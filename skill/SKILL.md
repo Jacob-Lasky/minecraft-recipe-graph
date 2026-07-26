@@ -1,15 +1,15 @@
 ---
-name: mbc-recipe-graph
+name: minecraft-recipe-graph
 description: Plan crafting chains in MeatballCraft or other heavy 1.12.2 modpacks - resolve an item's full recipe tree down to what you actually need, pruned against the contents of your AE2 network read from the world save. Use when asked "what do I need to make X", "how do I get X", when tracing a multi-step recipe chain by hand is getting confusing, or when reading AE2/ME system contents offline.
 ---
 
-# MeatballCraft recipe graph
+# Minecraft recipe graph
 
 Answers "what do I actually need to make X" for a ~410-mod 1.12.2 pack by computing the
 whole recipe tree at once and stopping wherever the player's AE2 network already has the
 ingredient. Replaces clicking through JEI one hop at a time.
 
-Tool lives at `~/Coding/mbc-recipe-graph`. Pure Python 3 stdlib, no install step.
+Tool lives at `~/Coding/minecraft-recipe-graph`. Pure Python 3 stdlib, no install step.
 
 ## Why you cannot just grep JEI
 
@@ -34,34 +34,34 @@ fluid-based routes for the same material will not unify automatically.
 **Check graph coverage before trusting a "no recipe" answer.** The offline graph only has
 crafting-table recipes (`assets/*/recipes/*.json` inside mod jars). 1.12.2 registers
 furnace and machine recipes *in code*, so NuclearCraft chemistry, Modular Machinery,
-inscribers and centrifuges are absent until the `/mbcdump` mod has been run. If an item
+inscribers and centrifuges are absent until the `/recipedump` mod has been run. If an item
 resolves to `NEED: <itself>` with no children, that is almost always missing coverage,
-not a missing recipe. Run `mbcgraph stats` and look for `hei_dump` in `by_source`; if it
+not a missing recipe. Run `recipegraph stats` and look for `hei_dump` in `by_source`; if it
 is absent, say so rather than reporting "no recipe exists".
 
 ## Usage
 
 ```bash
-cd ~/Coding/mbc-recipe-graph
+cd ~/Coding/minecraft-recipe-graph
 
 # 1. read the AE2 network out of the world save (read-only, safe on a live server)
-python3 -m mbcgraph.cli have --regions '<world>/region/r.*.mca' --out data/ae2_have.json
+python3 -m recipegraph.cli have --regions '<world>/region/r.*.mca' --out data/ae2_have.json
 
 # 2. build the recipe graph from the instance
-python3 -m mbcgraph.cli build --instance '<instance>/minecraft' --out data/graph.json
+python3 -m recipegraph.cli build --instance '<instance>/minecraft' --out data/graph.json
 
 # 3. plan
-python3 -m mbcgraph.cli plan "Borax" --qty 64 --have data/ae2_have.json --html plan.html
-python3 -m mbcgraph.cli find borax          # resolve a name to an item id
-python3 -m mbcgraph.cli stats               # coverage: how complete is the graph
+python3 -m recipegraph.cli plan "Borax" --qty 64 --have data/ae2_have.json --html plan.html
+python3 -m recipegraph.cli find borax          # resolve a name to an item id
+python3 -m recipegraph.cli stats               # coverage: how complete is the graph
 
 # search: stock, every recipe that makes it, everything that consumes it
-python3 -m mbcgraph.cli explore "ultimate component" --html explore.html
+python3 -m recipegraph.cli explore "ultimate component" --html explore.html
 
 # production monitoring: record snapshots (cron this), then chart levels + net rates
-python3 -m mbcgraph.cli track
-python3 -m mbcgraph.cli chart --window 2h --html chart.html
-python3 -m mbcgraph.cli metrics             # db size / row counts
+python3 -m recipegraph.cli track
+python3 -m recipegraph.cli chart --window 2h --html chart.html
+python3 -m recipegraph.cli metrics             # db size / row counts
 ```
 
 **Rates are NET, and say so when reporting them.** AE2 exposes stock levels, not machine
@@ -88,7 +88,7 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 | --- | --- | --- |
 | item display names | `config/AppliedEnergistics2/items.csv` | pack writes it on first run; 53k rows |
 | crafting recipes | `assets/*/recipes/*.json` in mod jars | ~10.3k, offline |
-| machine recipes | `/mbcdump` mod → `mbc-recipe-dump/recipes.ndjson` | **required for chemistry chains** |
+| machine recipes | `/recipedump` mod → `mc-recipe-dump/recipes.ndjson` | **required for chemistry chains** |
 | ore dictionary | dump mod's `oredict.json`, or `/ct oredict` → `crafttweaker.log` | otherwise inferred from names (labelled heuristic, ~43% recovery) |
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
 

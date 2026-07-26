@@ -1,6 +1,6 @@
 --[[ ae2_dump.lua -- live AE2 network export for OpenComputers (MC 1.12.2)
 
-Writes the ME network's contents to a JSON file that `mbcgraph plan --have` reads
+Writes the ME network's contents to a JSON file that `recipegraph plan --have` reads
 directly, in the same shape as the offline world-save reader produces.
 
 Why bother when the offline reader exists: this sees what the NETWORK sees, not just
@@ -47,7 +47,7 @@ local function esc(s)
   return s
 end
 
--- Canonical key must match mbcgraph.model.norm_key: meta 0 is omitted entirely.
+-- Canonical key must match recipegraph.model.norm_key: meta 0 is omitted entirely.
 local function key(name, damage)
   damage = tonumber(damage) or 0
   if damage == 0 then

@@ -1,4 +1,4 @@
-"""Recipe source: the NDJSON dump produced by the `mbc-recipe-dump` mod.
+"""Recipe source: the NDJSON dump produced by the `mc-recipe-dump` mod.
 
 This is the only COMPLETE source. It reads HEI/JEI's own recipe registry, so it
 contains every recipe type any of the ~366 mods registered -- NuclearCraft
@@ -6,7 +6,7 @@ chemistry, Modular Machinery, inscribers, centrifuges, everything the player see
 in the recipe viewer. The jar_json source cannot see any of that.
 
 Format: one JSON object per line (NDJSON, so a 100k-recipe dump streams instead of
-loading whole). Written by MbcRecipeDump.java; keep the two in sync.
+loading whole). Written by RecipeDumpMod.java; keep the two in sync.
 
   {"cat":"nuclearcraft.chemical_reactor","title":"Chemical Reactor",
    "in":[[{"i":"minecraft:water_bucket","m":0,"c":1}], ...],

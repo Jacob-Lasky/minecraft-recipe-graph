@@ -2,7 +2,7 @@
 
 Two accepted sources, in preference order:
 
-1. `oredict.json` written by the mbc-recipe-dump mod (complete, straight from
+1. `oredict.json` written by the mc-recipe-dump mod (complete, straight from
    `OreDictionary.getOreNames()`).
 2. `crafttweaker.log` after running `/ct oredict` in game (lines beginning
    "Ore entries for").

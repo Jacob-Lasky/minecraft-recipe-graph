@@ -1,13 +1,13 @@
 # Building the dump mod
 
 **Status: builds clean.** Verified 2026-07-26 against MeatballCraft 0.18.4 —
-`mbc-recipe-dump-0.1.0.jar`, 4 classes, reobfuscation confirmed. Runtime behaviour
-(`/mbcdump` in game) is still unverified; see "What is not yet proven".
+`mc-recipe-dump-0.1.0.jar`, 4 classes, reobfuscation confirmed. Runtime behaviour
+(`/recipedump` in game) is still unverified; see "What is not yet proven".
 
 ```bash
 cd mod
 ./gradlew build -Phei_jar='/path/to/instance/minecraft/mods/HadEnoughItems_1.12.2-4.28.1.jar'
-# -> build/libs/mbc-recipe-dump-0.1.0.jar
+# -> build/libs/mc-recipe-dump-0.1.0.jar
 ```
 
 Install by dropping that jar into the instance's `mods/`. It is `clientSideOnly` and adds
@@ -69,8 +69,8 @@ Reobfuscation is the step most likely to silently not happen, and a non-reobfusc
 fails at runtime with confusing `NoSuchMethodError`s. Check the direction of the mapping:
 
 ```bash
-unzip -p build/libs/mbc-recipe-dump-0.1.0.jar \
-  com/meatballcraft/recipedump/DumpCommand.class | strings | grep -cE 'func_|field_'
+unzip -p build/libs/mc-recipe-dump-0.1.0.jar \
+  io/github/jacoblasky/recipedump/DumpCommand.class | strings | grep -cE 'func_|field_'
 ```
 
 The **production** jar should report a non-zero count (SRG names, 12 at time of writing);
@@ -85,7 +85,7 @@ The jar compiles, packages and reobfuscates correctly. Not yet confirmed:
 
 - that Forge loads it in a 366-mod pack without a conflict,
 - that `@JEIPlugin` discovery works against HEI 4.28 specifically,
-- that `/mbcdump` completes over every recipe category without a wrapper throwing.
+- that `/recipedump` completes over every recipe category without a wrapper throwing.
 
 The third is partly designed for: every category and every recipe is individually
 try/caught, and the command reports how many it skipped. Recipe wrappers from third-party

@@ -1,4 +1,4 @@
-package com.meatballcraft.recipedump;
+package io.github.jacoblasky.recipedump;
 
 import mezz.jei.api.IJeiRuntime;
 import mezz.jei.api.IModPlugin;
@@ -16,6 +16,6 @@ public class DumpPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
-        MbcRecipeDump.runtime = jeiRuntime;
+        RecipeDumpMod.runtime = jeiRuntime;
     }
 }

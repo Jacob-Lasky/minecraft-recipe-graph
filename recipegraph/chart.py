@@ -31,7 +31,7 @@ padding:2px 4px;border-radius:6px;cursor:pointer;color:var(--fg);font:12.5px var
 
 CHART_JS = r"""
 (function(){
-  var DATA = window.__MBC_CHART__;
+  var DATA = window.__RECIPE_CHART__;
 
   function css(name, fallback){
     var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -269,7 +269,7 @@ def render_chart_html(payload):
 
     return """<style>%s%s</style>
 <div class="wrap">
-  <div class="eyebrow">Production monitor &middot; MeatballCraft</div>
+  <div class="eyebrow">Production monitor</div>
   <h1>AE2 network activity<span class="x">%s</span></h1>
   <div class="id">%s &middot; source: %s</div>
 
@@ -306,7 +306,7 @@ def render_chart_html(payload):
   2&nbsp;d, 1&nbsp;h kept 60&nbsp;d) and written only when a quantity actually changes, so
   the database stays small on a network this size.</div>
 </div>
-<script>window.__MBC_CHART__ = %s;</script>
+<script>window.__RECIPE_CHART__ = %s;</script>
 <script>%s</script>""" % (
         CSS, CHART_CSS,
         _esc(payload.get("window_label", "")),

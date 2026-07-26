@@ -1,4 +1,4 @@
-package com.meatballcraft.recipedump;
+package io.github.jacoblasky.recipedump;
 
 import java.util.ArrayList;
 import java.util.Collections;

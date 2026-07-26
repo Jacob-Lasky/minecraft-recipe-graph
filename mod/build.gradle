@@ -17,9 +17,9 @@ plugins {
     id 'com.gtnewhorizons.retrofuturagradle' version '2.0.2'
 }
 
-group = 'com.meatballcraft'
+group = 'io.github.jacoblasky'
 version = project.mod_version
-base { archivesName.set('mbc-recipe-dump') }
+base { archivesName.set('mc-recipe-dump') }
 
 java {
     toolchain {

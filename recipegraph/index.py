@@ -23,7 +23,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
         say("names: items.csv NOT FOUND -- output will show raw ids")
 
     # Ore dictionary: the mod's dump wins, /ct oredict log is the fallback.
-    od_json = os.path.join(instance_dir, "mbc-recipe-dump", "oredict.json")
+    od_json = os.path.join(instance_dir, "mc-recipe-dump", "oredict.json")
     ct_log = os.path.join(instance_dir, "crafttweaker.log")
     if os.path.exists(od_json):
         g.ore_members = oredict.from_json(od_json)
@@ -48,7 +48,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
     else:
         say("jar_json: no mods/ dir at %s" % mods_dir)
 
-    hei_path = hei_path or os.path.join(instance_dir, "mbc-recipe-dump", "recipes.ndjson")
+    hei_path = hei_path or os.path.join(instance_dir, "mc-recipe-dump", "recipes.ndjson")
     if os.path.exists(hei_path):
         n = 0
         for recipe in hei_dump.extract(hei_path):

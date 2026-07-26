@@ -21,4 +21,4 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Byte-compile every module
-        run: python -m compileall -q mbcgraph
+        run: python -m compileall -q recipegraph

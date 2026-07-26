@@ -9,10 +9,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mbcgraph.model import Graph, Ingredient, Recipe, norm_key  # noqa: E402
-from mbcgraph.solve import Solver  # noqa: E402
-from mbcgraph.sources.jar_json import parse_recipe_json  # noqa: E402
-from mbcgraph.sources.oredict import guess_from_names  # noqa: E402
+from recipegraph.model import Graph, Ingredient, Recipe, norm_key  # noqa: E402
+from recipegraph.solve import Solver  # noqa: E402
+from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
+from recipegraph.sources.oredict import guess_from_names  # noqa: E402
 
 
 class TestKeys(unittest.TestCase):

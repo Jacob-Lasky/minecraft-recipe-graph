@@ -221,7 +221,7 @@ def render_html(result, graph=None, coverage_note=None):
 
     return """<style>%s</style>
 <div class="wrap">
-  <div class="eyebrow">Crafting plan &middot; MeatballCraft</div>
+  <div class="eyebrow">Crafting plan</div>
   <h1>%s<span class="x">&times;%s</span></h1>
   <div class="id">%s</div>
 
@@ -410,7 +410,7 @@ def render_explore_html(payload, coverage_note=None):
     warn = ('<div class="warnbar">%s</div>' % _esc(coverage_note)) if coverage_note else ""
     return """<style>%s%s</style>
 <div class="wrap">
-  <div class="eyebrow">Item explorer &middot; MeatballCraft</div>
+  <div class="eyebrow">Item explorer</div>
   <h1>%s<span class="x">%d match%s</span></h1>
   <div class="id">Searched %s item names &middot; ? on an oredict chip means membership was
   inferred from display names, not read from the game</div>
@@ -425,7 +425,7 @@ def render_explore_html(payload, coverage_note=None):
   </div>
   %s
   <div class="foot">"No known recipe" usually means a machine recipe that has not been
-  dumped yet, not that the item is uncraftable. Run <code>/mbcdump</code> to add machine
+  dumped yet, not that the item is uncraftable. Run <code>/recipedump</code> to add machine
   and furnace recipes to the graph.</div>
 </div>
 <script>%s</script>""" % (

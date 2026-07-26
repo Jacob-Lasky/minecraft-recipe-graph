@@ -1,10 +1,10 @@
-"""mbcgraph command line.
+"""recipegraph command line.
 
-  python3 -m mbcgraph.cli build   --instance <minecraft dir> --out data/graph.json
-  python3 -m mbcgraph.cli have    --regions 'save/region/*.mca' --out data/ae2_have.json
-  python3 -m mbcgraph.cli find    borax
-  python3 -m mbcgraph.cli plan    'Borax' --qty 64 --have data/ae2_have.json --html plan.html
-  python3 -m mbcgraph.cli stats
+  python3 -m recipegraph.cli build   --instance <minecraft dir> --out data/graph.json
+  python3 -m recipegraph.cli have    --regions 'save/region/*.mca' --out data/ae2_have.json
+  python3 -m recipegraph.cli find    borax
+  python3 -m recipegraph.cli plan    'Borax' --qty 64 --have data/ae2_have.json --html plan.html
+  python3 -m recipegraph.cli stats
 """
 
 import argparse
@@ -186,7 +186,7 @@ def cmd_explore(args):
     if args.html:
         note = None
         if not any(r.source == "hei_dump" for r in g.recipes):
-            note = ("This graph has no machine recipes yet: run /mbcdump in game, "
+            note = ("This graph has no machine recipes yet: run /recipedump in game, "
                     "otherwise machine-made items show as having no recipe.")
         with open(args.html, "w") as fh:
             fh.write(render_explore_html(payload, note))
@@ -305,7 +305,7 @@ def cmd_stats(args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="mbcgraph")
+    ap = argparse.ArgumentParser(prog="recipegraph")
     ap.add_argument("--graph", default=DEFAULT_GRAPH)
     sub = ap.add_subparsers(dest="cmd", required=True)
 

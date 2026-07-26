@@ -1,14 +1,18 @@
-# mbc-recipe-graph
+# minecraft-recipe-graph
 
-Offline crafting-tree planner for **MeatballCraft (Dimensional Ascension)** and other
-heavy 1.12.2 modpacks.
+Offline crafting-tree planner for heavy Minecraft **1.12.2** modpacks, pruned against
+what your **AE2 network already holds**.
+
+Developed and verified against **MeatballCraft (Dimensional Ascension)** — 366 mods — but
+nothing in it is pack-specific: the recipe data comes from your own instance and the
+inventory from your own world save.
 
 You ask for an item. It walks the entire recipe chain, stops wherever your **AE2
 network already has the ingredient**, and hands you the actual shopping list — instead
 of you clicking through JEI one hop at a time and losing your place.
 
 ```
-$ mbcgraph plan "Ultimate Crafting Table" --have data/ae2_have.json
+$ recipegraph plan "Ultimate Crafting Table" --have data/ae2_have.json
 
 == Ultimate Crafting Table x1 ==
 -- you still need --
@@ -43,7 +47,7 @@ Three stages, each usable alone.
 ### 1. What you have — read AE2 straight out of the world save
 
 ```bash
-mbcgraph have --regions '/path/to/world/region/r.*.mca' --out data/ae2_have.json
+recipegraph have --regions '/path/to/world/region/r.*.mca' --out data/ae2_have.json
 ```
 
 A pure-stdlib Anvil + NBT reader finds every AE2/NAE2/ExtraCells storage cell inside
@@ -66,7 +70,7 @@ touching an ME Controller.
 ### 2. What things cost — build the recipe graph
 
 ```bash
-mbcgraph build --instance '/path/to/instance/minecraft' --out data/graph.json
+recipegraph build --instance '/path/to/instance/minecraft' --out data/graph.json
 ```
 
 Two recipe sources:
@@ -74,7 +78,7 @@ Two recipe sources:
 | Source | Coverage | Needs |
 | --- | --- | --- |
 | `jar_json` | ~10,300 crafting-table recipes from `assets/*/recipes/*.json` in every mod jar, including Forge `_constants.json` `#name` references (38 jars use them) | nothing |
-| `hei_dump` | **everything** — machine recipes, NuclearCraft chemistry, Modular Machinery, inscribers, centrifuges | the `/mbcdump` mod in `mod/` |
+| `hei_dump` | **everything** — machine recipes, NuclearCraft chemistry, Modular Machinery, inscribers, centrifuges | the `/recipedump` mod in `mod/` |
 
 **The offline source alone is not enough for machine chains.** 1.12.2 furnace recipes
 are registered in code, not JSON, and machine recipes never touch `assets/*/recipes/`.
@@ -84,7 +88,7 @@ the dump. That gap is the whole reason `mod/` exists.
 ### 3. What to do — solve the tree
 
 ```bash
-mbcgraph plan "Borax" --qty 64 --have data/ae2_have.json --html plan.html
+recipegraph plan "Borax" --qty 64 --have data/ae2_have.json --html plan.html
 ```
 
 The solver handles the three things that make this harder than it looks:
@@ -101,7 +105,7 @@ The solver handles the three things that make this harder than it looks:
 ### Explore — search before you plan
 
 ```bash
-mbcgraph explore "ultimate component" --html explore.html
+recipegraph explore "ultimate component" --html explore.html
 ```
 
 For each match: how much is in your network, every recipe that makes it (with per-input
@@ -115,8 +119,8 @@ Answers the question that actually comes first — *which* of the twelve things 
 ### Track — Factorio-style production graphs
 
 ```bash
-mbcgraph track                      # record one snapshot (cron this)
-mbcgraph chart --window 2h --html chart.html
+recipegraph track                      # record one snapshot (cron this)
+recipegraph chart --window 2h --html chart.html
 ```
 
 Stock levels over time, net per-minute rates, and ME network power. Charts are Canvas,
@@ -139,9 +143,9 @@ unknowable rather than merely coarse.
 
 ## The dump mod
 
-`mod/` is a ~400-line client-side Forge mod adding one command, `/mbcdump`. It walks
+`mod/` is a ~400-line client-side Forge mod adding one command, `/recipedump`. It walks
 JEI's `IRecipeRegistry` and writes `recipes.ndjson`, `oredict.json` and `names.json`
-into `<gamedir>/mbc-recipe-dump/`.
+into `<gamedir>/mc-recipe-dump/`.
 
 It uses **only the public `mezz.jei.api` surface** — `getRecipeCategories()`,
 `getRecipeWrappers()`, `IRecipeWrapper.getIngredients()` — every signature verified
@@ -150,15 +154,24 @@ against `HadEnoughItems_1.12.2-4.28.1.jar`. That is deliberate: the older
 and rendered recipe GUIs to scrape them, which is both slow and broken across the JEI
 4.8 → HEI 4.28 gap.
 
-> **Status: written, not yet compiled.** Building 1.12.2 needs JDK 8, which is a
-> one-package install. See `ASK-JAKE.md`.
+**Status: builds clean**, and you do NOT need a system JDK 8 — Gradle provisions its own
+Java 8 toolchain while running on a modern JDK:
+
+```bash
+cd mod && ./gradlew build -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar
+```
+
+It deliberately does **not** use ForgeGradle 2.3, the plugin every 1.12.2 tutorial names:
+Forge's maven no longer publishes the `userdev` artifact FG2 requires, only the FG3-format
+`userdev3`. See [docs/BUILD.md](docs/BUILD.md) for the evidence and the reobfuscation
+check.
 
 ## Ore dictionary
 
 Real membership comes from the dump mod's `oredict.json`. Without it, the builder falls
 back to **inferring** membership from display names (`ingotIron` → "Iron Ingot"), which
 recovers 233 of 548 referenced entries on the reference pack. That fallback is a
-labelled heuristic, never presented as ground truth — `mbcgraph build --no-guess`
+labelled heuristic, never presented as ground truth — `recipegraph build --no-guess`
 disables it. `/ct oredict` in game is the other exact source.
 
 ## Requirements

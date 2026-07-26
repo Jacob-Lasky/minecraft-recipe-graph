@@ -1,11 +1,11 @@
 [
   {
-    "modid": "mbcrecipedump",
-    "name": "MBC Recipe Dump",
-    "description": "Client-side utility: dumps every recipe HEI/JEI knows about to NDJSON, plus the ore dictionary and display names, for offline crafting-tree tools. Adds one command, /mbcdump. Changes no gameplay.",
+    "modid": "mcrecipedump",
+    "name": "Recipe Dump",
+    "description": "Client-side utility: dumps every recipe HEI/JEI knows about to NDJSON, plus the ore dictionary and display names, for offline crafting-tree tools. Adds one command, /recipedump. Changes no gameplay.",
     "version": "${version}",
     "mcversion": "${mcversion}",
-    "url": "https://github.com/jacoblasky/mbc-recipe-graph",
+    "url": "https://github.com/jacoblasky/minecraft-recipe-graph",
     "authorList": ["Jacob Lasky"],
     "dependencies": ["jei"]
   }

@@ -1,4 +1,4 @@
-package com.meatballcraft.recipedump;
+package io.github.jacoblasky.recipedump;
 
 import mezz.jei.api.IJeiRuntime;
 import net.minecraftforge.client.ClientCommandHandler;
@@ -14,12 +14,12 @@ import net.minecraftforge.fml.relauncher.SideOnly;
  * because that is where recipe categories are registered. Recipe *contents* are
  * identical client- and server-side, so a client dump is valid for a server world.
  */
-@Mod(modid = MbcRecipeDump.MODID, name = MbcRecipeDump.NAME, version = MbcRecipeDump.VERSION,
+@Mod(modid = RecipeDumpMod.MODID, name = RecipeDumpMod.NAME, version = RecipeDumpMod.VERSION,
      clientSideOnly = true, dependencies = "required-after:jei")
-public class MbcRecipeDump {
+public class RecipeDumpMod {
 
-    public static final String MODID = "mbcrecipedump";
-    public static final String NAME = "MBC Recipe Dump";
+    public static final String MODID = "mcrecipedump";
+    public static final String NAME = "Recipe Dump";
     public static final String VERSION = "0.1.0";
 
     /** Set by DumpPlugin once JEI finishes loading; null before then. */

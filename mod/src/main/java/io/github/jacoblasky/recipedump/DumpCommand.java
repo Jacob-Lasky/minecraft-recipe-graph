@@ -1,4 +1,4 @@
-package com.meatballcraft.recipedump;
+package io.github.jacoblasky.recipedump;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -26,12 +26,12 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.oredict.OreDictionary;
 
 /**
- * `/mbcdump` -- writes recipes.ndjson, oredict.json and names.json into
- * &lt;gamedir&gt;/mbc-recipe-dump/.
+ * `/recipedump` -- writes recipes.ndjson, oredict.json and names.json into
+ * &lt;gamedir&gt;/mc-recipe-dump/.
  *
  * NDJSON (one recipe per line) rather than one big JSON document, so a 100k-recipe
  * dump streams on both ends and a single malformed recipe cannot invalidate the
- * whole file. Keep the schema in sync with mbcgraph/sources/hei_dump.py.
+ * whole file. Keep the schema in sync with recipegraph/sources/hei_dump.py.
  *
  * Every per-recipe call is individually guarded: third-party recipe wrappers do
  * throw (missing items, broken NBT, wrappers that assume a live GUI), and one bad
@@ -41,12 +41,12 @@ public class DumpCommand extends CommandBase {
 
     @Override
     public String getName() {
-        return "mbcdump";
+        return "recipedump";
     }
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/mbcdump -- dump all JEI recipes for offline crafting-tree tools";
+        return "/recipedump -- dump all JEI recipes for offline crafting-tree tools";
     }
 
     @Override
@@ -57,11 +57,11 @@ public class DumpCommand extends CommandBase {
     @Override
     public void execute(net.minecraft.server.MinecraftServer server, ICommandSender sender,
                         String[] args) {
-        if (MbcRecipeDump.runtime == null) {
+        if (RecipeDumpMod.runtime == null) {
             reply(sender, "JEI runtime not available yet -- open the recipe GUI once, then retry.");
             return;
         }
-        File dir = new File(Minecraft.getMinecraft().gameDir, "mbc-recipe-dump");
+        File dir = new File(Minecraft.getMinecraft().gameDir, "mc-recipe-dump");
         try {
             Files.createDirectories(dir.toPath());
         } catch (IOException e) {
@@ -74,7 +74,7 @@ public class DumpCommand extends CommandBase {
         int categories = 0;
         int failed = 0;
 
-        IRecipeRegistry registry = MbcRecipeDump.runtime.getRecipeRegistry();
+        IRecipeRegistry registry = RecipeDumpMod.runtime.getRecipeRegistry();
         File out = new File(dir, "recipes.ndjson");
         try (Writer w = new BufferedWriter(
                 new OutputStreamWriter(Files.newOutputStream(out.toPath()), StandardCharsets.UTF_8))) {
@@ -333,6 +333,6 @@ public class DumpCommand extends CommandBase {
     }
 
     private static void reply(ICommandSender sender, String msg) {
-        sender.sendMessage(new TextComponentString("[mbcdump] " + msg));
+        sender.sendMessage(new TextComponentString("[recipedump] " + msg));
     }
 }

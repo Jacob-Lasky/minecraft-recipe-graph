@@ -30,11 +30,11 @@ Build status is in `docs/BUILD.md`.
 Once the jar builds and you drop it in `mods/`:
 
 ```
-/mbcdump
+/recipedump
 ```
 
 Writes `recipes.ndjson`, `oredict.json`, `names.json` into the instance's
-`mbc-recipe-dump/`. `mbcgraph build` picks them up automatically and machine recipes —
+`mc-recipe-dump/`. `recipegraph build` picks them up automatically and machine recipes —
 including your borax chain — light up.
 
 `/ct oredict` is still worth running independently: your `crafttweaker.log` has zero
@@ -44,38 +44,23 @@ becomes redundant once the mod works.
 
 ## 3. The GitHub push is yours to run
 
-You picked "push to GitHub under your account", me prepping and you authing. Repo is
-prepped: MIT licence, CI workflow running the test suite, README written for people who
-have never seen it. Two commits, clean tree.
-
-When you're ready:
+Repo is prepped and the privacy cleanup is DONE (see Resolved). MIT licence, CI running
+the suite on Python 3.8 and 3.13, Gradle wrapper committed so it bootstraps itself.
 
 ```fish
-gh repo create mbc-recipe-graph --public --source ~/Coding/mbc-recipe-graph --push
+gh repo create minecraft-recipe-graph --public \
+  --source ~/Coding/minecraft-recipe-graph --push
 ```
 
-I deliberately have not run this. Publishing is outward-facing and yours to trigger, and
-it would also make your AE2 inventory and base region coordinates public — see the note
-in "Watch out for" below.
+I have not run this. Publishing is outward-facing and yours to trigger.
 
-## 4. Open questions (low stakes, answer whenever)
+## 4. Open questions (low stakes)
 
-- **Essentia**: you have 6 `thaumicenergistics:essentia_cell_64k`. Aggregating them is on
-  the work list you picked. Do you want essentia treated as a plannable input (so
-  Thaumcraft chains resolve against vis/essentia on hand), or just reported as a number?
-- **Fluid units**: recipes consume fluids in mB (1000 per bucket). Do you want plans shown
-  in mB, or in buckets where it divides cleanly?
-- **The mod's identity**: currently `modid=mbcrecipedump`, author "Jacob Lasky", URL
-  pointing at a `jacoblasky/mbc-recipe-graph` GitHub path that doesn't exist yet. Tell me
-  the real repo path and I'll fix the metadata before you publish.
+- **Fluid units**: recipes consume fluids in mB (1000 per bucket). Show plans in mB, or in
+  buckets where it divides cleanly?
 
 ## Watch out for
 
-- **Publishing the repo publishes `data/ae2_have.json` if it's committed.** It currently
-  is, and it contains your full item list. Region filenames in docs also disclose your
-  base coordinates. Neither is dangerous on a
-  private server, but say the word and I'll gitignore the data dir and scrub coords from
-  the docs before you push.
 - `items.csv` is from **May 31** and `crafttweaker.log` from **Jul 25**. Fine for now;
   rebuild the graph if you change mods.
 
@@ -84,7 +69,7 @@ in "Watch out for" below.
 ## Resolved — do not re-ask
 
 - **Production tracking: skipped for now.** The code is written, tested (10 tests) and
-  committed, but nothing is scheduled and nothing writes to Tower. `mbcgraph track` /
+  committed, but nothing is scheduled and nothing writes to Tower. `recipegraph track` /
   `chart` work on demand if you want them later. No cron was installed.
 - **AE2 scan scope: base 3×3 only.** The 9 region files around `r.<X>.<Z>`: 67 drives,
   467 cells, 3,270 distinct items. Not scanning the other 797 regions.
@@ -92,3 +77,27 @@ in "Watch out for" below.
 - **Work order you picked** (all four): fluid/bucket unification, whole-pack browsable
   explorer, essentia aggregation, recipe-choice overrides. I'm doing fluid/bucket first
   since it's the one that directly affects your borax chains.
+
+- **Essentia: plannable input.** You mentioned multiblocks that convert vis pods into
+  essentia, which makes essentia a real intermediate rather than a terminal resource, so it
+  needs to be a first-class node (`essentia:<aspect>`) that recipes can both consume and
+  produce. Noted: you already hold ~1.47M `thaumadditions:vis_pod`, so those conversion
+  chains are live. I need one thing from the game to finish it — see below.
+- **Name: `minecraft-recipe-graph`.** Python package is now `recipegraph`, mod artifact
+  `mc-recipe-dump`, modid `mcrecipedump`, command `/recipedump`, Java package
+  `io.github.jacoblasky.recipedump`. Docs reframed as generic-1.12.2 with MeatballCraft as
+  the verified reference pack.
+- **Privacy cleanup: done.** `data/` is gitignored AND `data/ae2_have.json` plus all base
+  coordinates were purged from every commit via `filter-branch`, with the backup refs
+  dropped and the object store gc'd. Verified: no reachable commit contains either.
+
+## Blocking the essentia work
+
+Essentia cells are detected in your network (6 × `thaumicenergistics:essentia_cell_64k`)
+but aggregate to **zero**, so their contents are not stored under the `#N` keys that item
+and fluid cells use. I cannot guess the layout. Either:
+
+- run `/recipedump` once the mod is installed (the aspect ingredient type should surface
+  through JEI), or
+- tell me a rough location of a drive holding an essentia cell and I will dump that
+  tile entity's raw NBT from the save and read the real structure.
