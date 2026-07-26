@@ -98,6 +98,45 @@ The solver handles the three things that make this harder than it looks:
 - **Stock is consumed, not just checked.** The inventory pool is drawn down as the tree
   is built, so two branches cannot both claim the same 5 redstone.
 
+### Explore — search before you plan
+
+```bash
+mbcgraph explore "ultimate component" --html explore.html
+```
+
+For each match: how much is in your network, every recipe that makes it (with per-input
+stock badges, so you can see at a glance which ingredient is the blocker), everything that
+consumes it, and which ore dictionaries it belongs to. Ore chips marked `?` were inferred
+rather than read from the game.
+
+Answers the question that actually comes first — *which* of the twelve things called
+"Ultimate something" did I mean, and is it even craftable in this pack.
+
+### Track — Factorio-style production graphs
+
+```bash
+mbcgraph track                      # record one snapshot (cron this)
+mbcgraph chart --window 2h --html chart.html
+```
+
+Stock levels over time, net per-minute rates, and ME network power. Charts are Canvas,
+theme-aware, with clickable legends.
+
+**These are net rates, and that limit is real.** AE2 reports stock *levels*, not machine
+throughput, so production and consumption cannot be separated the way Factorio does it —
+Factorio instruments every machine; we only see the warehouse. An item produced and
+consumed at the same speed reads as a flat line. Network power is the exception: AE2
+publishes its own rolling averages, so `avg use` / `avg injected` are true rates (live
+feed only).
+
+Storage is bounded two ways: a row is written only when a quantity actually **changes**
+(most of a big network is inert), and samples live in tiered buckets — 1 min kept 2 h,
+10 min kept 2 d, 1 h kept 60 d. Measured on a 3,270-item network with ~150 items moving
+per minute: **2.3 MB per 2 hours** at 1-minute cadence, and the fine tier reaches steady
+state rather than growing. Pruning deliberately keeps one "carry" row per item just
+before each horizon — without it an item that last changed before the window would become
+unknowable rather than merely coarse.
+
 ## The dump mod
 
 `mod/` is a ~400-line client-side Forge mod adding one command, `/mbcdump`. It walks

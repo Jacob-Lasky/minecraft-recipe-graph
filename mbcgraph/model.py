@@ -129,10 +129,12 @@ class Graph:
         self.ore_members = {}        # ore name -> [item keys]
         self.ore_guessed = set()     # subset of ore_members inferred, not authoritative
         self._by_output = None
+        self._by_input = None
 
     def add(self, recipe):
         self.recipes.append(recipe)
         self._by_output = None
+        self._by_input = None
 
     @property
     def by_output(self):
@@ -143,6 +145,33 @@ class Graph:
                     idx.setdefault(key, []).append(r)
             self._by_output = idx
         return self._by_output
+
+    @property
+    def by_input(self):
+        """key -> recipes that consume it. Built lazily; 'used in' is the reverse
+        direction of the same edges, so it must be invalidated with by_output."""
+        if self._by_input is None:
+            idx = {}
+            for r in self.recipes:
+                seen = set()
+                for ing in r.inputs:
+                    for alt in ing.alternatives:
+                        if alt not in seen:
+                            seen.add(alt)
+                            idx.setdefault(alt, []).append(r)
+            self._by_input = idx
+        return self._by_input
+
+    def consumers(self, key):
+        out = list(self.by_input.get(key, ()))
+        base, meta = split_key(key)
+        if meta not in (None, "*"):
+            out.extend(self.by_input.get("%s:*" % base, ()))
+        # an item is also reachable through any oredict it belongs to
+        for ore, members in self.ore_members.items():
+            if key in members:
+                out.extend(self.by_input.get("ore:%s" % ore, ()))
+        return out
 
     def producers(self, key):
         """Recipes producing `key`, including via a wildcard-meta output."""

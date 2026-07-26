@@ -11,6 +11,24 @@ ingredient. Replaces clicking through JEI one hop at a time.
 
 Tool lives at `~/Coding/mbc-recipe-graph`. Pure Python 3 stdlib, no install step.
 
+## Why you cannot just grep JEI
+
+**JEI is a viewer, not a database — it ships zero recipe data.** `HadEnoughItems.jar`
+contains 0 recipe files (verified). Every recipe you page through in the JEI GUI was handed
+to JEI at runtime by the owning mod's JEI plugin, out of that mod's own in-memory
+registries. There is no on-disk index to search, in JEI or anywhere else.
+
+That is why the answer is a dump-at-runtime mod rather than decompilation. Decompiling is
+only ever the fallback for an isolated hardcoded constant (a search radius, a tick rate) —
+never for recipes, because at 366 jars it does not scale and NuclearCraft-style recipe
+registration is procedural anyway.
+
+Fluids need no special handling: they arrive through the same
+`IIngredients.getInputs(VanillaTypes.FLUID)` call as items and become `fluid:<name>` node
+keys with amounts in mB. The one wrinkle is that a filled bucket
+(`forge:bucketfilled` + NBT) is a *different key* from the raw fluid, so bucket-based and
+fluid-based routes for the same material will not unify automatically.
+
 ## The one thing to get right
 
 **Check graph coverage before trusting a "no recipe" answer.** The offline graph only has
@@ -36,7 +54,20 @@ python3 -m mbcgraph.cli build --instance '<instance>/minecraft' --out data/graph
 python3 -m mbcgraph.cli plan "Borax" --qty 64 --have data/ae2_have.json --html plan.html
 python3 -m mbcgraph.cli find borax          # resolve a name to an item id
 python3 -m mbcgraph.cli stats               # coverage: how complete is the graph
+
+# search: stock, every recipe that makes it, everything that consumes it
+python3 -m mbcgraph.cli explore "ultimate component" --html explore.html
+
+# production monitoring: record snapshots (cron this), then chart levels + net rates
+python3 -m mbcgraph.cli track
+python3 -m mbcgraph.cli chart --window 2h --html chart.html
+python3 -m mbcgraph.cli metrics             # db size / row counts
 ```
+
+**Rates are NET, and say so when reporting them.** AE2 exposes stock levels, not machine
+throughput, so an item produced and consumed at equal speed reads flat. Do not describe
+these as production rates. Network power is the exception — AE2 publishes real rolling
+averages, but only over the OpenComputers live feed, not the world save.
 
 Useful `plan` flags: `--ignore-stock` (pretend nothing is owned), `--exact` (skip
 name-match disambiguation), `--depth`, `--max-nodes`, `--json`, `--html`.

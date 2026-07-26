@@ -18,6 +18,16 @@ from .model import Graph
 from .names import build_reverse, resolve
 
 DEFAULT_GRAPH = "data/graph.json"
+DEFAULT_DB = "data/metrics.db"
+
+
+def _duration(text):
+    """'90s' / '30m' / '2h' / '7d' -> seconds."""
+    text = str(text).strip().lower()
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if text and text[-1] in units:
+        return int(float(text[:-1]) * units[text[-1]])
+    return int(float(text))
 
 
 def cmd_build(args):
@@ -141,6 +151,153 @@ def cmd_plan(args):
     return 0
 
 
+def cmd_explore(args):
+    from . import explore
+    from .render import render_explore_html
+
+    g = _load_graph(args.graph)
+    have, _stats, craftables, extra_names = _load_have(args.have)
+    for k, v in (extra_names or {}).items():
+        g.names.setdefault(k, v)
+
+    results = explore.search(g, args.query, have=have, limit=args.limit)
+    if not results:
+        print("no item name matched %r" % args.query, file=sys.stderr)
+        hints = explore.suggest(g, args.query)
+        if hints:
+            print("did you mean: %s" % ", ".join(hints), file=sys.stderr)
+        return 1
+
+    for r in results:
+        flags = []
+        if r["stock"]:
+            flags.append("%s in stock" % "{:,}".format(r["stock"]))
+        flags.append("%d recipe(s)" % r["makes_total"])
+        flags.append("%d use(s)" % r["used_in_total"])
+        if r["oredicts"]:
+            flags.append("ore: " + ",".join(r["oredicts"][:3]))
+        print("%-44s %-38s %s" % (r["key"], r["name"][:38], " | ".join(flags)))
+
+    payload = {"query": args.query, "results": results, "searched": len(g.names)}
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(payload, fh, indent=1)
+        print("\nwrote %s" % args.json)
+    if args.html:
+        note = None
+        if not any(r.source == "hei_dump" for r in g.recipes):
+            note = ("This graph has no machine recipes yet: run /mbcdump in game, "
+                    "otherwise machine-made items show as having no recipe.")
+        with open(args.html, "w") as fh:
+            fh.write(render_explore_html(payload, note))
+        print("wrote %s" % args.html)
+    return 0
+
+
+def cmd_track(args):
+    """Record one snapshot of AE2 stock (and power, if the dump provides it)."""
+    from . import metrics
+
+    if args.regions:
+        from .ae2_inventory import scan
+        paths = []
+        for pattern in args.regions:
+            paths.extend(sorted(glob.glob(pattern)))
+        if not paths:
+            print("no region files matched", file=sys.stderr)
+            return 2
+        items, fluids, _ess, st, _s = scan(paths)
+        have = dict(items)
+        for name, amount in fluids.items():
+            have["fluid:%s" % name] = amount
+        source, power, names = "save", None, None
+    else:
+        have, st, _craftables, names = _load_have(args.have)
+        with open(args.have) as fh:
+            doc = json.load(fh)
+        source = doc.get("source", "save")
+        power = doc.get("power")
+
+    if not have:
+        print("nothing to record", file=sys.stderr)
+        return 1
+
+    # Backfill labels from the graph so the charts read in English.
+    if not names and os.path.exists(args.graph):
+        g = Graph.load(args.graph)
+        names = {k: g.display(k) for k in have if k in g.names}
+
+    conn = metrics.connect(args.db)
+    written = metrics.record(conn, have, source=source, power=power, names=names)
+    if not args.no_prune:
+        metrics.prune(conn)
+    info = metrics.stats(conn)
+    print("recorded %d items from %s; rows written per tier: %s"
+          % (len(have), source, written))
+    print("db %s: %d snapshots, %d level rows, %d distinct items"
+          % (args.db, info["snapshots"], info["level_rows"], info["distinct_items"]))
+    return 0
+
+
+def cmd_chart(args):
+    from . import metrics
+    from .chart import render_chart_html
+
+    conn = metrics.connect(args.db)
+    info = metrics.stats(conn)
+    if not info["snapshots"]:
+        print("no snapshots yet -- run `track` at least twice", file=sys.stderr)
+        return 1
+
+    until = info["last_snapshot"]
+    window = _duration(args.window)
+    since = until - window
+    tier = metrics.pick_tier(window)
+
+    tops = metrics.movers(conn, since, until, limit=args.top, tier=tier)
+    if not tops:
+        print("no quantity changed in the last %s (need >=2 snapshots apart)" % args.window,
+              file=sys.stderr)
+        return 1
+
+    payload = {
+        "since": since, "until": until, "tier": tier,
+        "window_label": args.window,
+        "range_label": "%s snapshots recorded, %s tracked items"
+                       % ("{:,}".format(info["snapshots"]),
+                          "{:,}".format(info["distinct_items"])),
+        "source": "mixed",
+        "movers": tops,
+        "series": {m["key"]: metrics.series(conn, m["key"], since, until, tier)
+                   for m in tops},
+        "power": metrics.power_series(conn, since, until, tier),
+        "storage": info,
+    }
+
+    for m in tops[: args.limit]:
+        print("%-40s %14s -> %-14s %+12s  %s"
+              % (m["label"][:40], "{:,}".format(m["first"]), "{:,}".format(m["last"]),
+                 "{:,}".format(m["delta"]),
+                 ("%+.1f/min" % m["per_min"])))
+
+    if args.html:
+        with open(args.html, "w") as fh:
+            fh.write(render_chart_html(payload))
+        print("\nwrote %s" % args.html)
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(payload, fh, indent=1)
+        print("wrote %s" % args.json)
+    return 0
+
+
+def cmd_metrics(args):
+    from . import metrics
+    conn = metrics.connect(args.db)
+    print(json.dumps(metrics.stats(conn), indent=2))
+    return 0
+
+
 def cmd_stats(args):
     g = _load_graph(args.graph)
     print(json.dumps(index.coverage(g), indent=2))
@@ -184,6 +341,34 @@ def main(argv=None):
     p.add_argument("--json")
     p.add_argument("--html")
     p.set_defaults(fn=cmd_plan)
+
+    p = sub.add_parser("explore", help="search items: how made, what uses them, stock")
+    p.add_argument("query")
+    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--limit", type=int, default=60)
+    p.add_argument("--json")
+    p.add_argument("--html")
+    p.set_defaults(fn=cmd_explore)
+
+    p = sub.add_parser("track", help="record one AE2 stock snapshot into the metrics db")
+    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--regions", nargs="+", help="scan the save directly instead")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--no-prune", action="store_true")
+    p.set_defaults(fn=cmd_track)
+
+    p = sub.add_parser("chart", help="stock levels and net rates over time")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--window", default="2h", help="e.g. 30m, 2h, 2d")
+    p.add_argument("--top", type=int, default=12, help="series to chart")
+    p.add_argument("--limit", type=int, default=15, help="rows to print")
+    p.add_argument("--html")
+    p.add_argument("--json")
+    p.set_defaults(fn=cmd_chart)
+
+    p = sub.add_parser("metrics", help="metrics db size and coverage")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.set_defaults(fn=cmd_metrics)
 
     p = sub.add_parser("stats", help="graph coverage")
     p.set_defaults(fn=cmd_stats)

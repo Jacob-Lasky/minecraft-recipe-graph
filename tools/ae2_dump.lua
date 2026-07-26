@@ -125,8 +125,34 @@ local function main()
     return 1
   end
 
+  -- Power is the one thing the offline save reader genuinely cannot get: these are
+  -- AE2's own rolling averages, not values derivable from stock levels.
+  local function num(fn)
+    if not fn then return nil end
+    local ok, v = pcall(fn)
+    if ok and type(v) == "number" then return v end
+    return nil
+  end
+  local power = {
+    stored     = num(net.getStoredPower),
+    max_stored = num(net.getMaxStoredPower),
+    avg_use    = num(net.getAvgPowerUsage),
+    avg_inject = num(net.getAvgPowerInjection),
+    idle       = num(net.getIdlePowerUsage),
+    demand     = num(net.getEnergyDemand),
+  }
+
   fh:write('{\n "source": "opencomputers",\n')
   fh:write(' "stats": {"items": ' .. n .. ', "craftables": ' .. cn .. '},\n')
+  do
+    local parts = {}
+    for _, f in ipairs({ "stored", "max_stored", "avg_use", "avg_inject", "idle", "demand" }) do
+      if power[f] then
+        parts[#parts + 1] = '"' .. f .. '": ' .. string.format("%.2f", power[f])
+      end
+    end
+    fh:write(' "power": {' .. table.concat(parts, ", ") .. '},\n')
+  end
 
   local function writeMap(name, tbl, valueFn, last)
     fh:write(' "' .. name .. '": {')

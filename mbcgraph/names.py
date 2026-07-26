@@ -10,8 +10,18 @@ game. items.csv already did that join.
 
 import csv
 import os
+import re
 
 from .model import norm_key
+
+# Minecraft colour/format codes (U+00A7 + one char). The pack bakes them into display
+# names, so they land in items.csv verbatim -- strip them or they break substring
+# search ("§8Ultimate Furnace" does not match a leading "ultimate") and leak into the UI.
+FORMAT_CODE = re.compile("§.")
+
+
+def clean_label(label):
+    return FORMAT_CODE.sub("", label).strip()
 
 
 def load_items_csv(path):
@@ -24,7 +34,7 @@ def load_items_csv(path):
                 continue
             raw_id = row[0].strip()
             # Localized names can contain commas, so rejoin everything after col 0.
-            label = ",".join(row[1:]).strip()
+            label = clean_label(",".join(row[1:]))
             if not raw_id or raw_id.lower().startswith("mod:item"):
                 continue
             parts = raw_id.split(":")
