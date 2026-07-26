@@ -14,7 +14,7 @@ import os
 import sys
 
 from . import index
-from .model import Graph
+from .model import Graph, essentia_key
 from .names import build_reverse, resolve
 
 DEFAULT_GRAPH = "data/graph.json"
@@ -53,8 +53,8 @@ def cmd_have(args):
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as fh:
         json.dump(payload, fh, indent=1, sort_keys=True)
-    print("wrote %s: %d items, %d fluids from %d cells"
-          % (args.out, len(items), len(fluids), stats["cells"]))
+    print("wrote %s: %d items, %d fluids, %d essentia aspects from %d cells"
+          % (args.out, len(items), len(fluids), len(essentia), stats["cells"]))
     return 0
 
 
@@ -93,6 +93,8 @@ def _load_have(path):
     have = dict(doc.get("items", {}))
     for name, amount in (doc.get("fluids") or {}).items():
         have["fluid:%s" % name] = amount
+    for aspect, amount in (doc.get("essentia") or {}).items():
+        have[essentia_key(aspect)] = amount
     craftables = set(doc.get("craftables") or ())
     return have, doc.get("stats", {}), craftables, doc.get("names") or {}
 

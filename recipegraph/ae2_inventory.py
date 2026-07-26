@@ -4,8 +4,10 @@ Reads AE2/NAE2/ExtraCells/ThaumicEnergistics storage cells out of Anvil region
 files and aggregates them into an item->count map. Offline and read-only: it
 never writes to the save, so it is safe to run against a live server.
 
-Counts come from the cell's `Cnt` long, NOT the ItemStack `Count` byte -- Count
-is capped at 127 and is meaningless for cell contents. DO NOT switch to Count.
+Counts come from the cell's own amount field -- `Cnt` for item and fluid cells,
+`Amount` for essentia cells -- NOT the ItemStack `Count` byte. Count is capped at
+127 and reads 0 in every cell format seen here, so preferring it silently drops
+entire cells instead of erroring. DO NOT reorder those fields; see classify().
 
 Usage:
   python3 ae2_inventory.py [--sample] [--json out.json] region/*.mca
@@ -16,7 +18,10 @@ import collections
 import json
 import sys
 
-from anvil_nbt import iter_region, tile_entities
+try:
+    from .anvil_nbt import iter_region, tile_entities
+except ImportError:  # run directly as a script, e.g. inside a server container
+    from anvil_nbt import iter_region, tile_entities
 
 # Tile entities that can physically hold a storage cell.
 CELL_HOLDERS = (
@@ -24,6 +29,10 @@ CELL_HOLDERS = (
     "appliedenergistics2:chest",
     "appliedenergistics2:io_port",
     "appliedenergistics2:cell_workbench",
+    # Interfaces really do hold cells in practice (found holding an essentia cell on
+    # the reference network), so they are not just a pass-through block.
+    "appliedenergistics2:interface",
+    "ae2fc:dual_interface",
     "extracells:storage.casing",
     "nae2:exposer",
     "cellterminal:cell_terminal",
@@ -52,28 +61,51 @@ def walk_compounds(node):
 
 
 def classify(entry):
-    """Return (kind, key, count) for one `#N` cell entry, or None if unusable."""
+    """Return (kind, key, count) for one `#N` cell entry, or None if unusable.
+
+    The amount key differs by cell type and getting this wrong silently drops whole
+    cells rather than erroring:
+      * item and fluid cells  -> `Cnt`
+      * essentia cells        -> `Amount`   (ThaumicEnergistics)
+      * `Count` is the ItemStack byte and is 0 in every cell format seen; it is only a
+        last resort and must never take priority.
+    """
     if not isinstance(entry, dict):
         return None
-    # `Cnt` is the authoritative amount; fall back to Count only if absent.
-    count = entry.get("Cnt")
+    count = None
+    for field in ("Cnt", "Amount", "Count"):
+        value = entry.get(field)
+        if isinstance(value, int) and value > 0:
+            count = value
+            break
     if count is None:
-        count = entry.get("Count", 0)
-    if not isinstance(count, int) or count <= 0:
         return None
 
+    # Aspect before id: an essentia entry has no `id`, but check explicitly so a future
+    # cell format carrying both cannot be misfiled as an item.
+    if "Aspect" in entry and isinstance(entry["Aspect"], str):
+        return "essentia", entry["Aspect"], count
     if "FluidName" in entry:
         return "fluid", entry["FluidName"], count
     if "id" in entry and isinstance(entry["id"], str):
         dmg = entry.get("Damage", 0)
         key = entry["id"] if not dmg else "%s:%s" % (entry["id"], dmg)
-        # An NBT-bearing stack is a distinct item for crafting purposes; flag it
-        # so the graph solver does not treat it as interchangeable with the base.
-        if entry.get("tag"):
+        # An NBT-bearing stack is a distinct item for crafting purposes, so it must not
+        # unify with the bare item. Where the NBT is a known, meaningful discriminator,
+        # decode it into the key instead of an opaque marker: a Vis Pod of Perditio is a
+        # genuinely different ingredient from one of Lux, and those feed the
+        # item -> essentia multiblocks. Anything undecoded keeps the opaque flag so it
+        # still cannot be mistaken for the base item.
+        tag = entry.get("tag")
+        if isinstance(tag, dict) and tag:
+            aspect = tag.get("Aspect")
+            if isinstance(aspect, str) and aspect:
+                key += "#" + aspect.lower()
+            else:
+                key += " (+nbt)"
+        elif tag:
             key += " (+nbt)"
         return "item", key, count
-    if "Aspect" in entry:
-        return "essentia", str(entry["Aspect"]), count
     return None
 
 

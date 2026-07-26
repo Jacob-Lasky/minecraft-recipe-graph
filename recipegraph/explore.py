@@ -43,10 +43,28 @@ def search(graph, query, have=None, limit=MAX_RESULTS):
             rank = 4
         scored.append((rank, len(label), label, key))
 
+    # Keys that exist only in the inventory, never in items.csv: NBT-discriminated
+    # stacks like `thaumadditions:vis_pod#perditio`, plus fluids and essentia. Without
+    # this, everything the aspect decoder produces is unsearchable.
+    for key in have:
+        if key in graph.names:
+            continue
+        label = graph.display(key)
+        low = label.lower()
+        if not all(t in low or t in key.lower() for t in terms):
+            continue
+        scored.append((2 if low.startswith(q) else 3, len(label), label, key))
+
     scored.sort()
+    seen_keys = set()
     out = []
-    for _rank, _len, _label, key in scored[:limit]:
+    for _rank, _len, _label, key in scored:
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         out.append(describe(graph, key, have))
+        if len(out) >= limit:
+            break
     return out
 
 

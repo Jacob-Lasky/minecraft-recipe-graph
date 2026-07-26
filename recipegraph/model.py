@@ -47,9 +47,20 @@ def fluid_key(name):
     return "fluid:%s" % name
 
 
+def essentia_key(aspect):
+    """Thaumcraft essentia as a plannable node.
+
+    Essentia is an intermediate, not a terminal resource -- multiblocks convert items
+    (vis pods, for one) into aspects -- so it must be able to appear on BOTH sides of a
+    recipe, exactly like an item or a fluid. Hence its own namespace rather than a
+    report-only side channel.
+    """
+    return "essentia:%s" % str(aspect).lower()
+
+
 def split_key(key):
     """Return (base_key_without_meta, meta_or_None) for concrete item keys."""
-    if key.startswith(("ore:", "fluid:")):
+    if key.startswith(("ore:", "fluid:", "essentia:")):
         return key, None
     parts = key.split(":")
     if len(parts) >= 3:
@@ -187,11 +198,29 @@ class Graph:
 
     def display(self, key):
         if key in self.names:
-            return self.names[key]
+            label = self.names[key]
+            # items.csv stores aspect-parameterised names as format strings ("%s Vis
+            # Pod"). With no aspect to fill in, drop the placeholder rather than showing
+            # a raw %s.
+            if "%s" in label:
+                return label.replace("%s ", "").replace("%s", "").strip() or key
+            return label
         if key.startswith("ore:"):
             return "[oredict] %s" % key[4:]
         if key.startswith("fluid:"):
             return "[fluid] %s" % key[6:]
+        if key.startswith("essentia:"):
+            return "[essentia] %s" % key[9:].capitalize()
+        # `mod:item#aspect` -- an NBT-discriminated stack. Names for these are format
+        # strings in items.csv ("%s Vis Pod"), so fill the placeholder with the aspect
+        # rather than showing a raw %s to the user.
+        if "#" in key:
+            stem, aspect = key.rsplit("#", 1)
+            label = self.names.get(stem) or self.display(stem)
+            pretty = aspect.capitalize()
+            if "%s" in label:
+                return label % pretty
+            return "%s (%s)" % (label, pretty)
         base, meta = split_key(key)
         if base in self.names:
             return self.names[base] if meta in (0, None) else "%s (%s)" % (self.names[base], meta)

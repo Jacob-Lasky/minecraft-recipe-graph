@@ -96,8 +96,18 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 
 - **AE2 cell counts live in the `Cnt` tag, not `Count`.** `Count` is an ItemStack byte
   capped at 127 and is meaningless for cell contents.
-- **Cell contents are `tag/#N` keys**, not an `Items` list. Fluid cells put the amount in
-  `Cnt` too (`{FluidName, Cnt}`).
+- **Cell contents are `tag/#N` keys**, not an `Items` list, and the amount field differs
+  per cell type: `Cnt` for item and fluid cells, **`Amount` for essentia cells**. `Count`
+  is the ItemStack byte and reads 0 in all of them, so preferring it silently drops whole
+  cells instead of erroring.
+- **Aspect NBT is decoded into the item key.** `thaumadditions:vis_pod` with
+  `tag:{Aspect:"perditio"}` becomes `thaumadditions:vis_pod#perditio`, because a Vis Pod
+  of Perditio is a different ingredient from one of Lux and they feed the item→essentia
+  multiblocks. Names for these are format strings in items.csv (`"%s Vis Pod"`), filled in
+  at display time. Undecodable NBT keeps a ` (+nbt)` marker so it never unifies with the
+  bare item.
+- **Essentia is a plannable node** (`essentia:<aspect>`), not a report-only number -- it is
+  an intermediate that recipes both consume and produce.
 - **Forge `_constants.json`**: 38 jars in this pack use `"item": "#name"` references. An
   extractor that ignores them produces phantom `minecraft:#name` items.
 - **Uncrafting recipes poison naive solvers.** `block → 9 ingots` looks like a cheap
