@@ -41,6 +41,15 @@ form.search button{font:600 14px var(--sans);padding:11px 18px;border-radius:9px
 border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
 form.search input:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .hint2{color:var(--dim);font-size:13px;margin-bottom:22px}
+/* Stale-data strip. Uses the warn tokens, not the accent: this is a state of the data, not
+   navigation, and it has to survive being scrolled past on a long page. */
+form.stale{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+background:var(--warnbg);color:var(--warn);border:1px solid currentColor;
+border-radius:9px;padding:11px 14px;font-size:13.5px;margin-bottom:20px}
+form.stale span{flex:1 1 260px}
+form.stale button{font:600 12.5px var(--sans);padding:7px 14px;border-radius:8px;
+border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}
+form.stale button:hover{background:var(--warn);color:var(--card)}
 .hits{list-style:none;padding:0;margin:0}
 .hits li{border-bottom:1px solid var(--line);display:flex;align-items:stretch;gap:8px}
 .hits a{display:flex;gap:12px;align-items:baseline;padding:10px 4px;text-decoration:none;
@@ -203,7 +212,52 @@ NAV_ITEMS = (
 )
 
 
-def _nav(active=""):
+STALE_LABEL = {"graph": "the recipe graph", "have": "your AE2 stock"}
+
+
+def _safe_back(form, default="/machines"):
+    """The `back` form field, or `default` if it could navigate off this server.
+
+    ONE implementation on purpose. `back` is attacker-controllable in the general case, and
+    `startswith("/")` alone is NOT sufficient -- `//evil.example/x` satisfies it and is a
+    valid protocol-relative URL. The second handler that needed this check reintroduced the
+    weak version within minutes of the first being fixed.
+    """
+    back = (form.get("back") or [default])[0]
+    parsed = urllib.parse.urlsplit(back)
+    if not back.startswith("/") or parsed.scheme or parsed.netloc:
+        return default
+    return back
+
+
+def _stale_banner(state, back="/"):
+    """Tell the user their in-memory data is behind the files on disk.
+
+    Shown rather than auto-reloaded because loading a 72 MB graph takes tens of seconds and
+    would stall whichever unlucky request triggered it. An explicit button is predictable.
+
+    `back` is the nav's active path, NOT the live request path: the State is shared across
+    request threads, so stashing the current URL on it would race between concurrent
+    requests and could bounce one user to another's page.
+    """
+    changed = state.stale()
+    if not changed:
+        return ""
+    what = " and ".join(STALE_LABEL.get(c, c) for c in changed)
+    return ("<form method='post' action='/reload' class='stale'>"
+            "<input type='hidden' name='back' value='%s'>"
+            "<span><b>%s</b> changed on disk since this server started, so what you are "
+            "looking at is out of date.</span>"
+            "<button type='submit'>Reload now</button></form>"
+            % (_esc(back), _esc(what)))
+
+
+def _nav(active="", state=None):
+    """The tab bar, plus a stale-data warning when one is due.
+
+    The banner rides along here because every page renders a nav and none of them should be
+    able to forget it. Pass the state; omit it only where there is none (the 404 shell).
+    """
     out = []
     for href, label, icon in NAV_ITEMS:
         if href == active:
@@ -211,11 +265,26 @@ def _nav(active=""):
                        % (_icon(icon), _esc(label)))
         else:
             out.append("<a href='%s'>%s%s</a>" % (href, _icon(icon), _esc(label)))
-    return "<nav class='top'>%s</nav>" % "".join(out)
+    banner = _stale_banner(state, active or "/") if state is not None else ""
+    return "<nav class='top'>%s</nav>%s" % ("".join(out), banner)
+
+
+def _stamp(path):
+    """(mtime, size) for a file, or None if it is absent.
+
+    Content is not hashed: graph.json is 72 MB and this runs on every request. A rebuild
+    always changes both fields, and a rewrite with byte-identical content is not a change
+    worth reloading for.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 class State:
-    """Loaded once; requests read it. Rebuilt only when overrides change."""
+    """Loaded once; requests read it. Rebuilt when overrides change or the files do."""
 
     def __init__(self, graph_path, have_path, machines_path, sources_path=None):
         self.graph_path = graph_path
@@ -223,13 +292,22 @@ class State:
         self.machines_path = machines_path
         self.sources_path = sources_path or "data/sources.json"
         self.lock = threading.Lock()
-        self.graph = Graph.load(graph_path)
+        self.load_all()
+
+    def load_all(self):
+        """Read the graph and the stock file from disk, then recompute everything.
+
+        Stamps are taken BEFORE reading, so a rebuild that lands mid-read is noticed on the
+        next request rather than being recorded as already loaded.
+        """
+        self.stamps = {"graph": _stamp(self.graph_path), "have": _stamp(self.have_path)}
+        self.graph = Graph.load(self.graph_path)
         self.reverse = build_reverse(self.graph.names)
         self.have = {}
         self.craftables = set()
         self.placed = {}
-        if have_path and os.path.exists(have_path):
-            with open(have_path) as fh:
+        if self.have_path and os.path.exists(self.have_path):
+            with open(self.have_path) as fh:
                 doc = json.load(fh)
             self.have = dict(doc.get("items") or {})
             for name, amount in (doc.get("fluids") or {}).items():
@@ -239,6 +317,16 @@ class State:
             self.craftables = set(doc.get("craftables") or ())
             self.placed = doc.get("placed") or {}
         self.refresh_machines()
+
+    def stale(self):
+        """Which of the loaded files have changed on disk since they were read.
+
+        The whole point of the tool is a `/recipedump` then a rebuild, and the server holds
+        the graph in memory for the session. Without this it silently serves the old graph
+        afterwards, which reads as "the fix did not work" rather than "reload me".
+        """
+        return sorted(name for name, was in self.stamps.items()
+                      if _stamp(getattr(self, "%s_path" % name)) != was)
 
     def refresh_machines(self):
         """Recompute machine states and the cost table (cost depends on machine state)."""
@@ -436,7 +524,7 @@ def home_page(state, query="", qty=1):
     <code>recipegraph plan &lt;item&gt;</code> from the terminal.</p></noscript>
 </div>
 <script>%s</script>""" % (
-        _nav("/"),
+        _nav("/", state),
         "{:,}".format(len(state.graph.recipes)),
         "{:,}".format(len(state.have)),
         sum(1 for s, _w in state.states.values() if s == machines_mod.HAVE),
@@ -597,7 +685,7 @@ def machines_page(state, message="", query=""):
   </div>
 </div>
 <script>%s</script>""" % (
-        _nav("/machines"),
+        _nav("/machines", state),
         (" <b>%s</b>" % _esc(message)) if message else "",
         counts.get("have", 0), "{:,}".format(recipes_by_state.get("have", 0)),
         counts.get("buildable", 0), "{:,}".format(recipes_by_state.get("buildable", 0)),
@@ -616,7 +704,7 @@ def machine_page(state, uid):
     if not info:
         return _page("Not found", "<div class='wrap'>%s<h1>No such category</h1>"
                      "<p class='hint2'><code>%s</code> is not in this graph.</p></div>"
-                     % (_nav("/machines"), _esc(uid))), 404
+                     % (_nav("/machines", state), _esc(uid))), 404
 
     detail = machines_mod.responsibilities(state.graph, uid)
     st = info["state"]
@@ -672,7 +760,7 @@ def machine_page(state, uid):
     <div class="card"><h2><span>Consumes</span><span class="c">%s</span></h2>%s</div>
   </div>
 </div>""" % (
-        _nav("/machines"),
+        _nav("/machines", state),
         _esc(info["title"] or uid), "{:,}".format(detail["recipes"]), _esc(uid),
         STATE_PILL.get(st, "mut"), STATE_LABEL.get(st, st),
         _esc(info["mod"] or "?"),
@@ -719,7 +807,7 @@ def sources_page(state):
      <code>recipegraph sources --add &lt;block id&gt;=&lt;item or fluid key&gt;</code>.</div>
     <ul class="klist">%s</ul></div>
 </div>""" % (
-        _nav("/sources"), len(state.free_sources),
+        _nav("/sources", state), len(state.free_sources),
         rows or "<tr class='empty-row'><td colspan='2'>Nothing detected.</td></tr>",
         sum(1 for b in known if b not in state.placed and b not in state.have),
         unmatched or "<li class='hint2'>All known generators are present.</li>",
@@ -746,7 +834,7 @@ def stats_page(state):
   <div class="card"><h2>By source</h2><table>%s</table></div>
   <div class="card"><h2>Biggest categories</h2><table>%s</table></div>
 </div>""" % (
-        _nav("/stats"),
+        _nav("/stats", state),
         "{:,}".format(cov["recipes"]), "{:,}".format(cov["produced_keys"]),
         "{:,}".format(cov["named_items"]), "{:,}".format(cov["oredict_entries"]),
         "".join("<tr><td><code>%s</code></td><td class='n'>%s</td></tr>"
@@ -851,10 +939,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = urllib.parse.urlparse(self.path)
-        if parts.path != "/machines":
+        if parts.path not in ("/machines", "/reload"):
             return self._send("", 404)
         length = int(self.headers.get("Content-Length") or 0)
         form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+        st = self.state
+        if parts.path == "/reload":
+            # Blocking on purpose: loading a 72 MB graph takes tens of seconds, and doing it
+            # in the background while still serving the old one would mean the page you land
+            # on can still be stale. The user asked for it and gets to wait for it.
+            with st.lock:
+                st.load_all()
+            self.send_response(303)
+            self.send_header("Location", _safe_back(form, "/"))
+            self.end_headers()
+            return
+
         uid = (form.get("uid") or [""])[0]
         target = (form.get("state") or [""])[0]
         # Return the user to wherever they toggled from, so a change made on a detail page
@@ -864,11 +964,7 @@ class Handler(BaseHTTPRequestHandler):
         # `startswith("/")` is NOT enough: `//evil.example/x` passes that and is a valid
         # protocol-relative URL that navigates off-site. Require a parse with no scheme and
         # no netloc, which is the only form that cannot leave this server.
-        back = (form.get("back") or ["/machines"])[0]
-        parsed = urllib.parse.urlsplit(back)
-        if not back.startswith("/") or parsed.scheme or parsed.netloc:
-            back = "/machines"
-        st = self.state
+        back = _safe_back(form)
         msg = ""
         if uid and target in machines_mod.STATES:
             with st.lock:

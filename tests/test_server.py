@@ -154,9 +154,9 @@ class ServerTest(unittest.TestCase):
 
     # ---- the toggle form ----
 
-    def post(self, fields):
+    def post(self, fields, path="/machines"):
         data = urllib.parse.urlencode(fields).encode()
-        req = urllib.request.Request("http://127.0.0.1:%d/machines" % self.port, data=data)
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path), data=data)
 
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *_a, **_kw):
@@ -198,6 +198,60 @@ class ServerTest(unittest.TestCase):
             _status, loc = self.post({"uid": "mod.press", "state": machines.HAVE,
                                       "back": hostile})
             self.assertTrue(loc.startswith("/machines?"), "%s -> %s" % (hostile, loc))
+
+    # ---- staleness ----
+
+    def test_no_banner_while_the_files_are_unchanged(self):
+        self.assertEqual(self.state.stale(), [])
+        self.assertNotIn("changed on disk", self.get("/machines")[2])
+
+    def test_a_rebuilt_graph_raises_the_banner_on_every_page(self):
+        """The whole workflow is dump, rebuild, look at the UI.
+
+        Without this the server keeps serving the graph it loaded at startup and says
+        nothing, which reads as "the rebuild did not work" rather than "reload me".
+        """
+        os.utime(self.state.graph_path, None)
+        try:
+            self.assertEqual(self.state.stale(), ["graph"])
+            for href, _label, _icon in server.NAV_ITEMS:
+                body = self.get(href)[2]
+                self.assertIn("changed on disk", body, href)
+                self.assertIn("the recipe graph", body, href)
+        finally:
+            self.state.load_all()
+
+    def test_a_rescanned_stock_file_is_noticed_too(self):
+        os.utime(self.state.have_path, None)
+        try:
+            self.assertEqual(self.state.stale(), ["have"])
+            self.assertIn("your AE2 stock", self.get("/")[2])
+        finally:
+            self.state.load_all()
+
+    def test_reload_clears_the_banner_and_returns_you_to_the_page(self):
+        os.utime(self.state.graph_path, None)
+        self.assertTrue(self.state.stale())
+        status, loc = self.post({"back": "/machines"}, path="/reload")
+        self.assertEqual(status, 303)
+        self.assertEqual(loc, "/machines")
+        self.assertEqual(self.state.stale(), [])
+
+    def test_reload_cannot_be_used_as_an_open_redirect_either(self):
+        # The second handler that needed this check reintroduced the weak
+        # startswith("/") version; both now go through one helper.
+        for hostile in ("//evil.example/x", "https://evil.example/x"):
+            _status, loc = self.post({"back": hostile}, path="/reload")
+            self.assertEqual(loc, "/", hostile)
+
+    def test_a_missing_file_counts_as_changed_rather_than_crashing(self):
+        moved = self.state.have_path + ".away"
+        os.rename(self.state.have_path, moved)
+        try:
+            self.assertEqual(self.state.stale(), ["have"])
+        finally:
+            os.rename(moved, self.state.have_path)
+            self.state.load_all()
 
     def test_posting_to_any_other_path_is_a_404(self):
         req = urllib.request.Request("http://127.0.0.1:%d/plan" % self.port, data=b"x=1")

@@ -336,6 +336,15 @@ public class DumpCommand extends CommandBase {
             reply(sender, String.format(
                     "%s skipped, all recorded in skipped.ndjson (per-category counts in summary.json)",
                     formatCount(failed)));
+            // The files are useless on their own, and in-game chat is the only place the
+            // player is looking at this moment, so name the next two steps and the URL.
+            //
+            // Phrased as an instruction, NOT as "open http://localhost:8765" on its own: the
+            // planner is a separate program that may not be installed or running, and
+            // pointing at a dead URL is worse than saying nothing. DO NOT reduce this to
+            // just the link.
+            reply(sender, "next: run `recipegraph build` to load these, then "
+                    + "`recipegraph serve` and open http://localhost:8765");
         }
     }
 
