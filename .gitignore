@@ -1,9 +1,10 @@
-__pycache__/
-*.pyc
 data/graph.json
 data/*.ndjson
 *.mca
 mod/build/
 mod/.gradle/
+mod/localmaven/
 mod/run/
 plan*.html
+*.pyc
+__pycache__/

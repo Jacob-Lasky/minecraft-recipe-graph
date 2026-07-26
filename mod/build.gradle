@@ -1,68 +1,77 @@
-// 1.12.2 Forge mod build.
+// 1.12.2 Forge mod build, on RetroFuturaGradle rather than ForgeGradle 2.3.
 //
-// Gradle 4.x + ForgeGradle 2.3 + JDK 8 is the only combination that works for
-// 1.12.2. DO NOT "modernise" this to a current Gradle/JDK: ForgeGradle 2.3 does not
-// run on anything past JDK 8, and newer ForgeGradle lines dropped 1.12.2 support.
-// Run it as:  JAVA_HOME=/usr/lib/jvm/java-8-openjdk ./gradlew build
+// WHY NOT ForgeGradle 2.3 (the "classic" 1.12.2 plugin): it resolves Forge from
+// `forge-<ver>-userdev.jar`, and Forge's maven no longer publishes that artifact for
+// 1.12.2 -- only `userdev3`, which is the FG3+ layout (config.json + joined.lzma +
+// patches) that FG2 cannot read. Verified: userdev 404s, userdev3 200s, and renaming
+// one to the other fails because FG2 looks for a dev.json that isn't in there.
+// DO NOT "simplify" this back to ForgeGradle 2.3; it cannot resolve Forge any more.
 //
-// HEI (HadEnoughItems) is API-compatible with JEI 4.x and publishes as jei_1.12.2,
-// so the standard JEI dependency coordinate resolves against it. Only the public
-// mezz.jei.api surface is used, which is why this survives the 4.8 -> 4.28 gap that
-// broke JEIExporter.
+// RFG 2.0.2 is what CleanroomMC's own 1.12.2 template uses -- and Cleanroom is the
+// loader this pack runs on, so it is the best-supported path available.
+//
+// Build it with:  ./gradlew build -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar
 
-buildscript {
-    repositories {
-        maven { url = 'https://maven.minecraftforge.net' }
-        maven { url = 'https://repo.maven.apache.org/maven2' }
-    }
-    dependencies {
-        classpath 'net.minecraftforge.gradle:ForgeGradle:2.3-SNAPSHOT'
-    }
+plugins {
+    id 'java'
+    id 'com.gtnewhorizons.retrofuturagradle' version '2.0.2'
 }
 
-apply plugin: 'net.minecraftforge.gradle.forge'
-
-version = project.mod_version
 group = 'com.meatballcraft'
-archivesBaseName = "mbc-recipe-dump-${project.minecraft_version}"
+version = project.mod_version
+base { archivesName.set('mbc-recipe-dump') }
 
-sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8'
+java {
+    toolchain {
+        // Minecraft 1.12.2 must be compiled by Java 8. Gradle itself may run on a
+        // modern JDK; the foojay resolver in settings.gradle downloads this toolchain
+        // if the machine lacks it. Azul covers the most platforms for Java 8.
+        languageVersion.set(JavaLanguageVersion.of(8))
+        vendor.set(JvmVendorSpec.AZUL)
+    }
+}
 
 minecraft {
-    version = "${project.minecraft_version}-${project.forge_version}"
-    runDir = 'run'
-    mappings = project.mappings_version
-    makeObfSourceJar = false
+    mcVersion.set(project.minecraft_version)
+    mcpMappingChannel.set(project.mapping_channel)
+    mcpMappingVersion.set(project.mapping_version)
 }
 
-repositories {
-    maven {
-        name = 'progwml6 (JEI)'
-        url = 'https://dvs1.progwml6.com/files/maven/'
-    }
-    maven {
-        name = 'CurseMaven'
-        url = 'https://cursemaven.com'
-        content { includeGroup 'curse.maven' }
-    }
-}
+// Compile against the HadEnoughItems jar from the pack itself, not a maven JEI
+// artifact. Two reasons this is not laziness:
+//   1. HEI 4.28.1 is published by DimensionalDevelopment, NOT under mezz.jei on
+//      progwml6, which only carries JEI up to 4.16.x for 1.12.2. The coordinate
+//      `mezz.jei:jei_1.12.2:4.28.1` does not exist and will not resolve.
+//   2. A 1.12.2 mod jar already carries MCP-named references, and this mod is compiled
+//      against MCP names too, so a plain file dependency links correctly with no
+//      deobfuscation step.
+def heiJar = project.findProperty('hei_jar')
 
 dependencies {
-    // Compile against the JEI API only. `deobfProvided` keeps it off the runtime
-    // classpath of the built jar, which is correct -- HEI supplies it in game.
-    deobfProvided "mezz.jei:jei_${project.minecraft_version}:${project.jei_version}:api"
-    runtime "mezz.jei:jei_${project.minecraft_version}:${project.jei_version}"
+    if (heiJar && file(heiJar).exists()) {
+        compileOnly files(heiJar)
+    }
 }
+
+// Fail with an actionable message rather than 40 "package mezz.jei.api does not exist"
+// errors, which is what a missing or wrong hei_jar actually looks like.
+tasks.register('checkHeiJar') {
+    doFirst {
+        if (!heiJar) {
+            throw new GradleException(
+                'Set -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar ' +
+                '(or add hei_jar= to gradle.properties)')
+        }
+        if (!file(heiJar).exists()) {
+            throw new GradleException("hei_jar does not exist: ${heiJar}")
+        }
+    }
+}
+tasks.named('compileJava') { dependsOn 'checkHeiJar' }
 
 processResources {
     inputs.property 'version', project.version
-    inputs.property 'mcversion', project.minecraft.version
-
-    from(sourceSets.main.resources.srcDirs) {
-        include 'mcmod.info'
-        expand 'version': project.version, 'mcversion': project.minecraft.version
-    }
-    from(sourceSets.main.resources.srcDirs) {
-        exclude 'mcmod.info'
+    filesMatching('mcmod.info') {
+        expand 'version': project.version, 'mcversion': project.minecraft_version
     }
 }
