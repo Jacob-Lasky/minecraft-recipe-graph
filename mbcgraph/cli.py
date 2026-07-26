@@ -70,14 +70,21 @@ def cmd_find(args):
 
 
 def _load_have(path):
+    """Load a stock file from either the world-save reader or tools/ae2_dump.lua.
+
+    The OpenComputers dump additionally carries `craftables` (what AE2 can already
+    autocraft) and `names`; both are absent from the offline reader, so treat them
+    as optional rather than assuming one producer.
+    """
     if not path:
-        return {}, {}
+        return {}, {}, set(), {}
     with open(path) as fh:
         doc = json.load(fh)
     have = dict(doc.get("items", {}))
     for name, amount in (doc.get("fluids") or {}).items():
         have["fluid:%s" % name] = amount
-    return have, doc.get("stats", {})
+    craftables = set(doc.get("craftables") or ())
+    return have, doc.get("stats", {}), craftables, doc.get("names") or {}
 
 
 def cmd_plan(args):
@@ -93,11 +100,21 @@ def cmd_plan(args):
         print("matched %s (%s); %d other candidates, use `find` to disambiguate"
               % (key, g.display(key), len(keys) - 1), file=sys.stderr)
 
-    have, _stats = _load_have(args.have)
+    have, _stats, craftables, extra_names = _load_have(args.have)
+    if extra_names:
+        # A live dump knows names for items items.csv may predate.
+        for k, v in extra_names.items():
+            g.names.setdefault(k, v)
     if args.ignore_stock:
-        have = {}
-    solver = Solver(g, have=have, max_depth=args.depth, max_nodes=args.max_nodes)
+        have, craftables = {}, set()
+    if args.ignore_craftable:
+        craftables = set()
+    solver = Solver(g, have=have, craftables=craftables,
+                    max_depth=args.depth, max_nodes=args.max_nodes)
     result = solver.solve(key, args.qty)
+    if craftables:
+        print("(%d items treated as satisfied because AE2 can autocraft them; "
+              "--ignore-craftable to expand them)" % len(craftables), file=sys.stderr)
 
     print("== %s x%d ==" % (result["target_name"], result["qty"]))
     print("nodes: %d%s" % (result["nodes"], "  (TRUNCATED)" if result["truncated"] else ""))
@@ -158,6 +175,8 @@ def main(argv=None):
     p.add_argument("--qty", type=int, default=1)
     p.add_argument("--have", default="data/ae2_have.json")
     p.add_argument("--ignore-stock", action="store_true")
+    p.add_argument("--ignore-craftable", action="store_true",
+                   help="expand items AE2 could autocraft instead of stopping")
     p.add_argument("--exact", action="store_true")
     p.add_argument("--depth", type=int, default=24)
     p.add_argument("--max-nodes", type=int, default=4000)

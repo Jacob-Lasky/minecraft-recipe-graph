@@ -56,6 +56,13 @@ drives** in about a minute.
 Counts come from the cell's `Cnt` tag, *not* the ItemStack `Count` byte, which is capped
 at 127 and meaningless for cell contents.
 
+**Optional live feed.** `tools/ae2_dump.lua` is an OpenComputers script that exports the
+same file from the running network instead of the save. It's better data — it sees storage
+buses and external inventories, and `getCraftables()` tells the planner what AE2 can
+already autocraft, which becomes a stopping condition so the tree doesn't expand branches
+your ME system would just make for you. Costs you an OC computer and an Adapter block
+touching an ME Controller.
+
 ### 2. What things cost — build the recipe graph
 
 ```bash
