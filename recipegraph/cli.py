@@ -371,13 +371,67 @@ def cmd_metrics(args):
     return 0
 
 
+def _dump_newer_than_graph(graph_path, instance_dir):
+    """True when a `/recipedump` has happened since this graph was built."""
+    if not instance_dir:
+        return False
+    dump = os.path.join(instance_dir, "mc-recipe-dump", "recipes.ndjson")
+    if not (os.path.exists(dump) and os.path.exists(graph_path)):
+        return False
+    return os.path.getmtime(dump) > os.path.getmtime(graph_path)
+
+
+def ensure_graph(graph_path, instance_dir=None, quiet=False, allow_build=True):
+    """Build the graph if it is missing or older than the dump. Returns the path.
+
+    Exists because the documented flow was "run /recipedump, then build, then serve", and
+    the middle step is one the tool can work out for itself: the graph records the instance
+    it came from, so a dump newer than the graph is unambiguous. Fewer steps between the
+    player and the answer is the whole point of the UI.
+    """
+    def say(msg):
+        if not quiet:
+            print(msg, file=sys.stderr)
+
+    have_graph = os.path.exists(graph_path)
+    instance_dir = instance_dir or (
+        Graph.load(graph_path).instance_dir if have_graph else None)
+
+    if have_graph and not _dump_newer_than_graph(graph_path, instance_dir):
+        return graph_path
+    if not allow_build:
+        if not have_graph:
+            print("no graph at %s -- run `build` first" % graph_path, file=sys.stderr)
+            sys.exit(2)
+        say("note: %s has a newer dump than this graph; run `build` to pick it up"
+            % instance_dir)
+        return graph_path
+    if not instance_dir or not os.path.isdir(instance_dir):
+        if not have_graph:
+            print("no graph at %s and no --instance to build one from"
+                  % graph_path, file=sys.stderr)
+            sys.exit(2)
+        return graph_path
+
+    say("%s -- building from %s"
+        % ("no graph yet" if not have_graph else "dump is newer than the graph",
+           instance_dir))
+    g = index.build(instance_dir)
+    os.makedirs(os.path.dirname(graph_path) or ".", exist_ok=True)
+    g.save(graph_path)
+    say("wrote %s (%.1f MB)" % (graph_path, os.path.getsize(graph_path) / 1e6))
+    return graph_path
+
+
 def cmd_serve(args):
     """Local web UI so the tool is usable without a terminal."""
     from . import server
 
+    ensure_graph(args.graph, args.instance, allow_build=not args.no_build)
     print("loading graph %s ..." % args.graph, file=sys.stderr)
     httpd, state = server.serve(args.graph, args.have, args.machines,
-                                host=args.host, port=args.port)
+                                host=args.host, port=args.port,
+                                sources_path=args.sources)
     print("recipegraph UI on http://%s:%d  (%s recipes, %s stocked items)"
           % (args.host, args.port, "{:,}".format(len(state.graph.recipes)),
              "{:,}".format(len(state.have))))
@@ -567,7 +621,13 @@ def main(argv=None):
     p.add_argument("--json")
     p.set_defaults(fn=cmd_gaps)
 
-    p = sub.add_parser("serve", help="local web UI (search, plan, toggle machines)")
+    p = sub.add_parser("serve",
+                       help="local web UI; builds the graph first if it is missing or stale")
+    p.add_argument("--instance", help="pack's minecraft/ dir, if the graph must be built "
+                                      "(remembered from the last build otherwise)")
+    p.add_argument("--sources", default=DEFAULT_SOURCES)
+    p.add_argument("--no-build", action="store_true",
+                   help="never build; only warn if the graph is behind the dump")
     p.add_argument("--have", default=DEFAULT_HAVE)
     p.add_argument("--machines", default=DEFAULT_MACHINES)
     # Localhost by default on purpose: the graph exposes a live base's contents and there

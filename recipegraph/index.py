@@ -17,6 +17,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
             print(msg, file=sys.stderr)
 
     g = Graph()
+    g.instance_dir = os.path.abspath(instance_dir)
 
     csv_path = find_items_csv(instance_dir)
     if csv_path:

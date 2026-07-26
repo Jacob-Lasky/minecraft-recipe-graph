@@ -263,3 +263,61 @@ class ServerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnsureGraphTest(unittest.TestCase):
+    """`serve` builds the graph itself rather than making the user run two commands."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.graph_path = os.path.join(self.dir, "graph.json")
+        self.instance = os.path.join(self.dir, "instance")
+        os.makedirs(os.path.join(self.instance, "mc-recipe-dump"))
+        self.dump = os.path.join(self.instance, "mc-recipe-dump", "recipes.ndjson")
+        open(self.dump, "w").close()
+
+    def _write_graph(self, instance_dir=None):
+        g = build_graph()
+        g.instance_dir = instance_dir
+        g.save(self.graph_path)
+
+    def test_a_current_graph_is_left_alone(self):
+        from recipegraph.cli import ensure_graph
+
+        self._write_graph(self.instance)
+        os.utime(self.graph_path, (10 ** 9, 10 ** 9))     # graph newer than the dump
+        os.utime(self.dump, (10 ** 9 - 100, 10 ** 9 - 100))
+        before = os.path.getmtime(self.graph_path)
+        ensure_graph(self.graph_path, quiet=True)
+        self.assertEqual(os.path.getmtime(self.graph_path), before)
+
+    def test_a_newer_dump_is_detected_through_the_remembered_instance(self):
+        # The instance is read back off the graph, so no --instance flag is needed.
+        from recipegraph.cli import _dump_newer_than_graph
+
+        self._write_graph(self.instance)
+        os.utime(self.graph_path, (10 ** 9 - 100, 10 ** 9 - 100))
+        os.utime(self.dump, (10 ** 9, 10 ** 9))
+        self.assertTrue(_dump_newer_than_graph(self.graph_path, self.instance))
+
+    def test_no_build_only_warns(self):
+        from recipegraph.cli import ensure_graph
+
+        self._write_graph(self.instance)
+        os.utime(self.graph_path, (10 ** 9 - 100, 10 ** 9 - 100))
+        os.utime(self.dump, (10 ** 9, 10 ** 9))
+        before = os.path.getmtime(self.graph_path)
+        ensure_graph(self.graph_path, quiet=True, allow_build=False)
+        self.assertEqual(os.path.getmtime(self.graph_path), before)
+
+    def test_a_graph_with_no_remembered_instance_is_not_touched(self):
+        from recipegraph.cli import ensure_graph
+
+        self._write_graph(None)
+        before = os.path.getmtime(self.graph_path)
+        ensure_graph(self.graph_path, quiet=True)
+        self.assertEqual(os.path.getmtime(self.graph_path), before)
+
+    def test_the_instance_survives_a_save_and_load(self):
+        self._write_graph(self.instance)
+        self.assertEqual(Graph.load(self.graph_path).instance_dir, self.instance)
