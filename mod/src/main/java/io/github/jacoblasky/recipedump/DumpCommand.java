@@ -70,6 +70,12 @@ public class DumpCommand extends CommandBase {
         }
 
         Map<String, String> names = new LinkedHashMap<>();
+        // Per-category tallies so a coverage gap can be attributed to a category and mod
+        // rather than merely counted. A bare failure count says coverage is incomplete
+        // but not where, which cannot tell you whether a missing recipe matters.
+        Map<String, int[]> perCategory = new LinkedHashMap<>();  // uid -> {dumped, threw, empty}
+        Map<String, String> categoryMod = new LinkedHashMap<>();
+        List<String> skips = new ArrayList<>();
         int recipes = 0;
         int categories = 0;
         int failed = 0;
@@ -82,14 +88,31 @@ public class DumpCommand extends CommandBase {
                 categories++;
                 String uid = safe(category.getUid());
                 String title = safe(category.getTitle());
+                String modName = "";
+                try {
+                    modName = safe(category.getModName());
+                } catch (Throwable ignored) {
+                    // getModName is best-effort; its absence must not skip a category
+                }
+                categoryMod.put(uid, modName);
+                int[] tally = perCategory.get(uid);
+                if (tally == null) {
+                    tally = new int[3];
+                    perCategory.put(uid, tally);
+                }
+
                 List<?> wrappers;
                 try {
                     wrappers = registry.getRecipeWrappers(cast(category));
                 } catch (Throwable t) {
                     failed++;
+                    tally[1]++;
+                    skips.add(skipLine(uid, modName, -1, null, t, "getRecipeWrappers failed"));
                     continue;
                 }
+                int index = -1;
                 for (Object obj : wrappers) {
+                    index++;
                     if (!(obj instanceof IRecipeWrapper)) {
                         continue;
                     }
@@ -99,9 +122,18 @@ public class DumpCommand extends CommandBase {
                             w.write(line);
                             w.write('\n');
                             recipes++;
+                            tally[0]++;
+                        } else {
+                            // Parsed fine but yielded no outputs, so it is not a usable
+                            // graph edge. Recorded separately from a thrown failure
+                            // because the causes and the fixes are different.
+                            tally[2]++;
+                            skips.add(skipLine(uid, modName, index, obj, null, "no outputs"));
                         }
                     } catch (Throwable t) {
                         failed++;
+                        tally[1]++;
+                        skips.add(skipLine(uid, modName, index, obj, t, "threw"));
                     }
                 }
             }
@@ -110,17 +142,97 @@ public class DumpCommand extends CommandBase {
             return;
         }
 
+        writeLines(new File(dir, "skipped.ndjson"), skips);
+        writeSummary(new File(dir, "summary.json"), perCategory, categoryMod, recipes, failed);
+
         int ores = writeOreDict(new File(dir, "oredict.json"), names);
         writeNames(new File(dir, "names.json"), names);
 
         reply(sender, String.format(
-                "dumped %d recipes from %d categories (%d skipped), %d oredict entries, %d names -> %s",
-                recipes, categories, failed, ores, names.size(), dir.getName()));
+                "dumped %d recipes from %d categories, %d oredict entries, %d names -> %s",
+                recipes, categories, ores, names.size(), dir.getName()));
+        reply(sender, String.format(
+                "%d skipped (%d recorded in skipped.ndjson; see summary.json for per-category counts)",
+                failed, skips.size()));
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static IRecipeCategory cast(IRecipeCategory<?> c) {
         return (IRecipeCategory) c;
+    }
+
+    /**
+     * One NDJSON record describing a recipe that did not make it into the dump.
+     *
+     * The wrapper's class name is the useful field: it names the mod and the recipe type
+     * far more precisely than the category uid does, which is what makes the log
+     * actionable rather than just a count.
+     */
+    private static String skipLine(String uid, String modName, int index, Object wrapper,
+                                   Throwable t, String reason) {
+        StringBuilder sb = new StringBuilder(160);
+        sb.append("{\"cat\":\"").append(uid).append('"');
+        if (!modName.isEmpty()) {
+            sb.append(",\"mod\":\"").append(modName).append('"');
+        }
+        sb.append(",\"i\":").append(index);
+        sb.append(",\"reason\":\"").append(safe(reason)).append('"');
+        if (wrapper != null) {
+            sb.append(",\"wrapper\":\"").append(safe(wrapper.getClass().getName())).append('"');
+        }
+        if (t != null) {
+            sb.append(",\"err\":\"").append(safe(t.getClass().getName())).append('"');
+            String msg = t.getMessage();
+            if (msg != null) {
+                if (msg.length() > 300) {
+                    msg = msg.substring(0, 300) + "...";
+                }
+                sb.append(",\"msg\":\"").append(safe(msg)).append('"');
+            }
+            StackTraceElement[] trace = t.getStackTrace();
+            if (trace != null && trace.length > 0) {
+                sb.append(",\"at\":\"").append(safe(trace[0].toString())).append('"');
+            }
+        }
+        return sb.append('}').toString();
+    }
+
+    private static void writeLines(File file, List<String> lines) {
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            for (String line : lines) {
+                w.write(line);
+                w.write('\n');
+            }
+        } catch (IOException ignored) {
+            // the dump itself already succeeded; losing the skip log must not fail it
+        }
+    }
+
+    private static void writeSummary(File file, Map<String, int[]> perCategory,
+                                     Map<String, String> categoryMod,
+                                     int recipes, int failed) {
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n \"recipes\": " + recipes + ",\n \"skipped\": " + failed
+                    + ",\n \"categories\": {");
+            boolean first = true;
+            for (Map.Entry<String, int[]> e : perCategory.entrySet()) {
+                if (!first) {
+                    w.write(",");
+                }
+                first = false;
+                int[] t = e.getValue();
+                String mod = categoryMod.get(e.getKey());
+                w.write("\n  \"" + e.getKey() + "\": {\"dumped\": " + t[0]
+                        + ", \"threw\": " + t[1] + ", \"empty\": " + t[2]
+                        + (mod != null && !mod.isEmpty() ? ", \"mod\": \"" + mod + "\"" : "")
+                        + "}");
+            }
+            w.write(first ? "}\n}\n" : "\n }\n}\n");
+        } catch (IOException ignored) {
+            // same: a missing summary is not worth failing a good dump over
+        }
     }
 
     private static String encode(IRecipeWrapper wrapper, String uid, String title,

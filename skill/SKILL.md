@@ -62,6 +62,9 @@ python3 -m recipegraph.cli explore "ultimate component" --html explore.html
 python3 -m recipegraph.cli track
 python3 -m recipegraph.cli chart --window 2h --html chart.html
 python3 -m recipegraph.cli metrics             # db size / row counts
+
+# what is the graph blind to? (needs dump mod v0.2.0+)
+python3 -m recipegraph.cli gaps --dump-dir '<instance>/minecraft/mc-recipe-dump'
 ```
 
 **Fluids are reported in mB, not buckets** (1000 mB = 1 bucket). Recipes are authored in

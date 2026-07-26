@@ -293,6 +293,29 @@ def cmd_chart(args):
     return 0
 
 
+def cmd_gaps(args):
+    """What is the graph blind to, per the dump mod's skip log."""
+    from . import gaps
+
+    if not os.path.isdir(args.dump_dir):
+        print("no dump dir at %s -- run /recipedump in game first" % args.dump_dir,
+              file=sys.stderr)
+        return 2
+    summary, skips = gaps.load(args.dump_dir)
+    if not summary and not skips:
+        print("no summary.json or skipped.ndjson in %s. A dump made by mod v0.1.0 only\n"
+              "counted failures without recording them; v0.2.0+ writes both files."
+              % args.dump_dir, file=sys.stderr)
+        return 1
+    analysis = gaps.analyse(summary, skips)
+    print(gaps.report(analysis))
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(analysis, fh, indent=1)
+        print("\nwrote %s" % args.json)
+    return 0
+
+
 def cmd_metrics(args):
     from . import metrics
     conn = metrics.connect(args.db)
@@ -371,6 +394,12 @@ def main(argv=None):
     p = sub.add_parser("metrics", help="metrics db size and coverage")
     p.add_argument("--db", default=DEFAULT_DB)
     p.set_defaults(fn=cmd_metrics)
+
+    p = sub.add_parser("gaps", help="what the graph is blind to, from the dump skip log")
+    p.add_argument("--dump-dir", default="mc-recipe-dump",
+                   help="the mc-recipe-dump/ dir written by /recipedump")
+    p.add_argument("--json")
+    p.set_defaults(fn=cmd_gaps)
 
     p = sub.add_parser("stats", help="graph coverage")
     p.set_defaults(fn=cmd_stats)

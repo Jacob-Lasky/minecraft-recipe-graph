@@ -166,6 +166,22 @@ Forge's maven no longer publishes the `userdev` artifact FG2 requires, only the 
 `userdev3`. See [docs/BUILD.md](docs/BUILD.md) for the evidence and the reobfuscation
 check.
 
+### Gaps — what the dump could not read
+
+```bash
+recipegraph gaps --dump-dir <instance>/minecraft/mc-recipe-dump
+```
+
+`/recipedump` guards every category and every recipe individually, because third-party
+recipe wrappers genuinely throw. v0.2.0+ records each failure to `skipped.ndjson` with the
+category, mod, wrapper class and exception, plus per-category tallies in `summary.json`.
+
+`gaps` turns that into an answer to *does this matter*. A category that dumped **zero**
+recipes is a total blind spot — an entire machine type missing, so anything made only there
+looks uncraftable. That is ranked first and separately. Partially-covered categories are
+ranked by the **share** lost, not the raw count, so losing 30 of 70 Thaumcraft infusions
+outranks losing 6 of 39,000 vanilla crafting recipes.
+
 ## Ore dictionary
 
 Real membership comes from the dump mod's `oredict.json`. Without it, the builder falls
