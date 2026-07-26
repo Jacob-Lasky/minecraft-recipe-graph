@@ -64,6 +64,10 @@ python3 -m recipegraph.cli chart --window 2h --html chart.html
 python3 -m recipegraph.cli metrics             # db size / row counts
 ```
 
+**Fluids are reported in mB, not buckets** (1000 mB = 1 bucket). Recipes are authored in
+mB; converting to buckets would misreport partial-bucket recipes. State the unit when
+quoting a fluid figure.
+
 **Rates are NET, and say so when reporting them.** AE2 exposes stock levels, not machine
 throughput, so an item produced and consumed at equal speed reads flat. Do not describe
 these as production rates. Network power is the exception — AE2 publishes real rolling

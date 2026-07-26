@@ -182,7 +182,12 @@ same code runs inside a server container where `pip` is unavailable.
 ## Status / known limits
 
 - Machine recipes require the dump mod (see above).
-- Fluids are tracked but fluid *conversion* chains are shallow.
+- **Fluid amounts are always in mB** (1000 mB = 1 bucket), never auto-converted to
+  buckets, because recipes are authored in mB and rounding to buckets would misreport any
+  recipe using a partial bucket.
+- Fluid *conversion* chains are shallow: a filled bucket
+  (`forge:bucketfilled` + NBT) is still a different key from the raw fluid, so
+  bucket-based and fluid-based routes for one material do not yet unify.
 - Essentia cells are detected but not yet aggregated.
 - The AE2 reader sees cells in drives and chests. Items parked in ME Interfaces or in
   external inventories behind a storage bus are not counted.

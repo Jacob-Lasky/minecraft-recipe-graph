@@ -5,7 +5,7 @@
     "description": "Client-side utility: dumps every recipe HEI/JEI knows about to NDJSON, plus the ore dictionary and display names, for offline crafting-tree tools. Adds one command, /recipedump. Changes no gameplay.",
     "version": "${version}",
     "mcversion": "${mcversion}",
-    "url": "https://github.com/jacoblasky/minecraft-recipe-graph",
+    "url": "https://github.com/Jacob-Lasky/minecraft-recipe-graph",
     "authorList": ["Jacob Lasky"],
     "dependencies": ["jei"]
   }

@@ -54,11 +54,6 @@ gh repo create minecraft-recipe-graph --public \
 
 I have not run this. Publishing is outward-facing and yours to trigger.
 
-## 4. Open questions (low stakes)
-
-- **Fluid units**: recipes consume fluids in mB (1000 per bucket). Show plans in mB, or in
-  buckets where it divides cleanly?
-
 ## Watch out for
 
 - `items.csv` is from **May 31** and `crafttweaker.log` from **Jul 25**. Fine for now;
@@ -91,7 +86,16 @@ I have not run this. Publishing is outward-facing and yours to trigger.
   coordinates were purged from every commit via `filter-branch`, with the backup refs
   dropped and the object store gc'd. Verified: no reachable commit contains either.
 
-## Blocking the essentia work
+## Resolved since
+
+- **Fluid units: mB**, never auto-converted to buckets.
+- **Essentia: done.** Cells were storing amounts in `Amount` rather than `Cnt`, so all six
+  aggregated to zero; 52 aspects now read, as plannable `essentia:<aspect>` nodes. Vis pod
+  NBT is decoded per aspect too, so your ~1.47M pods split into 15 distinct ingredients
+  instead of one opaque pile.
+- **Repo pushed** to github.com/Jacob-Lasky/minecraft-recipe-graph.
+
+## Superseded: the essentia NBT question
 
 Essentia cells are detected in your network (6 × `thaumicenergistics:essentia_cell_64k`)
 but aggregate to **zero**, so their contents are not stored under the `#N` keys that item
