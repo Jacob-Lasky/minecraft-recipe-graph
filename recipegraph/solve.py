@@ -40,7 +40,8 @@ def _count_nodes(node):
 
 class Solver:
     def __init__(self, graph, have=None, raw=None, overrides=None,
-                 max_depth=24, max_nodes=4000, craftables=None, branch_tries=4):
+                 max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
+                 work_budget=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self.raw = set(raw or ())            # user-declared "stop here" items
@@ -50,6 +51,14 @@ class Solver:
         self.max_nodes = max_nodes
         self.branch_tries = branch_tries
         self.nodes = 0
+        # Monotonic work counter. `nodes` is REWOUND when a backtrack discards a subtree,
+        # so discarded work never counts toward max_nodes -- with branch_tries retries at
+        # every level that makes the search effectively unbounded, and on a 340k-recipe
+        # graph it simply never returns. This counter is never rewound, so it is the only
+        # real termination guarantee. DO NOT add it to a snapshot/restore.
+        self.work = 0
+        self.work_budget = work_budget or max(50000, max_nodes * 20)
+        self.exhausted = False
         self.leaf_totals = collections.Counter()
         self.used_from_stock = collections.Counter()
 
@@ -128,7 +137,9 @@ class Solver:
         # simplicity tiebreak: fewer inputs, and prefer plain crafting over machines
         simple = 1.0 / (1 + len(recipe.inputs))
         plain = 0.1 if recipe.category.startswith("crafting") else 0.0
-        return (-cyclic, satisfied, simple + plain)
+        # A container fill/empty never counts as production, so it loses to any real
+        # recipe regardless of how well stocked it looks.
+        return (0 if recipe.transfer else 1, -cyclic, satisfied, simple + plain)
 
     def pick_recipe(self, key, ancestors=frozenset()):
         override = self.overrides.get(key)
@@ -157,7 +168,14 @@ class Solver:
 
     def expand(self, key, need, ancestors=frozenset(), depth=0):
         self.nodes += 1
+        self.work += 1
         node = {"key": key, "name": self.g.display(key), "need": need}
+
+        if self.work > self.work_budget:
+            self.exhausted = True
+            node["status"] = STATUS_DEPTH
+            self.leaf_totals[key] += need
+            return node
 
         if self.nodes > self.max_nodes or depth > self.max_depth:
             node["status"] = STATUS_DEPTH
@@ -206,6 +224,8 @@ class Solver:
         # item being crafted. Only accept a cycling recipe if every option cycles.
         best = None  # (rank_tuple, attempt, state_to_restore)
         for rank, recipe in enumerate(ranked[: self.branch_tries]):
+            if self.work > self.work_budget:
+                break
             snapshot = (
                 self.pool.copy(), self.used_from_stock.copy(),
                 self.leaf_totals.copy(), self.nodes,
@@ -276,5 +296,7 @@ class Solver:
                 for k, n in self.used_from_stock.most_common()
             ],
             "nodes": self.nodes,
-            "truncated": self.nodes > self.max_nodes,
+            "work": self.work,
+            "truncated": self.nodes > self.max_nodes or self.exhausted,
+            "exhausted": self.exhausted,
         }

@@ -101,15 +101,21 @@ class Ingredient:
 
 
 class Recipe:
-    __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine")
+    __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine",
+                 "transfer")
 
-    def __init__(self, rid, source, outputs, inputs, category="crafting", machine=None):
+    def __init__(self, rid, source, outputs, inputs, category="crafting", machine=None,
+                 transfer=False):
         self.rid = rid
         self.source = source          # which extractor produced this
         self.category = category      # JEI category / recipe kind
         self.outputs = outputs        # [(key, qty)]
         self.inputs = inputs          # [Ingredient]
         self.machine = machine        # display name of the machine, if any
+        # True for container fill/empty pseudo-recipes: they MOVE a fluid rather than
+        # create it. Treating them as production makes every fluid free to anyone who
+        # owns a tank. Set by index.mark_container_transfers, never by an extractor.
+        self.transfer = transfer
 
     def to_json(self):
         return {
@@ -119,6 +125,7 @@ class Recipe:
             "out": [{"key": k, "qty": q} for k, q in self.outputs],
             "in": [i.to_json() for i in self.inputs],
             **({"machine": self.machine} if self.machine else {}),
+            **({"xf": 1} if self.transfer else {}),
         }
 
     @staticmethod
@@ -127,7 +134,7 @@ class Recipe:
             d["id"], d["src"],
             [(o["key"], o["qty"]) for o in d["out"]],
             [Ingredient.from_json(i) for i in d["in"]],
-            d.get("cat", "crafting"), d.get("machine"),
+            d.get("cat", "crafting"), d.get("machine"), bool(d.get("xf")),
         )
 
 
@@ -141,11 +148,13 @@ class Graph:
         self.ore_guessed = set()     # subset of ore_members inferred, not authoritative
         self._by_output = None
         self._by_input = None
+        self._producer_cache = {}
 
     def add(self, recipe):
         self.recipes.append(recipe)
         self._by_output = None
         self._by_input = None
+        self._producer_cache = {}
 
     @property
     def by_output(self):
@@ -185,7 +194,14 @@ class Graph:
         return out
 
     def producers(self, key):
-        """Recipes producing `key`, including via a wildcard-meta output."""
+        """Recipes producing `key`, including via a wildcard-meta output.
+
+        Memoised: the solver scores every candidate of every node, so rebuilding this
+        list per call dominated the search on a 340k-recipe graph.
+        """
+        cached = self._producer_cache.get(key)
+        if cached is not None:
+            return cached
         out = list(self.by_output.get(key, ()))
         base, meta = split_key(key)
         if meta not in (None, "*"):
@@ -194,6 +210,7 @@ class Graph:
                 pass
             elif base in self.by_output:
                 pass
+        self._producer_cache[key] = out
         return out
 
     def display(self, key):

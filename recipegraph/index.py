@@ -74,10 +74,91 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
     elif missing:
         say("oredict: %d referenced ore names have no membership" % len(missing))
 
+    flagged, containers = mark_container_transfers(g)
+    if flagged:
+        say("container transfers: %d recipes flagged as fluid moves, not production "
+            "(%d container items detected)" % (flagged, len(containers)))
+
     say("graph: %d recipes, %d produced item keys, %d/%d oredict resolved"
         % (len(g.recipes), len(g.by_output),
            len(referenced & set(g.ore_members)), len(referenced)))
     return g
+
+
+CONTAINER_FLUID_THRESHOLD = 8
+
+
+def mark_container_transfers(g, quiet=True):
+    """Flag fluid-container fill/empty pseudo-recipes so they cannot fake production.
+
+    JEI exposes container operations as ordinary recipes. A Forestry Bottler entry reads
+    `Tank -> Tank + 16,000 mB borax_solution`, and an Ender IO tank the same. Left alone,
+    the solver concludes borax_solution is free to anyone holding a tank -- which is how
+    "64 Borax" first resolved to "3 Tank, fully covered by stock".
+
+    Two structural signals, no per-mod blacklist:
+
+    1. SAME ITEM IN AND OUT. If an item key appears on both sides, it is a container or
+       catalyst rather than an ingredient, and any fluid alongside it is being moved.
+    2. ONE ITEM, MANY FLUIDS. A bucket/can/capsule appears as the sole item input of
+       recipes yielding dozens of different fluids. No real process turns one item into
+       80 unrelated liquids, so past a threshold the item is a container.
+
+    Signal 2 exists because the dump cannot yet tell a filled can from an empty one: the
+    NBT that distinguishes them is dropped, so `Can -> 1,000 mB borax_solution` looks
+    like creation. Once the mod emits the contained fluid, signal 2 becomes redundant --
+    keep it until then.
+    """
+    flagged = 0
+
+    # signal 1
+    for r in g.recipes:
+        if r.transfer:
+            continue
+        out_keys = {k for k, _q in r.outputs}
+        if not any(k.startswith("fluid:") for k in out_keys):
+            continue
+        in_items = set()
+        for ing in r.inputs:
+            for alt in ing.alternatives:
+                if not alt.startswith(("fluid:", "ore:", "essentia:")):
+                    in_items.add(alt)
+        if in_items & out_keys:
+            r.transfer = True
+            flagged += 1
+
+    # signal 2: count distinct fluids each sole-item-input produces
+    fluids_per_item = {}
+    for r in g.recipes:
+        if r.transfer:
+            continue
+        fluid_outs = {k for k, _q in r.outputs if k.startswith("fluid:")}
+        if not fluid_outs:
+            continue
+        item_ins = [a for ing in r.inputs for a in ing.alternatives
+                    if not a.startswith(("fluid:", "ore:", "essentia:"))]
+        if len(item_ins) != 1:
+            continue
+        fluids_per_item.setdefault(item_ins[0], set()).update(fluid_outs)
+
+    containers = {k for k, fl in fluids_per_item.items()
+                  if len(fl) >= CONTAINER_FLUID_THRESHOLD}
+    if containers:
+        for r in g.recipes:
+            if r.transfer:
+                continue
+            if not any(k.startswith("fluid:") for k, _q in r.outputs):
+                continue
+            item_ins = [a for ing in r.inputs for a in ing.alternatives
+                        if not a.startswith(("fluid:", "ore:", "essentia:"))]
+            if len(item_ins) == 1 and item_ins[0] in containers:
+                r.transfer = True
+                flagged += 1
+
+    if not quiet:
+        print("container transfers: flagged %d recipes across %d container items"
+              % (flagged, len(containers)), file=sys.stderr)
+    return flagged, containers
 
 
 def coverage(g):

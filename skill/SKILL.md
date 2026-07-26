@@ -120,6 +120,15 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 - **Uncrafting recipes poison naive solvers.** `block → 9 ingots` looks like a cheap
   one-input recipe and gets picked over the real route. The solver backtracks out of
   cycling recipes; if you write another one, do the same.
+- **Container fill/empty recipes fake fluid production.** JEI lists `Tank -> Tank +
+  16,000 mB borax_solution` as an ordinary recipe, so any fluid looks free to anyone
+  holding a tank. These are flagged as `transfer` at build time by two structural signals
+  (same item in and out; one item "producing" 8+ distinct fluids) and always lose to a real
+  recipe. ~23k of 344k recipes on the reference pack.
+- **The solver's backtracking needs a work budget, not just a node cap.** `nodes` is
+  rewound when a failed branch is discarded, so discarded work never counts toward
+  `max_nodes`; on a 340k-recipe graph the search never returns. A monotonic `work` counter
+  is the only termination guarantee.
 - **Read on the client, write on the server.** Recipes and configs are identical on both
   sides, so reading the local client instance is fine. The *world save* must come from
   wherever the world actually lives.

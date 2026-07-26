@@ -143,7 +143,11 @@ unknowable rather than merely coarse.
 
 ## The dump mod
 
-`mod/` is a ~400-line client-side Forge mod adding one command, `/recipedump`. It walks
+`mod/` is a client-side Forge mod adding one command, `/recipedump`. The dump is spread
+across client ticks with a ~15 ms per-tick budget, so the game stays playable and progress
+messages actually appear while it runs — a second of work inside a command handler is a
+second the render loop never gets, and printing a warning first does not help because chat
+draws on the next frame. It walks
 JEI's `IRecipeRegistry` and writes `recipes.ndjson`, `oredict.json` and `names.json`
 into `<gamedir>/mc-recipe-dump/`.
 
