@@ -41,7 +41,7 @@ def _count_nodes(node):
 class Solver:
     def __init__(self, graph, have=None, raw=None, overrides=None,
                  max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
-                 work_budget=None):
+                 work_budget=None, machine_states=None, costs=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self.raw = set(raw or ())            # user-declared "stop here" items
@@ -59,6 +59,15 @@ class Solver:
         self.work = 0
         self.work_budget = work_budget or max(50000, max_nodes * 20)
         self.exhausted = False
+        # {category: (state, why)} from machines.resolve. Absent category means unknown,
+        # which is treated as buildable rather than unavailable: refusing to plan through
+        # a machine merely because it could not be identified would hide real routes.
+        self.machine_states = machine_states or {}
+        self.machines_needed = {}
+        # Precomputed lower-bound cost per item. Without it recipe choice is greedy and
+        # local, which is how a two-step chemical route lost to an enormous chain through
+        # machines that happened to be owned. See cost.py.
+        self.costs = costs
         self.leaf_totals = collections.Counter()
         self.used_from_stock = collections.Counter()
 
@@ -118,6 +127,12 @@ class Solver:
                 best, best_score = a, score
         return best
 
+    def estimated_cost(self, recipe):
+        if self.costs is None:
+            return 0.0
+        from .cost import recipe_cost
+        return recipe_cost(self.costs, recipe, self.g.ore_members, self.machine_states)
+
     def score_recipe(self, recipe, ancestors=frozenset()):
         """Higher is better: prefer recipes we can mostly satisfy from stock.
 
@@ -137,9 +152,26 @@ class Solver:
         # simplicity tiebreak: fewer inputs, and prefer plain crafting over machines
         simple = 1.0 / (1 + len(recipe.inputs))
         plain = 0.1 if recipe.category.startswith("crafting") else 0.0
+        avail = self.availability_rank(recipe)
         # A container fill/empty never counts as production, so it loses to any real
         # recipe regardless of how well stocked it looks.
-        return (0 if recipe.transfer else 1, -cyclic, satisfied, simple + plain)
+        # Order matters. A container transfer is never production. After that, the
+        # ESTIMATED TOTAL COST dominates: it already accounts for machine availability
+        # (via cost.MACHINE_COST) and for how expensive the whole subtree is, which local
+        # signals cannot see. `satisfied`/`simple` only break ties between comparable
+        # routes. DO NOT promote `avail` above cost -- doing that is what made the solver
+        # prefer a million-bucket chain through an owned machine.
+        cost = self.estimated_cost(recipe)
+        cheap = -cost if cost != float("inf") else float("-inf")
+        return (0 if recipe.transfer else 1, cheap, -cyclic, satisfied,
+                simple + plain, avail)
+
+    def availability_rank(self, recipe):
+        """2 = machine on hand, 1 = machine buildable/unknown, 0 = unavailable."""
+        state = self.machine_states.get(recipe.category)
+        if state is None:
+            return 1
+        return {"have": 2, "buildable": 1}.get(state[0], 0)
 
     def pick_recipe(self, key, ancestors=frozenset()):
         override = self.overrides.get(key)
@@ -269,6 +301,13 @@ class Solver:
         })
         if recipe.machine:
             node["machine"] = recipe.machine
+        state = self.machine_states.get(recipe.category)
+        if state is not None:
+            node["machine_state"] = state[0]
+            if state[0] != "have":
+                node["machine_why"] = state[1]
+                self.machines_needed[recipe.category] = (
+                    recipe.machine or recipe.category, state[0], state[1])
 
         children = []
         for ing in recipe.inputs:
@@ -294,6 +333,10 @@ class Solver:
             "used_from_stock": [
                 {"key": k, "name": self.g.display(k), "qty": n}
                 for k, n in self.used_from_stock.most_common()
+            ],
+            "machines_to_build": [
+                {"category": cat, "machine": m, "state": st, "why": why}
+                for cat, (m, st, why) in sorted(self.machines_needed.items())
             ],
             "nodes": self.nodes,
             "work": self.work,

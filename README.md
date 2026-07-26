@@ -170,6 +170,27 @@ Forge's maven no longer publishes the `userdev` artifact FG2 requires, only the 
 `userdev3`. See [docs/BUILD.md](docs/BUILD.md) for the evidence and the reobfuscation
 check.
 
+### Machines — route through what you actually have
+
+```bash
+recipegraph machines --match nuclearcraft        # see what you have
+recipegraph machines --set nuclearcraft_crystallizer=have   # toggle by hand
+```
+
+Every recipe carries its JEI category, and a category is a machine — so machine
+availability is a constraint on recipe choice rather than a guess. Three states: `have`
+(placed in the world, or the item in stock), `buildable` (the machine is craftable),
+`unavailable`. Placed machines are read out of the world save during `have`, so this is
+evidence rather than configuration; manual overrides always win.
+
+Plans then report what you must build first:
+
+```
+-- machines you do not have yet --
+  Chemical Reactor    buildable    craftable: nuclearcraft:chemical_reactor_idle
+  Crystallizer        buildable    craftable: nuclearcraft:crystallizer_idle
+```
+
 ### Gaps — what the dump could not read
 
 ```bash

@@ -47,15 +47,30 @@ def cmd_have(args):
     if not paths:
         print("no region files matched", file=sys.stderr)
         return 2
-    items, fluids, essentia, stats, _ = scan(paths)
+    items, fluids, essentia, stats, _s, placed = scan(paths)
     payload = {"stats": stats, "items": dict(items),
-               "fluids": dict(fluids), "essentia": dict(essentia)}
+               "fluids": dict(fluids), "essentia": dict(essentia),
+               "placed": dict(placed)}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as fh:
         json.dump(payload, fh, indent=1, sort_keys=True)
-    print("wrote %s: %d items, %d fluids, %d essentia aspects from %d cells"
-          % (args.out, len(items), len(fluids), len(essentia), stats["cells"]))
+    print("wrote %s: %d items, %d fluids, %d essentia aspects from %d cells; "
+          "%d placed machine types"
+          % (args.out, len(items), len(fluids), len(essentia), stats["cells"], len(placed)))
     return 0
+
+
+def _machine_states(graph, have_path, overrides_path):
+    from . import machines
+
+    placed, stock = {}, {}
+    if have_path and os.path.exists(have_path):
+        with open(have_path) as fh:
+            doc = json.load(fh)
+        placed = doc.get("placed") or {}
+        stock = doc.get("items") or {}
+    overrides = machines.load_overrides(overrides_path)
+    return machines.resolve(graph, placed, stock, overrides=overrides), overrides
 
 
 def _load_graph(path):
@@ -121,8 +136,15 @@ def cmd_plan(args):
         have, craftables = {}, set()
     if args.ignore_craftable:
         craftables = set()
-    solver = Solver(g, have=have, craftables=craftables,
-                    max_depth=args.depth, max_nodes=args.max_nodes)
+    states = {}
+    if not args.ignore_machines:
+        states, _ov = _machine_states(g, args.have, args.machines)
+    costs = None
+    if not args.no_cost:
+        from . import cost as cost_mod
+        costs = cost_mod.estimate(g, have=have, machine_states=states)
+    solver = Solver(g, have=have, craftables=craftables, machine_states=states,
+                    costs=costs, max_depth=args.depth, max_nodes=args.max_nodes)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
@@ -139,6 +161,11 @@ def cmd_plan(args):
         print("\n-- drawn from your AE2 stock --")
         for row in result["used_from_stock"][:15]:
             print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))
+
+    if result.get("machines_to_build"):
+        print("\n-- machines you do not have yet --")
+        for m in result["machines_to_build"]:
+            print("  %-38s %-12s %s" % (m["machine"][:38], m["state"], m["why"]))
 
     if args.json:
         with open(args.json, "w") as fh:
@@ -208,7 +235,7 @@ def cmd_track(args):
         if not paths:
             print("no region files matched", file=sys.stderr)
             return 2
-        items, fluids, _ess, st, _s = scan(paths)
+        items, fluids, _ess, st, _s, _pl = scan(paths)
         have = dict(items)
         for name, amount in fluids.items():
             have["fluid:%s" % name] = amount
@@ -323,6 +350,50 @@ def cmd_metrics(args):
     return 0
 
 
+def cmd_machines(args):
+    """List machine availability per recipe category, or toggle one by hand."""
+    from . import machines
+
+    g = _load_graph(args.graph)
+    overrides = machines.load_overrides(args.file)
+
+    if args.set:
+        for pair in args.set:
+            if "=" not in pair:
+                print("--set expects uid=state, got %r" % pair, file=sys.stderr)
+                return 2
+            uid, state = pair.split("=", 1)
+            state = state.strip()
+            if state not in (machines.HAVE, machines.BUILDABLE, machines.UNAVAILABLE):
+                print("state must be have|buildable|unavailable, got %r" % state,
+                      file=sys.stderr)
+                return 2
+            overrides[uid.strip()] = state
+        machines.save_overrides(args.file, overrides)
+        print("wrote %s (%d overrides)" % (args.file, len(overrides)))
+
+    states, overrides = _machine_states(g, args.have, args.file)
+    counts = machines.summarise(states)
+    print("categories: %d have, %d buildable, %d unavailable"
+          % (counts[machines.HAVE], counts[machines.BUILDABLE],
+             counts[machines.UNAVAILABLE]))
+
+    rows = sorted(states.items())
+    if args.state:
+        rows = [r for r in rows if r[1][0] == args.state]
+    if args.match:
+        needle = args.match.lower()
+        rows = [r for r in rows if needle in r[0].lower() or needle in r[1][1].lower()]
+
+    for uid, (state, why) in rows[: args.limit]:
+        mark = "*" if uid in overrides else " "
+        print("%s %-11s %-46s %s" % (mark, state, uid[:46], why))
+    if len(rows) > args.limit:
+        print("... %d more (use --limit)" % (len(rows) - args.limit))
+    print("\n* = manual override. Toggle with:  machines --set <uid>=have")
+    return 0
+
+
 def cmd_stats(args):
     g = _load_graph(args.graph)
     print(json.dumps(index.coverage(g), indent=2))
@@ -359,6 +430,12 @@ def main(argv=None):
     p.add_argument("--ignore-stock", action="store_true")
     p.add_argument("--ignore-craftable", action="store_true",
                    help="expand items AE2 could autocraft instead of stopping")
+    p.add_argument("--machines", default="data/machines.json",
+                   help="manual machine availability overrides")
+    p.add_argument("--ignore-machines", action="store_true",
+                   help="do not weight recipes by whether you own the machine")
+    p.add_argument("--no-cost", action="store_true",
+                   help="skip the cost precompute and choose recipes greedily")
     p.add_argument("--exact", action="store_true")
     p.add_argument("--depth", type=int, default=24)
     p.add_argument("--max-nodes", type=int, default=4000)
@@ -400,6 +477,16 @@ def main(argv=None):
                    help="the mc-recipe-dump/ dir written by /recipedump")
     p.add_argument("--json")
     p.set_defaults(fn=cmd_gaps)
+
+    p = sub.add_parser("machines", help="which machines you have, and manual toggles")
+    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--file", default="data/machines.json", help="overrides file")
+    p.add_argument("--set", nargs="+", metavar="UID=STATE",
+                   help="set availability by hand, e.g. nuclearcraft_crystallizer=have")
+    p.add_argument("--state", choices=["have", "buildable", "unavailable"])
+    p.add_argument("--match", help="filter by category uid or reason")
+    p.add_argument("--limit", type=int, default=40)
+    p.set_defaults(fn=cmd_machines)
 
     p = sub.add_parser("stats", help="graph coverage")
     p.set_defaults(fn=cmd_stats)

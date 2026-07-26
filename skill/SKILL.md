@@ -29,6 +29,33 @@ keys with amounts in mB. The one wrinkle is that a filled bucket
 (`forge:bucketfilled` + NBT) is a *different key* from the raw fluid, so bucket-based and
 fluid-based routes for the same material will not unify automatically.
 
+## Machine availability drives recipe choice
+
+```bash
+python3 -m recipegraph.cli machines --match nuclearcraft
+python3 -m recipegraph.cli machines --set nuclearcraft_crystallizer=have
+```
+
+Three states per JEI category: `have` (block placed in the world, or item in stock),
+`buildable` (the machine itself is craftable), `unavailable`. Placed tile entities are read
+from the world save during `have`, so this is evidence, not configuration. Plans report a
+"machines you do not have yet" list. Manual overrides in `data/machines.json` always win.
+
+Machine state feeds the **cost estimate**, which is what actually picks recipes. Local
+scoring alone fails badly: it once preferred 100,000 items through a machine already owned
+over 2 items through one that needed building.
+
+## Most of a JEI dump is not recipes
+
+On the reference pack **222,673 of 343,859 dumped entries were not production recipes** --
+`minecraft.anvil` repair permutations (77k), `EIOTank`/`forestry.bottler` container fills
+(133k), plus JEI info panels, worldgen, villager trades and loot tables. They are dropped
+at build time. Leaving them in produced plans wanting 2,000,000 mB of water and an
+ingredient called "Dropped by Fishing Methods".
+
+If a plan looks insane, suspect a false edge from a display-only category before suspecting
+the solver.
+
 ## The one thing to get right
 
 **Check graph coverage before trusting a "no recipe" answer.** The offline graph only has

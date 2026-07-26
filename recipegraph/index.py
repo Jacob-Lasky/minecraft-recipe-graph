@@ -8,7 +8,8 @@ from .names import find_items_csv, load_items_csv
 from .sources import hei_dump, jar_json, oredict
 
 
-def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
+def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
+          keep_categories=None):
     def say(msg):
         if not quiet:
             print(msg, file=sys.stderr)
@@ -74,6 +75,26 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
     elif missing:
         say("oredict: %d referenced ore names have no membership" % len(missing))
 
+    keep = {k.lower() for k in (keep_categories or ())}
+    before = len(g.recipes)
+    dropped_by_cat = {}
+    kept = []
+    for r in g.recipes:
+        if is_non_recipe(r.category, keep):
+            dropped_by_cat[r.category] = dropped_by_cat.get(r.category, 0) + 1
+        else:
+            kept.append(r)
+    if len(kept) != before:
+        g.recipes = kept
+        g._by_output = None
+        g._by_input = None
+        g._producer_cache = {}
+        top = sorted(dropped_by_cat.items(), key=lambda t: -t[1])[:4]
+        say("non-recipes: dropped %d of %d entries (%s) -- info panels, anvil "
+            "permutations, loot tables and container fills are not production"
+            % (before - len(kept), before,
+               ", ".join("%s x%d" % (c, n) for c, n in top)))
+
     flagged, containers = mark_container_transfers(g)
     if flagged:
         say("container transfers: %d recipes flagged as fluid moves, not production "
@@ -83,6 +104,37 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False):
         % (len(g.recipes), len(g.by_output),
            len(referenced & set(g.ore_members)), len(referenced)))
     return g
+
+
+# JEI categories that are NOT production recipes. They dominate the dump by volume --
+# ~222k of 344k entries on the reference pack -- and every one of them is a false edge the
+# solver will happily plan through. Observed damage: a plan wanted 2,000,000 mB of water
+# and an item "Dropped by Fishing Methods" for a single Borax.
+#
+# What these actually are:
+#   anvil            repair/combine permutations, not crafting
+#   EIOTank/bottler  fluid container fill and empty
+#   information      JEI info panels (drop sources, usage notes)
+#   jeresources.*    world generation, villager trades, plant drops
+#   loot/drops       mob and chest loot tables
+#   enchant*         enchanting permutations
+# Squeezers, smelteries and centrifuges are REAL production and must not be added here.
+# Override per-pack with `--keep-category` if a pack uses one of these names for real work.
+NON_RECIPE_CATEGORY_PATTERNS = (
+    "minecraft.anvil", "anvil",
+    "eiotank", "forestry.bottler",
+    "jei.information", "jei.description", "information", "description",
+    "jeresources.", "villager_trade", "villager",
+    "loot", ".drop", "drops",
+    "enchanter", "enchantment", "superenchant",
+)
+
+
+def is_non_recipe(category, keep=()):
+    lc = str(category).lower()
+    if lc in keep:
+        return False
+    return any(pat in lc for pat in NON_RECIPE_CATEGORY_PATTERNS)
 
 
 CONTAINER_FLUID_THRESHOLD = 8

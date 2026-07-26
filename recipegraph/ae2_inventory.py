@@ -115,6 +115,10 @@ def scan(paths, sample=False):
     essentia = collections.Counter()
     stats = {"regions": 0, "chunks": 0, "holders": 0, "cells": 0, "entries": 0}
     samples = []
+    # Every tile entity id seen, not just cell holders: a placed machine is the most
+    # direct evidence of what the player can actually craft with, and collecting it here
+    # costs nothing because the region walk is already happening.
+    placed = {}
 
     for path in paths:
         stats["regions"] += 1
@@ -122,6 +126,8 @@ def scan(paths, sample=False):
             stats["chunks"] += 1
             for te in tile_entities(root):
                 tid = te.get("id")
+                if isinstance(tid, str) and tid:
+                    placed[tid] = placed.get(tid, 0) + 1
                 if not isinstance(tid, str) or tid not in CELL_HOLDERS:
                     continue
                 stats["holders"] += 1
@@ -150,7 +156,7 @@ def scan(paths, sample=False):
                         stats["entries"] += 1
                         {"item": items, "fluid": fluids, "essentia": essentia}[kind][key] += count
 
-    return items, fluids, essentia, stats, samples
+    return items, fluids, essentia, stats, samples, placed
 
 
 def main():
@@ -161,7 +167,7 @@ def main():
     ap.add_argument("--top", type=int, default=25)
     args = ap.parse_args()
 
-    items, fluids, essentia, stats, samples = scan(args.regions, args.sample)
+    items, fluids, essentia, stats, samples, placed = scan(args.regions, args.sample)
 
     print("== scan stats ==")
     for k, v in stats.items():
@@ -169,6 +175,7 @@ def main():
     print("  distinct items    %d" % len(items))
     print("  distinct fluids   %d" % len(fluids))
     print("  distinct essentia %d" % len(essentia))
+    print("  placed machines   %d types" % len(placed))
 
     if samples:
         print("\n== raw cell samples ==")
@@ -188,6 +195,7 @@ def main():
                 "items": dict(items),
                 "fluids": dict(fluids),
                 "essentia": dict(essentia),
+                "placed": dict(placed),
             }, fh, indent=1, sort_keys=True)
         print("\nwrote %s" % args.json)
 
