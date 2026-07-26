@@ -25,6 +25,7 @@ STATUS_HAVE = "have"        # fully covered by inventory
 STATUS_PARTIAL = "partial"  # some from inventory, remainder crafted
 STATUS_CRAFT = "craft"      # crafted from sub-ingredients
 STATUS_RAW = "raw"          # no recipe known and not in inventory -> shopping list
+STATUS_SOURCE = "source"    # an infinite generator you own makes this; nothing to plan
 STATUS_CYCLE = "cycle"      # recipe loops back on an ancestor
 STATUS_DEPTH = "depth"      # hit the depth/size cap
 
@@ -42,11 +43,17 @@ def _count_nodes(node):
 class Solver:
     def __init__(self, graph, have=None, raw=None, overrides=None,
                  max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
-                 work_budget=None, machine_states=None, costs=None):
+                 work_budget=None, machine_states=None, costs=None, free_sources=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self.raw = set(raw or ())            # user-declared "stop here" items
         self.craftables = set(craftables or ())  # AE2 autocraftable -> treat as have
+        # {key: why} for outputs of an infinite generator the player owns. These terminate
+        # a branch like stock does, but are NOT added to `pool`: a pool is finite and would
+        # report a made-up number as "drawn from stock". Draw is tallied separately so the
+        # quantity stays visible. See generators.py.
+        self.free_sources = dict(free_sources or {})
+        self.from_sources = collections.Counter()
         self.overrides = dict(overrides or {})
         self.max_depth = max_depth
         self.max_nodes = max_nodes
@@ -120,9 +127,11 @@ class Solver:
                 score += max((self.available(m) for m in members), default=0) / 1e6
             else:
                 score += min(self.available(a), 1e6) / 1e6
+                if a in self.free_sources:
+                    score += 1.0   # an infinite source beats a finite pile of anything
                 if a in self.craftables:
                     score += 0.5
-                if self.g.producers(a):
+                if self.g.real_producers(a):
                     score += 0.25
             if score > best_score:
                 best, best_score = a, score
@@ -146,7 +155,8 @@ class Solver:
         cyclic = 0
         for ing in recipe.inputs:
             alt = self.pick_alternative(ing)
-            if self.available(alt) >= ing.qty or alt in self.craftables:
+            if (self.available(alt) >= ing.qty or alt in self.craftables
+                    or alt in self.free_sources):
                 satisfied += 1
             if alt in ancestors and self.available(alt) < ing.qty:
                 cyclic += 1
@@ -176,7 +186,7 @@ class Solver:
 
     def pick_recipe(self, key, ancestors=frozenset()):
         override = self.overrides.get(key)
-        candidates = self.g.producers(key)
+        candidates = self.g.real_producers(key)
         if not candidates:
             return None
         if override:
@@ -226,6 +236,14 @@ class Solver:
             node["status"] = STATUS_HAVE
             return node
 
+        # Checked before `raw`/`craftables` and before any recipe lookup: if you own an
+        # infinite source for this, there is nothing to plan and nothing to buy.
+        if key in self.free_sources:
+            node["status"] = STATUS_SOURCE
+            node["note"] = self.free_sources[key]
+            self.from_sources[key] += remainder
+            return node
+
         if key in self.raw or key in self.craftables:
             node["status"] = STATUS_HAVE if key in self.craftables else STATUS_RAW
             if key in self.craftables:
@@ -239,7 +257,7 @@ class Solver:
             self.leaf_totals[key] += remainder
             return node
 
-        candidates = self.g.producers(key)
+        candidates = self.g.real_producers(key)
         if not candidates:
             node["status"] = STATUS_RAW
             self.leaf_totals[key] += remainder
@@ -259,10 +277,7 @@ class Solver:
         for rank, recipe in enumerate(ranked[: self.branch_tries]):
             if self.work > self.work_budget:
                 break
-            snapshot = (
-                self.pool.copy(), self.used_from_stock.copy(),
-                self.leaf_totals.copy(), self.nodes,
-            )
+            snapshot = self._snapshot()
             attempt = self._build(node, recipe, key, remainder, from_stock, nxt, depth)
             cycles = _count_cycles(attempt)
             if not cycles:
@@ -273,19 +288,31 @@ class Solver:
             # expansion, so the plan still shows the real ingredients it did resolve.
             score = (cycles, -_count_nodes(attempt), rank)
             if best is None or score < best[0]:
-                best = (score, attempt, (
-                    self.pool.copy(), self.used_from_stock.copy(),
-                    self.leaf_totals.copy(), self.nodes,
-                ))
-            self.pool, self.used_from_stock, self.leaf_totals, self.nodes = snapshot
+                best = (score, attempt, self._snapshot())
+            self._restore(snapshot)
 
         if best is None:
             node["status"] = STATUS_RAW
             self.leaf_totals[key] += remainder
             return node
         _score, attempt, restore = best
-        self.pool, self.used_from_stock, self.leaf_totals, self.nodes = restore
+        self._restore(restore)
         return attempt
+
+    def _snapshot(self):
+        """Everything a discarded branch must not leave behind.
+
+        DO NOT include `self.work` here. It is the monotonic budget counter and rewinding
+        it removes the only guarantee the search terminates -- see the comment on it in
+        __init__. Every OTHER accumulator must be listed, or a rejected attempt's draw is
+        counted twice; `from_sources` was added for exactly that reason.
+        """
+        return (self.pool.copy(), self.used_from_stock.copy(),
+                self.leaf_totals.copy(), self.from_sources.copy(), self.nodes)
+
+    def _restore(self, snap):
+        (self.pool, self.used_from_stock, self.leaf_totals,
+         self.from_sources, self.nodes) = snap
 
     def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth):
         """Expand one specific recipe choice for `key`."""
@@ -298,7 +325,7 @@ class Solver:
             "category": recipe.category,
             "runs": runs,
             "per_run": per_run,
-            "alternatives": len(self.g.producers(key)),
+            "alternatives": len(self.g.real_producers(key)),
         })
         if recipe.machine:
             node["machine"] = recipe.machine
@@ -334,6 +361,11 @@ class Solver:
             "used_from_stock": [
                 {"key": k, "name": self.g.display(k), "qty": n}
                 for k, n in self.used_from_stock.most_common()
+            ],
+            "from_sources": [
+                {"key": k, "name": self.g.display(k), "qty": n,
+                 "why": self.free_sources.get(k, "")}
+                for k, n in self.from_sources.most_common()
             ],
             "machines_to_build": [
                 {"category": cat, "machine": m, "state": st, "why": why}

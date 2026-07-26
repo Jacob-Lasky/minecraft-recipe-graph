@@ -17,6 +17,7 @@ STATUS_LABEL = {
     "partial": ("part stock", "warn"),
     "craft": ("craft", "craft"),
     "raw": ("NEED", "need"),
+    "source": ("infinite", "ok"),
     "cycle": ("loop", "muted"),
     "depth": ("cut off", "muted"),
     "oredict": ("any of", "muted"),
@@ -225,10 +226,26 @@ def _rows(entries, limit=200):
     if not entries:
         return '<tr><td class="meta">none</td></tr>'
     return "".join(
-        '<tr><td class="n">%s</td><td>%s</td></tr>'
-        % ("{:,}".format(e["qty"]), _esc(e["name"]))
+        '<tr><td class="n">%s</td><td>%s%s</td></tr>'
+        % ("{:,}".format(e["qty"]), _esc(e["name"]),
+           (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else "")
         for e in entries[:limit]
     )
+
+
+def _sources_html(entries):
+    """Draw from infinite generators.
+
+    Its own panel, and always shown when non-empty, because "free" must not mean
+    "invisible": a plan that quietly consumed 64,000 buckets of water would read as though
+    it needed nothing. The quantity is the useful signal even when the cost is zero.
+    """
+    if not entries:
+        return ""
+    total = sum(e["qty"] for e in entries)
+    return ('<div class="card"><h2><span>Drawn from infinite sources</span>'
+            '<span class="c">%s</span></h2><div class="scroll"><table>%s</table></div>'
+            '</div>' % ("{:,}".format(total), _rows(entries)))
 
 
 def render_html(result, graph=None, coverage_note=None):
@@ -282,7 +299,7 @@ def render_html(result, graph=None, coverage_note=None):
       <div class="card">
         <h2><span>Drawn from AE2 stock</span><span class="c">%d</span></h2>
         <div class="scroll"><table>%s</table></div>
-      </div>%s
+      </div>%s%s
     </div>
   </div>
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
@@ -306,6 +323,7 @@ def render_html(result, graph=None, coverage_note=None):
         _rows(need),
         len(used),
         _rows(used),
+        _sources_html(result.get("from_sources")),
         _machines_html(result.get("machines_to_build")),
         JS,
     )

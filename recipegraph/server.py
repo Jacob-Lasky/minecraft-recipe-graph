@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import cost as cost_mod
 from . import explore as explore_mod
+from . import generators as generators_mod
 from . import machines as machines_mod
 from .model import Graph
 from .names import build_reverse
@@ -95,10 +96,11 @@ def _nav(active=""):
 class State:
     """Loaded once; requests read it. Rebuilt only when overrides change."""
 
-    def __init__(self, graph_path, have_path, machines_path):
+    def __init__(self, graph_path, have_path, machines_path, sources_path=None):
         self.graph_path = graph_path
         self.have_path = have_path
         self.machines_path = machines_path
+        self.sources_path = sources_path or "data/sources.json"
         self.lock = threading.Lock()
         self.graph = Graph.load(graph_path)
         self.reverse = build_reverse(self.graph.names)
@@ -121,14 +123,20 @@ class State:
         """Recompute machine states and the cost table (cost depends on machine state)."""
         overrides = machines_mod.load_overrides(self.machines_path)
         self.overrides = overrides
-        self.states = machines_mod.resolve(self.graph, self.placed, self.have,
-                                           overrides=overrides)
-        self.costs = cost_mod.estimate(self.graph, have=self.have,
-                                       machine_states=self.states)
+        self.machine_info = machines_mod.describe(self.graph, self.placed, self.have,
+                                                  overrides=overrides)
+        self.states = {uid: (i["state"], i["why"])
+                       for uid, i in self.machine_info.items()}
+        self.free_sources = generators_mod.resolve(
+            self.placed, self.have, generators_mod.load_overrides(self.sources_path))
+        self.costs = cost_mod.estimate_cached(
+            self.graph, self.graph_path, have=self.have, machine_states=self.states,
+            free_sources=self.free_sources)
 
     def solver(self):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
-                      machine_states=self.states, costs=self.costs)
+                      machine_states=self.states, costs=self.costs,
+                      free_sources=self.free_sources)
 
 
 def home_page(state, query="", qty=1):
@@ -327,8 +335,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def serve(graph_path, have_path, machines_path, host="127.0.0.1", port=8765):
-    state = State(graph_path, have_path, machines_path)
+def serve(graph_path, have_path, machines_path, host="127.0.0.1", port=8765,
+          sources_path=None):
+    state = State(graph_path, have_path, machines_path, sources_path)
     Handler.state = state
     httpd = ThreadingHTTPServer((host, port), Handler)
     return httpd, state

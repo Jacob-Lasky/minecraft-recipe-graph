@@ -213,6 +213,27 @@ class Graph:
         self._producer_cache[key] = out
         return out
 
+    def real_producers(self, key):
+        """`producers`, minus container transfers asked to CREATE a fluid.
+
+        Emptying a container is not production of its contents: to hold a water-filled can
+        you must already have had the water, so `Water Can -> 1,000 mB water` is circular.
+        Left in, it is worse than circular, because the dump drops the NBT that tells one
+        filled can from another -- every filled Forestry can collapses to `forestry:can:1`,
+        so the graph believes squeezing a can of WATER yields uranium fluoride. That exact
+        edge put a Fluid Transposer and a bogus uranium chain in a Borax plan.
+
+        Filling a container IS real work and stays: only the fluid direction is fake, so a
+        transfer may still produce an ITEM. A fluid whose only route is a container empty
+        correctly comes out as NEED, which is the honest answer.
+
+        Not memoised on purpose -- it is a cheap filter over an already-memoised list, and
+        a second cache keyed the same way is how the two drift apart.
+        """
+        if not key.startswith("fluid:"):
+            return self.producers(key)
+        return [r for r in self.producers(key) if not r.transfer]
+
     def display(self, key):
         if key in self.names:
             label = self.names[key]

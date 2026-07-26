@@ -61,17 +61,27 @@ def cmd_have(args):
     return 0
 
 
-def _machine_states(graph, have_path, overrides_path):
-    from . import machines
+def _placed_and_stock(have_path):
+    """Placed tile entities and item stock from a have file, for evidence-based checks."""
+    if not have_path or not os.path.exists(have_path):
+        return {}, {}
+    with open(have_path) as fh:
+        doc = json.load(fh)
+    return doc.get("placed") or {}, doc.get("items") or {}
 
-    placed, stock = {}, {}
-    if have_path and os.path.exists(have_path):
-        with open(have_path) as fh:
-            doc = json.load(fh)
-        placed = doc.get("placed") or {}
-        stock = doc.get("items") or {}
+
+def _machine_states(graph, have_path, overrides_path):
+    placed, stock = _placed_and_stock(have_path)
     overrides = machines.load_overrides(overrides_path)
     return machines.resolve(graph, placed, stock, overrides=overrides), overrides
+
+
+def _free_sources(have_path, sources_path):
+    """Item/fluid keys an infinite generator in this world makes effectively free."""
+    from . import generators
+
+    placed, stock = _placed_and_stock(have_path)
+    return generators.resolve(placed, stock, generators.load_overrides(sources_path))
 
 
 def _load_graph(path):
@@ -140,12 +150,15 @@ def cmd_plan(args):
     states = {}
     if not args.ignore_machines:
         states, _ov = _machine_states(g, args.have, args.machines)
+    free = {} if args.ignore_sources else _free_sources(args.have, args.sources)
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
-        costs = cost_mod.estimate(g, have=have, machine_states=states)
+        costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
+                                         free_sources=free)
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
-                    costs=costs, max_depth=args.depth, max_nodes=args.max_nodes)
+                    costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
+                    free_sources=free)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
@@ -162,6 +175,13 @@ def cmd_plan(args):
         print("\n-- drawn from your AE2 stock --")
         for row in result["used_from_stock"][:15]:
             print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))
+    if result.get("from_sources"):
+        # Printed, not hidden: a free resource still has a quantity, and "8,000,000 mB of
+        # water" is a signal about the route even when the water itself costs nothing.
+        print("\n-- drawn from infinite sources --")
+        for row in result["from_sources"][:15]:
+            print("  %14s  %-34s %s" % ("{:,}".format(row["qty"]),
+                                        row["name"][:34], row["why"]))
 
     if result.get("machines_to_build"):
         print("\n-- machines you do not have yet --")
@@ -371,6 +391,53 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_sources(args):
+    """Show, or edit, which infinite generators make a resource free."""
+    from . import generators
+
+    ov = generators.load_overrides(args.file)
+    dirty = False
+    if args.add:
+        for pair in args.add:
+            if "=" not in pair:
+                print("--add expects block=key, got %r" % pair, file=sys.stderr)
+                return 2
+            block, key = (part.strip() for part in pair.split("=", 1))
+            ov["generators"].setdefault(block, [])
+            if key not in ov["generators"][block]:
+                ov["generators"][block].append(key)
+            dirty = True
+    if args.disable:
+        ov["disabled"] |= {k.strip() for k in args.disable}
+        dirty = True
+    if args.no_vanilla_water:
+        ov["vanilla_water"] = False
+        dirty = True
+    if dirty:
+        generators.save_overrides(args.file, ov["generators"], ov["disabled"],
+                                  ov["vanilla_water"])
+        print("wrote %s" % args.file)
+
+    g = _load_graph(args.graph)
+    placed, stock = _placed_and_stock(args.have)
+    free = generators.resolve(placed, stock, ov)
+    if not free:
+        print("no infinite generators detected in this world.")
+    for key, why in sorted(free.items()):
+        print("  %-40s %-34s %s" % (key, g.display(key)[:34], why))
+
+    # Detection is a curated list, so say what was NOT matched rather than implying the
+    # world was searched exhaustively.
+    known = set(generators.DEFAULT_GENERATORS) | set(ov["generators"])
+    unmatched = sorted(b for b in known
+                       if b not in placed and b not in stock)
+    print("\n%d known generator blocks, %d matched in this world."
+          % (len(known), len(known) - len(unmatched)))
+    print("Detection is a curated list, not a search: add yours with")
+    print("  sources --add <block id>=<item or fluid key>")
+    return 0
+
+
 def cmd_machines(args):
     """List machine availability per recipe category, or toggle one by hand."""
     from . import machines
@@ -454,6 +521,10 @@ def main(argv=None):
                    help="manual machine availability overrides")
     p.add_argument("--ignore-machines", action="store_true",
                    help="do not weight recipes by whether you own the machine")
+    p.add_argument("--sources", default="data/sources.json",
+                   help="infinite generator additions and removals")
+    p.add_argument("--ignore-sources", action="store_true",
+                   help="do not treat infinite generator output as free")
     p.add_argument("--no-cost", action="store_true",
                    help="skip the cost precompute and choose recipes greedily")
     p.add_argument("--exact", action="store_true")
@@ -516,6 +587,17 @@ def main(argv=None):
     p.add_argument("--match", help="filter by category uid or reason")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(fn=cmd_machines)
+
+    p = sub.add_parser("sources", help="infinite generators that make resources free")
+    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--file", default="data/sources.json", help="additions and removals")
+    p.add_argument("--add", nargs="+", metavar="BLOCK=KEY",
+                   help="e.g. mymod:water_well=fluid:water")
+    p.add_argument("--disable", nargs="+", metavar="KEY",
+                   help="stop treating a key as free, e.g. fluid:water")
+    p.add_argument("--no-vanilla-water", action="store_true",
+                   help="this pack has disabled infinite water spreading")
+    p.set_defaults(fn=cmd_sources)
 
     p = sub.add_parser("stats", help="graph coverage")
     p.set_defaults(fn=cmd_stats)
