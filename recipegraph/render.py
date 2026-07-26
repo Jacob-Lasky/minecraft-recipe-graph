@@ -124,7 +124,51 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .leaf{padding:4px 6px 4px 26px;display:flex;gap:9px;align-items:baseline}
 .foot{margin-top:26px;font-size:12.5px;color:var(--dim);border-top:1px solid var(--line);
 padding-top:14px}
+
+/* Type chips replace the "[fluid]" text prefix. Reading the same bracketed word down a
+   hundred rows is fatiguing, and a chip is scannable at a glance. These hues are separate
+   from the semantic ok/warn/need tokens on purpose: a fluid is not a *status*, so it must
+   not compete with one, and it must not be the accent either, which marks structure. */
+:root{--fluidbg:#dceaf5;--fluidfg:#1d5c86;--essbg:#ece0f4;--essfg:#6b3f92;
+--orebg:#e9e6dc;--orefg:#6d6146}
+@media(prefers-color-scheme:dark){:root{
+--fluidbg:#12293c;--fluidfg:#7cc0ea;--essbg:#291a38;--essfg:#c39ce8;
+--orebg:#2b2823;--orefg:#c0b394}}
+:root[data-theme=light]{--fluidbg:#dceaf5;--fluidfg:#1d5c86;--essbg:#ece0f4;
+--essfg:#6b3f92;--orebg:#e9e6dc;--orefg:#6d6146}
+:root[data-theme=dark]{--fluidbg:#12293c;--fluidfg:#7cc0ea;--essbg:#291a38;
+--essfg:#c39ce8;--orebg:#2b2823;--orefg:#c0b394}
+.t{font:600 9.5px/1.7 var(--mono);letter-spacing:.06em;text-transform:uppercase;
+padding:1px 6px;border-radius:5px;flex:0 0 auto;vertical-align:2px;margin-right:6px;
+display:inline-block}
+.t-fluid{background:var(--fluidbg);color:var(--fluidfg)}
+.t-essentia{background:var(--essbg);color:var(--essfg)}
+.t-ore{background:var(--orebg);color:var(--orefg)}
 """
+
+# Type chip markup. `ore` says ANY because that is what an oredict entry means to the
+# player: any member satisfies the slot.
+KIND_CHIP = {"fluid": "FLUID", "essentia": "ESSENTIA", "ore": "ANY"}
+
+
+def kind_chip(kind):
+    label = KIND_CHIP.get(kind)
+    if not label:
+        return ""
+    return '<span class="t t-%s">%s</span>' % (kind, label)
+
+
+def named(entry):
+    """Escaped display name with a type chip in front, for HTML.
+
+    Reads the `kind` and `label` the solver and explorer now put on every node, so no
+    renderer needs a Graph in hand. On an older payload that has only `name`, it degrades
+    to the bracketed text form rather than losing the type entirely.
+    """
+    label = entry.get("label")
+    if label is None:
+        return _esc(entry.get("name") or entry.get("key") or "")
+    return kind_chip(entry.get("kind")) + _esc(label)
 
 JS = """
 function setAll(open){document.querySelectorAll('.tree details')
@@ -158,7 +202,7 @@ def _node_html(node, depth=0):
 
     bits = [
         '<span class="qty">%s&times;</span>' % "{:,}".format(node.get("need", 1)),
-        '<span class="nm">%s' % _esc(node.get("name") or node.get("key")),
+        '<span class="nm">%s' % named(node),
     ]
     extra = []
     if node.get("from_stock"):
@@ -186,7 +230,8 @@ def _node_html(node, depth=0):
     return (
         '<details data-hasneed="%d"%s><summary><span class="tw">&#9656;</span>%s</summary>'
         '<div class="kids">%s</div></details>'
-        % (need_flag, open_attr, inner, "".join(_node_html(k, depth + 1) for k in kids))
+        % (need_flag, open_attr, inner,
+           "".join(_node_html(k, depth + 1) for k in kids))
     )
 
 
@@ -217,17 +262,24 @@ def _machines_html(machines):
     note = ('<div class="meta" style="margin-top:9px">%d of these could not be matched to '
             'a block, so availability is a guess. You may already have them.</div>'
             % unknowns) if unknowns else ""
+    # The heading counts what is listed. Showing the confirmed-only figure beside a longer
+    # list just reads as an off-by-one; the unidentified share belongs in the note.
     return ('<div class="card"><h2><span>Machines to build first</span>'
             '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>%s'
-            '</div>' % (len(machines) - unknowns, rows, note))
+            '</div>' % (len(machines), rows, note))
 
 
 def _rows(entries, limit=200):
     if not entries:
         return '<tr><td class="meta">none</td></tr>'
     return "".join(
-        '<tr><td class="n">%s</td><td>%s%s</td></tr>'
-        % ("{:,}".format(e["qty"]), _esc(e["name"]),
+        '<tr><td class="n">%s%s</td><td>%s%s</td></tr>'
+        % ("{:,}".format(e["qty"]),
+           # mB, stated on the number rather than in the name, because the unit belongs to
+           # the quantity. Never converted to buckets: recipes are authored in mB and
+           # rounding would misreport a partial-bucket step.
+           " mB" if e.get("kind") == "fluid" else "",
+           named(e),
            (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else "")
         for e in entries[:limit]
     )
@@ -391,9 +443,9 @@ def _ing_html(ing):
         others = ", ".join(_esc(a["name"]) for a in alts[1:4])
         extra = ' <span class="alt">or %d more%s</span>' % (
             ing["alt_total"] - 1, (": " + others) if others else "")
-    unit = " mB" if ing.get("role") == "fluid" else ""
+    unit = " mB" if ing.get("role") == "fluid" or first.get("kind") == "fluid" else ""
     return '<div class="ing"><span class="q">%s%s</span>%s<span>%s%s</span></div>' % (
-        "{:,}".format(ing["qty"]), unit, pill, _esc(first["name"]), extra)
+        "{:,}".format(ing["qty"]), unit, pill, named(first), extra)
 
 
 def _makes_html(item):
@@ -403,7 +455,7 @@ def _makes_html(item):
     for rec in item["makes"]:
         via = rec.get("machine") or rec["category"]
         yields = ", ".join(
-            "%s&times; %s" % ("{:,}".format(o["qty"]), _esc(o["name"]))
+            "%s&times; %s" % ("{:,}".format(o["qty"]), named(o))
             for o in rec["outputs"][:3])
         out.append('<div class="rec"><div class="via">%s &rarr; %s</div>%s</div>'
                    % (_esc(via), yields, "".join(_ing_html(i) for i in rec["inputs"])))
@@ -419,7 +471,7 @@ def _used_html(item):
     out = []
     for rec in item["used_in"]:
         via = rec.get("machine") or rec["category"]
-        outs = ", ".join(_esc(o["name"]) for o in rec["outputs"][:2]) or "?"
+        outs = ", ".join(named(o) for o in rec["outputs"][:2]) or "?"
         out.append('<div class="ing"><span class="q">&rarr;</span>'
                    '<span>%s <span class="alt">via %s</span></span></div>'
                    % (outs, _esc(via)))
@@ -450,7 +502,7 @@ def _res_html(item):
     <div class="sect"><h4><span>Used in</span><span>%d</span></h4>%s</div>
   </div>
 </div>""" % (
-        _esc(hay), _esc(item["name"]), _esc(item["key"]), "".join(chips),
+        _esc(hay), named(item), _esc(item["key"]), "".join(chips),
         item["makes_total"], _makes_html(item),
         item["used_in_total"], _used_html(item),
     )

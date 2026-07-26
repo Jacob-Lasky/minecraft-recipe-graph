@@ -124,8 +124,14 @@ def parse_recipe_json(doc, rid, constants=None):
 
     if not slots:
         return None
-    cat = "crafting_shaped" if (rtype in SHAPED or "pattern" in doc) else "crafting_shapeless"
-    return Recipe(rid, "jar_json", outputs, slots, category=cat)
+    shaped = rtype in SHAPED or "pattern" in doc
+    cat = "crafting_shaped" if shaped else "crafting_shapeless"
+    # A display title, so the UI does not have to show the raw uid where every other
+    # category shows a machine name. Kept distinct from the JEI dump's "Crafting" on
+    # purpose: these are the same crafting table read from a different source, and
+    # collapsing the labels would make two rows look like duplicates of one thing.
+    title = "Crafting (shaped)" if shaped else "Crafting (shapeless)"
+    return Recipe(rid, "jar_json", outputs, slots, category=cat, machine=title)
 
 
 def extract(mods_dir, on_progress=None):

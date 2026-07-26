@@ -89,6 +89,24 @@ def _tokens(text):
     return [t for t in _SPLIT.split(str(text).lower()) if t]
 
 
+def _squash(text):
+    return _NON_ALNUM.sub("", str(text)).lower()
+
+
+def same_mod(uid, key):
+    """Does `key` belong to the mod that owns category `uid`?
+
+    Compares the candidate's modid against the SQUASHED uid rather than against its first
+    token. A modid can itself contain an underscore -- `tinker_io:smart_output` tokenises
+    to `tinker`, so a first-token comparison declares tinker_io's own machine to be from a
+    different mod -- and a uid may separate modid from name with `.`, `_`, `:` or a
+    camelCase boundary, none of which can be told apart from a separator inside the modid.
+    Substring on the squashed form is the only comparison that survives all of those.
+    """
+    modid = _squash(str(key).split(":")[0])
+    return bool(modid) and modid in _squash(uid)
+
+
 def normalise_block(key):
     """Drop a machine's running-state suffix so variants compare equal."""
     key = str(key).lower()
@@ -172,9 +190,9 @@ def candidate_items(graph, uid, machine_title, reverse_names, catalysts=None):
     modid = uid_tokens[0] if uid_tokens else ""
 
     if modid:
-        same_mod = [c for c in cands if c.split(":")[0].lower() == modid]
-        if same_mod:
-            return same_mod
+        same = [c for c in cands if same_mod(uid, c)]
+        if same:
+            return same
         for guess in _id_guesses(uid):
             if guess in graph.names and guess not in cands:
                 cands.append(guess)
@@ -241,22 +259,73 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
             rec.update(state=UNKNOWN, why="machine item unknown")
             continue
 
+        # A cross-mod name match is a much weaker claim than a same-mod one: the Extra
+        # Utilities furnace category is titled "Furnace" and matches `minecraft:furnace`,
+        # so "placed" would otherwise assert you own a machine you have never built. Say
+        # so in the evidence rather than presenting a guess as a sighting.
+        caveat = "" if rec["from_catalyst"] else _cross_mod_note(uid, cands)
+
         built = [placed_index[normalise_block(c)] for c in cands
                  if normalise_block(c) in placed_index]
         if built:
-            rec.update(state=HAVE, why="placed: %s" % built[0])
+            rec.update(state=HAVE, why="placed: %s%s" % (built[0], caveat))
             continue
         held = [stock_index[normalise_block(c)] for c in cands
                 if normalise_block(c) in stock_index]
         if held:
-            rec.update(state=HAVE, why="in stock: %s" % held[0])
+            rec.update(state=HAVE, why="in stock: %s%s" % (held[0], caveat))
             continue
         makeable = [c for c in cands if graph.producers(c)]
         if makeable:
-            rec.update(state=BUILDABLE, why="craftable: %s" % makeable[0])
+            rec.update(state=BUILDABLE, why="craftable: %s%s" % (makeable[0], caveat))
             continue
-        rec.update(state=UNAVAILABLE, why="no route to %s" % cands[0])
+        rec.update(state=UNAVAILABLE, why="no route to %s%s" % (cands[0], caveat))
     return out
+
+
+def _cross_mod_note(uid, candidates):
+    """" (name match, other mod)" when no candidate belongs to the category's own mod."""
+    if not candidates:
+        return ""
+    if any(same_mod(uid, c) for c in candidates):
+        return ""
+    return " (name match, other mod)"
+
+
+def responsibilities(graph, uid, limit=40):
+    """What a category is actually for: the items it makes and the ones it consumes.
+
+    Answers "what is this machine responsible for" without the caller walking 100k
+    recipes. Sorted by how many of the category's recipes touch each key, so the head of
+    each list is what the machine is *characteristically* for rather than an arbitrary
+    sample -- a Melter that appears once for Borax and 600 times for metals should read as
+    a metal melter.
+    """
+    makes, uses = {}, {}
+    total = 0
+    for r in graph.recipes:
+        if r.category != uid:
+            continue
+        total += 1
+        for key, _qty in r.outputs:
+            makes[key] = makes.get(key, 0) + 1
+        seen = set()
+        for ing in r.inputs:
+            # Count a slot once however many alternatives it lists, or a 200-member oredict
+            # slot would dominate purely by width.
+            for alt in ing.alternatives[:1]:
+                if alt not in seen:
+                    seen.add(alt)
+                    uses[alt] = uses.get(alt, 0) + 1
+    rank = lambda d: sorted(d.items(), key=lambda kv: (-kv[1], graph.display(kv[0])))
+    return {
+        "uid": uid,
+        "recipes": total,
+        "makes": rank(makes)[:limit],
+        "makes_total": len(makes),
+        "uses": rank(uses)[:limit],
+        "uses_total": len(uses),
+    }
 
 
 def load_overrides(path):

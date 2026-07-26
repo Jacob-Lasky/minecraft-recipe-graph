@@ -202,17 +202,22 @@ class Solver:
         members = self.g.ore_members.get(key[4:], [])
         if not members:
             self.leaf_totals[key] += need
-            return {"key": key, "name": self.g.display(key), "need": need,
+            return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
+                    "label": self.g.bare_name(key), "need": need,
                     "status": STATUS_RAW, "note": "oredict members unknown"}
         best = max(members, key=lambda m: (self.available(m), m in self.craftables))
         child = self.expand(best, need, ancestors, depth)
-        return {"key": key, "name": self.g.display(key), "need": need,
+        return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
+                "label": self.g.bare_name(key), "need": need,
                 "status": "oredict", "resolved_to": best, "children": [child]}
 
     def expand(self, key, need, ancestors=frozenset(), depth=0):
         self.nodes += 1
         self.work += 1
-        node = {"key": key, "name": self.g.display(key), "need": need}
+        # `kind` travels with every node so the renderers never need the graph to know a
+        # water row is a fluid, and so `--json` output is self-describing.
+        node = {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
+                "label": self.g.bare_name(key), "need": need}
 
         if self.work > self.work_budget:
             self.exhausted = True
@@ -347,6 +352,10 @@ class Solver:
         node["children"] = children
         return node
 
+    def _entry(self, key, qty):
+        return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
+                "label": self.g.bare_name(key), "qty": qty}
+
     def solve(self, key, qty=1):
         tree = self.expand(key, qty)
         return {
@@ -354,19 +363,13 @@ class Solver:
             "target_name": self.g.display(key),
             "qty": qty,
             "tree": tree,
-            "shopping_list": [
-                {"key": k, "name": self.g.display(k), "qty": n}
-                for k, n in self.leaf_totals.most_common()
-            ],
-            "used_from_stock": [
-                {"key": k, "name": self.g.display(k), "qty": n}
-                for k, n in self.used_from_stock.most_common()
-            ],
-            "from_sources": [
-                {"key": k, "name": self.g.display(k), "qty": n,
-                 "why": self.free_sources.get(k, "")}
-                for k, n in self.from_sources.most_common()
-            ],
+            "shopping_list": [self._entry(k, n)
+                              for k, n in self.leaf_totals.most_common()],
+            "used_from_stock": [self._entry(k, n)
+                                for k, n in self.used_from_stock.most_common()],
+            "from_sources": [dict(self._entry(k, n),
+                                  why=self.free_sources.get(k, ""))
+                             for k, n in self.from_sources.most_common()],
             "machines_to_build": [
                 {"category": cat, "machine": m, "state": st, "why": why}
                 for cat, (m, st, why) in sorted(self.machines_needed.items())

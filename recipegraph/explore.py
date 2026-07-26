@@ -72,6 +72,8 @@ def _stack(graph, key, have):
     return {
         "key": key,
         "name": graph.display(key),
+        "kind": graph.kind(key),
+        "label": graph.bare_name(key),
         "stock": _stock_of(key, have),
         "makeable": bool(graph.producers(key)),
     }
@@ -101,10 +103,12 @@ def _recipe_brief(graph, recipe, have, direction):
              "alt_total": len(ing.alternatives)}
             for ing in recipe.inputs
         ]
-        d["outputs"] = [{"key": k, "name": graph.display(k), "qty": q}
+        d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
+                        "label": graph.bare_name(k), "qty": q}
                         for k, q in recipe.outputs]
     else:
-        d["outputs"] = [{"key": k, "name": graph.display(k), "qty": q}
+        d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
+                        "label": graph.bare_name(k), "qty": q}
                         for k, q in recipe.outputs]
         d["input_count"] = len(recipe.inputs)
     return d
@@ -121,6 +125,8 @@ def describe(graph, key, have=None):
     return {
         "key": key,
         "name": graph.display(key),
+        "kind": graph.kind(key),
+        "label": graph.bare_name(key),
         "stock": _stock_of(key, have),
         "oredicts": ores,
         "oredict_guessed": [o for o in ores if o in graph.ore_guessed],

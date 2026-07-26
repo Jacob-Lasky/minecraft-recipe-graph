@@ -239,7 +239,24 @@ class Graph:
             return self.producers(key)
         return [r for r in self.producers(key) if not r.transfer]
 
-    def display(self, key):
+    @staticmethod
+    def kind(key):
+        """Which namespace a key lives in: fluid, essentia, ore, or plain item.
+
+        Exists so a UI can render the type as a coloured chip. Reading "[fluid]" a hundred
+        times down a plan is fatiguing, and the bracket text is only there because plain
+        terminal output has no other way to say it.
+        """
+        if key.startswith("fluid:"):
+            return "fluid"
+        if key.startswith("essentia:"):
+            return "essentia"
+        if key.startswith("ore:"):
+            return "ore"
+        return "item"
+
+    def bare_name(self, key):
+        """`display` without the type prefix, for callers that show the type separately."""
         if key in self.names:
             label = self.names[key]
             # items.csv stores aspect-parameterised names as format strings ("%s Vis
@@ -249,25 +266,42 @@ class Graph:
                 return label.replace("%s ", "").replace("%s", "").strip() or key
             return label
         if key.startswith("ore:"):
-            return "[oredict] %s" % key[4:]
+            return key[4:]
         if key.startswith("fluid:"):
-            return "[fluid] %s" % key[6:]
+            return key[6:]
         if key.startswith("essentia:"):
-            return "[essentia] %s" % key[9:].capitalize()
+            return key[9:].capitalize()
         # `mod:item#aspect` -- an NBT-discriminated stack. Names for these are format
         # strings in items.csv ("%s Vis Pod"), so fill the placeholder with the aspect
         # rather than showing a raw %s to the user.
         if "#" in key:
             stem, aspect = key.rsplit("#", 1)
-            label = self.names.get(stem) or self.display(stem)
+            label = self.names.get(stem) or self.bare_name(stem)
             pretty = aspect.capitalize()
             if "%s" in label:
                 return label % pretty
             return "%s (%s)" % (label, pretty)
         base, meta = split_key(key)
         if base in self.names:
-            return self.names[base] if meta in (0, None) else "%s (%s)" % (self.names[base], meta)
+            return (self.names[base] if meta in (0, None)
+                    else "%s (%s)" % (self.names[base], meta))
         return key
+
+    # Text prefixes, for the CLI and anything else without colour. `ore` reads "oredict"
+    # rather than "ore" because it means "any member of", not "an ore".
+    KIND_PREFIX = {"fluid": "[fluid] ", "essentia": "[essentia] ", "ore": "[oredict] "}
+
+    def display(self, key):
+        """Human label, with a bracketed type prefix for non-item keys.
+
+        DO NOT drop the prefix here to tidy the web UI. This is what the CLI and the JSON
+        output print, and without it `water` and `Water Bucket` are indistinguishable in a
+        shopping list. HTML callers should use `kind` + `bare_name` instead.
+        """
+        name = self.bare_name(key)
+        if key in self.names:
+            return name
+        return self.KIND_PREFIX.get(self.kind(key), "") + name
 
     def referenced_ores(self):
         """Ore names actually used as an input by some recipe."""

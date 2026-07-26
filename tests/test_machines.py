@@ -200,3 +200,46 @@ class CostChoiceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SameModTest(unittest.TestCase):
+    """Deciding whether a candidate belongs to the category's own mod."""
+
+    def test_a_modid_containing_an_underscore_is_not_split(self):
+        # `tinker_io:smart_output` tokenises to `tinker`, so comparing first tokens
+        # declared tinker_io's own machine to be from a different mod and stamped a
+        # "(name match, other mod)" caveat on evidence that was exact.
+        self.assertTrue(machines.same_mod("tinker_io:smart_output",
+                                          "tinker_io:smart_output"))
+
+    def test_every_uid_separator_style_works(self):
+        for uid, key in (("TechReborn.WireMill", "techreborn:wire_mill"),
+                         ("GENDUSTRY_SAMPLER", "gendustry:sampler"),
+                         ("nuclearcraft_alloy_furnace", "nuclearcraft:alloy_furnace"),
+                         ("bloodmagic:salchemyTable", "bloodmagic:alchemy_table")):
+            self.assertTrue(machines.same_mod(uid, key), "%s / %s" % (uid, key))
+
+    def test_a_genuine_cross_mod_match_is_still_detected(self):
+        # The Extra Utilities furnace category is titled "Furnace" and matches
+        # `minecraft:furnace`, which must not read as "you own this machine".
+        self.assertFalse(machines.same_mod("xu2_machine_extrautils2:furnace",
+                                           "minecraft:furnace"))
+
+    def test_cross_mod_evidence_carries_a_caveat(self):
+        g = Graph()
+        g.names = {"minecraft:furnace": "Furnace", "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="xu2_machine_extrautils2:furnace", machine="Furnace"))
+        state, why = machines.resolve(g, placed={"minecraft:furnace": 1})[
+            "xu2_machine_extrautils2:furnace"]
+        self.assertEqual(state, machines.HAVE)
+        self.assertIn("other mod", why)
+
+    def test_same_mod_evidence_has_no_caveat(self):
+        g = Graph()
+        g.names = {"tinker_io:smart_output": "Smart Output", "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="tinker_io:smart_output", machine="Smart Output"))
+        _state, why = machines.resolve(g, placed={"tinker_io:smart_output": 1})[
+            "tinker_io:smart_output"]
+        self.assertNotIn("other mod", why)
