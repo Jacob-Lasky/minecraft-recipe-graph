@@ -1,0 +1,68 @@
+// 1.12.2 Forge mod build.
+//
+// Gradle 4.x + ForgeGradle 2.3 + JDK 8 is the only combination that works for
+// 1.12.2. DO NOT "modernise" this to a current Gradle/JDK: ForgeGradle 2.3 does not
+// run on anything past JDK 8, and newer ForgeGradle lines dropped 1.12.2 support.
+// Run it as:  JAVA_HOME=/usr/lib/jvm/java-8-openjdk ./gradlew build
+//
+// HEI (HadEnoughItems) is API-compatible with JEI 4.x and publishes as jei_1.12.2,
+// so the standard JEI dependency coordinate resolves against it. Only the public
+// mezz.jei.api surface is used, which is why this survives the 4.8 -> 4.28 gap that
+// broke JEIExporter.
+
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://repo.maven.apache.org/maven2' }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:2.3-SNAPSHOT'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+
+version = project.mod_version
+group = 'com.meatballcraft'
+archivesBaseName = "mbc-recipe-dump-${project.minecraft_version}"
+
+sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8'
+
+minecraft {
+    version = "${project.minecraft_version}-${project.forge_version}"
+    runDir = 'run'
+    mappings = project.mappings_version
+    makeObfSourceJar = false
+}
+
+repositories {
+    maven {
+        name = 'progwml6 (JEI)'
+        url = 'https://dvs1.progwml6.com/files/maven/'
+    }
+    maven {
+        name = 'CurseMaven'
+        url = 'https://cursemaven.com'
+        content { includeGroup 'curse.maven' }
+    }
+}
+
+dependencies {
+    // Compile against the JEI API only. `deobfProvided` keeps it off the runtime
+    // classpath of the built jar, which is correct -- HEI supplies it in game.
+    deobfProvided "mezz.jei:jei_${project.minecraft_version}:${project.jei_version}:api"
+    runtime "mezz.jei:jei_${project.minecraft_version}:${project.jei_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'mcversion', project.minecraft.version
+
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version, 'mcversion': project.minecraft.version
+    }
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info'
+    }
+}
