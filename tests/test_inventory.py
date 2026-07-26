@@ -67,7 +67,37 @@ class DisplayTest(unittest.TestCase):
     def test_essentia_and_fluid_keys_are_labelled(self):
         g = Graph()
         self.assertEqual(g.display(essentia_key("Terra")), "[essentia] Terra")
-        self.assertEqual(g.display("fluid:borax_solution"), "[fluid] borax_solution")
+        # A fluid has no items.csv entry, so the registry name is prettified rather than
+        # shown raw next to properly-cased item names.
+        self.assertEqual(g.display("fluid:borax_solution"), "[fluid] Borax Solution")
+        self.assertEqual(g.bare_name("fluid:borax_solution"), "Borax Solution")
+
+    def test_prettify_leaves_existing_capitals_alone(self):
+        # `.title()` would turn TBU into Tbu and NaOH into Naoh.
+        g = Graph()
+        self.assertEqual(g.bare_name("fluid:fuel_TBU"), "Fuel TBU")
+        self.assertEqual(g.bare_name("fluid:NaOH_solution"), "NaOH Solution")
+
+    def test_searchable_labels_cover_fluids_the_recipes_reference(self):
+        # items.csv covers items only. Without this, "Boric Acid" found the placed block
+        # (no recipes) and never the fluid the chemistry chains actually need.
+        from recipegraph.model import Ingredient, Recipe
+
+        g = Graph()
+        g.names = {"mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("fluid:boric_acid", 1000)],
+                     [Ingredient(["mod:widget"], 1)], category="c"))
+        self.assertEqual(g.labels.get("fluid:boric_acid"), "Boric Acid")
+
+    def test_labels_hold_the_bare_name_not_the_bracketed_form(self):
+        # Indexing "[fluid] water" made the query "water" a mere substring, so every item
+        # containing the word outranked the fluid itself.
+        from recipegraph.model import Ingredient, Recipe
+
+        g = Graph()
+        g.add(Recipe("r", "t", [("mod:x", 1)],
+                     [Ingredient(["fluid:water"], 1000, "fluid")], category="c"))
+        self.assertEqual(g.labels["fluid:water"], "Water")
 
     def test_essentia_key_is_case_normalised(self):
         self.assertEqual(essentia_key("Terra"), essentia_key("terra"))

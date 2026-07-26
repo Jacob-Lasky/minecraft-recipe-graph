@@ -43,12 +43,20 @@ form.search button.ghost{background:var(--card);color:var(--fg);border-color:var
 form.search input:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .hint2{color:var(--dim);font-size:13px;margin-bottom:22px}
 .hits{list-style:none;padding:0;margin:0}
-.hits li{border-bottom:1px solid var(--line)}
+.hits li{border-bottom:1px solid var(--line);display:flex;align-items:stretch;gap:8px}
 .hits a{display:flex;gap:12px;align-items:baseline;padding:10px 4px;text-decoration:none;
-color:inherit}
-.hits a:hover{background:var(--accent-soft)}
-.hits .nm2{flex:1 1 auto;font-size:15px}
+color:inherit;flex:1 1 auto;min-width:0;border-radius:8px}
+.hits a:hover,.hits a.on{background:var(--accent-soft)}
+/* Keyboard selection must be visible even when the pointer is elsewhere, so `.on` gets a
+   ring rather than only the hover tint. */
+.hits a.on{box-shadow:inset 0 0 0 2px var(--accent)}
+.hits a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.hits .nm2{flex:1 1 auto;font-size:15px;min-width:0;overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
 .hits .id2{font:11.5px var(--mono);color:var(--dim);flex:0 0 auto}
+.hits a.det{flex:0 0 auto;font:11.5px var(--sans);color:var(--dim);align-self:center;
+padding:6px 10px}
+.hits a.det:hover{color:var(--accent);background:none;text-decoration:underline}
 .pill{font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;flex:0 0 auto}
 .pill.ok{background:var(--okbg);color:var(--ok)}
 .pill.no{background:var(--needbg);color:var(--need)}
@@ -235,53 +243,124 @@ class State:
                       free_sources=self.free_sources)
 
 
+HOME_JS = """
+(function(){
+ var box=document.getElementById('q'), qty=document.getElementById('qty'),
+     list=document.getElementById('hits'), note=document.getElementById('note'),
+     seq=0, sel=-1, rows=[];
+
+ function plan(key){
+   return '/plan?item='+encodeURIComponent(key)+'&qty='+(parseInt(qty.value,10)||1);
+ }
+ function chip(kind){
+   var l={fluid:'FLUID',essentia:'ESSENTIA',ore:'ANY'}[kind];
+   return l?'<span class="t t-'+kind+'">'+l+'</span>':'';
+ }
+ function esc(s){
+   return String(s).replace(/[&<>"]/g,function(c){
+     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});
+ }
+ function n(x){return x.toLocaleString();}
+
+ function render(items,q){
+   rows=[]; sel=-1;
+   if(!q){list.innerHTML=''; note.textContent=''; return;}
+   if(!items.length){
+     list.innerHTML='';
+     note.textContent='Nothing matches \\u201c'+q+'\\u201d.';
+     return;
+   }
+   note.textContent='';
+   list.innerHTML=items.map(function(it,i){
+     // "made by / used by" in place: where an item sits in the graph is often the whole
+     // answer, so it should not need a second page load to see.
+     var made=it.makes?n(it.makes)+' recipe'+(it.makes===1?'':'s'):'no recipe';
+     return '<li><a href="'+plan(it.key)+'" data-i="'+i+'" data-key="'+esc(it.key)+'">'
+       +'<span class="nm2">'+chip(it.kind)+esc(it.label||it.name)+'</span>'
+       +'<span class="pill '+(it.stock?'ok':'mut')+'">'
+       +(it.stock?n(it.stock)+' in stock':'none')+'</span>'
+       +'<span class="pill '+(it.makes?'mut':'no')+'">'+made+'</span>'
+       +'<span class="pill mut">'+n(it.uses)+' use'+(it.uses===1?'':'s')+'</span>'
+       +'<span class="id2">'+esc(it.key)+'</span></a>'
+       +'<a class="det" href="/explore?q='+encodeURIComponent(it.key)+'"'
+       +' title="every recipe that makes and uses this">details</a></li>';
+   }).join('');
+   rows=Array.prototype.slice.call(list.querySelectorAll('a[data-i]'));
+ }
+
+ function highlight(){
+   rows.forEach(function(a,i){
+     a.classList.toggle('on',i===sel);
+     if(i===sel)a.scrollIntoView({block:'nearest'});
+   });
+ }
+
+ var timer=null;
+ function go(){
+   var q=box.value.trim();
+   // Reflect the query in the URL without a navigation, so a search survives reload and
+   // can be shared, and the back button still works.
+   history.replaceState(null,'',q?'/?q='+encodeURIComponent(q):'/');
+   if(!q){render([],'');return;}
+   var mine=++seq;
+   fetch('/suggest?q='+encodeURIComponent(q))
+     .then(function(r){return r.json();})
+     .then(function(d){
+       // Drop a slow response that a later keystroke has already superseded, or results
+       // flicker back to a stale query.
+       if(mine!==seq)return;
+       render(d.results||[],q);
+     })
+     .catch(function(){if(mine===seq)note.textContent='Search failed.';});
+ }
+ box.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(go,110);});
+ // Changing the quantity must not re-search; only the links need updating. The key comes
+ // from a data attribute rather than being parsed back out of the href.
+ qty.addEventListener('input',function(){
+   rows.forEach(function(a){a.href=plan(a.dataset.key);});
+ });
+ box.addEventListener('keydown',function(e){
+   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+     if(!rows.length)return;
+     e.preventDefault();
+     var down=e.key==='ArrowDown';
+     if(sel<0){sel=down?0:rows.length-1;}
+     else{sel=(sel+(down?1:-1)+rows.length)%rows.length;}
+     highlight();
+   }else if(e.key==='Enter'){
+     e.preventDefault();
+     if(rows.length)rows[sel<0?0:sel].click();
+   }else if(e.key==='Escape'){box.value='';go();}
+ });
+ if(box.value.trim())go();
+})();
+"""
+
+
 def home_page(state, query="", qty=1):
-    hits = []
-    if query:
-        for key in explore_mod.search(state.graph, query, have=state.have, limit=40):
-            hits.append(key)
-
-    rows = []
-    for item in hits:
-        stock = item["stock"]
-        pills = []
-        pills.append("<span class='pill %s'>%s</span>"
-                     % ("ok" if stock else "mut",
-                        ("%s in stock" % "{:,}".format(stock)) if stock else "none"))
-        pills.append("<span class='pill %s'>%s</span>"
-                     % ("mut" if item["makes_total"] else "no",
-                        "%d recipe%s" % (item["makes_total"],
-                                         "" if item["makes_total"] == 1 else "s")
-                        if item["makes_total"] else "no recipe"))
-        rows.append(
-            "<li><a href='/plan?item=%s&qty=%d'><span class='nm2'>%s</span>"
-            "%s<span class='id2'>%s</span></a></li>"
-            % (urllib.parse.quote(item["key"]), qty,
-               kind_chip(item.get("kind")) + _esc(item.get("label") or item["name"]),
-               "".join(pills), _esc(item["key"])))
-
     body = """<div class="wrap">%s
   <div class="eyebrow">Recipe graph</div>
   <h1>What do you want to make?</h1>
   <div class="hint2">%s recipes &middot; %s items in your network &middot;
     %d machine categories on hand</div>
-  <form class="search" method="get" action="/">
-    <input type="search" name="q" value="%s" placeholder="Borax, Ultimate Component&hellip;"
-           autofocus autocomplete="off">
-    <input type="number" name="qty" value="%d" min="1" title="quantity">
-    <button type="submit">Search</button>
-    <button class="ghost" type="submit" formaction="/explore">Explore</button>
+  <form class="search" onsubmit="return false">
+    <input id="q" type="search" name="q" value="%s"
+           placeholder="Start typing&hellip; Borax, Ultimate Component"
+           autofocus autocomplete="off" spellcheck="false">
+    <input id="qty" type="number" name="qty" value="%d" min="1" title="quantity"
+           aria-label="quantity">
   </form>
-  %s
-</div>""" % (
+  <div class="hint2" id="note"></div>
+  <ul class="hits" id="hits"></ul>
+  <noscript><p class="hint2">Search needs JavaScript. Without it, use
+    <code>recipegraph plan &lt;item&gt;</code> from the terminal.</p></noscript>
+</div>
+<script>%s</script>""" % (
         _nav("/"),
         "{:,}".format(len(state.graph.recipes)),
         "{:,}".format(len(state.have)),
         sum(1 for s, _w in state.states.values() if s == machines_mod.HAVE),
-        _esc(query), qty,
-        ("<ul class='hits'>%s</ul>" % "".join(rows)) if rows else
-        ("<p class='hint2'>No item matched &ldquo;%s&rdquo;.</p>" % _esc(query)
-         if query else ""),
+        _esc(query), qty, HOME_JS,
     )
     return _page("Recipe graph", body)
 
@@ -631,6 +710,12 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path == "/":
                 qty = max(1, int(one("qty", "1") or 1))
                 return self._send(home_page(st, one("q"), qty))
+            if parts.path == "/suggest":
+                # The only JSON endpoint. Everything else is server-rendered; this exists
+                # because a keystroke must not re-render a page.
+                results = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
+                return self._send(json.dumps({"results": results}),
+                                  ctype="application/json; charset=utf-8")
             if parts.path == "/explore":
                 query = one("q")
                 results = explore_mod.search(st.graph, query, have=st.have, limit=40)

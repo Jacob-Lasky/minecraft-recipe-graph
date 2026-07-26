@@ -213,7 +213,7 @@ def cmd_explore(args):
     results = explore.search(g, args.query, have=have, limit=args.limit)
     if not results:
         print("no item name matched %r" % args.query, file=sys.stderr)
-        hints = explore.suggest(g, args.query)
+        hints = explore.name_hints(g, args.query)
         if hints:
             print("did you mean: %s" % ", ".join(hints), file=sys.stderr)
         return 1

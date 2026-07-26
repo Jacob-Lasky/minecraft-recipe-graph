@@ -58,6 +58,15 @@ def essentia_key(aspect):
     return "essentia:%s" % str(aspect).lower()
 
 
+def _prettify(registry_name):
+    """`boric_acid` -> `Boric Acid`, for keys with no localized name to fall back on."""
+    words = str(registry_name).replace("_", " ").split()
+    # Leave a word alone if it already carries capitals: `.title()` would turn `TBU` into
+    # `Tbu` and `NaOH` into `Naoh`.
+    return " ".join(w if any(c.isupper() for c in w) else w.capitalize()
+                    for w in words) or registry_name
+
+
 def split_key(key):
     """Return (base_key_without_meta, meta_or_None) for concrete item keys."""
     if key.startswith(("ore:", "fluid:", "essentia:")):
@@ -153,12 +162,16 @@ class Graph:
         self.catalysts = {}
         self._by_output = None
         self._by_input = None
+        self._ore_index = None
+        self._labels = None
         self._producer_cache = {}
 
     def add(self, recipe):
         self.recipes.append(recipe)
         self._by_output = None
         self._by_input = None
+        self._ore_index = None
+        self._labels = None
         self._producer_cache = {}
 
     @property
@@ -187,15 +200,59 @@ class Graph:
             self._by_input = idx
         return self._by_input
 
+    @property
+    def ore_index(self):
+        """item key -> [ore names it belongs to].
+
+        Built once. `consumers` previously scanned all 3,114 oredict entries per call,
+        which is fine for one lookup and hopeless for search-as-you-type across 40 results
+        per keystroke. Invalidated with the other indexes, since ore membership is loaded
+        alongside recipes.
+        """
+        if self._ore_index is None:
+            idx = {}
+            for ore, members in self.ore_members.items():
+                for member in members:
+                    idx.setdefault(member, []).append(ore)
+            self._ore_index = idx
+        return self._ore_index
+
+    def ores_of(self, key):
+        return self.ore_index.get(key, ())
+
+    @property
+    def labels(self):
+        """Every searchable key -> its display label.
+
+        items.csv covers items only, so a fluid that no recipe outputs into a container was
+        invisible to search: "Boric Acid" found `nuclearcraft:fluid_boric_acid` (the placed
+        block, no recipes) while `fluid:boric_acid` -- the thing the chemistry chain
+        actually needs -- could not be found at all. Fluids, essentia and oredict names are
+        therefore collected from the recipes themselves.
+
+        Holds the BARE name, not `display`. Indexing the bracketed form made `fluid:water`
+        match the query "water" only as a substring of "[fluid] water", so it ranked below
+        every item merely containing the word and "Water Egg" came first.
+
+        Built once and invalidated with the other indexes.
+        """
+        if self._labels is None:
+            out = dict(self.names)
+            for index in (self.by_output, self.by_input):
+                for key in index:
+                    if key.startswith(("fluid:", "essentia:", "ore:")) and key not in out:
+                        out[key] = self.bare_name(key)
+            self._labels = out
+        return self._labels
+
     def consumers(self, key):
         out = list(self.by_input.get(key, ()))
         base, meta = split_key(key)
         if meta not in (None, "*"):
             out.extend(self.by_input.get("%s:*" % base, ()))
         # an item is also reachable through any oredict it belongs to
-        for ore, members in self.ore_members.items():
-            if key in members:
-                out.extend(self.by_input.get("ore:%s" % ore, ()))
+        for ore in self.ores_of(key):
+            out.extend(self.by_input.get("ore:%s" % ore, ()))
         return out
 
     def producers(self, key):
@@ -268,7 +325,11 @@ class Graph:
         if key.startswith("ore:"):
             return key[4:]
         if key.startswith("fluid:"):
-            return key[6:]
+            # `boric_acid` -> `Boric Acid`. A fluid has no items.csv entry, so the registry
+            # name is all there is; presented raw it looks like a variable next to
+            # properly-cased item names. Search still finds the raw form because the key is
+            # matched too.
+            return _prettify(key[6:])
         if key.startswith("essentia:"):
             return key[9:].capitalize()
         # `mod:item#aspect` -- an NBT-discriminated stack. Names for these are format

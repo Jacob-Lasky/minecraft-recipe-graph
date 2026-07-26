@@ -17,8 +17,13 @@ MAX_PRODUCERS = 8
 MAX_CONSUMERS = 12
 
 
-def search(graph, query, have=None, limit=MAX_RESULTS):
-    """Rank items by how well their display name matches `query`."""
+def rank_keys(graph, query, have=None, limit=MAX_RESULTS):
+    """Item keys matching `query`, best first. The shared ranking for search and suggest.
+
+    Split out from `search` so search-as-you-type does not pay for the full `describe` of
+    every hit: `describe` walks producers and consumers per item, which is the right cost
+    for a page and far too much for a keystroke.
+    """
     have = have or {}
     q = query.strip().lower()
     if not q:
@@ -26,7 +31,9 @@ def search(graph, query, have=None, limit=MAX_RESULTS):
     terms = q.split()
     scored = []
 
-    for key, label in graph.names.items():
+    # graph.labels, not graph.names: names covers items only, and a fluid the chemistry
+    # chains need must be findable by name too.
+    for key, label in graph.labels.items():
         low = label.lower()
         if not all(t in low or t in key.lower() for t in terms):
             continue
@@ -47,7 +54,7 @@ def search(graph, query, have=None, limit=MAX_RESULTS):
     # stacks like `thaumadditions:vis_pod#perditio`, plus fluids and essentia. Without
     # this, everything the aspect decoder produces is unsearchable.
     for key in have:
-        if key in graph.names:
+        if key in graph.labels:
             continue
         label = graph.display(key)
         low = label.lower()
@@ -56,16 +63,44 @@ def search(graph, query, have=None, limit=MAX_RESULTS):
         scored.append((2 if low.startswith(q) else 3, len(label), label, key))
 
     scored.sort()
-    seen_keys = set()
-    out = []
+    seen, out = set(), []
     for _rank, _len, _label, key in scored:
-        if key in seen_keys:
+        if key in seen:
             continue
-        seen_keys.add(key)
-        out.append(describe(graph, key, have))
+        seen.add(key)
+        out.append(key)
         if len(out) >= limit:
             break
     return out
+
+
+def suggest(graph, query, have=None, limit=25):
+    """Cheap rows for a typeahead: name, type, stock, and how connected the item is.
+
+    `makes` and `uses` are the counts Jake asked to see in place -- where an item sits in
+    the graph is often the whole answer ("no recipe" or "used by 400 things" tells you what
+    kind of thing you are looking at without opening anything).
+    """
+    have = have or {}
+    out = []
+    for key in rank_keys(graph, query, have, limit):
+        out.append({
+            "key": key,
+            "name": graph.display(key),
+            "kind": graph.kind(key),
+            "label": graph.bare_name(key),
+            "stock": _stock_of(key, have),
+            "makes": len(graph.real_producers(key)),
+            "uses": len(graph.consumers(key)),
+        })
+    return out
+
+
+def search(graph, query, have=None, limit=MAX_RESULTS):
+    """Full detail for every item matching `query`."""
+    have = have or {}
+    return [describe(graph, key, have)
+            for key in rank_keys(graph, query, have, limit)]
 
 
 def _stack(graph, key, have):
@@ -120,7 +155,7 @@ def describe(graph, key, have=None):
     producers = graph.producers(key)
     consumers = graph.consumers(key)
 
-    ores = sorted(ore for ore, members in graph.ore_members.items() if key in members)
+    ores = sorted(graph.ores_of(key))
 
     return {
         "key": key,
@@ -143,8 +178,12 @@ def resolve_one(graph, query):
     return hits[0]["key"] if hits else None
 
 
-def suggest(graph, query, limit=10):
-    """Cheap name-only suggestions, for a 'did you mean' line."""
+def name_hints(graph, query, limit=10):
+    """Cheap name-only suggestions, for a CLI 'did you mean' line.
+
+    Distinct from `suggest`, which returns rows for the web typeahead. The two had the same
+    name once and the later definition silently shadowed the earlier.
+    """
     rev = build_reverse(graph.names)
     q = query.strip().lower()
     hits = [label for label in rev if q in label]

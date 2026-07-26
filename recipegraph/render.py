@@ -533,7 +533,9 @@ def render_explore_html(payload, coverage_note=None):
 </div>
 <script>%s</script>""" % (
         CSS, EXPLORE_CSS,
-        _esc(payload["query"]),
+        # One exact hit means the caller followed a "details" link with a raw key; showing
+        # the key back as the heading reads like an error. Use the item's name.
+        (named(results[0]) if len(results) == 1 else _esc(payload["query"])),
         len(results), "" if len(results) == 1 else "es",
         "{:,}".format(payload.get("searched", 0)),
         warn,
