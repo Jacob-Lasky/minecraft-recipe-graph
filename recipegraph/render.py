@@ -189,6 +189,26 @@ def _node_html(node, depth=0):
     )
 
 
+def _machines_html(machines):
+    """Machines the plan routes through that the player does not have yet.
+
+    Shown as its own panel rather than folded into the shopping list: a machine is a
+    one-off prerequisite, not a consumed quantity, and conflating them made plans read as
+    though you needed 4,000 of something you actually build once.
+    """
+    if not machines:
+        return ""
+    rows = "".join(
+        '<tr><td>%s</td><td><span class="badge %s">%s</span></td></tr>'
+        % (_esc(m.get("machine") or m.get("category")),
+           "warn" if m.get("state") == "buildable" else "need",
+           _esc(m.get("state", "?")))
+        for m in machines)
+    return ('<div class="card"><h2><span>Machines to build first</span>'
+            '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>'
+            '</div>' % (len(machines), rows))
+
+
 def _rows(entries, limit=200):
     if not entries:
         return '<tr><td class="meta">none</td></tr>'
@@ -250,7 +270,7 @@ def render_html(result, graph=None, coverage_note=None):
       <div class="card">
         <h2><span>Drawn from AE2 stock</span><span class="c">%d</span></h2>
         <div class="scroll"><table>%s</table></div>
-      </div>
+      </div>%s
     </div>
   </div>
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
@@ -274,6 +294,7 @@ def render_html(result, graph=None, coverage_note=None):
         _rows(need),
         len(used),
         _rows(used),
+        _machines_html(result.get("machines_to_build")),
         JS,
     )
 

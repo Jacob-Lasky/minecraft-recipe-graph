@@ -29,6 +29,16 @@ keys with amounts in mB. The one wrinkle is that a filled bucket
 (`forge:bucketfilled` + NBT) is a *different key* from the raw fluid, so bucket-based and
 fluid-based routes for the same material will not unify automatically.
 
+## There is a local UI
+
+```bash
+python3 -m recipegraph.cli serve      # http://127.0.0.1:8765
+```
+
+Search -> click an item -> plan. Machines page toggles availability per category. Prefer
+pointing the user at this over running `plan` for them repeatedly. Nothing auto-starts:
+the mod only writes JSON files, and the server is started by hand.
+
 ## Machine availability drives recipe choice
 
 ```bash

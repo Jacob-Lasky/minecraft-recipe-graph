@@ -141,6 +141,24 @@ state rather than growing. Pruning deliberately keeps one "carry" row per item j
 before each horizon — without it an item that last changed before the window would become
 unknowable rather than merely coarse.
 
+## A local UI
+
+```bash
+recipegraph serve            # http://127.0.0.1:8765
+```
+
+Search for an item, click it, get the plan. Also a Machines page where availability can be
+toggled per category with one click, and a Coverage page. Stdlib `http.server` only, no
+Flask and no pip.
+
+Bound to **127.0.0.1** deliberately: the graph exposes the contents of a live base and
+there is no authentication, so widening it to `--host 0.0.0.0` has to be an explicit
+choice. The graph is loaded once at startup (a few seconds for 121k recipes) and held in
+memory, which is why this is a long-running server rather than a per-request script.
+
+Pages reuse the same renderers as the CLI's `--html` flag, so there is one implementation
+of each view rather than a UI and an API drifting apart.
+
 ## The dump mod
 
 `mod/` is a client-side Forge mod adding one command, `/recipedump`. The dump is spread

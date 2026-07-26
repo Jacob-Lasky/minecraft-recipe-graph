@@ -350,6 +350,26 @@ def cmd_metrics(args):
     return 0
 
 
+def cmd_serve(args):
+    """Local web UI so the tool is usable without a terminal."""
+    from . import server
+
+    print("loading graph %s ..." % args.graph, file=sys.stderr)
+    httpd, state = server.serve(args.graph, args.have, args.machines,
+                                host=args.host, port=args.port)
+    print("recipegraph UI on http://%s:%d  (%s recipes, %s stocked items)"
+          % (args.host, args.port, "{:,}".format(len(state.graph.recipes)),
+             "{:,}".format(len(state.have))))
+    print("Ctrl-C to stop.")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        httpd.server_close()
+    return 0
+
+
 def cmd_machines(args):
     """List machine availability per recipe category, or toggle one by hand."""
     from . import machines
@@ -477,6 +497,15 @@ def main(argv=None):
                    help="the mc-recipe-dump/ dir written by /recipedump")
     p.add_argument("--json")
     p.set_defaults(fn=cmd_gaps)
+
+    p = sub.add_parser("serve", help="local web UI (search, plan, toggle machines)")
+    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--machines", default="data/machines.json")
+    # Localhost by default on purpose: the graph exposes a live base's contents and there
+    # is no auth. Binding wider has to be a deliberate act.
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("machines", help="which machines you have, and manual toggles")
     p.add_argument("--have", default="data/ae2_have.json")
