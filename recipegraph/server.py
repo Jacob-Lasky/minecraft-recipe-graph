@@ -57,6 +57,28 @@ text-overflow:ellipsis;white-space:nowrap}
 .hits a.det{flex:0 0 auto;font:11.5px var(--sans);color:var(--dim);align-self:center;
 padding:6px 10px}
 .hits a.det:hover{color:var(--accent);background:none;text-decoration:underline}
+.hits button.star{flex:0 0 auto;align-self:center;background:none;border:0;cursor:pointer;
+font-size:16px;line-height:1;color:var(--dim);padding:6px 4px}
+.hits button.star:hover{color:var(--warn)}
+.hits button.star.on{color:var(--warn)}
+.hits button.star:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Favourites and recents. Pinned chips rather than another list: they are shortcuts, and
+   sizing them like results would suggest they are results. */
+.shelf{margin-top:30px}
+.shelf h2{font:600 10.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
+color:var(--dim);margin:0 0 10px}
+.pins{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px}
+.pin{display:inline-flex;align-items:center;border:1px solid var(--line);
+border-radius:99px;background:var(--card);overflow:hidden}
+.pin a{display:flex;align-items:center;gap:2px;padding:6px 13px;text-decoration:none;
+color:inherit;font-size:13.5px}
+.pin a:hover{background:var(--accent-soft);color:var(--accent)}
+.pin button{background:none;border:0;border-left:1px solid var(--line);cursor:pointer;
+color:var(--dim);padding:7px 10px;font-size:13px;line-height:1}
+.pin button:hover{color:var(--need)}
+.pin button:focus-visible,.pin a:focus-visible{outline:2px solid var(--accent);
+outline-offset:-2px}
 .pill{font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;flex:0 0 auto}
 .pill.ok{background:var(--okbg);color:var(--ok)}
 .pill.no{background:var(--needbg);color:var(--need)}
@@ -247,7 +269,27 @@ HOME_JS = """
 (function(){
  var box=document.getElementById('q'), qty=document.getElementById('qty'),
      list=document.getElementById('hits'), note=document.getElementById('note'),
+     shelf=document.getElementById('shelf'),
      seq=0, sel=-1, rows=[];
+
+ // Favourites and recents live in localStorage: this is a single-user local tool with no
+ // account, and putting them server-side would mean a write path and a file to corrupt for
+ // something a browser already stores well.
+ var FAV='rg.favs', HIST='rg.hist', HIST_MAX=8;
+ function load(k){try{return JSON.parse(localStorage.getItem(k))||[];}catch(e){return [];}}
+ function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+ function isFav(key){return load(FAV).some(function(f){return f.key===key;});}
+ function toggleFav(item){
+   var favs=load(FAV), i=favs.findIndex(function(f){return f.key===item.key;});
+   if(i>=0){favs.splice(i,1);}
+   else{favs.unshift({key:item.key,label:item.label||item.name,kind:item.kind});}
+   save(FAV,favs); shelves(); return i<0;
+ }
+ function remember(item){
+   var h=load(HIST).filter(function(x){return x.key!==item.key;});
+   h.unshift({key:item.key,label:item.label||item.name,kind:item.kind});
+   save(HIST,h.slice(0,HIST_MAX)); shelves();
+ }
 
  function plan(key){
    return '/plan?item='+encodeURIComponent(key)+'&qty='+(parseInt(qty.value,10)||1);
@@ -264,7 +306,8 @@ HOME_JS = """
 
  function render(items,q){
    rows=[]; sel=-1;
-   if(!q){list.innerHTML=''; note.textContent=''; return;}
+   if(!q){list.innerHTML=''; note.textContent=''; shelf.hidden=false; return;}
+   shelf.hidden=true;
    if(!items.length){
      list.innerHTML='';
      note.textContent='Nothing matches \\u201c'+q+'\\u201d.';
@@ -275,6 +318,7 @@ HOME_JS = """
      // "made by / used by" in place: where an item sits in the graph is often the whole
      // answer, so it should not need a second page load to see.
      var made=it.makes?n(it.makes)+' recipe'+(it.makes===1?'':'s'):'no recipe';
+     var fav=isFav(it.key);
      return '<li><a href="'+plan(it.key)+'" data-i="'+i+'" data-key="'+esc(it.key)+'">'
        +'<span class="nm2">'+chip(it.kind)+esc(it.label||it.name)+'</span>'
        +'<span class="pill '+(it.stock?'ok':'mut')+'">'
@@ -282,10 +326,46 @@ HOME_JS = """
        +'<span class="pill '+(it.makes?'mut':'no')+'">'+made+'</span>'
        +'<span class="pill mut">'+n(it.uses)+' use'+(it.uses===1?'':'s')+'</span>'
        +'<span class="id2">'+esc(it.key)+'</span></a>'
+       +'<button class="star'+(fav?' on':'')+'" type="button" data-star="'+i+'"'
+       +' aria-pressed="'+fav+'" title="keep this in Favourites">'
+       +(fav?'\\u2605':'\\u2606')+'</button>'
        +'<a class="det" href="/explore?q='+encodeURIComponent(it.key)+'"'
        +' title="every recipe that makes and uses this">details</a></li>';
    }).join('');
    rows=Array.prototype.slice.call(list.querySelectorAll('a[data-i]'));
+   list.querySelectorAll('button[data-star]').forEach(function(b){
+     b.addEventListener('click',function(){
+       var on=toggleFav(items[+b.dataset.star]);
+       b.classList.toggle('on',on);
+       b.setAttribute('aria-pressed',String(on));
+       b.textContent=on?'\\u2605':'\\u2606';
+     });
+   });
+   rows.forEach(function(a,i){
+     a.addEventListener('click',function(){remember(items[i]);});
+   });
+ }
+
+ function shelf_html(title, entries, removable){
+   if(!entries.length)return '';
+   return '<div class="shelf"><h2>'+title+'</h2><div class="pins">'+entries.map(function(e){
+     return '<span class="pin"><a href="'+plan(e.key)+'">'+chip(e.kind)
+       +esc(e.label||e.key)+'</a>'
+       +(removable?'<button type="button" data-drop="'+esc(e.key)
+         +'" title="remove" aria-label="remove '+esc(e.label||e.key)+'">\\u00d7</button>':'')
+       +'</span>';
+   }).join('')+'</div></div>';
+ }
+
+ function shelves(){
+   var favs=load(FAV), hist=load(HIST);
+   shelf.innerHTML=shelf_html('Favourites',favs,true)+shelf_html('Recent',hist,false);
+   shelf.querySelectorAll('button[data-drop]').forEach(function(b){
+     b.addEventListener('click',function(){
+       save(FAV,load(FAV).filter(function(f){return f.key!==b.dataset.drop;}));
+       shelves();
+     });
+   });
  }
 
  function highlight(){
@@ -332,6 +412,7 @@ HOME_JS = """
      if(rows.length)rows[sel<0?0:sel].click();
    }else if(e.key==='Escape'){box.value='';go();}
  });
+ shelves();
  if(box.value.trim())go();
 })();
 """
@@ -352,6 +433,7 @@ def home_page(state, query="", qty=1):
   </form>
   <div class="hint2" id="note"></div>
   <ul class="hits" id="hits"></ul>
+  <div id="shelf"></div>
   <noscript><p class="hint2">Search needs JavaScript. Without it, use
     <code>recipegraph plan &lt;item&gt;</code> from the terminal.</p></noscript>
 </div>

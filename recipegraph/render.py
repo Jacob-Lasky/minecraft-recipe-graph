@@ -12,6 +12,8 @@ strict CSP that blocks every off-host request.
 import html
 import json
 
+from .graphview import DIAGRAM_CSS, render_svg
+
 STATUS_LABEL = {
     "have": ("in stock", "ok"),
     "partial": ("part stock", "warn"),
@@ -81,6 +83,11 @@ color:var(--dim)}
 border-radius:9px;padding:11px 13px;font-size:13.5px;margin-bottom:20px}
 .cols{display:grid;grid-template-columns:1fr;gap:20px;align-items:start}
 @media(min-width:900px){.cols{grid-template-columns:1.45fr .95fr}}
+/* A grid item defaults to min-width:auto, so wide content inside it (the plan diagram's
+   SVG carries its natural width) pushes the track out and the PAGE scrolls sideways
+   instead of the container. This one line is what keeps the overflow where it belongs. */
+.cols>*{min-width:0}
+@media(min-width:900px){.cols.single{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:11px;
 padding:15px 17px}
 .card+.card{margin-top:20px}
@@ -181,6 +188,20 @@ document.getElementById('needonly').onclick=function(){
   document.querySelectorAll('.tree [data-hasneed=0]').forEach(function(e){
     e.style.display=on?'':'none';});
 };
+(function(){
+  var btn=document.getElementById('diag'), tree=document.getElementById('treebox'),
+      diag=document.getElementById('diagbox'), cols=document.getElementById('cols');
+  if(!btn||!diag)return;
+  btn.onclick=function(){
+    var showing=diag.hidden;
+    diag.hidden=!showing; tree.hidden=showing;
+    // The flow view needs the full width to be worth looking at, so the two-column grid
+    // collapses to one while it is open and the ledgers sit underneath it.
+    cols.classList.toggle('single',showing);
+    btn.textContent=showing?'Show as list':'Show as diagram';
+    btn.setAttribute('aria-pressed',String(showing));
+  };
+})();
 """
 
 
@@ -320,7 +341,7 @@ def render_html(result, graph=None, coverage_note=None):
     total_need = sum(e["qty"] for e in need)
     total_used = sum(e["qty"] for e in used)
 
-    return """<style>%s</style>
+    return """<style>%s%s</style>
 <div class="wrap">
   <div class="eyebrow">Crafting plan</div>
   <h1>%s<span class="x">&times;%s</span></h1>
@@ -334,12 +355,20 @@ def render_html(result, graph=None, coverage_note=None):
   </div>
   %s
   <div class="bar">
+    <button id="diag" aria-pressed="false">Show as diagram</button>
     <button id="exp">Expand all</button>
     <button id="col">Collapse all</button>
     <button id="needonly" data-on="0">Show only what I need</button>
   </div>
-  <div class="cols">
-    <div class="card">
+  <div class="card" id="diagbox" hidden>
+    <h2><span>Flow</span><span class="c">left to right</span></h2>
+    <div class="diagwrap">%s</div>
+    <div class="meta" style="margin-top:9px">Swatch colour groups items by mod and the
+      letter stands in for the icon; real item textures need a sprite sheet the dump mod
+      does not render yet. Click any box to plan that item on its own.</div>
+  </div>
+  <div class="cols" id="cols">
+    <div class="card" id="treebox">
       <h2><span>Crafting tree</span><span class="c">%s steps</span></h2>
       <div class="tree scroll">%s</div>
     </div>
@@ -360,7 +389,7 @@ def render_html(result, graph=None, coverage_note=None):
   not yet dumped, rather than that none exists.</div>
 </div>
 <script>%s</script>""" % (
-        CSS,
+        CSS, DIAGRAM_CSS,
         _esc(result["target_name"]),
         "{:,}".format(result["qty"]),
         _esc(result["target"]),
@@ -369,6 +398,7 @@ def render_html(result, graph=None, coverage_note=None):
         "{:,}".format(total_used),
         "{:,}".format(len(need) + len(used)),
         warnbar,
+        render_svg(tree),
         "{:,}".format(result["nodes"]),
         _node_html(tree),
         len(need),
