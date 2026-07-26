@@ -1,3 +1,4 @@
+data/
 data/graph.json
 data/*.ndjson
 *.mca

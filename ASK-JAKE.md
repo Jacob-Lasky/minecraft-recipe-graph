@@ -73,7 +73,7 @@ in "Watch out for" below.
 
 - **Publishing the repo publishes `data/ae2_have.json` if it's committed.** It currently
   is, and it contains your full item list. Region filenames in docs also disclose your
-  base coordinates (`r.<X>.<Z>` → your base coordinates). Neither is dangerous on a
+  base coordinates. Neither is dangerous on a
   private server, but say the word and I'll gitignore the data dir and scrub coords from
   the docs before you push.
 - `items.csv` is from **May 31** and `crafttweaker.log` from **Jul 25**. Fine for now;
