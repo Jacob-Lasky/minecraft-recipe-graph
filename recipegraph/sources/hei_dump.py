@@ -21,6 +21,7 @@ lives, and flattening it would destroy the solver's ability to pick what you own
 import json
 
 from ..model import Ingredient, Recipe, fluid_key, norm_key
+from ..names import clean_label
 
 
 def _stack_key(entry):
@@ -90,7 +91,11 @@ def extract(path, on_progress=None):
             stats["recipes"] += 1
             yield Recipe(
                 "hei:%s:%d" % (cat, lineno), "hei_dump", outputs, slots,
-                category=cat, machine=doc.get("title"),
+                # Titles carry colour/format codes verbatim ("Wire Mill§r"), and 22
+                # categories in the reference pack do. Strip them HERE so no downstream
+                # consumer has to: an uncleaned title fails the machine name lookup
+                # silently, which reads as "you do not own this machine".
+                category=cat, machine=clean_label(doc.get("title")),
             )
             if on_progress and stats["recipes"] % 5000 == 0:
                 on_progress(cat, stats)

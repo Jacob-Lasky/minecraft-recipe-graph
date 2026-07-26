@@ -26,8 +26,18 @@ import math
 
 # What a machine costs to route through. Owning it is nearly free; building one is a real
 # but one-off expense; using one you cannot get should lose to almost anything.
-MACHINE_COST = {"have": 1.0, "buildable": 40.0, "unavailable": 5000.0}
-UNKNOWN_MACHINE_COST = 20.0
+#
+# `unknown` sits between buildable and unavailable ON PURPOSE. It means the category's
+# machine could not be identified, which is a gap in this tool, not a fact about the
+# player's base, so it must not be priced as unusable -- doing that put 40% of the
+# reference pack's recipes behind a 5,000 wall. It must also not undercut `buildable`,
+# or an unidentified machine would beat one the player can demonstrably build.
+MACHINE_COST = {"have": 1.0, "buildable": 40.0, "unknown": 120.0, "unavailable": 5000.0}
+
+# Used only when machine gating is off entirely (no states supplied), where every category
+# gets the same figure and the value is arbitrary. NOT the cost of an unidentified machine
+# -- that is MACHINE_COST["unknown"] above.
+UNGATED_MACHINE_COST = 20.0
 
 # A fluid input's quantity is in mB, so 1000 mB of water would otherwise look a thousand
 # times dearer than one item. Normalise a bucket to roughly one item.
@@ -82,8 +92,8 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES):
         if r.category not in machine_cost:
             state = machine_states.get(r.category)
             machine_cost[r.category] = (
-                MACHINE_COST.get(state[0], UNKNOWN_MACHINE_COST) if state
-                else UNKNOWN_MACHINE_COST)
+                MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
+                else UNGATED_MACHINE_COST)
 
     ore_members = graph.ore_members
     recipes = graph.recipes
@@ -120,8 +130,8 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None):
     """Estimated cost of running one recipe once, given precomputed item costs."""
     machine_states = machine_states or {}
     state = machine_states.get(recipe.category)
-    total = (MACHINE_COST.get(state[0], UNKNOWN_MACHINE_COST) if state
-             else UNKNOWN_MACHINE_COST)
+    total = (MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
+             else UNGATED_MACHINE_COST)
     if recipe.transfer:
         total += TRANSFER_PENALTY
     for ing in recipe.inputs:

@@ -21,7 +21,10 @@ FORMAT_CODE = re.compile("§.")
 
 
 def clean_label(label):
-    return FORMAT_CODE.sub("", label).strip()
+    """Strip format codes. None-safe, because JEI category titles are often absent."""
+    if label is None:
+        return None
+    return FORMAT_CODE.sub("", str(label)).strip() or None
 
 
 def load_items_csv(path):

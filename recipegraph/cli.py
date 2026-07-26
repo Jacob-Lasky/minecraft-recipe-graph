@@ -14,6 +14,7 @@ import os
 import sys
 
 from . import index
+from . import machines
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
 
@@ -384,9 +385,9 @@ def cmd_machines(args):
                 return 2
             uid, state = pair.split("=", 1)
             state = state.strip()
-            if state not in (machines.HAVE, machines.BUILDABLE, machines.UNAVAILABLE):
-                print("state must be have|buildable|unavailable, got %r" % state,
-                      file=sys.stderr)
+            if state not in machines.STATES:
+                print("state must be one of %s, got %r"
+                      % ("|".join(machines.STATES), state), file=sys.stderr)
                 return 2
             overrides[uid.strip()] = state
         machines.save_overrides(args.file, overrides)
@@ -394,9 +395,8 @@ def cmd_machines(args):
 
     states, overrides = _machine_states(g, args.have, args.file)
     counts = machines.summarise(states)
-    print("categories: %d have, %d buildable, %d unavailable"
-          % (counts[machines.HAVE], counts[machines.BUILDABLE],
-             counts[machines.UNAVAILABLE]))
+    print("categories: %s"
+          % ", ".join("%d %s" % (counts[s], s) for s in machines.STATES))
 
     rows = sorted(states.items())
     if args.state:
@@ -512,7 +512,7 @@ def main(argv=None):
     p.add_argument("--file", default="data/machines.json", help="overrides file")
     p.add_argument("--set", nargs="+", metavar="UID=STATE",
                    help="set availability by hand, e.g. nuclearcraft_crystallizer=have")
-    p.add_argument("--state", choices=["have", "buildable", "unavailable"])
+    p.add_argument("--state", choices=list(machines.STATES))
     p.add_argument("--match", help="filter by category uid or reason")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(fn=cmd_machines)

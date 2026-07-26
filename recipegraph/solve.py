@@ -18,6 +18,7 @@ The three things that make this non-trivial, and how each is handled:
 
 import collections
 
+from .machines import is_hand_crafting
 from .model import split_key
 
 STATUS_HAVE = "have"        # fully covered by inventory
@@ -151,7 +152,7 @@ class Solver:
                 cyclic += 1
         # simplicity tiebreak: fewer inputs, and prefer plain crafting over machines
         simple = 1.0 / (1 + len(recipe.inputs))
-        plain = 0.1 if recipe.category.startswith("crafting") else 0.0
+        plain = 0.1 if is_hand_crafting(recipe.category) else 0.0
         avail = self.availability_rank(recipe)
         # A container fill/empty never counts as production, so it loses to any real
         # recipe regardless of how well stocked it looks.
@@ -167,11 +168,11 @@ class Solver:
                 simple + plain, avail)
 
     def availability_rank(self, recipe):
-        """2 = machine on hand, 1 = machine buildable/unknown, 0 = unavailable."""
+        """2 = machine on hand, 1 = buildable or unidentified, 0 = proven unavailable."""
         state = self.machine_states.get(recipe.category)
         if state is None:
             return 1
-        return {"have": 2, "buildable": 1}.get(state[0], 0)
+        return {"have": 2, "buildable": 1, "unknown": 1}.get(state[0], 0)
 
     def pick_recipe(self, key, ancestors=frozenset()):
         override = self.overrides.get(key)

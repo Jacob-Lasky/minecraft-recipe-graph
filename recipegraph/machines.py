@@ -9,13 +9,23 @@ Every recipe carries its JEI category, and a category IS a machine. So machine
 availability is a constraint on categories, which turns recipe choice from a guess into
 a filter.
 
-THREE STATES, not two. "Don't own it" is not the same as "can't use it":
+FOUR STATES, not two. "Don't own it", "can't use it", and "couldn't tell" are three
+different answers and collapsing any pair of them produces wrong plans:
   * have        -- the machine is placed in the world, or its item is in your stock
   * buildable   -- not present, but the machine item itself is craftable
-  * unavailable -- neither, or you disabled it by hand
+  * unknown     -- the category's machine could not be identified at all
+  * unavailable -- identified, and there is no route to it; or you disabled it by hand
 A plan may legitimately route through a `buildable` machine; it just has to TELL you to
 build it first. That is the "I only have a crafting table, so I will make a furnace"
 case: the furnace is buildable, an alloy smelter is not.
+
+`unknown` exists because folding it into `unavailable` was catastrophic: on the reference
+pack 360 of 521 categories -- 48,814 of 121,186 recipes, 40% of the graph -- could not be
+name-matched to a machine item, and every one of them was priced as unusable. Title
+matching is a heuristic ("Casting" is a recipe type, the machine is a Casting Table), so
+it will always miss some. An unidentified machine must cost more than one you can
+demonstrably build and far less than one proven out of reach. Catalysts from the dump mod
+are the real fix; this state is what keeps the failure honest until they arrive.
 
 EVIDENCE, in order of directness:
   1. tile entities in the world save -- you built it, it is there. Direct.
@@ -31,9 +41,14 @@ import json
 import os
 import re
 
+from .names import clean_label
+
 HAVE = "have"
 BUILDABLE = "buildable"
+UNKNOWN = "unknown"
 UNAVAILABLE = "unavailable"
+
+STATES = (HAVE, BUILDABLE, UNKNOWN, UNAVAILABLE)
 
 # Categories that need no machine at all. Never gate these; the player always has hands.
 ALWAYS_AVAILABLE = {
@@ -42,7 +57,25 @@ ALWAYS_AVAILABLE = {
     "jei.information", "jei.description",
 }
 
+# The two sources name hand-crafting differently: the JEI dump says `minecraft.crafting`,
+# the offline jar reader says `crafting_shaped` / `crafting_shapeless`. Both are a crafting
+# table. Matching only one of them left 10,301 offline recipes gated behind a machine the
+# player was told they did not have. DO NOT test either prefix directly; go through
+# `is_hand_crafting` so the two conventions can never drift apart again.
+_HAND_CRAFTING_PREFIXES = ("minecraft.crafting", "crafting_shaped", "crafting_shapeless")
+
 _SPLIT = re.compile(r"[^a-z0-9]+")
+# Category uids are frequently camelCase (`TechReborn.WireMill`, `botania.runicAltar`)
+# while registry names are snake_case. Lowercasing alone gives `wiremill`, which matches
+# nothing; the boundary has to be recovered before the case is thrown away.
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
+
+
+def is_hand_crafting(category):
+    """True for a crafting-table recipe under either source's naming convention."""
+    cat = str(category or "")
+    return any(cat.startswith(p) for p in _HAND_CRAFTING_PREFIXES)
 
 # Machine blocks are commonly registered once per running state. NuclearCraft ships
 # `alloy_furnace_idle` / `alloy_furnace_active` as separate items while the placed tile
@@ -88,7 +121,32 @@ def scan_world_machines(region_paths):
     return placed
 
 
-def candidate_items(graph, uid, machine_title, reverse_names):
+def _id_guesses(uid):
+    """Registry-name guesses built from a category uid, best first.
+
+    `TechReborn.WireMill` has to reach `techreborn:wire_mill`, so the camelCase boundary
+    is recovered before lowercasing. The un-split form is tried too, because plenty of
+    mods really do register `nuclearcraft:cobblestone_generator` style ids from an
+    already-underscored uid, and a few register the squashed form.
+    """
+    parts = [p for p in _NON_ALNUM.split(str(uid)) if p]
+    if len(parts) < 2:
+        return []
+    modid = parts[0].lower()
+    words = []
+    for part in parts[1:]:
+        words.extend(w for w in _CAMEL.split(part) if w)
+    if not words:
+        return []
+    snake = "_".join(w.lower() for w in words)
+    squashed = "".join(w.lower() for w in words)
+    guesses = ["%s:%s" % (modid, snake)]
+    if squashed != snake:
+        guesses.append("%s:%s" % (modid, squashed))
+    return guesses
+
+
+def candidate_items(graph, uid, machine_title, reverse_names, catalysts=None):
     """Item keys that could BE the machine for a category.
 
     A machine block's item and block registry names are the same in 1.12.2, so a
@@ -96,9 +154,17 @@ def candidate_items(graph, uid, machine_title, reverse_names):
     extra mapping. Candidates come from the category's display title, which is what JEI
     labels the machine, then filtered by the category's modid where one is recoverable --
     without that filter a title like "Furnace" matches a dozen unrelated mods.
+
+    Title matching is a HEURISTIC and misses roughly 40% of categories, because a JEI
+    category title is often the recipe type rather than the machine ("Casting", "Smelting",
+    "Cover Crafting"). `catalysts` from the dump mod is the authoritative mapping and wins
+    outright when present; everything here is the fallback for a graph built without it.
     """
+    if catalysts:
+        return list(catalysts)
+
     cands = []
-    title = (machine_title or "").strip()
+    title = clean_label(machine_title)
     if title:
         cands.extend(reverse_names.get(title.lower(), []))
 
@@ -109,18 +175,25 @@ def candidate_items(graph, uid, machine_title, reverse_names):
         same_mod = [c for c in cands if c.split(":")[0].lower() == modid]
         if same_mod:
             return same_mod
-        # Fall back to constructing the id directly from the uid: `nuclearcraft_crystallizer`
-        # -> `nuclearcraft:crystallizer`, which is how most machine blocks are registered.
-        rest = "_".join(uid_tokens[1:])
-        if rest:
-            guess = "%s:%s" % (modid, rest)
-            if guess in graph.names:
+        for guess in _id_guesses(uid):
+            if guess in graph.names and guess not in cands:
                 cands.append(guess)
     return cands
 
 
 def resolve(graph, placed=None, stock=None, catalysts=None, overrides=None):
     """Return {category_uid: (state, evidence)} for every category in the graph."""
+    return {uid: (info["state"], info["why"])
+            for uid, info in describe(graph, placed, stock, catalysts, overrides).items()}
+
+
+def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
+    """Full per-category detail: state, evidence, candidate machine items, recipe count.
+
+    `resolve` is the two-value view the solver and cost model consume; this is the view the
+    machines page needs, so that "why does it think I do not have this" is answerable
+    without re-deriving the candidates by hand.
+    """
     from .names import build_reverse
 
     placed = placed or {}
@@ -132,39 +205,53 @@ def resolve(graph, placed=None, stock=None, catalysts=None, overrides=None):
     stock_index = _index(k for k, v in stock.items() if v)
 
     categories = {}
+    counts = {}
     for r in graph.recipes:
         categories.setdefault(r.category, r.machine)
+        counts[r.category] = counts.get(r.category, 0) + 1
 
     out = {}
     for uid, title in categories.items():
+        rec = {
+            "uid": uid,
+            "title": clean_label(title),
+            "mod": (_tokens(uid) or [""])[0],
+            "recipes": counts.get(uid, 0),
+            "candidates": [],
+            "manual": uid in overrides,
+        }
+        out[uid] = rec
+
         if uid in overrides:
-            out[uid] = (overrides[uid], "manual override")
+            rec.update(state=overrides[uid], why="manual override")
             continue
-        if uid in ALWAYS_AVAILABLE or uid.startswith("minecraft.crafting"):
-            out[uid] = (HAVE, "no machine needed")
+        if uid in ALWAYS_AVAILABLE or is_hand_crafting(uid):
+            rec.update(state=HAVE, why="no machine needed")
             continue
 
         # Catalysts from the dump mod are exact; fall back to name matching without them.
-        cands = catalysts.get(uid) or candidate_items(graph, uid, title, reverse_names)
+        cands = candidate_items(graph, uid, title, reverse_names, catalysts.get(uid))
+        rec["candidates"] = cands
+        rec["from_catalyst"] = bool(catalysts.get(uid))
         if not cands:
-            out[uid] = (UNAVAILABLE, "machine item unknown")
+            rec.update(state=UNKNOWN, why="machine item unknown")
             continue
 
         built = [placed_index[normalise_block(c)] for c in cands
                  if normalise_block(c) in placed_index]
         if built:
-            out[uid] = (HAVE, "placed: %s" % built[0])
+            rec.update(state=HAVE, why="placed: %s" % built[0])
             continue
         held = [stock_index[normalise_block(c)] for c in cands
                 if normalise_block(c) in stock_index]
         if held:
-            out[uid] = (HAVE, "in stock: %s" % held[0])
+            rec.update(state=HAVE, why="in stock: %s" % held[0])
             continue
         makeable = [c for c in cands if graph.producers(c)]
         if makeable:
-            out[uid] = (BUILDABLE, "craftable: %s" % makeable[0])
+            rec.update(state=BUILDABLE, why="craftable: %s" % makeable[0])
             continue
-        out[uid] = (UNAVAILABLE, "no route to %s" % cands[0])
+        rec.update(state=UNAVAILABLE, why="no route to %s" % cands[0])
     return out
 
 
@@ -177,7 +264,7 @@ def load_overrides(path):
         except ValueError:
             return {}
     raw = doc.get("overrides", doc)
-    return {k: v for k, v in raw.items() if v in (HAVE, BUILDABLE, UNAVAILABLE)}
+    return {k: v for k, v in raw.items() if v in STATES}
 
 
 def save_overrides(path, overrides):
@@ -185,18 +272,23 @@ def save_overrides(path, overrides):
     with open(path, "w") as fh:
         json.dump({
             "_comment": "Manual machine availability. Values: have | buildable | "
-                        "unavailable. These win over anything auto-detected.",
+                        "unknown | unavailable. These win over anything auto-detected.",
             "overrides": overrides,
         }, fh, indent=1, sort_keys=True)
 
 
 def summarise(states):
-    counts = {HAVE: 0, BUILDABLE: 0, UNAVAILABLE: 0}
+    counts = dict.fromkeys(STATES, 0)
     for state, _why in states.values():
         counts[state] = counts.get(state, 0) + 1
     return counts
 
 
 def available_categories(states, include_buildable=True):
-    ok = {HAVE} | ({BUILDABLE} if include_buildable else set())
+    """Categories a plan may route through.
+
+    `unknown` is included alongside `buildable`: an unidentified machine is not evidence
+    that the player cannot use it, and excluding it would hide 40% of the graph.
+    """
+    ok = {HAVE} | ({BUILDABLE, UNKNOWN} if include_buildable else set())
     return {uid for uid, (state, _why) in states.items() if state in ok}

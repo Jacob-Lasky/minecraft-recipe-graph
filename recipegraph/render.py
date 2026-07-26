@@ -189,24 +189,36 @@ def _node_html(node, depth=0):
     )
 
 
+MACHINE_STATE_CLASS = {"buildable": "warn", "unknown": "muted", "unavailable": "need"}
+
+
 def _machines_html(machines):
     """Machines the plan routes through that the player does not have yet.
 
     Shown as its own panel rather than folded into the shopping list: a machine is a
     one-off prerequisite, not a consumed quantity, and conflating them made plans read as
     though you needed 4,000 of something you actually build once.
+
+    `unknown` is rendered muted, not red: it means this tool could not work out which block
+    the category corresponds to, so it is a caveat about the plan, not a task for the
+    player. Colouring it like `unavailable` would send someone hunting for a machine they
+    may well already own.
     """
     if not machines:
         return ""
     rows = "".join(
         '<tr><td>%s</td><td><span class="badge %s">%s</span></td></tr>'
         % (_esc(m.get("machine") or m.get("category")),
-           "warn" if m.get("state") == "buildable" else "need",
-           _esc(m.get("state", "?")))
+           MACHINE_STATE_CLASS.get(m.get("state"), "need"),
+           _esc("unidentified" if m.get("state") == "unknown" else m.get("state", "?")))
         for m in machines)
+    unknowns = sum(1 for m in machines if m.get("state") == "unknown")
+    note = ('<div class="meta" style="margin-top:9px">%d of these could not be matched to '
+            'a block, so availability is a guess. You may already have them.</div>'
+            % unknowns) if unknowns else ""
     return ('<div class="card"><h2><span>Machines to build first</span>'
-            '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>'
-            '</div>' % (len(machines), rows))
+            '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>%s'
+            '</div>' % (len(machines) - unknowns, rows, note))
 
 
 def _rows(entries, limit=200):
