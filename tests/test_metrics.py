@@ -15,6 +15,10 @@ class MetricsTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.db = os.path.join(self.dir, "m.db")
         self.conn = metrics.connect(self.db)
+        # `connect` hands ownership to the caller; without this every test leaks a
+        # connection and the suite emits ResourceWarnings from whichever query the GC
+        # happens to interrupt, which reads like a bug in metrics.py.
+        self.addCleanup(self.conn.close)
         self.now = 1_700_000_000
 
     def rows(self, tier=0):

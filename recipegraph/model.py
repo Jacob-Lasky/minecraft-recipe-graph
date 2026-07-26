@@ -146,6 +146,11 @@ class Graph:
         self.names = {}              # key -> localized name
         self.ore_members = {}        # ore name -> [item keys]
         self.ore_guessed = set()     # subset of ore_members inferred, not authoritative
+        # category uid -> [machine item keys], from JEI's own "made in" list. The
+        # authoritative category->machine mapping; without it machine availability has to
+        # guess from the category's display title, which is often the recipe type rather
+        # than the machine. Empty on a graph built before the dump mod emitted catalysts.
+        self.catalysts = {}
         self._by_output = None
         self._by_input = None
         self._producer_cache = {}
@@ -280,6 +285,7 @@ class Graph:
             "names": self.names,
             "ore_members": self.ore_members,
             "ore_guessed": sorted(self.ore_guessed),
+            "catalysts": self.catalysts,
         }
 
     def save(self, path):
@@ -295,4 +301,5 @@ class Graph:
         g.names = d.get("names", {})
         g.ore_members = d.get("ore_members", {})
         g.ore_guessed = set(d.get("ore_guessed", ()))
+        g.catalysts = d.get("catalysts") or {}
         return g

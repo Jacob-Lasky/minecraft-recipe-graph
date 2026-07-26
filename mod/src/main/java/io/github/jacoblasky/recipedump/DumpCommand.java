@@ -30,8 +30,8 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 import net.minecraftforge.oredict.OreDictionary;
 
 /**
- * `/recipedump` -- writes recipes.ndjson, oredict.json, names.json, skipped.ndjson and
- * summary.json into &lt;gamedir&gt;/mc-recipe-dump/.
+ * `/recipedump` -- writes recipes.ndjson, catalysts.json, oredict.json, names.json,
+ * skipped.ndjson and summary.json into &lt;gamedir&gt;/mc-recipe-dump/.
  *
  * The dump is SPREAD ACROSS CLIENT TICKS rather than run inline. It is only about a
  * second of work, but a second spent inside a command handler is a second the render
@@ -132,6 +132,19 @@ public class DumpCommand extends CommandBase {
         private final Map<String, int[]> perCategory = new LinkedHashMap<String, int[]>();
         private final Map<String, String> categoryMod = new LinkedHashMap<String, String>();
         private final List<String> skips = new ArrayList<String>();
+        /**
+         * {category uid: the item ids JEI shows as "made in"}.
+         *
+         * This is the AUTHORITATIVE category -> machine mapping and the reason it is worth
+         * dumping: the python side otherwise has to guess the machine from the category's
+         * display title, and a title is frequently the recipe TYPE rather than the machine
+         * ("Casting" is made in a Casting Table, "Smelting" in a Smeltery Controller).
+         * That heuristic failed on 343 of 521 categories in the reference pack, which then
+         * had to be priced as "machine unidentified" -- 37,857 recipes the planner could
+         * not reason about. Catalysts remove the guess entirely.
+         */
+        private final Map<String, List<String>> catalysts =
+                new LinkedHashMap<String, List<String>>();
 
         private int catIndex = -1;
         private Iterator<?> wrappers;
@@ -194,6 +207,7 @@ public class DumpCommand extends CommandBase {
                 // getModName is best-effort; its absence must not skip a category
             }
             categoryMod.put(uid, modName);
+            collectCatalysts(category);
             tally = perCategory.get(uid);
             if (tally == null) {
                 tally = new int[3];
@@ -209,6 +223,51 @@ public class DumpCommand extends CommandBase {
                 wrappers = null;
             }
             return true;
+        }
+
+        /**
+         * Record what JEI lists as the machine for this category.
+         *
+         * Only ItemStacks are kept. A catalyst can also be a FluidStack (a few categories
+         * list a fluid), but a fluid is not a block the player can be told to place, and
+         * the python side compares candidates against placed tile entities and inventory,
+         * so a fluid catalyst would only ever fail to match.
+         *
+         * Order is preserved: JEI lists the primary machine first and upgraded or
+         * alternative variants after it, so the first entry is the one to name in a
+         * "machines to build" list.
+         */
+        private void collectCatalysts(IRecipeCategory<?> category) {
+            List<String> ids = new ArrayList<String>();
+            try {
+                for (Object o : registry.getRecipeCatalysts(cast(category))) {
+                    if (!(o instanceof ItemStack)) {
+                        continue;
+                    }
+                    ItemStack stack = (ItemStack) o;
+                    if (stack.isEmpty()) {
+                        continue;
+                    }
+                    ResourceLocation id = stack.getItem().getRegistryName();
+                    if (id == null) {
+                        continue;
+                    }
+                    int meta = stack.getItemDamage();
+                    // A wildcard-meta catalyst names the whole family; the python side
+                    // normalises 32767 to `:*`, so pass it through unchanged.
+                    String key = meta == 0 ? id.toString() : id + ":" + meta;
+                    if (!ids.contains(key)) {
+                        ids.add(key);
+                    }
+                }
+            } catch (Throwable t) {
+                // Best-effort, exactly like getModName: a category whose catalysts throw
+                // must still have its recipes dumped. It falls back to title matching.
+                skips.add(skipLine(uid, modName, -1, null, t, "getRecipeCatalysts failed"));
+            }
+            if (!ids.isEmpty()) {
+                catalysts.put(uid, ids);
+            }
         }
 
         private void handle(Object obj) {
@@ -264,13 +323,15 @@ public class DumpCommand extends CommandBase {
             writeLines(new File(dir, "skipped.ndjson"), skips);
             writeSummary(new File(dir, "summary.json"), perCategory, categoryMod,
                          recipes, failed);
+            writeCatalysts(new File(dir, "catalysts.json"), catalysts);
             int ores = writeOreDict(new File(dir, "oredict.json"), names);
             writeNames(new File(dir, "names.json"), names);
 
             long ms = (System.nanoTime() - startedAt) / 1_000_000L;
             reply(sender, String.format(
-                    "done in %.1fs: %s recipes from %d categories, %s oredict entries, %s names -> %s",
-                    ms / 1000.0, formatCount(recipes), perCategory.size(),
+                    "done in %.1fs: %s recipes from %d categories, %d with a known machine, "
+                            + "%s oredict entries, %s names -> %s",
+                    ms / 1000.0, formatCount(recipes), perCategory.size(), catalysts.size(),
                     formatCount(ores), formatCount(names.size()), dir.getName()));
             reply(sender, String.format(
                     "%s skipped, all recorded in skipped.ndjson (per-category counts in summary.json)",
@@ -489,6 +550,29 @@ public class DumpCommand extends CommandBase {
             w.write(first ? "}\n}\n" : "\n }\n}\n");
         } catch (IOException ignored) {
             // same: a missing summary is not worth failing a good dump over
+        }
+    }
+
+    private static void writeCatalysts(File file, Map<String, List<String>> catalysts) {
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n");
+            boolean first = true;
+            for (Map.Entry<String, List<String>> e : catalysts.entrySet()) {
+                if (!first) {
+                    w.write(",\n");
+                }
+                first = false;
+                List<String> quoted = new ArrayList<String>();
+                for (String id : e.getValue()) {
+                    quoted.add("\"" + safe(id) + "\"");
+                }
+                w.write(" \"" + safe(e.getKey()) + "\": [" + String.join(",", quoted) + "]");
+            }
+            w.write(first ? "}\n" : "\n}\n");
+        } catch (IOException ignored) {
+            // Losing this file costs route quality, not correctness: the python side falls
+            // back to matching the category title against item names.
         }
     }
 

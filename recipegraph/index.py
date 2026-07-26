@@ -5,6 +5,7 @@ import sys
 
 from .model import Graph
 from .names import find_items_csv, load_items_csv
+from .sources import catalysts as catalysts_src
 from .sources import hei_dump, jar_json, oredict
 
 
@@ -49,6 +50,15 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     else:
         say("jar_json: no mods/ dir at %s" % mods_dir)
 
+    cat_path = catalysts_src.find(instance_dir)
+    if cat_path:
+        g.catalysts = catalysts_src.load(cat_path)
+        say("catalysts: %d categories have a known machine item (JEI's own \"made in\")"
+            % len(g.catalysts))
+    else:
+        say("catalysts: catalysts.json not present -- machine identity falls back to "
+            "matching category titles against item names, which misses ~2 in 3")
+
     hei_path = hei_path or os.path.join(instance_dir, "mc-recipe-dump", "recipes.ndjson")
     if os.path.exists(hei_path):
         n = 0
@@ -78,12 +88,24 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     keep = {k.lower() for k in (keep_categories or ())}
     before = len(g.recipes)
     dropped_by_cat = {}
+    loops_by_cat = {}
     kept = []
     for r in g.recipes:
         if is_non_recipe(r.category, keep):
             dropped_by_cat[r.category] = dropped_by_cat.get(r.category, 0) + 1
+        elif produces_nothing_new(r):
+            loops_by_cat[r.category] = loops_by_cat.get(r.category, 0) + 1
         else:
             kept.append(r)
+    if loops_by_cat:
+        # Reported separately from the category drops above: the causes and the fixes are
+        # different, and folding them together once made 8,051 wrongly-dropped crafting
+        # recipes read as "info panels and anvil permutations".
+        top = sorted(loops_by_cat.items(), key=lambda t: -t[1])[:4]
+        say("no-ops: dropped %d recipes that consume as much of their output as they "
+            "make (%s) -- charging, chisel variants, display entries"
+            % (sum(loops_by_cat.values()),
+               ", ".join("%s x%d" % (c, n) for c, n in top)))
     if len(kept) != before:
         g.recipes = kept
         g._by_output = None
@@ -120,6 +142,13 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 #   enchant*         enchanting permutations
 # Squeezers, smelteries and centrifuges are REAL production and must not be added here.
 # Override per-pack with `--keep-category` if a pack uses one of these names for real work.
+#   _stats           material stat tables (Tinkers' harvest/ranged/projectile), listing
+#                    every part a material yields against every form of that material
+#   preview          Modular Machinery structure previews: the whole multiblock presented
+#                    as if it crafts a blueprint, so a plan could "craft" a blueprint by
+#                    building a 200-block structure
+# Squeezers, smelteries and centrifuges are REAL production and must not be added here.
+# Override per-pack with `--keep-category` if a pack uses one of these names for real work.
 NON_RECIPE_CATEGORY_PATTERNS = (
     "minecraft.anvil", "anvil",
     "eiotank", "forestry.bottler",
@@ -127,6 +156,8 @@ NON_RECIPE_CATEGORY_PATTERNS = (
     "jeresources.", "villager_trade", "villager",
     "loot", ".drop", "drops",
     "enchanter", "enchantment", "superenchant",
+    "_stats", ".stats", ":stats",
+    "preview",
 )
 
 
@@ -135,6 +166,43 @@ def is_non_recipe(category, keep=()):
     if lc in keep:
         return False
     return any(pat in lc for pat in NON_RECIPE_CATEGORY_PATTERNS)
+
+
+def produces_nothing_new(recipe):
+    """True when a recipe consumes at least as much of every output as it produces.
+
+    These are display entries and no-ops, not production edges: `Empty Cell -> Empty Cell`
+    in a TechReborn Extractor, `Flux Capacitor -> Flux Capacitor` for charging, the chisel
+    variant tables, EnderIO's `GrindingBall` category showing a ball's SAG Mill bonus. Left
+    in, the item looks craftable from itself and the solver spends backtracking budget
+    rediscovering the cycle at every visit.
+
+    TWO CONDITIONS, both learned from real false positives, and the reason this is not the
+    obvious one-line set test:
+
+    1. THE INPUT SLOT MUST BE UNAMBIGUOUS. A slot listing many interchangeable stacks does
+       not require any particular one, so an output that merely appears among 200 oredict
+       alternatives is not being consumed. Unioning all alternatives dropped
+       `Chest + Tripwire Hook -> Trapped Chest`, because a trapped chest is one of the
+       three things the chest slot accepts, and the real Angel Ring upgrade with it.
+    2. QUANTITY MUST NOT INCREASE. `1 Spectral Fern -> 3 Spectral Fern` in a Phytogenic
+       Insolator is genuine multiplication and the whole point of the machine.
+
+    A recipe that returns a catalyst alongside new output (a mold, an empty bucket) is
+    unaffected: the new output is not among the inputs at all.
+    """
+    if not recipe.outputs:
+        return True
+    required = {}
+    for ing in recipe.inputs:
+        if len(ing.alternatives) != 1:
+            continue
+        key = ing.alternatives[0]
+        required[key] = required.get(key, 0) + max(ing.qty, 1)
+    for key, qty in recipe.outputs:
+        if required.get(key, 0) < max(qty, 1):
+            return False
+    return True
 
 
 CONTAINER_FLUID_THRESHOLD = 8

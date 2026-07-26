@@ -198,7 +198,11 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
 
     placed = placed or {}
     stock = stock or {}
-    catalysts = catalysts or {}
+    # A graph built with the dump mod carries JEI's own category->machine mapping. Prefer it
+    # over anything a caller passes only if the caller passed nothing: an explicit argument
+    # is how tests and one-off overrides work.
+    if catalysts is None:
+        catalysts = getattr(graph, "catalysts", None) or {}
     overrides = overrides or {}
     reverse_names = build_reverse(graph.names)
     placed_index = _index(placed)
