@@ -108,9 +108,7 @@ public class DumpCommand extends CommandBase {
         }
         active = runner;
         MinecraftForge.EVENT_BUS.register(runner);
-        reply(sender, String.format(
-                "dumping %d recipe categories -- the game stays playable, progress below.",
-                categories.size()));
+        reply(sender, String.format("dumping %d recipe categories...", categories.size()));
     }
 
     /**

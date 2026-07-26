@@ -80,9 +80,12 @@ def analyse(summary, skips):
 
 def report(a):
     out = []
-    out.append("dumped %s recipes across %d categories, %s skipped"
-               % ("{:,}".format(a["recipes"]), a["categories"],
-                  "{:,}".format(a["skipped"])))
+    empty = dict(a["reasons"]).get("no outputs", 0)
+    threw = a["skipped"]
+    out.append("dumped %s recipes across %d categories"
+               % ("{:,}".format(a["recipes"]), a["categories"]))
+    out.append("  %s wrappers threw, %s entries produced nothing usable"
+               % ("{:,}".format(threw), "{:,}".format(empty)))
 
     if a["reasons"]:
         out.append("\nwhy things were skipped")

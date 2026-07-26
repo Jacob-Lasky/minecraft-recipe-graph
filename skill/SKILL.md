@@ -29,6 +29,13 @@ keys with amounts in mB. The one wrinkle is that a filled bucket
 (`forge:bucketfilled` + NBT) is a *different key* from the raw fluid, so bucket-based and
 fluid-based routes for the same material will not unify automatically.
 
+## Writing the user-facing text
+
+Do not narrate the absence of a bug. An in-game message reading "the game stays playable"
+was removed for exactly this: the player can see the game is running, so the reassurance is
+noise and reads as an apology for a defect that is no longer there. State what is happening
+("dumping 674 recipe categories..."), not what is not going wrong.
+
 ## There is a local UI
 
 ```bash
