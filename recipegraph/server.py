@@ -14,10 +14,8 @@ several seconds and a few hundred MB, which is why this is a long-running server
 than a CGI script that reloads per request.
 """
 
-import html
 import json
 import os
-import re
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,8 +24,10 @@ from . import cost as cost_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
+from .htmlutil import esc as _esc
 from .model import Graph
 from .names import build_reverse
+from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, kind_chip_json)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
 
@@ -39,7 +39,6 @@ form.search input[type=number]{width:96px;font:16px var(--mono);padding:11px 12p
 border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--fg)}
 form.search button{font:600 14px var(--sans);padding:11px 18px;border-radius:9px;
 border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
-form.search button.ghost{background:var(--card);color:var(--fg);border-color:var(--line)}
 form.search input:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .hint2{color:var(--dim);font-size:13px;margin-bottom:22px}
 .hits{list-style:none;padding:0;margin:0}
@@ -156,10 +155,6 @@ font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .klist .grow{flex:1 1 auto}
 .klist code{font:11.5px var(--mono);color:var(--dim);word-break:break-all}
 """
-
-
-def _esc(s):
-    return html.escape(str(s), quote=True)
 
 
 def _item(graph, key):
@@ -294,8 +289,11 @@ HOME_JS = """
  function plan(key){
    return '/plan?item='+encodeURIComponent(key)+'&qty='+(parseInt(qty.value,10)||1);
  }
+ // Injected from present.KIND_CHIP rather than restated, so the client-rendered rows and
+ // the server-rendered pages cannot disagree about what a type is called.
+ var CHIPS=%%CHIPS%%;
  function chip(kind){
-   var l={fluid:'FLUID',essentia:'ESSENTIA',ore:'ANY'}[kind];
+   var l=CHIPS[kind];
    return l?'<span class="t t-'+kind+'">'+l+'</span>':'';
  }
  function esc(s){
@@ -442,14 +440,10 @@ def home_page(state, query="", qty=1):
         "{:,}".format(len(state.graph.recipes)),
         "{:,}".format(len(state.have)),
         sum(1 for s, _w in state.states.values() if s == machines_mod.HAVE),
-        _esc(query), qty, HOME_JS,
+        _esc(query), qty, HOME_JS.replace("%%CHIPS%%", kind_chip_json()),
     )
     return _page("Recipe graph", body)
 
-
-STATE_PILL = {"have": "ok", "buildable": "warnp", "unknown": "mut", "unavailable": "no"}
-STATE_LABEL = {"have": "have", "buildable": "buildable", "unknown": "unidentified",
-               "unavailable": "no route"}
 
 MACHINES_JS = """
 (function(){
@@ -502,9 +496,6 @@ MACHINES_JS = """
 })();
 """
 
-_STATE_RANK = {"have": 0, "buildable": 1, "unknown": 2, "unavailable": 3}
-
-
 def _toggle_form(uid, target, label, back):
     return ("<form method='post' action='/machines'>"
             "<input type='hidden' name='uid' value='%s'>"
@@ -520,13 +511,13 @@ def _toggles(uid, current, back="/machines"):
                     ("unavailable", "none")) if t != current)
 
 
-def machines_page(state, message="", query="", mod=""):
+def machines_page(state, message="", query=""):
     counts = machines_mod.summarise(state.states)
     recipes_by_state = dict.fromkeys(machines_mod.STATES, 0)
     mods = {}
     rows = []
     for uid, info in sorted(state.machine_info.items(),
-                            key=lambda kv: (_STATE_RANK.get(kv[1]["state"], 4),
+                            key=lambda kv: (STATE_RANK.get(kv[1]["state"], UNRANKED),
                                             -kv[1]["recipes"], kv[0])):
         st = info["state"]
         recipes_by_state[st] = recipes_by_state.get(st, 0) + info["recipes"]
@@ -548,7 +539,7 @@ def machines_page(state, message="", query="", mod=""):
             "<td class='n'>%s</td>"
             "<td class='hint2' style='margin:0'>%s</td>"
             "<td><div class='acts'>%s</div></td></tr>"
-            % (st, _STATE_RANK.get(st, 4), _esc(name.lower()), _esc(uid.lower()),
+            % (st, STATE_RANK.get(st, UNRANKED), _esc(name.lower()), _esc(uid.lower()),
                _esc(info["mod"]), info["recipes"], _esc(hay),
                STATE_PILL.get(st, "mut"), STATE_LABEL.get(st, st),
                urllib.parse.quote(uid), _esc(name),
@@ -832,7 +823,7 @@ class Handler(BaseHTTPRequestHandler):
                     "%s x%d" % (result["target_name"], qty),
                     render_html(result, st.graph)))
             if parts.path == "/machines":
-                return self._send(machines_page(st, one("m"), one("q"), one("mod")))
+                return self._send(machines_page(st, one("m"), one("q")))
             if parts.path == "/machine":
                 page, status = machine_page(st, one("uid"))
                 return self._send(page, status)
@@ -868,9 +859,15 @@ class Handler(BaseHTTPRequestHandler):
         target = (form.get("state") or [""])[0]
         # Return the user to wherever they toggled from, so a change made on a detail page
         # does not silently bounce them to the list.
+        #
+        # `back` arrives from a form field, so it is an open-redirect vector. Checking only
+        # `startswith("/")` is NOT enough: `//evil.example/x` passes that and is a valid
+        # protocol-relative URL that navigates off-site. Require a parse with no scheme and
+        # no netloc, which is the only form that cannot leave this server.
         back = (form.get("back") or ["/machines"])[0]
-        if not back.startswith("/"):
-            back = "/machines"        # never redirect off-site from a form field
+        parsed = urllib.parse.urlsplit(back)
+        if not back.startswith("/") or parsed.scheme or parsed.netloc:
+            back = "/machines"
         st = self.state
         msg = ""
         if uid and target in machines_mod.STATES:

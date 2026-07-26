@@ -14,7 +14,9 @@ DO NOT reach for a force-directed layout. A plan is a tree with a meaningful roo
 meaningful direction, and a force layout would throw both away in exchange for wobbling.
 """
 
-import html
+from .htmlutil import esc as _esc
+from .present import STATUS_STYLE
+from .solve import STATUS_CRAFT
 
 # Geometry. Rows are tight because a real plan is tall and narrow: 100 nodes at 30px is
 # already 3,000px of scroll, and anything looser stops being scannable.
@@ -29,24 +31,7 @@ PAD_Y = 20
 # not a preference.
 MAX_LABEL = 20
 
-# Status -> (fill token, text token). Same semantic tokens the plan tree uses, so a node
-# means the same thing in both views.
-STATUS_STYLE = {
-    "have": ("var(--okbg)", "var(--ok)"),
-    "source": ("var(--okbg)", "var(--ok)"),
-    "partial": ("var(--warnbg)", "var(--warn)"),
-    "craft": ("var(--craftbg)", "var(--craft)"),
-    "raw": ("var(--needbg)", "var(--need)"),
-    "cycle": ("rgba(127,127,127,.15)", "var(--dim)"),
-    "depth": ("rgba(127,127,127,.15)", "var(--dim)"),
-    "oredict": ("rgba(127,127,127,.15)", "var(--dim)"),
-}
-
 KIND_MARK = {"fluid": "F", "essentia": "E", "ore": "*"}
-
-
-def _esc(s):
-    return html.escape(str(s), quote=True)
 
 
 def _hue(key):
@@ -82,8 +67,8 @@ def _shorten(text, limit=MAX_LABEL):
 def layout(tree, max_nodes=400):
     """Assign (depth, row) to every node, breadth-limited.
 
-    Returns (nodes, links, rows). Each node carries its own row and the row span of its
-    subtree, so a parent can be centred on its children without a second pass.
+    Returns (nodes, links, rows). `visit` returns each node's row as it unwinds, so a
+    parent can centre itself on the rows its children took without a second pass.
 
     Truncation is BY SUBTREE, not by a flat node count: cutting off mid-level would draw a
     branch whose children silently vanish. A node that was cut says so.
@@ -103,7 +88,7 @@ def layout(tree, max_nodes=400):
             "label": _shorten(node.get("label") or node.get("name") or node.get("key")),
             "full": node.get("label") or node.get("name") or node.get("key"),
             "kind": node.get("kind", "item"),
-            "status": node.get("status", "craft"),
+            "status": node.get("status", STATUS_CRAFT),
             "need": node.get("need", 1),
             "machine": node.get("machine") or node.get("category") or "",
             "row": 0,
@@ -164,7 +149,7 @@ def render_svg(tree, max_nodes=400):
 
     boxes = []
     for n in nodes:
-        fill, ink = STATUS_STYLE.get(n["status"], STATUS_STYLE["craft"])
+        fill, ink = STATUS_STYLE.get(n["status"], STATUS_STYLE[STATUS_CRAFT])
         nx, ny = x(n), y(n)
         title = "%s × %s%s" % (n["full"], "{:,}".format(n["need"]),
                                     ("  · " + n["machine"]) if n["machine"] else "")

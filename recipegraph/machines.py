@@ -125,20 +125,6 @@ def _index(keys):
     return out
 
 
-def scan_world_machines(region_paths):
-    """Tile-entity ids present in the given region files -- machines actually built."""
-    from .anvil_nbt import iter_region, tile_entities
-
-    placed = {}
-    for path in region_paths:
-        for _cx, _cz, root in iter_region(path):
-            for te in tile_entities(root):
-                tid = te.get("id")
-                if isinstance(tid, str) and tid:
-                    placed[tid] = placed.get(tid, 0) + 1
-    return placed
-
-
 def _id_guesses(uid):
     """Registry-name guesses built from a category uid, best first.
 

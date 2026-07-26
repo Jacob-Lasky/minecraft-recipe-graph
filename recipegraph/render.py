@@ -9,21 +9,11 @@ No external assets of any kind (fonts, CDN scripts, images): artifacts run under
 strict CSP that blocks every off-host request.
 """
 
-import html
 import json
 
 from .graphview import DIAGRAM_CSS, render_svg
-
-STATUS_LABEL = {
-    "have": ("in stock", "ok"),
-    "partial": ("part stock", "warn"),
-    "craft": ("craft", "craft"),
-    "raw": ("NEED", "need"),
-    "source": ("infinite", "ok"),
-    "cycle": ("loop", "muted"),
-    "depth": ("cut off", "muted"),
-    "oredict": ("any of", "muted"),
-}
+from .htmlutil import esc as _esc
+from .present import KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL
 
 CSS = """
 /* Palette: warm-paper / slate ground with a certus-quartz teal accent taken from
@@ -153,11 +143,6 @@ display:inline-block}
 .t-ore{background:var(--orebg);color:var(--orefg)}
 """
 
-# Type chip markup. `ore` says ANY because that is what an oredict entry means to the
-# player: any member satisfies the slot.
-KIND_CHIP = {"fluid": "FLUID", "essentia": "ESSENTIA", "ore": "ANY"}
-
-
 def kind_chip(kind):
     label = KIND_CHIP.get(kind)
     if not label:
@@ -203,10 +188,6 @@ document.getElementById('needonly').onclick=function(){
   };
 })();
 """
-
-
-def _esc(s):
-    return html.escape(str(s), quote=True)
 
 
 def _has_need(node):
@@ -256,9 +237,6 @@ def _node_html(node, depth=0):
     )
 
 
-MACHINE_STATE_CLASS = {"buildable": "warn", "unknown": "muted", "unavailable": "need"}
-
-
 def _machines_html(machines):
     """Machines the plan routes through that the player does not have yet.
 
@@ -276,8 +254,8 @@ def _machines_html(machines):
     rows = "".join(
         '<tr><td>%s</td><td><span class="badge %s">%s</span></td></tr>'
         % (_esc(m.get("machine") or m.get("category")),
-           MACHINE_STATE_CLASS.get(m.get("state"), "need"),
-           _esc("unidentified" if m.get("state") == "unknown" else m.get("state", "?")))
+           STATE_BADGE.get(m.get("state"), "need"),
+           _esc(STATE_LABEL.get(m.get("state"), m.get("state", "?"))))
         for m in machines)
     unknowns = sum(1 for m in machines if m.get("state") == "unknown")
     note = ('<div class="meta" style="margin-top:9px">%d of these could not be matched to '

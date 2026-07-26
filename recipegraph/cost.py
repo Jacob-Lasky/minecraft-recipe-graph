@@ -22,6 +22,7 @@ has cycles and AND-nodes (a recipe needs *all* its inputs), so there is no simpl
 shortest-path formulation. A handful of passes converges well enough to rank by.
 """
 
+import hashlib
 import json
 import math
 import os
@@ -172,8 +173,6 @@ def fingerprint(graph_path, have, machine_states, free_sources):
     so editing MACHINE_COST invalidates the cache instead of silently reusing prices
     computed under the old table.
     """
-    import hashlib
-
     h = hashlib.sha256()
     try:
         stat = os.stat(graph_path)
