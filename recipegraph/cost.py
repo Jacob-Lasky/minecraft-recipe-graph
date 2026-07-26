@@ -27,6 +27,8 @@ import json
 import math
 import os
 
+from .defaults import DEFAULT_COST_CACHE
+
 # What a machine costs to route through. Owning it is nearly free; building one is a real
 # but one-off expense; using one you cannot get should lose to almost anything.
 #
@@ -194,7 +196,7 @@ def fingerprint(graph_path, have, machine_states, free_sources):
 
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
-                    cache_path="data/.cost-cache.json", passes=PASSES):
+                    cache_path=DEFAULT_COST_CACHE, passes=PASSES):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
     The relaxation is ~8s on a 121k-recipe graph, which is fine once at server startup and

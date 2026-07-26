@@ -166,6 +166,7 @@ def candidate_items(graph, uid, machine_title, reverse_names, catalysts=None):
     """
     if catalysts:
         return list(catalysts)
+    # (catalyst ordering is handled by `describe`, which can see every category at once)
 
     cands = []
     title = clean_label(machine_title)
@@ -207,6 +208,9 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
     # is how tests and one-off overrides work.
     if catalysts is None:
         catalysts = getattr(graph, "catalysts", None) or {}
+    # Must run over the WHOLE mapping: "is this item specific to one machine" is only
+    # answerable by looking at every category at once.
+    catalysts = order_by_specificity(catalysts) if catalysts else {}
     overrides = overrides or {}
     reverse_names = build_reverse(graph.names)
     placed_index = _index(placed)
@@ -267,6 +271,29 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
             continue
         rec.update(state=UNAVAILABLE, why="no route to %s%s" % (cands[0], caveat))
     return out
+
+
+def order_by_specificity(catalysts):
+    """Reorder each category's catalysts so the most specific machine comes first.
+
+    JEI lists whatever opens a category's recipes, and for Modular Machinery that is the
+    generic Machine Blueprint -- one item that catalyses 226 unrelated categories. Taken in
+    JEI's order it becomes the answer to "what machine is this", so a plan read
+    "Mythic Processor: Melter -- craftable: modularmachinery:itemblueprint". You can craft a
+    blueprint; that does not give you the machine.
+
+    Ordering by how many categories an item catalyses, fewest first, fixes it with no
+    threshold and no per-mod list: a purpose-built controller catalyses exactly one category
+    and wins, while a generic block that is genuinely the only candidate (Extra Utilities
+    registers 19 machine types under `extrautils2:machine`) is DEMOTED rather than dropped,
+    so it still answers when nothing better exists.
+    """
+    breadth = {}
+    for ids in catalysts.values():
+        for key in ids:
+            breadth[key] = breadth.get(key, 0) + 1
+    return {uid: sorted(ids, key=lambda k: (breadth.get(k, 1), ids.index(k)))
+            for uid, ids in catalysts.items()}
 
 
 def _cross_mod_note(uid, candidates):

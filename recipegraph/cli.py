@@ -15,11 +15,11 @@ import sys
 
 from . import index
 from . import machines
+from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST,
+                       DEFAULT_MACHINES, DEFAULT_METRICS_DB, DEFAULT_PORT, DEFAULT_SOURCES)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
 
-DEFAULT_GRAPH = "data/graph.json"
-DEFAULT_DB = "data/metrics.db"
 
 
 def _duration(text):
@@ -440,8 +440,6 @@ def cmd_sources(args):
 
 def cmd_machines(args):
     """List machine availability per recipe category, or toggle one by hand."""
-    from . import machines
-
     g = _load_graph(args.graph)
     overrides = machines.load_overrides(args.file)
 
@@ -502,7 +500,7 @@ def main(argv=None):
 
     p = sub.add_parser("have", help="read AE2 network contents from a world save")
     p.add_argument("--regions", nargs="+", required=True)
-    p.add_argument("--out", default="data/ae2_have.json")
+    p.add_argument("--out", default=DEFAULT_HAVE)
     p.set_defaults(fn=cmd_have)
 
     p = sub.add_parser("find", help="look up item ids by name")
@@ -513,15 +511,15 @@ def main(argv=None):
     p = sub.add_parser("plan", help="resolve a crafting tree against your stock")
     p.add_argument("item")
     p.add_argument("--qty", type=int, default=1)
-    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--have", default=DEFAULT_HAVE)
     p.add_argument("--ignore-stock", action="store_true")
     p.add_argument("--ignore-craftable", action="store_true",
                    help="expand items AE2 could autocraft instead of stopping")
-    p.add_argument("--machines", default="data/machines.json",
+    p.add_argument("--machines", default=DEFAULT_MACHINES,
                    help="manual machine availability overrides")
     p.add_argument("--ignore-machines", action="store_true",
                    help="do not weight recipes by whether you own the machine")
-    p.add_argument("--sources", default="data/sources.json",
+    p.add_argument("--sources", default=DEFAULT_SOURCES,
                    help="infinite generator additions and removals")
     p.add_argument("--ignore-sources", action="store_true",
                    help="do not treat infinite generator output as free")
@@ -537,21 +535,21 @@ def main(argv=None):
 
     p = sub.add_parser("explore", help="search items: how made, what uses them, stock")
     p.add_argument("query")
-    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--have", default=DEFAULT_HAVE)
     p.add_argument("--limit", type=int, default=60)
     p.add_argument("--json")
     p.add_argument("--html")
     p.set_defaults(fn=cmd_explore)
 
     p = sub.add_parser("track", help="record one AE2 stock snapshot into the metrics db")
-    p.add_argument("--have", default="data/ae2_have.json")
+    p.add_argument("--have", default=DEFAULT_HAVE)
     p.add_argument("--regions", nargs="+", help="scan the save directly instead")
-    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--db", default=DEFAULT_METRICS_DB)
     p.add_argument("--no-prune", action="store_true")
     p.set_defaults(fn=cmd_track)
 
     p = sub.add_parser("chart", help="stock levels and net rates over time")
-    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--db", default=DEFAULT_METRICS_DB)
     p.add_argument("--window", default="2h", help="e.g. 30m, 2h, 2d")
     p.add_argument("--top", type=int, default=12, help="series to chart")
     p.add_argument("--limit", type=int, default=15, help="rows to print")
@@ -560,7 +558,7 @@ def main(argv=None):
     p.set_defaults(fn=cmd_chart)
 
     p = sub.add_parser("metrics", help="metrics db size and coverage")
-    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--db", default=DEFAULT_METRICS_DB)
     p.set_defaults(fn=cmd_metrics)
 
     p = sub.add_parser("gaps", help="what the graph is blind to, from the dump skip log")
@@ -570,17 +568,17 @@ def main(argv=None):
     p.set_defaults(fn=cmd_gaps)
 
     p = sub.add_parser("serve", help="local web UI (search, plan, toggle machines)")
-    p.add_argument("--have", default="data/ae2_have.json")
-    p.add_argument("--machines", default="data/machines.json")
+    p.add_argument("--have", default=DEFAULT_HAVE)
+    p.add_argument("--machines", default=DEFAULT_MACHINES)
     # Localhost by default on purpose: the graph exposes a live base's contents and there
     # is no auth. Binding wider has to be a deliberate act.
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--host", default=DEFAULT_HOST)
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("machines", help="which machines you have, and manual toggles")
-    p.add_argument("--have", default="data/ae2_have.json")
-    p.add_argument("--file", default="data/machines.json", help="overrides file")
+    p.add_argument("--have", default=DEFAULT_HAVE)
+    p.add_argument("--file", default=DEFAULT_MACHINES, help="overrides file")
     p.add_argument("--set", nargs="+", metavar="UID=STATE",
                    help="set availability by hand, e.g. nuclearcraft_crystallizer=have")
     p.add_argument("--state", choices=list(machines.STATES))
@@ -589,8 +587,8 @@ def main(argv=None):
     p.set_defaults(fn=cmd_machines)
 
     p = sub.add_parser("sources", help="infinite generators that make resources free")
-    p.add_argument("--have", default="data/ae2_have.json")
-    p.add_argument("--file", default="data/sources.json", help="additions and removals")
+    p.add_argument("--have", default=DEFAULT_HAVE)
+    p.add_argument("--file", default=DEFAULT_SOURCES, help="additions and removals")
     p.add_argument("--add", nargs="+", metavar="BLOCK=KEY",
                    help="e.g. mymod:water_well=fluid:water")
     p.add_argument("--disable", nargs="+", metavar="KEY",

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph import index, machines  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.sources import catalysts as catalysts_src  # noqa: E402
+from recipegraph.sources import dump_meta  # noqa: E402
 
 
 def write(doc):
@@ -165,3 +167,101 @@ class InformationalCategoryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpecificityTest(unittest.TestCase):
+    """A generic viewer item must not become the answer to "what machine is this"."""
+
+    def test_a_broad_catalyst_loses_to_a_purpose_built_one(self):
+        # Real case: modularmachinery:itemblueprint is the catalyst for 226 categories
+        # because it is what you open the recipes with. Taken in JEI's order a plan read
+        # "Mythic Processor: Melter -- craftable: modularmachinery:itemblueprint". You can
+        # craft a blueprint; that does not give you the machine.
+        raw = {
+            "mm.melter": ["mm:blueprint", "mm:melter_controller"],
+            "mm.pulverizer": ["mm:blueprint", "mm:pulverizer_controller"],
+            "mm.infuser": ["mm:blueprint", "mm:infuser_controller"],
+        }
+        ordered = machines.order_by_specificity(raw)
+        self.assertEqual(ordered["mm.melter"][0], "mm:melter_controller")
+        self.assertEqual(ordered["mm.pulverizer"][0], "mm:pulverizer_controller")
+
+    def test_a_broad_catalyst_is_demoted_not_dropped(self):
+        # Extra Utilities registers 19 machine types under one `extrautils2:machine` block.
+        # Where it is the only candidate it still has to answer.
+        raw = {"a": ["mod:generic"], "b": ["mod:generic"], "c": ["mod:generic", "mod:own"]}
+        ordered = machines.order_by_specificity(raw)
+        self.assertEqual(ordered["a"], ["mod:generic"])
+        self.assertEqual(ordered["c"], ["mod:own", "mod:generic"])
+
+    def test_ties_keep_jeis_original_order(self):
+        # JEI lists the primary machine first, so equal breadth must not be reshuffled.
+        raw = {"x": ["mod:first", "mod:second", "mod:third"]}
+        self.assertEqual(machines.order_by_specificity(raw)["x"],
+                         ["mod:first", "mod:second", "mod:third"])
+
+    def test_describe_uses_the_specific_controller_as_evidence(self):
+        g = Graph()
+        g.names = {"mm:melter_controller": "Melter Controller", "mm:blueprint": "Blueprint",
+                   "mod:widget": "Widget"}
+        g.catalysts = {"mm.melter": ["mm:blueprint", "mm:melter_controller"],
+                       "mm.other": ["mm:blueprint", "mm:other_controller"]}
+        for uid in ("mm.melter", "mm.other"):
+            g.add(Recipe("r-" + uid, "t", [("mod:widget", 1)],
+                         [Ingredient(["mod:part"], 1)], category=uid, machine="X"))
+        info = machines.describe(g, placed={"mm:melter_controller": 1})
+        self.assertEqual(info["mm.melter"]["state"], machines.HAVE)
+        self.assertIn("melter_controller", info["mm.melter"]["why"])
+
+
+class DumpProvenanceTest(unittest.TestCase):
+    """A dump has to say what wrote it; its absence was previously unknowable."""
+
+    @staticmethod
+    def _dir(summary):
+        d = tempfile.mkdtemp()
+        if summary is not None:
+            with open(os.path.join(d, "summary.json"), "w") as fh:
+                json.dump(summary, fh)
+        return d
+
+    def test_a_stamped_dump_reports_its_version_and_schema(self):
+        meta = dump_meta.read(self._dir({"mod_version": "0.4.2",
+                                         "schema": dump_meta.SCHEMA, "recipes": 1}))
+        self.assertEqual(meta["mod_version"], "0.4.2")
+        self.assertEqual(meta["schema"], dump_meta.SCHEMA)
+        self.assertIn("mod 0.4.2", dump_meta.describe(meta))
+
+    def test_an_unstamped_dump_is_inferred_as_schema_1(self):
+        # Reporting None would throw away the one thing the absence tells us.
+        meta = dump_meta.read(self._dir({"recipes": 1, "skipped": 0}))
+        self.assertEqual(meta["schema"], 1)
+        self.assertIn("re-run /recipedump", dump_meta.describe(meta))
+
+    def test_a_missing_summary_says_so_rather_than_guessing(self):
+        meta = dump_meta.read(self._dir(None))
+        self.assertFalse(meta["present"])
+        self.assertIn("unknown", dump_meta.describe(meta))
+
+    def test_a_newer_schema_tells_you_to_update_the_reader(self):
+        meta = dump_meta.read(self._dir({"mod_version": "9.0.0",
+                                         "schema": dump_meta.SCHEMA + 1}))
+        self.assertIn("update recipegraph", dump_meta.describe(meta))
+
+    def test_a_corrupt_summary_does_not_raise(self):
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "summary.json"), "w") as fh:
+            fh.write("{not json")
+        self.assertFalse(dump_meta.read(d)["present"])
+
+    def test_the_reader_and_the_mod_agree_on_the_schema_number(self):
+        # The two constants are in different languages and cannot import each other, so
+        # this asserts the Java source says the same number.
+        java = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "mod", "src", "main", "java", "io", "github", "jacoblasky",
+            "recipedump", "DumpCommand.java")
+        with open(java) as fh:
+            found = re.search(r"SCHEMA\s*=\s*(\d+)", fh.read())
+        self.assertIsNotNone(found, "SCHEMA constant not found in DumpCommand.java")
+        self.assertEqual(int(found.group(1)), dump_meta.SCHEMA)

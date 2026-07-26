@@ -339,6 +339,9 @@ public class DumpCommand extends CommandBase {
             // The files are useless on their own, and in-game chat is the only place the
             // player is looking at this moment, so name the next two steps and the URL.
             //
+            // The port matches recipegraph.server.DEFAULT_PORT; it cannot be shared across
+            // the language boundary, so changing one means grepping 8765 for the others.
+            //
             // Phrased as an instruction, NOT as "open http://localhost:8765" on its own: the
             // planner is a separate program that may not be installed or running, and
             // pointing at a dead URL is worse than saying nothing. DO NOT reduce this to
@@ -536,12 +539,25 @@ public class DumpCommand extends CommandBase {
         }
     }
 
+    /**
+     * Bumped whenever the SHAPE of any dumped file changes, not when the mod version does.
+     * The reader compares it and says so rather than misparsing a newer or older dump in
+     * silence. 1 = recipes.ndjson + oredict + names + skipped + summary; 2 adds
+     * catalysts.json.
+     */
+    static final int SCHEMA = 2;
+
     private static void writeSummary(File file, Map<String, int[]> perCategory,
                                      Map<String, String> categoryMod,
                                      int recipes, int failed) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
-            w.write("{\n \"recipes\": " + recipes + ",\n \"skipped\": " + failed
+            // Stamp what produced this. Without it a dump is undatable: the only signal
+            // that catalysts.json was missing because the mod predated it, rather than
+            // because the category list genuinely had none, was its absence.
+            w.write("{\n \"mod_version\": \"" + safe(RecipeDumpMod.version()) + "\""
+                    + ",\n \"schema\": " + SCHEMA);
+            w.write(",\n \"recipes\": " + recipes + ",\n \"skipped\": " + failed
                     + ",\n \"categories\": {");
             boolean first = true;
             for (Map.Entry<String, int[]> e : perCategory.entrySet()) {

@@ -24,6 +24,7 @@ from . import cost as cost_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
+from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES
 from .htmlutil import esc as _esc
 from .model import Graph
 from .names import build_reverse
@@ -212,7 +213,15 @@ NAV_ITEMS = (
 )
 
 
-STALE_LABEL = {"graph": "the recipe graph", "have": "your AE2 stock"}
+# The files whose contents are held in memory, as (attribute holding the path, prose for the
+# banner). ONE table: the keys were previously spread across the stamps dict, a
+# `getattr(self, "%s_path" % name)` convention and a separate label map, so adding a watched
+# file meant editing three places and getting the attribute name right by hand or silently
+# watching nothing.
+WATCHED_FILES = (
+    ("graph_path", "the recipe graph"),
+    ("have_path", "your AE2 stock"),
+)
 
 
 def _safe_back(form, default="/machines"):
@@ -243,7 +252,7 @@ def _stale_banner(state, back="/"):
     changed = state.stale()
     if not changed:
         return ""
-    what = " and ".join(STALE_LABEL.get(c, c) for c in changed)
+    what = " and ".join(changed)
     return ("<form method='post' action='/reload' class='stale'>"
             "<input type='hidden' name='back' value='%s'>"
             "<span><b>%s</b> changed on disk since this server started, so what you are "
@@ -290,7 +299,7 @@ class State:
         self.graph_path = graph_path
         self.have_path = have_path
         self.machines_path = machines_path
-        self.sources_path = sources_path or "data/sources.json"
+        self.sources_path = sources_path or DEFAULT_SOURCES
         self.lock = threading.Lock()
         self.load_all()
 
@@ -300,7 +309,7 @@ class State:
         Stamps are taken BEFORE reading, so a rebuild that lands mid-read is noticed on the
         next request rather than being recorded as already loaded.
         """
-        self.stamps = {"graph": _stamp(self.graph_path), "have": _stamp(self.have_path)}
+        self.stamps = {attr: _stamp(getattr(self, attr)) for attr, _label in WATCHED_FILES}
         self.graph = Graph.load(self.graph_path)
         self.reverse = build_reverse(self.graph.names)
         self.have = {}
@@ -325,8 +334,8 @@ class State:
         the graph in memory for the session. Without this it silently serves the old graph
         afterwards, which reads as "the fix did not work" rather than "reload me".
         """
-        return sorted(name for name, was in self.stamps.items()
-                      if _stamp(getattr(self, "%s_path" % name)) != was)
+        return [label for attr, label in WATCHED_FILES
+                if _stamp(getattr(self, attr)) != self.stamps.get(attr)]
 
     def refresh_machines(self):
         """Recompute machine states and the cost table (cost depends on machine state)."""
@@ -981,7 +990,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def serve(graph_path, have_path, machines_path, host="127.0.0.1", port=8765,
+def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
+          port=DEFAULT_PORT,
           sources_path=None):
     state = State(graph_path, have_path, machines_path, sources_path)
     Handler.state = state

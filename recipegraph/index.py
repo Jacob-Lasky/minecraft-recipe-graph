@@ -6,6 +6,7 @@ import sys
 from .model import Graph
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
+from .sources import dump_meta
 from .sources import hei_dump, jar_json, oredict
 
 
@@ -49,6 +50,10 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("jar_json: %d crafting recipes from mod jars" % n)
     else:
         say("jar_json: no mods/ dir at %s" % mods_dir)
+
+    # Provenance first: everything else read from this directory is only as current as the
+    # dump that produced it, so say which mod wrote it before reporting what it contained.
+    say(dump_meta.describe(dump_meta.read(os.path.join(instance_dir, "mc-recipe-dump"))))
 
     cat_path = catalysts_src.find(instance_dir)
     if cat_path:
@@ -140,8 +145,6 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 #   jeresources.*    world generation, villager trades, plant drops
 #   loot/drops       mob and chest loot tables
 #   enchant*         enchanting permutations
-# Squeezers, smelteries and centrifuges are REAL production and must not be added here.
-# Override per-pack with `--keep-category` if a pack uses one of these names for real work.
 #   _stats           material stat tables (Tinkers' harvest/ranged/projectile), listing
 #                    every part a material yields against every form of that material
 #   preview          Modular Machinery structure previews: the whole multiblock presented

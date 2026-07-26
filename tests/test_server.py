@@ -213,7 +213,7 @@ class ServerTest(unittest.TestCase):
         """
         os.utime(self.state.graph_path, None)
         try:
-            self.assertEqual(self.state.stale(), ["graph"])
+            self.assertEqual(self.state.stale(), ["the recipe graph"])
             for href, _label, _icon in server.NAV_ITEMS:
                 body = self.get(href)[2]
                 self.assertIn("changed on disk", body, href)
@@ -224,7 +224,7 @@ class ServerTest(unittest.TestCase):
     def test_a_rescanned_stock_file_is_noticed_too(self):
         os.utime(self.state.have_path, None)
         try:
-            self.assertEqual(self.state.stale(), ["have"])
+            self.assertEqual(self.state.stale(), ["your AE2 stock"])
             self.assertIn("your AE2 stock", self.get("/")[2])
         finally:
             self.state.load_all()
@@ -248,7 +248,7 @@ class ServerTest(unittest.TestCase):
         moved = self.state.have_path + ".away"
         os.rename(self.state.have_path, moved)
         try:
-            self.assertEqual(self.state.stale(), ["have"])
+            self.assertEqual(self.state.stale(), ["your AE2 stock"])
         finally:
             os.rename(moved, self.state.have_path)
             self.state.load_all()
