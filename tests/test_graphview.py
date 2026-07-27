@@ -9,9 +9,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph import graphview  # noqa: E402
 
 
-def node(key, status="craft", need=1, kind="item", label=None, children=()):
-    return {"key": key, "label": label or key.split(":")[-1], "kind": kind,
-            "status": status, "need": need, "children": list(children)}
+def node(key, status="craft", need=1, kind="item", label=None, children=(),
+         machine=None, machine_state=None):
+    d = {"key": key, "label": label or key.split(":")[-1], "kind": kind,
+         "status": status, "need": need, "children": list(children)}
+    if machine:
+        d["machine"] = machine
+    if machine_state:
+        d["machine_state"] = machine_state
+    return d
 
 
 def plan():
@@ -128,6 +134,58 @@ class RenderTest(unittest.TestCase):
     def test_an_empty_plan_has_no_empty_legend_shell(self):
         _svg, legend = graphview.render_diagram({}, max_nodes=0)
         self.assertEqual(legend, "")
+
+    def test_a_blocked_step_is_outlined_without_hovering_it(self):
+        """#37: the machine was in the SVG `<title>` and nowhere else, so the one fact that
+        says "this step is where you stop" needed a hover, which touch does not have and
+        nobody can scan."""
+        tree = node("mod:out", machine="Press", machine_state="buildable",
+                    children=[node("mod:in", status="have")])
+        svg, legend = graphview.render_diagram(tree)
+        self.assertIn('stroke-dasharray="4 2.5"', svg)
+        self.assertEqual(svg.count('stroke-dasharray'), 1, "only the blocked box")
+        self.assertIn("needs a machine you do not have", legend)
+        # The words stay in the title: the outline says THAT it is blocked, not how badly.
+        self.assertIn("machine buildable", svg)
+
+    def test_a_machine_you_have_is_not_marked(self):
+        """"idc to see it if the machine exists already". Outlining every step would bury
+        the four that matter under fifty that do not."""
+        tree = node("mod:out", machine="Press", machine_state="have",
+                    children=[node("mod:in", status="have")])
+        svg, legend = graphview.render_diagram(tree)
+        self.assertNotIn("stroke-dasharray", svg)
+        self.assertNotIn("needs a machine", legend)
+
+    def test_an_unidentified_machine_is_marked_but_says_it_is_unidentified(self):
+        """It means "this tool could not work out which block this is", not "you lack it".
+        Hiding it would put a tooling gap behind a clean plan; calling it missing would
+        overstate. It is marked, and the title uses the honest word."""
+        svg, _legend = graphview.render_diagram(
+            node("mod:out", machine="Mystery", machine_state="unknown"))
+        self.assertIn("stroke-dasharray", svg)
+        self.assertIn("machine unidentified", svg)
+
+    def test_the_outline_is_a_different_channel_from_the_fill(self):
+        """Fill carries the plan status and the outline carries machine availability. If the
+        outline were another colour the two facts would compete for one signal."""
+        svg, _legend = graphview.render_diagram(
+            node("mod:out", status="have", machine="Press", machine_state="buildable"))
+        # Still filled by its STATUS, green, not recoloured by the machine problem.
+        self.assertIn('fill="var(--okbg)"', svg)
+        self.assertIn('stroke="var(--ok)"', svg)
+
+    def test_the_outline_key_has_no_fill_of_its_own(self):
+        # A background on that swatch would read as a fifth fill colour.
+        self.assertIn(".legend .sw.dash{background:transparent", graphview.DIAGRAM_CSS)
+
+    def test_layout_carries_the_machine_state_it_used_to_drop(self):
+        nodes, _l, _r = graphview.layout(
+            node("mod:out", machine="Press", machine_state="buildable"))
+        self.assertEqual(nodes[0]["machine_state"], "buildable")
+        # Absent rather than missing: every record has the key, so no consumer needs a get.
+        nodes, _l, _r = graphview.layout(node("mod:x"))
+        self.assertEqual(nodes[0]["machine_state"], "")
 
     def test_mod_hue_is_stable_and_shared_within_a_mod(self):
         self.assertEqual(graphview._hue("nuclearcraft:a"), graphview._hue("nuclearcraft:b"))
