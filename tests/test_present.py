@@ -289,6 +289,44 @@ class TreeRoadblockTest(unittest.TestCase):
         for state in machines.STATES:
             self.assertIn(".%s{" % present.STATE_BADGE[state], render.CSS, state)
 
+    def test_the_machine_link_is_styled_for_the_prose_it_sits_in(self):
+        """An unstyled <a> takes the browser default, blue and underlined, inside dim
+        11.5px meta text, and there is one per craft node. It follows `.crumb a`."""
+        self.assertIn(".mlink{color:inherit;text-decoration:none", render.CSS)
+        # Gated like every other :hover in this sheet, per the standing rule up top.
+        self.assertIn("@media(hover:hover){.mlink:hover", render.CSS)
+
+    def test_the_machines_panel_links_and_explains_the_same_as_the_tree(self):
+        """The panel is the SUMMARY of the roadblocks the tree marks, and it listed them as
+        dead text with no reason, so the one place holding the whole list was the one place
+        you could not click through from."""
+        page = render.render_html({
+            "target": "mod:x", "target_name": "X", "qty": 1, "nodes": 1,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [{"category": "mod.press", "machine": "Press",
+                                   "state": machines.BUILDABLE,
+                                   "why": "craftable: mod:press"}],
+            "truncated": False,
+        })
+        self.assertIn('<a class="mlink" href="/machine?uid=mod.press">Press</a>', page)
+        self.assertIn('title="craftable: mod:press"', page)
+
+    def test_a_machine_with_no_category_still_renders(self):
+        # `machine_href` has nothing to point at, and a dead link is worse than plain text.
+        # Asserted on the anchor, not on the word: `.mlink` is in the stylesheet regardless.
+        page = render.render_html({
+            "target": "mod:x", "target_name": "X", "qty": 1, "nodes": 1,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [{"machine": "Press", "state": machines.BUILDABLE}],
+            "truncated": False,
+        })
+        self.assertNotIn('<a class="mlink"', page)
+        self.assertIn("<td>Press</td>", page)
+
 
 class RoadblockPredicateTest(unittest.TestCase):
     def test_only_a_machine_you_do_not_have_counts(self):

@@ -131,6 +131,13 @@ letter-spacing:.03em;white-space:nowrap}
 .muted{background:var(--mutedbg);color:var(--dim)}
 .kids{margin-left:15px;border-left:1px solid var(--line);padding-left:9px}
 .meta{color:var(--dim);font-size:11.5px}
+/* Machine links, in the tree's meta line and in the machines panel. `color:inherit` and no
+   underline, matching `.crumb a`: a default blue underlined link inside dim 11.5px prose
+   outshouts the item name it sits behind, and there are one of these per craft node. The
+   dotted rule is what still says it is clickable. */
+.mlink{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
+@media(hover:hover){.mlink:hover{color:var(--accent);border-bottom-style:solid}}
+.mlink:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .bar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
 button{font:500 12.5px var(--sans);padding:6px 12px;border:1px solid var(--line);
 background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
@@ -278,6 +285,19 @@ def _has_roadblock(node):
     return any(_has_roadblock(c) for c in node.get("children") or ())
 
 
+def _machine_link(uid, name):
+    """A machine's name, linked to the page explaining it when there is a uid to link to.
+
+    Shared by the tree node and the "machines to build first" panel. The panel is the
+    SUMMARY of the same roadblocks the tree marks, and it listed them as dead text while the
+    tree linked them, so the one place with the whole list was the one place you could not
+    click through from.
+    """
+    if not uid:
+        return _esc(name)
+    return '<a class="mlink" href="%s">%s</a>' % (machine_href(uid), _esc(name))
+
+
 def _machine_bit(node, name):
     """The machine on a tree node: its name, linked, plus a state badge when it blocks.
 
@@ -290,10 +310,7 @@ def _machine_bit(node, name):
     of them would be a wall of green that hides the four that matter. That is the ask: only
     the roadblock is worth marking.
     """
-    uid = node.get("category")
-    label = _esc(name)
-    if uid:
-        label = '<a class="mlink" href="%s">%s</a>' % (machine_href(uid), label)
+    label = _machine_link(node.get("category"), name)
     state = node.get("machine_state")
     if not is_roadblock(state):
         return label
@@ -375,9 +392,10 @@ def _machines_html(machines):
     if not machines:
         return ""
     rows = "".join(
-        '<tr><td>%s</td><td><span class="badge %s">%s</span></td></tr>'
-        % (_esc(m.get("machine") or m.get("category")),
+        '<tr><td>%s</td><td><span class="badge %s"%s>%s</span></td></tr>'
+        % (_machine_link(m.get("category"), m.get("machine") or m.get("category")),
            STATE_BADGE.get(m.get("state"), "need"),
+           (' title="%s"' % _esc(m["why"])) if m.get("why") else "",
            _esc(STATE_LABEL.get(m.get("state"), m.get("state", "?"))))
         for m in machines)
     unknowns = sum(1 for m in machines if m.get("state") == "unknown")
