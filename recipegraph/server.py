@@ -122,6 +122,9 @@ border:1px solid var(--line);background:var(--card);color:var(--dim);letter-spac
 color:var(--accent)}
 .chip-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .chip-btn .n{font-variant-numeric:tabular-nums;opacity:.7;margin-left:5px}
+/* A filter that can no longer match anything reads as an honest zero rather than
+   disappearing, so the list never jumps under the cursor. */
+.chip-btn:disabled,.toolbar select option:disabled{opacity:.42;cursor:not-allowed}
 
 table.mach{width:100%;border-collapse:collapse;font-size:13.5px}
 table.mach th{text-align:left;font:600 10.5px var(--mono);letter-spacing:.1em;
@@ -639,7 +642,8 @@ MACHINES_JS = """
  var q=document.getElementById('mq'), sel=document.getElementById('mmod'),
      rows=Array.prototype.slice.call(document.querySelectorAll('#mbody tr[data-state]')),
      body=document.getElementById('mbody'), shown=document.getElementById('mshown'),
-     none=document.getElementById('mnone'), active={};
+     none=document.getElementById('mnone'), active={},
+     opts=Array.prototype.slice.call(sel.options);
  document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
    b.addEventListener('click',function(){
      var on=b.getAttribute('aria-pressed')==='true';
@@ -648,9 +652,52 @@ MACHINES_JS = """
      apply();
    });
  });
+ // The two filters narrow EACH OTHER. Picking a state used to leave the mod dropdown
+ // listing every mod at its full count, including mods with nothing in that state, so
+ // choosing one produced an empty table with no hint why.
+ //
+ // Counts come from the OTHER axis only and deliberately ignore the text box: counting
+ // against everything is more truthful but makes every number move while you type, and a
+ // moving target is harder to read than a slightly generous one.
+ function tally(){
+   var mod=sel.value, states=Object.keys(active), byMod={}, byState={};
+   rows.forEach(function(r){
+     if(!states.length||active[r.dataset.state]){
+       byMod[r.dataset.mod]=(byMod[r.dataset.mod]||0)+1;
+     }
+     if(!mod||r.dataset.mod===mod){
+       byState[r.dataset.state]=(byState[r.dataset.state]||0)+1;
+     }
+   });
+   return {mod:byMod, state:byState};
+ }
+ function reconcile(){
+   // A selection that can no longer match anything is CLEARED rather than left to show an
+   // empty table. Dropping a selection only ever widens the result, so one pass converges.
+   var t=tally(), changed=false;
+   if(sel.value && !t.mod[sel.value]){sel.value=''; changed=true;}
+   Object.keys(active).forEach(function(s){
+     if(!t.state[s]){delete active[s]; changed=true;}
+   });
+   return changed ? tally() : t;
+ }
  function apply(){
-   var text=(q.value||'').toLowerCase().trim(), mod=sel.value,
-       states=Object.keys(active), n=0;
+   var t=reconcile(), mod=sel.value, states=Object.keys(active),
+       text=(q.value||'').toLowerCase().trim(), n=0;
+   opts.forEach(function(o){
+     if(!o.value)return;                       // the "every mod" entry has no count
+     var c=t.mod[o.value]||0;
+     o.textContent=o.dataset.label+' ('+c+')';
+     // Disabled rather than removed: removing makes the list jump under the cursor,
+     // and a visible zero is an answer.
+     o.disabled=!c;
+   });
+   document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
+     var c=t.state[b.dataset.state]||0;
+     b.querySelector('.n').textContent=c;
+     b.disabled=!c && !active[b.dataset.state];
+     b.setAttribute('aria-pressed', active[b.dataset.state]?'true':'false');
+   });
    rows.forEach(function(r){
      var ok=(!text||r.dataset.hay.indexOf(text)>=0)
          && (!mod||r.dataset.mod===mod)
@@ -741,8 +788,12 @@ def machines_page(state, message="", query=""):
         "%s<span class='n'>%d</span></button>"
         % (s, STATE_LABEL.get(s, s), counts.get(s, 0))
         for s in machines_mod.STATES)
-    options = "".join("<option value='%s'>%s (%d)</option>" % (_esc(m), _esc(m or "?"), n)
-                      for m, n in sorted(mods.items(), key=lambda kv: (-kv[1], kv[0])))
+    # `data-label` so the client can rewrite the count as the state filter narrows without
+    # having to parse the existing "(28)" back out of the text.
+    options = "".join(
+        "<option value='%s' data-label='%s'>%s (%d)</option>"
+        % (_esc(m), _esc(m or "?"), _esc(m or "?"), n)
+        for m, n in sorted(mods.items(), key=lambda kv: (-kv[1], kv[0])))
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Machines</div>
@@ -781,8 +832,7 @@ def machines_page(state, message="", query=""):
     </table>
     <div class="hint2" style="margin:12px 0 0"><b id="mshown">%d</b> of %d categories
       shown. <b>Unidentified</b> means this tool could not work out which block the
-      category corresponds to, not that you cannot use it &mdash; run
-      <code>/recipedump</code> with mod v0.4.0 to fix most of these.</div>
+      category corresponds to, not that you cannot use it. %s</div>
   </div>
 </div>
 <script>%s</script>""" % (
@@ -794,6 +844,13 @@ def machines_page(state, message="", query=""):
         counts.get("unavailable", 0),
         "{:,}".format(recipes_by_state.get("unavailable", 0)),
         _esc(query), options, chips, "".join(rows), len(rows), len(rows),
+        # Telling someone who has already dumped to go and dump reads as the tool not
+        # noticing what it is holding, so say which case they are in.
+        ("These are the residue after reading JEI's own &ldquo;made in&rdquo; list, and "
+         "mostly have no machine at all."
+         if getattr(state.graph, "catalysts", None) else
+         "Run <code>/recipedump</code> with the current mod and rebuild to fix most of "
+         "these: JEI knows the exact mapping and this graph was built without it."),
         MACHINES_JS,
     )
     return _page("Machines", body)

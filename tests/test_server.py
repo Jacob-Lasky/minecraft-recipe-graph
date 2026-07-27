@@ -191,6 +191,29 @@ class ServerTest(unittest.TestCase):
         for uid in self.state.machine_info:
             self.assertIn(uid, body, uid)
 
+    def test_the_filters_get_what_they_need_to_narrow_each_other(self):
+        """#16: MACHINES_JS recounts both axes, and it reads these attributes to do it.
+
+        The counting itself is exercised in a browser (the page has no server round-trip
+        for it); this is the server-to-client contract that would silently empty the
+        dropdown if a name changed.
+        """
+        body = self.get("/machines")[2]
+        self.assertIn("data-label=", body, "option labels the client rewrites counts onto")
+        self.assertIn("data-mod=", body, "the row attribute the mod tally groups by")
+        self.assertIn("data-state=", body, "the row attribute the state tally groups by")
+        self.assertIn("<span class='n'>", body, "the chip count the client rewrites")
+
+    def test_the_unidentified_hint_reflects_whether_a_dump_was_read(self):
+        # Telling someone who has already dumped to go and dump reads as the tool not
+        # noticing what it is holding.
+        self.assertIn("Run <code>/recipedump</code>", self.get("/machines")[2])
+        self.state.graph.catalysts = {"mod.press": ["mod:press"]}
+        try:
+            self.assertIn("residue after reading JEI", self.get("/machines")[2])
+        finally:
+            self.state.graph.catalysts = {}
+
     # ---- the toggle form ----
 
     def post(self, fields, path="/machines"):
