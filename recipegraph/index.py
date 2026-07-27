@@ -3,7 +3,7 @@
 import os
 import sys
 
-from .model import Graph
+from .model import Graph, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
 from .sources import dump_meta, dump_names
@@ -258,26 +258,42 @@ def mark_container_transfers(g, quiet=True):
        recipes yielding dozens of different fluids. No real process turns one item into
        80 unrelated liquids, so past a threshold the item is a container.
 
-    Signal 2 exists because the dump cannot yet tell a filled can from an empty one: the
-    NBT that distinguishes them is dropped, so `Can -> 1,000 mB borax_solution` looks
-    like creation. Once the mod emits the contained fluid, signal 2 becomes redundant --
-    keep it until then.
+    BOTH SIGNALS COMPARE BASE KEYS, discriminator stripped, and that is load-bearing.
+    A schema-3 dump gives a filled can its own key per contained fluid, which silently
+    removed the premise of each signal at once and took detection from 7,016 recipes to
+    117 (see #34): signal 1 stopped matching because `forestry:can:1` and
+    `forestry:can:1#48a337d94489` are different strings, and signal 2 stopped reaching
+    the threshold because each filled can became its own key producing exactly one fluid.
+    Asking the question about the ITEM rather than about one NBT state of it restores
+    both, and does so identically at every schema, because `base_key` is the identity
+    function on a dump that carries no discriminators.
+
+    DO NOT "simplify" this to a direct `X -> X#something` fill/empty test. It looks
+    exact, and it misses the case that motivated the feature: Forestry's squeezer returns
+    the can's MATERIAL, so the real shape is
+    `forestry:can:1#48a337d94489 -> forestry:ingot_tin + 1,000 mB borax_solution`, with
+    the empty can nowhere in the outputs. Measured against the real graph, that test
+    catches 368 of the 7,016.
     """
     flagged = 0
+
+    def item_input_bases(recipe):
+        """Base keys of every item alternative across all input slots.
+
+        A list, not a set: signal 2 needs to know the slot was unambiguous, and
+        deduplicating first would make a two-alternative slot look like one item.
+        """
+        return [base_key(a) for ing in recipe.inputs for a in ing.alternatives
+                if is_item_key(a)]
 
     # signal 1
     for r in g.recipes:
         if r.transfer:
             continue
-        out_keys = {k for k, _q in r.outputs}
-        if not any(k.startswith("fluid:") for k in out_keys):
+        if not any(k.startswith("fluid:") for k, _q in r.outputs):
             continue
-        in_items = set()
-        for ing in r.inputs:
-            for alt in ing.alternatives:
-                if not alt.startswith(("fluid:", "ore:", "essentia:")):
-                    in_items.add(alt)
-        if in_items & out_keys:
+        out_bases = {base_key(k) for k, _q in r.outputs}
+        if set(item_input_bases(r)) & out_bases:
             r.transfer = True
             flagged += 1
 
@@ -289,8 +305,7 @@ def mark_container_transfers(g, quiet=True):
         fluid_outs = {k for k, _q in r.outputs if k.startswith("fluid:")}
         if not fluid_outs:
             continue
-        item_ins = [a for ing in r.inputs for a in ing.alternatives
-                    if not a.startswith(("fluid:", "ore:", "essentia:"))]
+        item_ins = item_input_bases(r)
         if len(item_ins) != 1:
             continue
         fluids_per_item.setdefault(item_ins[0], set()).update(fluid_outs)
@@ -303,8 +318,7 @@ def mark_container_transfers(g, quiet=True):
                 continue
             if not any(k.startswith("fluid:") for k, _q in r.outputs):
                 continue
-            item_ins = [a for ing in r.inputs for a in ing.alternatives
-                        if not a.startswith(("fluid:", "ore:", "essentia:"))]
+            item_ins = item_input_bases(r)
             if len(item_ins) == 1 and item_ins[0] in containers:
                 r.transfer = True
                 flagged += 1

@@ -12,7 +12,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import cost, generators  # noqa: E402
+import fixtures  # noqa: E402
+from recipegraph import cost, generators, index  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import STATUS_SOURCE, Solver  # noqa: E402
 
@@ -163,6 +164,95 @@ class ContainerFluidTest(unittest.TestCase):
         g = self._graph()
         costs = cost.estimate(g)
         self.assertTrue(math.isinf(costs.get("fluid:uranium_fluoride", math.inf)))
+
+
+class ContainerDetectionTest(unittest.TestCase):
+    """The DETECTOR, not the flag.
+
+    Every other suite sets `transfer = True` by hand and then checks the solver honours
+    it. That is why #34 shipped: detection collapsed from 7,016 recipes to 117 and no
+    test noticed, because no test asked `mark_container_transfers` to find anything.
+    """
+
+    def test_variants_of_one_container_are_detected_together(self):
+        # Signal 2 counts fluids per BASE key. Each filled can is its own key at schema 3
+        # and makes exactly one fluid, so counting per full key reaches a threshold of 8
+        # only if the variants are grouped back together.
+        g = fixtures.discriminated_graph()
+        flagged, containers = index.mark_container_transfers(g)
+        self.assertIn(fixtures.CAN_BASE, containers)
+        self.assertEqual(flagged, len(fixtures.CANNED_FLUIDS))
+
+    def test_the_honest_recipe_is_left_alone(self):
+        # Salt -> brine is production and shares a fluid with the container route, so a
+        # detector that flagged by fluid rather than by container would catch it.
+        g = fixtures.discriminated_graph()
+        index.mark_container_transfers(g)
+        boil = [r for r in g.recipes if r.rid == "boil"][0]
+        self.assertFalse(boil.transfer)
+        self.assertEqual(g.real_producers("fluid:brine"), [boil])
+
+    def test_emptying_a_container_is_not_a_fluid_producer(self):
+        g = fixtures.discriminated_graph()
+        index.mark_container_transfers(g)
+        # `acid` has no route but the can, so it must come out as NEED rather than free.
+        self.assertEqual(len(g.producers("fluid:acid")), 1)
+        self.assertEqual(g.real_producers("fluid:acid"), [])
+        result = Solver(g).solve("fluid:acid", 1000)
+        self.assertEqual(result["tree"]["status"], "raw")
+
+    def test_detection_is_unchanged_on_a_dump_with_no_discriminators(self):
+        # base_key is the identity function below schema 3, so an older dump must flag
+        # exactly what it always did. This is what lets the fix be ungated.
+        g = fixtures.discriminated_graph()
+        for r in g.recipes:
+            for ing in r.inputs:
+                ing.alternatives = [a.split("#")[0] for a in ing.alternatives]
+            r.outputs = [(k.split("#")[0], q) for k, q in r.outputs]
+        g._by_output = g._by_input = None
+        g._producer_cache = {}
+        flagged, containers = index.mark_container_transfers(g)
+        self.assertIn(fixtures.CAN_BASE, containers)
+        self.assertEqual(flagged, len(fixtures.CANNED_FLUIDS))
+
+    def test_a_container_that_holds_few_fluids_is_not_flagged(self):
+        # The threshold is what separates a container from a machine that happens to take
+        # one item and emit a fluid. Drop below it and nothing should be flagged.
+        g = fixtures.discriminated_graph()
+        g.recipes = [r for r in g.recipes if not r.rid.startswith("squeeze_")][:]
+        keep = fixtures.CANNED_FLUIDS[:3]
+        for fluid in keep:
+            g.add(Recipe("squeeze_%s" % fluid, "t",
+                         [("mod:ingot_tin", 1), ("fluid:%s" % fluid, 1000)],
+                         [Ingredient(["%s#%s" % (fixtures.CAN_BASE,
+                                                 fixtures.CAN_DIGESTS[fluid])], 1)],
+                         category="mod.squeezer"))
+        flagged, containers = index.mark_container_transfers(g)
+        self.assertEqual(containers, set())
+        self.assertEqual(flagged, 0)
+
+    def test_signal_one_matches_across_a_discriminator(self):
+        # `X -> X#d` and `X#d -> X` are the same container seen from either end. Before
+        # #34 these were different strings and signal 1 stopped firing entirely.
+        g = Graph()
+        g.add(Recipe("fill", "t",
+                     [("mod:tank#0123456789ab", 1), ("fluid:lava", 1000)],
+                     [Ingredient(["mod:tank"], 1)], category="mod.filler"))
+        flagged, _containers = index.mark_container_transfers(g)
+        self.assertEqual(flagged, 1)
+        self.assertTrue(g.recipes[0].transfer)
+
+    def test_meta_is_never_collapsed_into_the_base_key(self):
+        # Stripping meta as well as the discriminator would merge every metadata variant
+        # of an item into one pseudo-container. `tconstruct:ingots` would then appear to
+        # melt into every molten metal in the pack and the smeltery would be suppressed.
+        g = Graph()
+        for i, fluid in enumerate(fixtures.CANNED_FLUIDS):
+            g.add(Recipe("melt_%d" % i, "t", [("fluid:%s" % fluid, 144)],
+                         [Ingredient(["mod:ingots:%d" % i], 1)], category="mod.smeltery"))
+        flagged, containers = index.mark_container_transfers(g)
+        self.assertEqual(containers, set())
+        self.assertEqual(flagged, 0)
 
 
 class FluidScaleTest(unittest.TestCase):
