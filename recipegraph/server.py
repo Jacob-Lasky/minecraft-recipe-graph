@@ -193,6 +193,83 @@ border-top-color:var(--accent);animation:sp .8s linear infinite}
 /* No substitute animation: the label already says what is happening, so a reader who has
    asked for stillness gets a plain ring rather than a slower spin. */
 @media (prefers-reduced-motion:reduce){.spin{animation:none;border-color:var(--accent)}}
+
+/* PHONE. Same rule as the block at the end of render.CSS, and it must stay last here for
+   the same reason: these override the desktop rules above by cascade order.
+
+   700px HERE, 640px THERE, AND THAT IS NOT AN OVERSIGHT. render.CSS switches at 640
+   because that is where its own `.stats` grid goes from two columns to four, and moving
+   it would split a component across two breakpoints. A five-column table runs out of room
+   well before a two-column stat grid does, so it has to break earlier. Unifying the two
+   numbers means picking one component to render badly. */
+@media(max-width:700px){
+/* A FIVE-COLUMN TABLE CANNOT BE 390px WIDE. Measured on a 390px viewport, the machines
+   table rendered 1,424px, so the recipe count, the reason and the buttons were all off
+   the right-hand edge and the whole page scrolled sideways to reach them. Sorting by a
+   column you cannot see is not a feature.
+
+   Each row becomes a card instead. The cells are ORDERED, not just stacked, so the
+   machine name leads and the state pill and count sit together under it. That is why
+   they carry `c-` classes rather than being selected with nth-child: the sources table
+   has three of these cells and the machines table five, and nth-child would silently
+   assign the wrong rules to one of them. */
+table.mach thead{display:none}
+table.mach,table.mach tbody{display:block}
+table.mach tr{display:flex;flex-wrap:wrap;align-items:center;gap:5px 9px;
+border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 8px}
+/* `min-width:0` is load-bearing, not tidying. A flex item defaults to `min-width:auto`,
+   which means it refuses to shrink below its longest unbreakable word, and a registry id
+   like `modularmachinery:mythic_processor_melter_controller` has no break opportunity in
+   it. Without these two rules the card is as wide as its longest id, whatever
+   `flex-basis` says, and the page still scrolls sideways: 571px of it, measured. */
+table.mach td{display:block;border-top:0;padding:0;min-width:0}
+table.mach code,table.mach a.mname{overflow-wrap:anywhere}
+table.mach td.c-name{flex:1 1 100%;order:1}
+table.mach td.c-state{order:2}
+table.mach td.c-recipes{order:3;width:auto;text-align:left;font-size:12px;
+color:var(--dim)}
+/* The column header carried this word on desktop, and the header is gone here. */
+table.mach td.c-recipes::after{content:" recipes"}
+/* The evidence string is the other unbreakable one, and it got longer with #28:
+   "craftable: thermalexpansion:machine:1 (as thermalexpansion:machine:1#f56885268ad5)".
+   It overflowed INSIDE its own box, so nothing's bounding rect exceeded the viewport and
+   the page still scrolled 571px. Internal overflow of an inline is invisible to a
+   "does any element stick out" check, which is why the measurement has to be
+   scrollWidth, not geometry. */
+table.mach td.c-why{flex:1 1 100%;order:4;font-size:12.5px;overflow-wrap:anywhere}
+table.mach td.c-acts{flex:1 1 100%;order:5}
+table.mach .acts{justify-content:flex-start;flex-wrap:wrap;gap:6px}
+/* 40px is the tap-target floor. These were 26px, two per row, 503 rows. `inline-flex`
+   rather than padding alone so the min-height actually centres the label. */
+table.mach .acts button{padding:8px 12px;min-height:40px;display:inline-flex;
+align-items:center}
+/* The machine name is the primary target of the card, so give it a real one. */
+table.mach td.c-name a.mname{display:inline-flex;align-items:center;min-height:40px}
+/* A hover tint on a touch screen sticks after the tap and reads as a selection. */
+table.mach tbody tr:hover{background:transparent}
+
+/* The mod dropdown had no width bound, so a long mod name made it wider than the screen
+   and it was the second thing spilling out of the machines page. */
+.toolbar{gap:7px}
+.toolbar select,.toolbar input[type=search]{flex:1 1 100%;max-width:100%;min-height:44px}
+.chip-btn{padding:8px 12px;min-height:40px}
+
+/* The state stripe lives on the first CELL, which is the row's left edge in a table and
+   is NOT the left edge of a card, where it rendered as a green bar floating in the
+   middle of the row. Same signal, moved to the edge the card actually has. */
+table.mach tr[data-state] td:first-child{border-left:0}
+table.mach tr[data-state]{border-left-width:3px}
+table.mach tr[data-state=have]{border-left-color:var(--ok)}
+table.mach tr[data-state=buildable]{border-left-color:var(--warn)}
+table.mach tr[data-state=unknown]{border-left-color:var(--dim)}
+table.mach tr[data-state=unavailable]{border-left-color:var(--need)}
+
+/* Four tabs at 13.5px with 13px of side padding wrapped onto two rows, spending a whole
+   line of a phone screen on one tab that is always visible anyway. */
+nav.top{gap:0;font-size:12px;margin-bottom:16px}
+nav.top a,nav.top span.cur{padding:8px 7px;gap:4px;min-height:40px}
+.crumb{font-size:12.5px}
+}
 """
 
 
@@ -789,12 +866,12 @@ def machines_page(state, message="", query=""):
         rows.append(
             "<tr data-state='%s' data-rank='%d' data-name='%s' data-uid='%s' "
             "data-mod='%s' data-recipes='%d' data-hay='%s'>"
-            "<td><span class='pill %s'>%s</span></td>"
-            "<td><a class='mname' href='%s'>%s</a>"
+            "<td class='c-state'><span class='pill %s'>%s</span></td>"
+            "<td class='c-name'><a class='mname' href='%s'>%s</a>"
             "%s<br><code>%s</code></td>"
-            "<td class='n'>%s</td>"
-            "<td class='hint2' style='margin:0'>%s</td>"
-            "<td><div class='acts'>%s</div></td></tr>"
+            "<td class='n c-recipes'>%s</td>"
+            "<td class='hint2 c-why' style='margin:0'>%s</td>"
+            "<td class='c-acts'><div class='acts'>%s</div></td></tr>"
             % (st, STATE_RANK.get(st, UNRANKED), _esc(name.lower()), _esc(uid.lower()),
                _esc(info["mod"]), info["recipes"], _esc(hay),
                STATE_PILL.get(st, "mut"), STATE_LABEL.get(st, st),
@@ -1006,9 +1083,9 @@ def sources_page(state, message=""):
     """What the planner treats as free, on what evidence, and how to change it."""
     ov = state.source_overrides
     rows = "".join(
-        "<tr><td><a class='mname' href='%s'>%s</a><br><code>%s</code></td>"
-        "<td class='hint2' style='margin:0'>%s</td>"
-        "<td><div class='acts'>%s</div></td></tr>"
+        "<tr><td class='c-name'><a class='mname' href='%s'>%s</a><br><code>%s</code></td>"
+        "<td class='hint2 c-why' style='margin:0'>%s</td>"
+        "<td class='c-acts'><div class='acts'>%s</div></td></tr>"
         % (item_href(key), _item(state.graph, key), _esc(key), _esc(why),
            _source_button("disable", "not free", "stop treating this as free", key=key))
         for key, why in sorted(state.free_sources.items()))

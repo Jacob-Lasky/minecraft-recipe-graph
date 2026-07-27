@@ -104,7 +104,10 @@ details[open]>summary .tw{transform:rotate(90deg)}
 @media(prefers-reduced-motion:reduce){.tw{transition:none}}
 .qty{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--dim);
 flex:0 0 auto;font-size:12.5px}
-.nm{flex:1 1 auto;min-width:0}
+/* `min-width:0` lets the flex item shrink; `overflow-wrap` is what makes it actually
+   break. Registry ids and machine names have no spaces to break at, so without this a
+   single long one pushes the row past the viewport however narrow the column gets. */
+.nm{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 .badge{flex:0 0 auto;font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;
 letter-spacing:.03em;white-space:nowrap}
 .ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}
@@ -141,7 +144,46 @@ display:inline-block}
 .t-fluid{background:var(--fluidbg);color:var(--fluidfg)}
 .t-essentia{background:var(--essbg);color:var(--essfg)}
 .t-ore{background:var(--orebg);color:var(--orefg)}
+
+/* PHONE. Every rule here answers something measured on a 390px viewport, not something
+   imagined, and the numbers in the comments are from that measurement.
+
+   LAST IN THE SHEET ON PURPOSE. These are overrides of the rules above and they win by
+   cascade order, so moving this block earlier silently disables half of it. */
+@media(max-width:640px){
+/* 32px of side padding on a 390px screen is a sixth of the width, and the header stack
+   (eyebrow, h1, id, four stat tiles, four buttons) pushed the first tree node 1,030px
+   down: past the fold before a single answer was visible. */
+.wrap{padding:18px 15px 64px}
+h1{font-size:22px}
+h1 .x{font-size:16px;margin-left:6px}
+.id{margin-top:6px}
+.stats{margin:15px 0 14px}
+.stat{padding:10px 12px}
+.stat .v{font-size:18px;margin-top:5px}
+.stat .k{font-size:9.5px}
+
+/* The tree indented 24px per level, so a depth-5 node had 270px left to hold a quantity,
+   a name, a machine and a badge, and nearly every node wrapped to three or four lines.
+   14px still reads as a step without spending the screen on it. */
+.kids{margin-left:6px;padding-left:8px}
+.leaf{padding-left:16px}
+
+/* The machine name and recipe count flowed inline after the item name, so "Borax
+   Solution" and "Recursive Processor: Chemical Reactor - 5 recipes" wrapped together as
+   one paragraph. On its own line each is a separate thing to scan. */
+.meta{display:block;margin-top:1px;line-height:1.45}
+
+/* These rows were 24px high. 44px is the tap-target floor, and a plan is mostly a list
+   of things you are trying to tap. */
+summary,.leaf{padding-top:9px;padding-bottom:9px;gap:8px}
+.tw{flex:0 0 14px;font-size:12px}
+button{padding:9px 13px;font-size:13px;min-height:40px}
+.filter{min-height:44px}
+.bar{gap:7px;margin-bottom:14px}
+}
 """
+
 
 def kind_chip(kind):
     label = KIND_CHIP.get(kind)
