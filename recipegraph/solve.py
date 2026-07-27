@@ -18,6 +18,7 @@ The three things that make this non-trivial, and how each is handled:
 
 import collections
 
+from .cost import input_cost, recipe_cost
 from .machines import is_hand_crafting
 from .model import merge_slots, split_key
 
@@ -101,9 +102,10 @@ class Solver:
         # as before; the CLI and the server supply it. See tokens.py.
         self.token_kinds = dict(token_kinds or {})
         self.tokens_needed = collections.Counter()
-        # Precomputed lower-bound cost per item. Without it recipe choice is greedy and
-        # local, which is how a two-step chemical route lost to an enormous chain through
-        # machines that happened to be owned. See cost.py.
+        # Precomputed cost per item, from cost.estimate. Without it recipe choice is greedy
+        # and local, which is how a two-step chemical route lost to an enormous chain
+        # through machines that happened to be owned. A RANKING, not a lower bound and not
+        # a quantity -- see the docstring in cost.py before doing arithmetic with these.
         self.costs = costs
         self.leaf_totals = collections.Counter()
         self.used_from_stock = collections.Counter()
@@ -147,34 +149,64 @@ class Solver:
 
     # ---- choice ---------------------------------------------------------
 
+    def slot_cost(self, key, qty=1):
+        """What `qty` of `key` adds to a recipe's price, or 0.0 with no costs supplied.
+
+        Delegates to `cost.input_cost` rather than reading `self.costs` directly, so an
+        oredict key resolves to its cheapest member and a fluid is scaled to buckets by
+        the same code that priced the recipe. A local copy of that arithmetic would be a
+        second place for it to drift.
+
+        Zero rather than infinity for the no-costs case ON PURPOSE: every candidate then
+        ties and the cost tiebreaks below go inert, so a Solver built without `costs`
+        behaves exactly as it did before cost became a factor in these choices.
+        """
+        if self.costs is None:
+            return 0.0
+        return input_cost(self.costs, key, qty, self.g.ore_members)
+
+    def _alternative_rank(self, key, qty):
+        """Sort key for one option in a slot: reachable-and-owned first, then cheapest."""
+        score = 0.0
+        if key.startswith("ore:"):
+            members = self.g.ore_members.get(key[4:], [])
+            score += max((self.available(m) for m in members), default=0) / 1e6
+        else:
+            score += min(self.available(key), 1e6) / 1e6
+            if key in self.free_sources:
+                score += 1.0   # an infinite source beats a finite pile of anything
+            if key in self.craftables:
+                score += 0.5
+            if self.g.real_producers(key):
+                score += 0.25
+        return (score, -self.slot_cost(key, qty))
+
     def pick_alternative(self, ingredient):
-        """Which of an input slot's alternatives to actually use."""
+        """Which of an input slot's alternatives to actually use.
+
+        Availability first, then CHEAPEST. Without the cost tiebreak an unstocked slot had
+        nothing to separate its options and fell through to whichever the dump happened to
+        list first, which is how a plan for one Lapis picked Nether Lapis Ore and went off
+        to compress Netherrack six times. See issue #29.
+
+        THIS IS ALSO WHAT PRICES A RECIPE. `estimated_cost` passes this method to
+        `cost.recipe_cost`, so whatever is chosen here is what the recipe is scored on. The
+        two cannot drift apart, which is the point: they used to, and the ranker's price
+        came from an option the expander never took.
+        """
         alts = ingredient.alternatives
         if len(alts) == 1:
             return alts[0]
-        best, best_score = alts[0], -1.0
-        for a in alts:
-            score = 0.0
-            if a.startswith("ore:"):
-                members = self.g.ore_members.get(a[4:], [])
-                score += max((self.available(m) for m in members), default=0) / 1e6
-            else:
-                score += min(self.available(a), 1e6) / 1e6
-                if a in self.free_sources:
-                    score += 1.0   # an infinite source beats a finite pile of anything
-                if a in self.craftables:
-                    score += 0.5
-                if self.g.real_producers(a):
-                    score += 0.25
-            if score > best_score:
-                best, best_score = a, score
-        return best
+        return max(alts, key=lambda a: self._alternative_rank(a, ingredient.qty))
 
     def estimated_cost(self, recipe):
         if self.costs is None:
             return 0.0
-        from .cost import recipe_cost
-        return recipe_cost(self.costs, recipe, self.g.ore_members, self.machine_states)
+        # `pick=self.pick_alternative` is load-bearing, not tidiness: it makes the recipe
+        # score the cost of the branch `_build` will actually expand. DO NOT drop it back to
+        # the default cheapest-alternative rule -- see the docstring on `recipe_cost`.
+        return recipe_cost(self.costs, recipe, self.g.ore_members, self.machine_states,
+                           pick=self.pick_alternative)
 
     def score_recipe(self, recipe, ancestors=frozenset()):
         """Higher is better: prefer recipes we can mostly satisfy from stock.
@@ -242,7 +274,10 @@ class Solver:
             return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
                     "label": self.g.bare_name(key), "need": need,
                     "status": STATUS_RAW, "note": "oredict members unknown"}
-        best = max(members, key=lambda m: (self.available(m), m in self.craftables))
+        # Same three-tier rule as `pick_alternative`, for the same reason: with nothing in
+        # stock every member ties on availability and the choice used to fall to dump order.
+        best = max(members, key=lambda m: (self.available(m), m in self.craftables,
+                                           -self.slot_cost(m, need)))
         child = self.expand(best, need, ancestors, depth)
         return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
                 "label": self.g.bare_name(key), "need": need,

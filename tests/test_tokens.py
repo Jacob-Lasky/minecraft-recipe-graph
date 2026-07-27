@@ -97,7 +97,8 @@ class ResolveTest(unittest.TestCase):
         later correction here would be overridden by a stale copy of itself."""
         path = os.path.join(tempfile.mkdtemp(), "tokens.json")
         tokens.save_overrides(path, {"mod:x": tokens.LOOT}, ["contenttweaker:boss_drop"])
-        doc = json.load(open(path))
+        with open(path) as fh:
+            doc = json.load(fh)
         self.assertEqual(doc["tokens"], {"mod:x": tokens.LOOT})
         self.assertEqual(doc["disabled"], ["contenttweaker:boss_drop"])
         self.assertNotIn("contenttweaker:dungeon_drop", doc["tokens"])

@@ -236,8 +236,35 @@ for: a plan that routes through a nuclear fission chain to obtain a common reage
 
 Chemistry chains run 10+ hops, so the Bellman-Ford relaxation needs ~20 passes, not 6. The
 table is cached at `data/.cost-cache.json`, fingerprinted on graph mtime, stock, machine
-states AND the tuning constants -- so editing `MACHINE_COST` invalidates it rather than
-silently reusing old prices.
+states, the tuning constants AND `cost.FORMULA_VERSION` -- so editing `MACHINE_COST`
+invalidates it, and so does changing the arithmetic, which moves no other input at all.
+**Bump `FORMULA_VERSION` whenever you touch the per-unit formula**, or every machine
+holding a cache keeps serving pre-change prices and the fix looks like it did not work.
+
+**Only the ingredients amortise over a recipe's output quantity; the machine is charged per
+run.** The pack has a Hostile Computing Unit recipe yielding 1,024 iron ingots and an
+Enchanted Greenhouse one yielding 60,466,176 fruit, so dividing the machine by the batch
+made it free: the 5,000 wall in front of an *unavailable* machine came out at 8e-5, and 126
+items -- diamond, coal, string, redstone -- priced under 0.1. Symptom to watch for: a basic
+material routing through a mob-simulation multiblock. The estimate is therefore **not a
+lower bound**, deliberately; it is a ranking.
+
+**Whatever picks a slot's alternative must also be what prices it.** `Solver.estimated_cost`
+passes `pick=self.pick_alternative` into `cost.recipe_cost` for exactly this reason. The
+iron-ingot unpacking recipe accepts a Block of Iron *or* a decorative Chisel block; the
+Chisel block is a raw leaf at `BASE_RAW_COST`, so the recipe priced at 2.0 and beat smelting
+an ore, and then the solver expanded the Block of Iron, which is cast from 1,296 mB of
+molten iron. Nothing was mispriced. The price was for a route nobody took.
+
+**With an empty pool every alternative ties, so cost has to be the tiebreak.** Both
+`pick_alternative` and `resolve_ore` used to fall through to dump order, which is how one
+Lapis Lazuli became six rounds of compressing Netherrack. Availability still wins: cost only
+separates options the pool cannot.
+
+`FLUID_SCALE` was the suspected cause of the 1,296 mB iron plan and was not involved. Ranking
+a fluid chain against an item chain was fine; the batch amortisation and the pricing/expansion
+disagreement were doing all the damage, and fixing them also cut a plan for one iron ingot
+from 43s (truncated at the work budget) to 0.01s.
 
 ## Infinite generators are a curated list, not an inference
 

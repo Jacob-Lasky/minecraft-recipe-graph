@@ -13,9 +13,16 @@ Both are the same mistake: a locally attractive recipe whose subtree is ruinous.
 is to precompute, for every item, roughly what it costs to obtain, then let the solver
 pick the recipe with the cheapest total. That turns choice from a guess into a comparison.
 
-THE ESTIMATE IS A LOWER BOUND, NOT A PLAN. It ignores cycles, assumes inputs can be had
+THE ESTIMATE IS A RANKING, NOT A PLAN. It ignores cycles, assumes inputs can be had
 independently, and never double-counts shared intermediates. It exists to rank recipes,
 not to be reported as a real cost. DO NOT surface these numbers to users as quantities.
+
+It is deliberately NOT a lower bound, and that distinction is the fix for issue #29. A true
+lower bound amortises everything over the output quantity, and the pack contains recipes
+that output 1,024 iron ingots or 60,466,176 fruit at once; amortising the machine over
+those makes it free and prices the output at nothing. Cost of ENTRY (the machine) is
+charged per run and only the ingredients amortise, so a route cannot be made cheap by
+being enormous. See the comment on `per_unit` in `estimate`.
 
 Costs are relaxed iteratively (Bellman-Ford style) rather than solved exactly: the graph
 has cycles and AND-nodes (a recipe needs *all* its inputs), so there is no simple
@@ -58,6 +65,14 @@ FLUID_SCALE = 1.0 / 1000.0
 BASE_RAW_COST = 1.0        # an item with no recipe: assume it can be obtained somehow
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
+# Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
+# The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
+# formula change moves none of them, so without this a machine holding `.cost-cache.json`
+# would keep serving prices computed by the old arithmetic forever -- the one failure this
+# cache must never have, and one that looks like "the fix did not work" rather than like a
+# stale cache.
+FORMULA_VERSION = 2
+
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
 # chain unpriced. Measured on the reference pack: the last item gets a price at pass 12 and
@@ -74,8 +89,13 @@ def _scaled_qty(key, qty):
     return max(q, FLUID_SCALE)
 
 
-def _input_cost(cost, key, qty, ore_members):
-    """Cheapest cost of satisfying one ingredient slot."""
+def input_cost(cost, key, qty, ore_members):
+    """Cheapest cost of satisfying one ingredient slot.
+
+    Public because the solver needs it too: `Solver.slot_cost` breaks its alternative and
+    oredict-member ties on exactly this number, and a second implementation over there
+    would be a second place for the normalisation (oredict members, fluid scale) to drift.
+    """
     if key.startswith("ore:"):
         members = ore_members.get(key[4:]) or ()
         best = math.inf
@@ -90,6 +110,23 @@ def _input_cost(cost, key, qty, ore_members):
     if math.isinf(best):
         return math.inf
     return best * _scaled_qty(key, qty)
+
+
+def _cheapest_alternative(cost, ingredient, ore_members):
+    """Which of an input slot's alternatives the ranker assumes you would use.
+
+    One rule, shared by `estimate` and `recipe_cost`, which used to hold two: `estimate`
+    compared alternatives at qty 1 and `recipe_cost` at the slot's real qty. Those happen
+    to agree, because `_scaled_qty` is linear in qty and the item/fluid ratio is therefore
+    the same at any quantity -- but they agreed by arithmetic accident, not by design, and
+    "the relaxation priced one alternative and the ranking priced another" is a bug nobody
+    would find by reading either function alone. Priced at the real qty, which is the one
+    that does not depend on that accident.
+    """
+    alts = ingredient.alternatives
+    if len(alts) == 1:
+        return alts[0]
+    return min(alts, key=lambda a: input_cost(cost, a, ingredient.qty, ore_members))
 
 
 def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None):
@@ -138,17 +175,15 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
             base = machine_cost[r.category]
             if r.transfer:
                 base += TRANSFER_PENALTY
-            total = base
+            ingredients = 0.0
             for ing in r.inputs:
-                c = _input_cost(cost, ing.alternatives[0] if len(ing.alternatives) == 1
-                                else min(ing.alternatives,
-                                         key=lambda a: _input_cost(cost, a, 1, ore_members)),
+                c = input_cost(cost, _cheapest_alternative(cost, ing, ore_members),
                                 ing.qty, ore_members)
                 if math.isinf(c):
-                    total = math.inf
+                    ingredients = math.inf
                     break
-                total += c
-            if math.isinf(total):
+                ingredients += c
+            if math.isinf(ingredients):
                 continue
             for key, qty in r.outputs:
                 # A container transfer never makes its fluid cheaper: emptying a can you
@@ -157,7 +192,16 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
                 # cannot take.
                 if r.transfer and key.startswith("fluid:"):
                     continue
-                per_unit = total / _scaled_qty(key, qty)
+                # ONLY THE INGREDIENTS AMORTISE. `base` is what running this recipe costs
+                # you at all -- overwhelmingly the machine -- and dividing it by the batch
+                # says a big enough output makes the machine free. It is not a small error:
+                # the reference pack has a Hostile Computing Unit recipe yielding 1,024 iron
+                # ingots and an Enchanted Greenhouse one yielding 60,466,176 fruit, so the
+                # 5,000 wall MACHINE_COST puts in front of an unavailable machine collapsed
+                # to 8e-5 and 126 items (diamond, coal, string, redstone) priced under 0.1.
+                # That is how "one iron ingot" came out as "smelt a Spawner Shard", which
+                # needs a Pristine Matter run, which needs bee drones. See issue #29.
+                per_unit = base + ingredients / _scaled_qty(key, qty)
                 if per_unit < cost.get(key, math.inf) - 1e-9:
                     cost[key] = per_unit
                     changed += 1
@@ -173,7 +217,8 @@ def fingerprint(graph_path, have, machine_states, free_sources):
     a manual override changes machine state without touching the graph, and mtimes move
     when a file is rewritten with identical contents. Also folds in the tuning constants,
     so editing MACHINE_COST invalidates the cache instead of silently reusing prices
-    computed under the old table.
+    computed under the old table. FORMULA_VERSION covers the other half of that: a change
+    to the arithmetic rather than to a constant, which moves no other input at all.
     """
     h = hashlib.sha256()
     try:
@@ -182,8 +227,8 @@ def fingerprint(graph_path, have, machine_states, free_sources):
     except OSError:
         h.update(str(graph_path).encode())
     h.update(repr(sorted((MACHINE_COST.items()))).encode())
-    h.update(("%r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
-                                  TRANSFER_PENALTY, PASSES)).encode())
+    h.update(("%r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
+                                     TRANSFER_PENALTY, PASSES, FORMULA_VERSION)).encode())
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
     h.update(b"\x00")
@@ -231,8 +276,19 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     return cost
 
 
-def recipe_cost(cost, recipe, ore_members, machine_states=None):
-    """Estimated cost of running one recipe once, given precomputed item costs."""
+def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
+    """Estimated cost of running one recipe once, given precomputed item costs.
+
+    `pick(ingredient) -> alternative` names, per slot, the option whoever is asking will
+    ACTUALLY use; it defaults to the cheapest. The solver passes its own
+    `Solver.pick_alternative`, and it has to: pricing a slot at its cheapest option and
+    then expanding a different one is how "1 Iron Ingot" became "cast 1,296 mB of molten
+    iron". That recipe's slot accepts a Block of Iron or a decorative Chisel block, the
+    Chisel block is a raw leaf costing BASE_RAW_COST, so the recipe priced at 2.0 and beat
+    smelting an ore -- and then the solver expanded the Block of Iron instead, because it
+    is the one with a recipe. Nothing was mispriced; the price was simply for a route
+    nobody took. See issue #29.
+    """
     machine_states = machine_states or {}
     state = machine_states.get(recipe.category)
     total = (MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
@@ -240,11 +296,8 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None):
     if recipe.transfer:
         total += TRANSFER_PENALTY
     for ing in recipe.inputs:
-        best = math.inf
-        for alt in ing.alternatives:
-            c = _input_cost(cost, alt, ing.qty, ore_members)
-            if c < best:
-                best = c
+        alt = pick(ing) if pick else _cheapest_alternative(cost, ing, ore_members)
+        best = input_cost(cost, alt, ing.qty, ore_members)
         if math.isinf(best):
             return math.inf
         total += best
