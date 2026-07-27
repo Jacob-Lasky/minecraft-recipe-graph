@@ -432,8 +432,9 @@ class State:
         """Recompute machine states and the cost table (cost depends on machine state)."""
         overrides = machines_mod.load_overrides(self.machines_path)
         self.overrides = overrides
-        self.machine_info = machines_mod.describe(self.graph, self.placed, self.have,
-                                                  overrides=overrides)
+        self.machine_info = machines_mod.describe(
+            self.graph, self.placed, self.have, overrides=overrides,
+            no_machine=machines_mod.load_no_machine(self.machines_path))
         self.states = {uid: (i["state"], i["why"])
                        for uid, i in self.machine_info.items()}
         self.free_sources = generators_mod.resolve(

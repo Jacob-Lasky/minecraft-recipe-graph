@@ -55,7 +55,9 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # Provenance first: everything else read from this directory is only as current as the
     # dump that produced it, so say which mod wrote it before reporting what it contained.
     dump_dir = os.path.join(instance_dir, "mc-recipe-dump")
-    say(dump_meta.describe(dump_meta.read(dump_dir)))
+    meta = dump_meta.read(dump_dir)
+    say(dump_meta.describe(meta))
+    g.dump_schema = meta["schema"] or 0
 
     g.category_mods = dump_meta.category_mods(dump_dir)
     if g.category_mods:
@@ -159,7 +161,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 #   preview          Modular Machinery structure previews: the whole multiblock presented
 #                    as if it crafts a blueprint, so a plan could "craft" a blueprint by
 #                    building a 200-block structure
+#   package_contents Packaged Auto showing what is inside a package
+#   machine_produce  a list of everything a machine CAN output, not a recipe for any of it
+#   throws           Chickens' colour-egg throwing: an interaction with the world
+#   right_click      likewise, a use action presented in the recipe browser
+#   puzzle           a puzzle display
 # Squeezers, smelteries and centrifuges are REAL production and must not be added here.
+# Neither is bee or chicken breeding, which IS production and has no machine -- see
+# machines.NO_MACHINE_PATTERNS, a different answer to a different question.
 # Override per-pack with `--keep-category` if a pack uses one of these names for real work.
 NON_RECIPE_CATEGORY_PATTERNS = (
     "minecraft.anvil", "anvil",
@@ -170,6 +179,7 @@ NON_RECIPE_CATEGORY_PATTERNS = (
     "enchanter", "enchantment", "superenchant",
     "_stats", ".stats", ":stats",
     "preview",
+    "package_contents", "machine_produce", "throws", "right_click", "puzzle",
 )
 
 

@@ -165,6 +165,11 @@ class Graph:
         # never match `industrialforegoing:plant_gatherer`, and machine identification must
         # keep using `machines.same_mod` on the uid. See sources/dump_meta.category_mods.
         self.category_mods = {}
+        # Which dump schema produced this graph, 0 for none. Recorded because some
+        # judgements are only SAFE once the data supports them: see
+        # machines.SPECIES_SCHEMA, where "bee breeding needs no machine" has to wait for
+        # a dump that can tell one bee from another.
+        self.dump_schema = 0
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -391,6 +396,7 @@ class Graph:
             "ore_guessed": sorted(self.ore_guessed),
             "catalysts": self.catalysts,
             "category_mods": self.category_mods,
+            "dump_schema": self.dump_schema,
             "instance_dir": self.instance_dir,
         }
 
@@ -409,5 +415,6 @@ class Graph:
         g.ore_guessed = set(d.get("ore_guessed", ()))
         g.catalysts = d.get("catalysts") or {}
         g.category_mods = d.get("category_mods") or {}
+        g.dump_schema = d.get("dump_schema") or 0
         g.instance_dir = d.get("instance_dir")
         return g
