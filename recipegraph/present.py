@@ -41,7 +41,9 @@ STATUS_LABEL = {
 
 # status -> (fill, ink) for the diagram. Same meaning as the badge class above, expressed as
 # the CSS custom properties an SVG attribute can take.
-_MUTED = "rgba(127,127,127,.15)"
+# The one place this grey is written is `--mutedbg` in render.CSS, so a diagram box
+# and a tree badge for the same status cannot end up different greys.
+_MUTED = "var(--mutedbg)"
 STATUS_STYLE = {
     STATUS_HAVE: ("var(--okbg)", "var(--ok)"),
     STATUS_PARTIAL: ("var(--warnbg)", "var(--warn)"),
@@ -52,6 +54,37 @@ STATUS_STYLE = {
     STATUS_DEPTH: (_MUTED, "var(--dim)"),
     STATUS_OREDICT: (_MUTED, "var(--dim)"),
 }
+
+def status_legend(statuses=ALL_STATUSES):
+    """`[(fill, ink, labels)]` explaining the diagram's box colours, one row per FILL.
+
+    Generated from STATUS_STYLE and STATUS_LABEL rather than written out beside them, so the
+    legend cannot end up describing colours the diagram stopped using. It also means the
+    legend and the tree badges say the same words for the same status, which they must: a
+    reader who learns "part stock" from one should recognise it in the other.
+
+    Grouped by fill because two statuses can SHARE one. `have` and `source` are both green;
+    `cycle`, `depth` and `oredict` are all grey. Listing those as separate rows would put two
+    identical swatches in one legend, which reads as a bug in the legend rather than as the
+    truth about the diagram, which is that green means either of them.
+
+    Order follows ALL_STATUSES, not the argument, so the legend does not reshuffle between
+    two plans that happen to contain the same statuses in a different order.
+    """
+    wanted = set(statuses)
+    by_fill = {}
+    rows = []
+    for status in ALL_STATUSES:
+        if status not in wanted:
+            continue
+        fill, ink = STATUS_STYLE[status]
+        labels = by_fill.get(fill)
+        if labels is None:
+            labels = by_fill[fill] = []
+            rows.append((fill, ink, labels))
+        labels.append(STATUS_LABEL[status][0])
+    return [(fill, ink, ", ".join(labels)) for fill, ink, labels in rows]
+
 
 # Machine availability. `unknown` reads "unidentified" to the player, because "unknown"
 # invites reading it as "unknown whether you can use it" when it means "this tool could not

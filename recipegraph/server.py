@@ -99,7 +99,7 @@ outline-offset:-2px}
 .pill{font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;flex:0 0 auto}
 .pill.ok{background:var(--okbg);color:var(--ok)}
 .pill.no{background:var(--needbg);color:var(--need)}
-.pill.mut{background:rgba(127,127,127,.15);color:var(--dim)}
+.pill.mut{background:var(--mutedbg);color:var(--dim)}
 /* Nav items are links AND targets, so they get an icon, a hit area and a visible
    current-page state. Text-only links at 13.5px did not read as clickable. */
 nav.top{display:flex;gap:4px;font-size:13.5px;margin-bottom:22px;flex-wrap:wrap;

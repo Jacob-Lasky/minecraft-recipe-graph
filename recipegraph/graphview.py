@@ -16,7 +16,7 @@ meaningful direction, and a force layout would throw both away in exchange for w
 
 from .htmlutil import esc as _esc
 from .htmlutil import item_href
-from .present import STATUS_STYLE
+from .present import STATUS_STYLE, status_legend
 from .solve import STATUS_CRAFT
 
 # Geometry. Rows are tight because a real plan is tall and narrow: 100 nodes at 30px is
@@ -121,11 +121,35 @@ def layout(tree, max_nodes=400):
     return nodes, links, rows
 
 
-def render_svg(tree, max_nodes=400):
-    """A self-contained <svg> for a solved plan tree. No script, no external assets."""
+def render_legend(nodes):
+    """The colour key for a set of laid-out nodes, or "" when there is nothing to key.
+
+    Takes the LAID-OUT nodes rather than the tree, because a plan can be truncated at
+    `max_nodes` and a legend must describe the boxes that are actually on the page. Built
+    from the same `present` tables the boxes are filled from.
+
+    Fills arrive as `var(--token)`, so they go in a style attribute: the swatch has to be the
+    exact colour of the box it explains, and that colour is only knowable from the token.
+    """
+    rows = status_legend({n["status"] for n in nodes})
+    if not rows:
+        return ""
+    return ('<ul class="legend">%s</ul>' % "".join(
+        '<li><span class="sw" style="background:%s;border-color:%s"></span>%s</li>'
+        % (fill, ink, _esc(labels)) for fill, ink, labels in rows))
+
+
+def render_diagram(tree, max_nodes=400):
+    """`(svg, legend)` for a solved plan tree. No script, no external assets.
+
+    ONE entry point returning both, deliberately. The legend has to describe the boxes that
+    were drawn, and a plan gets truncated at `max_nodes`, so building it from a second
+    independent walk of the tree could name a colour that is not on the page. Both come out
+    of one `layout`.
+    """
     nodes, links, rows = layout(tree, max_nodes)
     if not nodes:
-        return '<div class="meta">Nothing to draw.</div>'
+        return '<div class="meta">Nothing to draw.</div>', ""
 
     depth_max = max(n["depth"] for n in nodes)
     width = PAD_X * 2 + depth_max * COL + BOX_W
@@ -182,7 +206,8 @@ def render_svg(tree, max_nodes=400):
         '<svg class="diagram" viewBox="0 0 %d %d" width="%d" height="%d" '
         'role="img" aria-label="crafting plan diagram">'
         '<g class="lk">%s</g>%s</svg>'
-        % (width, height, width, height, "".join(edges), "".join(boxes))
+        % (width, height, width, height, "".join(edges), "".join(boxes)),
+        render_legend(nodes),
     )
 
 
@@ -206,4 +231,11 @@ stroke-width:2}
    page scroll sideways. */
 .diagwrap{overflow:auto;max-height:74vh;border:1px solid var(--line);border-radius:11px;
 background:var(--card);padding:6px}
+/* Colour key. Sits ABOVE the diagram: it is what makes the fills readable, so a reader
+   should meet it before the boxes, not after scrolling a tall plan. Wraps rather than
+   scrolls, because it is short and losing an entry off the right edge would defeat it. */
+.legend{display:flex;flex-wrap:wrap;gap:5px 15px;list-style:none;margin:0 0 11px;padding:0;
+font-size:11.5px;color:var(--dim)}
+.legend li{display:flex;align-items:center;gap:6px}
+.legend .sw{width:11px;height:11px;border-radius:3px;border:1px solid;flex:0 0 auto}
 """

@@ -75,7 +75,7 @@ class LayoutTest(unittest.TestCase):
 
 class RenderTest(unittest.TestCase):
     def test_svg_is_self_contained_and_has_a_node_per_step(self):
-        svg = graphview.render_svg(plan())
+        svg, _legend = graphview.render_diagram(plan())
         self.assertTrue(svg.startswith("<svg"))
         self.assertEqual(svg.count('class="nd"'), 8)
         # No external asset may be referenced: the artifact CSP blocks every off-host request.
@@ -83,11 +83,11 @@ class RenderTest(unittest.TestCase):
             self.assertNotIn(forbidden, svg, forbidden)
 
     def test_every_box_links_to_a_plan_for_that_item(self):
-        svg = graphview.render_svg(plan())
+        svg, _legend = graphview.render_diagram(plan())
         self.assertIn('href="/plan?item=nc%3Aborax&amp;qty=1"', svg)
 
     def test_fluids_are_marked_and_carry_mB(self):
-        svg = graphview.render_svg(plan())
+        svg, _legend = graphview.render_diagram(plan())
         self.assertIn("128,000 mB", svg)
         # The root is an item, so its quantity carries no unit.
         self.assertIn(">64<", svg)
@@ -96,23 +96,48 @@ class RenderTest(unittest.TestCase):
         nodes, _l, _r = graphview.layout(plan())
         longest = max(len(n["label"]) for n in nodes)
         self.assertLessEqual(longest, graphview.MAX_LABEL)
-        self.assertIn("…", graphview.render_svg(plan()))
+        self.assertIn("…", graphview.render_diagram(plan())[0])
 
     def test_status_colours_come_from_the_shared_tokens(self):
         # The same status must mean the same thing in the tree and the diagram.
-        svg = graphview.render_svg(plan())
+        svg, _legend = graphview.render_diagram(plan())
         self.assertIn("var(--okbg)", svg)     # in stock / infinite source
         self.assertIn("var(--craftbg)", svg)  # crafted
+
+    def test_the_legend_explains_the_colours_this_plan_actually_used(self):
+        """#49: yellow and blue had no legend entry anywhere on the page."""
+        _svg, legend = graphview.render_diagram(plan())
+        self.assertIn("in stock, infinite", legend)   # both green, one row
+        self.assertIn("craft", legend)
+        self.assertIn("background:var(--okbg)", legend)
+        self.assertIn("background:var(--craftbg)", legend)
+        # This plan has no partial and no raw node, so their colours are not on the page
+        # and must not be in its key.
+        self.assertNotIn("part stock", legend)
+        self.assertNotIn("NEED", legend)
+
+    def test_the_legend_describes_the_boxes_that_were_drawn_not_the_whole_tree(self):
+        """A truncated plan draws fewer statuses than the tree contains. The legend comes
+        out of the same `layout` as the boxes so it cannot name a colour that is absent."""
+        svg, legend = graphview.render_diagram(plan(), max_nodes=1)
+        self.assertEqual(svg.count('class="nd"'), 1)
+        # The root is a craft node; the green source nodes below it were never drawn.
+        self.assertIn("craft", legend)
+        self.assertNotIn("in stock", legend)
+
+    def test_an_empty_plan_has_no_empty_legend_shell(self):
+        _svg, legend = graphview.render_diagram({}, max_nodes=0)
+        self.assertEqual(legend, "")
 
     def test_mod_hue_is_stable_and_shared_within_a_mod(self):
         self.assertEqual(graphview._hue("nuclearcraft:a"), graphview._hue("nuclearcraft:b"))
         self.assertNotEqual(graphview._hue("nuclearcraft:a"), graphview._hue("botania:a"))
 
     def test_an_empty_tree_does_not_raise(self):
-        self.assertIn("Nothing to draw", graphview.render_svg({}, max_nodes=0))
+        self.assertIn("Nothing to draw", graphview.render_diagram({}, max_nodes=0)[0])
 
     def test_markup_in_a_name_is_escaped(self):
-        svg = graphview.render_svg(node("mod:x", label='<script>"&'))
+        svg, _legend = graphview.render_diagram(node("mod:x", label='<script>"&'))
         self.assertNotIn("<script>", svg)
         self.assertIn("&lt;script&gt;", svg)
 
