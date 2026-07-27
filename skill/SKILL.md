@@ -125,8 +125,17 @@ test that lints all four stylesheets for this.
 **Audit INTERACTIVE state, not just page loads.** `tools/mobile-audit.js` types into
 search and taps a filter chip, because an audit that only navigated to each page passed
 clean while every search result rendered with its name at zero width. Run it against a
-running server: `node tools/mobile-audit.js http://host:8765` (needs a local
-`npm i playwright`; it is not a repo dependency and CI stays stdlib-only).
+running server:
+
+```bash
+corepack enable pnpm && pnpm install && pnpm run browsers   # once
+pnpm run audit:mobile http://host:8765
+```
+
+**pnpm, not npm.** playwright is a pinned devDependency with a committed lockfile, and
+pnpm's own version lives in `packageManager` in `package.json` so corepack reads it. Dev
+tooling only: recipegraph itself is Python 3 stdlib, the image copies `recipegraph/` and
+nothing else, and CI stays stdlib-only.
 
 **`getDisplayName()` returns format codes.** 14,425 of 340,324 names arrived as
 `§3Abyssalnite Axe`. `dump_names.load` cleans them now, the same way `load_items_csv`
