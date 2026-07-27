@@ -96,6 +96,31 @@ rsync -avz --partial data/graph.json data/ae2_have.json \
 That moves ~115 MB rather than several gigabytes of jars. Tower notices the file changed
 and the **Reload** button picks it up with no restart.
 
+### Changing the UI means measuring it at 390px
+
+The UI is used on a phone. Before and after any layout change, drive it with Playwright at
+a 390px viewport and measure; do not eyeball it at desktop width and assume.
+
+**Measure `scrollWidth`, not geometry.** "Does any element's bounding box stick out" misses
+the common case: an unbreakable string overflows INSIDE its own box, so every rect looks
+fine while the page still scrolls sideways. That is how a 571px-wide page hid from a check
+that reported no offenders. Compare `el.scrollWidth > el.clientWidth` per element.
+
+**A flex item defaults to `min-width:auto`,** which means it refuses to shrink below its
+longest unbreakable word, and `flex-basis` is simply ignored. Registry ids
+(`modularmachinery:mythic_processor_melter_controller`) and the machine evidence strings
+have no break opportunity, so any container holding one needs `min-width:0` AND
+`overflow-wrap:anywhere`. One without the other does nothing.
+
+**A multi-column table cannot be 390px wide.** The machines table rendered 1,424px. Rows
+become cards below 700px, ordered by the `c-` classes on each cell. Those classes are the
+contract between the row template and the card CSS, and `tests/test_server.py` asserts it
+in both directions; add a cell and you add a class.
+
+The two phone blocks sit LAST in `render.CSS` and in `server.HOME_CSS` because they win by
+cascade order. They use different breakpoints on purpose, 640 and 700, and the comment
+says why.
+
 **Item icons are not available and cannot be faked from the id.** A registry id does not map
 to a texture path by any convention; the mapping lives in each mod's models and blockstate
 JSON. Real icons need a sprite sheet rendered by the dump mod. The diagram uses a per-mod hue
