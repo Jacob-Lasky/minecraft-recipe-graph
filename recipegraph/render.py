@@ -719,8 +719,8 @@ def render_explore_html(payload, coverage_note=None):
 <div class="wrap">
   <div class="eyebrow">Item explorer</div>
   <h1>%s<span class="x">%d match%s</span></h1>
-  <div class="id">Searched %s item names%s &middot; ? on an oredict chip means membership
-  was inferred from display names, not read from the game</div>
+  <div class="id">Searched %s of %s item names%s &middot; ? on an oredict chip means
+  membership was inferred from display names, not read from the game</div>
   %s
   <input id="filter" class="filter" type="search"
          placeholder="Narrow these results&hellip;" autocomplete="off">
@@ -742,6 +742,7 @@ def render_explore_html(payload, coverage_note=None):
         (named(results[0]) if len(results) == 1 else _esc(payload["query"])),
         len(results), "" if len(results) == 1 else "es",
         "{:,}".format(payload.get("searched", 0)),
+        "{:,}".format(payload.get("named", payload.get("searched", 0))),
         (" &middot; %s" % _esc(dead)) if dead else "",
         warn,
         len(results),

@@ -30,8 +30,8 @@ from .htmlutil import esc as _esc
 from .htmlutil import item_href, machine_href
 from .model import Graph, path_of
 from .names import build_reverse
-from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED,
-                      hidden_note as present_hidden_note, kind_chip_json)
+from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, hidden_note,
+                      kind_chip_json)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
 
@@ -630,6 +630,15 @@ class State:
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
+        # The two search indexes, built here rather than on first use. Between them they
+        # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
+        # them is a keystroke -- so left lazy, the first search of a session stalls while
+        # every later one is instant, which reads as "the search is broken" rather than as
+        # "the index is warming". Startup already costs 40 to 90 seconds and the
+        # healthcheck's start-period covers it. Both counts are then what /explore reports,
+        # so neither is warm-up-only state waiting to go stale.
+        self.named = len(self.graph.labels)
+        self.searchable = len(self.graph.live_keys)
 
     def solver(self):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
@@ -1329,14 +1338,17 @@ class Handler(BaseHTTPRequestHandler):
                 hits = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
                 return self._send(json.dumps({"results": hits.results,
                                               "hidden": hits.hidden,
-                                              "note": present_hidden_note(hits.hidden)}),
+                                              "note": hidden_note(hits.hidden)}),
                                   ctype="application/json; charset=utf-8")
             if parts.path == "/explore":
                 query = one("q")
                 hits = explore_mod.search(st.graph, query, have=st.have, limit=40)
+                # `searched` is what search actually looked at, not len(names): more
+                # than half the named keys are dead and never enter the scan, so the old
+                # figure claimed a reach the search does not have.
                 payload = {"query": query, "results": hits.results,
                            "hidden": hits.hidden,
-                           "searched": len(st.graph.names)}
+                           "searched": st.searchable, "named": st.named}
                 return self._send(_wrap_fragment(
                     "Explore: %s" % query, render_explore_html(payload), st,
                     _crumb("Explore “%s”" % query), path="/explore"))

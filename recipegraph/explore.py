@@ -203,12 +203,6 @@ def describe(graph, key, have=None):
     }
 
 
-def resolve_one(graph, query):
-    """Best single key for a query, or None."""
-    hits = rank_matches(graph, query, limit=1)
-    return hits.results[0] if hits.results else None
-
-
 def name_hints(graph, query, limit=10):
     """Cheap name-only suggestions, for a CLI 'did you mean' line.
 

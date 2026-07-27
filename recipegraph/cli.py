@@ -263,8 +263,8 @@ def cmd_explore(args):
     if hits.hidden:
         print("\n" + present.hidden_note(hits.hidden))
 
-    payload = {"query": args.query, "results": results, "searched": len(g.names),
-               "hidden": hits.hidden}
+    payload = {"query": args.query, "results": results, "hidden": hits.hidden,
+               "searched": len(g.live_keys), "named": len(g.labels)}
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(payload, fh, indent=1)
