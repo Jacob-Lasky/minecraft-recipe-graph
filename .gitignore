@@ -10,3 +10,8 @@ plan*.html
 *.pyc
 __pycache__/
 mod/logs/
+
+# Dev tooling for tools/mobile-audit.js. `pnpm-lock.yaml` is deliberately NOT here:
+# committing it is most of the point of pnpm, and it is what makes
+# `pnpm install --frozen-lockfile` reproducible.
+node_modules/

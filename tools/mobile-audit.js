@@ -6,10 +6,12 @@
 // search-result row whose name was squeezed to zero width. Static pages are not the
 // whole surface; interactive state has to be exercised too.
 //
-// Not a repo dependency and not run by CI, which is stdlib-only on purpose:
+// Dev tooling only. The tool itself is Python 3 stdlib and CI stays stdlib-only; this
+// lives behind package.json so its one dependency is pinned rather than whatever the
+// machine happened to have.
 //
-//     npm i playwright && npx playwright install chromium
-//     node tools/mobile-audit.js http://127.0.0.1:8765
+//     corepack enable pnpm && pnpm install && pnpm run browsers
+//     pnpm run audit:mobile http://127.0.0.1:8765
 //
 // Two things it checks that are easy to get wrong by hand:
 //

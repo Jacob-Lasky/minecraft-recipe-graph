@@ -226,11 +226,20 @@ to shrink below an unbreakable registry id. `tools/mobile-audit.js` drives a rea
 at 390px against a running server and fails loudly on all three.
 
 ```bash
-npm i playwright && npx playwright install chromium
-node tools/mobile-audit.js http://127.0.0.1:8765
+corepack enable pnpm     # once; Node ships corepack through 24
+pnpm install             # playwright, from the committed lockfile
+pnpm run browsers        # the chromium build that playwright pins
+pnpm run audit:mobile http://127.0.0.1:8765
 ```
 
-Not a dependency of the tool and not run by CI, which stays stdlib-only.
+**This is dev tooling only.** The tool itself is Python 3 stdlib with no install step, the
+container image copies `recipegraph/` and nothing else, and CI stays stdlib-only. The
+`package.json` exists so the audit's one dependency is pinned and reproducible rather than
+a version someone happened to have.
+
+pnpm's version lives in `packageManager` in `package.json`, in exactly one place, and
+corepack reads it. Use `pnpm install --frozen-lockfile` when you want the lockfile to be
+authoritative rather than updated.
 
 It exercises **interactive** state as well as loading each page, because that is where the
 misses have been: an audit that only navigated to every page passed cleanly while every

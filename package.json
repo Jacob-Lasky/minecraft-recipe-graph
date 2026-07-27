@@ -1,0 +1,16 @@
+{
+  "name": "minecraft-recipe-graph-tools",
+  "private": true,
+  "description": "Dev tooling for minecraft-recipe-graph. The tool itself is Python 3 stdlib and needs none of this.",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "audit:mobile": "node tools/mobile-audit.js",
+    "browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
+}
