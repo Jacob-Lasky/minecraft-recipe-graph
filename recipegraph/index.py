@@ -71,6 +71,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("names: +%d from the dump that items.csv did not cover (%d discriminated "
             "by NBT)" % (added, sum(1 for k in dumped_names if "#" in k)))
 
+    # After BOTH name sources are merged and before anything reads a name. `oredict.
+    # guess_from_names` below infers ore membership from display names, and an unlocalized
+    # key is not a display name.
+    relabelled = g.relabel_unlocalized()
+    if relabelled:
+        say("names: %d were an unlocalized lang key ('tile.null.name'), relabelled from "
+            "the registry path" % relabelled)
+
     g.category_mods = dump_meta.category_mods(dump_dir)
     if g.category_mods:
         say("category mods: %d categories carry JEI's own mod name" % len(g.category_mods))

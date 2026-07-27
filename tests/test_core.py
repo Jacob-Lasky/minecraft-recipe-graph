@@ -3,8 +3,10 @@
 Run: python3 -m unittest discover -s tests
 """
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,9 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import (  # noqa: E402
-    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, merge_slots,
-    norm_key, split_discriminator,
+    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, is_unlocalized,
+    merge_slots, norm_key, split_discriminator,
 )
+from recipegraph.names import resolve  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
@@ -348,6 +351,101 @@ class TestSlotMerging(unittest.TestCase):
                      [Ingredient(["mod:clump", "mod:rod", "mod:ore"], 1)]))
         html = render.render_html(Solver(g).solve("mod:plate", 1))
         self.assertIn("any of 3", html)
+
+
+class UnlocalizedNameTest(unittest.TestCase):
+    """#52: `tile.null.name` is a lang key, not a name, and 268 items shared that one."""
+
+    def test_the_shape_is_recognised(self):
+        for label in ("tile.null.name", "item.ccluster2.name",
+                      "parttype.parttypes.integrateddynamics.audio_reader.name.name",
+                      "fluid.molten_hepatizon.name",
+                      "item.bloodmagic.livingArmour..name"):
+            self.assertTrue(is_unlocalized(label), label)
+
+    def test_a_real_name_is_left_alone(self):
+        for label in ("Machine Controller", "Borax", "R.T.G.", "Block of Iron",
+                      # Ends in `.name` but is half localized, and the space says so.
+                      "Spawn entity.blackfrost.name",
+                      # One dot only: a name may legitimately contain a period.
+                      "Dr.name", "", None):
+            self.assertFalse(is_unlocalized(label), label)
+
+    def test_the_registry_path_replaces_it(self):
+        g = Graph()
+        g.names = {"modularmachinery:safe_fission_hep239_controller": "tile.null.name"}
+        self.assertEqual(g.relabel_unlocalized(), 1)
+        self.assertEqual(g.bare_name("modularmachinery:safe_fission_hep239_controller"),
+                         "Safe Fission Hep239 Controller")
+
+    def test_items_that_shared_one_lang_key_become_distinguishable(self):
+        """The whole point. Eight reactors read identically before this."""
+        g = Graph()
+        g.names = {"modularmachinery:safe_fission_%s_controller" % v: "tile.null.name"
+                   for v in ("amfm", "hea242", "hecf249", "hep239")}
+        g.relabel_unlocalized()
+        self.assertEqual(len(set(g.names.values())), 4)
+
+    def test_the_key_stays_searchable(self):
+        """Relabelling, NOT deleting: `labels` is built from `names`, so a dropped key
+        would vanish from search altogether, which is worse than an ugly name."""
+        g = Graph()
+        g.names = {"mod:thing": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertIn("mod:thing", g.names)
+        self.assertIn("mod:thing", g.labels)
+
+    def test_a_variant_of_an_unlocalized_stem_still_names_its_variant(self):
+        """Both the stem and the variant are junk, and the two passes have to agree
+        whichever order the dict yields them in."""
+        for order in (("mod:thing", "mod:thing#a3f19c02b8d1"),
+                      ("mod:thing#a3f19c02b8d1", "mod:thing")):
+            g = Graph()
+            g.names = {k: "tile.null.name" for k in order}
+            g.relabel_unlocalized()
+            self.assertEqual(g.bare_name("mod:thing#a3f19c02b8d1"),
+                             "Thing (variant a3f19c)", order)
+
+    def test_a_localized_stem_still_wins_for_its_variant(self):
+        g = Graph()
+        g.names = {"mod:thing": "Real Thing", "mod:thing#a3f19c02b8d1": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertEqual(g.bare_name("mod:thing#a3f19c02b8d1"),
+                         "Real Thing (variant a3f19c)")
+
+    def test_meta_survives_the_fallback(self):
+        g = Graph()
+        g.names = {"mod:thing:3": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertEqual(g.bare_name("mod:thing:3"), "Thing (3)")
+
+    def test_an_acronym_is_not_title_cased_into_nonsense(self):
+        g = Graph()
+        g.names = {"mod:TBU_block": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertEqual(g.bare_name("mod:TBU_block"), "TBU Block")
+
+    def test_name_to_key_lookup_stops_resolving_the_lang_key(self):
+        """`build_reverse` mapped the string "tile.null.name" onto 268 unrelated items."""
+        g = Graph()
+        g.names = {"mod:a": "tile.null.name", "mod:b": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertEqual(resolve("tile.null.name", g.names), [])
+        self.assertEqual(resolve("A", g.names), ["mod:a"])
+
+    def test_an_item_with_no_name_at_all_also_reads_as_its_path(self):
+        """174 recipe-referenced keys have no name from any source. They used to render
+        as a raw id next to properly-cased names."""
+        self.assertEqual(Graph().bare_name("minecraft:scroll_buff"), "Scroll Buff")
+
+    def test_loading_a_graph_json_relabels_without_a_rebuild(self):
+        """The fix has to reach the 115 MB file already on disk: rebuilding needs the game
+        running and a fresh dump."""
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "graph.json")
+        with open(path, "w") as fh:
+            json.dump({"recipes": [], "names": {"mod:thing": "tile.null.name"}}, fh)
+        self.assertEqual(Graph.load(path).bare_name("mod:thing"), "Thing")
 
 
 class TestOredictGuess(unittest.TestCase):
