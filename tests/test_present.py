@@ -82,6 +82,36 @@ class StatusCoverageTest(unittest.TestCase):
         self.assertEqual(present.status_legend({"raw", "have", "craft"}),
                          present.status_legend(["craft", "raw", "have"]))
 
+    def test_the_muted_grey_is_defined_in_every_document_that_uses_it(self):
+        """It was written out four times: `present._MUTED` plus three CSS rules, so changing
+        the badge grey would have left the diagram box a different grey with nothing failing.
+        It is `--mutedbg` now, defined once, in render.CSS.
+
+        An undefined custom property does not fall back, it makes the declaration invalid at
+        computed-value time, so a grey pill would render with NO background rather than
+        visibly breaking. Every document kind is checked because they compose different
+        stylesheets: server pages take render.CSS plus HOME_CSS, and a plan or explore
+        fragment carries render.CSS inline so it still works published as an Artifact.
+        """
+        sheets = (render.CSS, server.HOME_CSS, graphview.DIAGRAM_CSS)
+        self.assertEqual(sum(s.count("--mutedbg:") for s in sheets), 1,
+                         "the token must be defined exactly once")
+        # Rendered documents, not stylesheets, because the definition and the uses can come
+        # from different sheets and only a document proves they met.
+        for name, doc in (("plan page", render.render_html(self.MUTED_RESULT)),
+                          ("server page", server._page("t", "<div class='pill mut'>x</div>"))):
+            self.assertIn("var(--mutedbg)", doc, name)
+            self.assertIn("--mutedbg:", doc, "%s uses --mutedbg and never defines it" % name)
+        self.assertEqual(present.STATUS_STYLE[present.STATUS_OREDICT][0], "var(--mutedbg)")
+
+    MUTED_RESULT = {
+        "target": "mod:x", "target_name": "X", "qty": 1, "nodes": 1,
+        "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                 "status": present.STATUS_OREDICT},
+        "shopping_list": [], "used_from_stock": [], "from_sources": [],
+        "machines_to_build": [], "truncated": False,
+    }
+
     def test_the_badge_class_is_one_the_stylesheet_defines(self):
         # A class with no rule renders as unstyled text, which reads as a missing badge.
         for _label, cls in present.STATUS_LABEL.values():

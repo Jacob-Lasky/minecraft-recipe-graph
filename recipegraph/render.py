@@ -47,6 +47,14 @@ CSS = """
    genuinely are code, and tabular digits are what make the ledgers scannable. */
 :root{--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+/* The "no state worth colouring" grey, for loops, cut-off branches and oredict stand-ins.
+   NOT in the four theme blocks above, and that is the point: grey at 15% alpha reads the
+   same on paper and on slate, so one definition serves both and there is no pair of values
+   to keep in step. It lives here because `present.STATUS_STYLE` names this token for the
+   diagram while `.muted`, `.chip` and `.pill.mut` use it for badges, and the value was
+   written out four times before, so changing the badge grey left the diagram box a
+   different grey with nothing failing. */
+:root{--mutedbg:rgba(127,127,127,.15)}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);
 -webkit-font-smoothing:antialiased}
 .wrap{max-width:1180px;margin:0 auto;padding:32px 22px 88px}
@@ -119,7 +127,7 @@ letter-spacing:.03em;white-space:nowrap}
 .ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}
 .craft{background:var(--craftbg);color:var(--craft)}
 .need{background:var(--needbg);color:var(--need)}
-.muted{background:rgba(127,127,127,.15);color:var(--dim)}
+.muted{background:var(--mutedbg);color:var(--dim)}
 .kids{margin-left:15px;border-left:1px solid var(--line);padding-left:9px}
 .meta{color:var(--dim);font-size:11.5px}
 .bar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
@@ -460,7 +468,7 @@ padding-bottom:11px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .rid{font:11.5px/1 var(--mono);color:var(--dim);word-break:break-all}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
 .chip{font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;
-background:rgba(127,127,127,.15);color:var(--dim);white-space:nowrap}
+background:var(--mutedbg);color:var(--dim);white-space:nowrap}
 .chip.stock{background:var(--okbg);color:var(--ok)}
 .chip.none{background:var(--needbg);color:var(--need)}
 .chip.ore{background:var(--accent-soft);color:var(--accent)}

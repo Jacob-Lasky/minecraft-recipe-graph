@@ -41,7 +41,9 @@ STATUS_LABEL = {
 
 # status -> (fill, ink) for the diagram. Same meaning as the badge class above, expressed as
 # the CSS custom properties an SVG attribute can take.
-_MUTED = "rgba(127,127,127,.15)"
+# The one place this grey is written is `--mutedbg` in render.CSS, so a diagram box
+# and a tree badge for the same status cannot end up different greys.
+_MUTED = "var(--mutedbg)"
 STATUS_STYLE = {
     STATUS_HAVE: ("var(--okbg)", "var(--ok)"),
     STATUS_PARTIAL: ("var(--warnbg)", "var(--warn)"),
