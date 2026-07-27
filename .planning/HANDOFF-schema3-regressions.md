@@ -13,7 +13,7 @@ Fix, in this order, on one branch:
 
 Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a new mod build.
 
-**The one thing you cannot do: final verification against real data.** See "Gotchas" 1. Write the code and the tests; Jake confirms against his 117,685-recipe graph in the morning by restarting his server.
+**You have the real graph.** A checkout with real data sits at `/coding/minecraft-recipe-graph` inside the pocket-dev container (`/mnt/user/misc/coding/minecraft-recipe-graph` on Tower). Verified 2026-07-26 from inside the container: `Graph.load` returns 117,685 recipes at schema 3 in 13 seconds, the 230-test suite passes in 17 seconds, and the P0 symptom reproduces (`sum(1 for r in g.recipes if r.transfer)` is **117**, and should be roughly 23,000). Prove every fix against that, not only against a fixture.
 
 ## What shipped (verified 2026-07-26)
 
@@ -61,8 +61,24 @@ Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a
 
 ## Gotchas the next agent MUST know
 
-1. **You almost certainly do not have the real data, and cannot get it.** `data/` is gitignored in full. `data/graph.json` is 117 MB, built from a 165 MB `recipes.ndjson` inside a PrismLauncher instance with ~410 mod jars, on Jake's desktop only. It is not on Tower and it is not in the repo.
-   **Consequence:** every measurement quoted in the issues came from that machine and you cannot re-run it. Do not try to reproduce a number. Write the fix, prove it with a synthetic fixture, and say plainly in the PR that real-data verification is pending. This is exactly what #31 exists to make possible.
+1. **`data/` is gitignored, so a fresh clone has no graph. One checkout has been seeded for you.**
+   `/coding/minecraft-recipe-graph` in the pocket-dev container holds `data/graph.json` (117 MB, schema 3, 117,685 recipes) and `data/ae2_have.json`. Ownership is `99:100`, which is what UnRAID array shares expect; if you create files there as root you will wedge it for everything else, so `chown -R 99:100 .` after anything that might.
+
+   **What is still NOT there: the mod jars and the raw dump.** `build` reads `mods/*.jar` (~410 of them) and a 165 MB `recipes.ndjson` from a PrismLauncher instance on Jake's desktop. So you cannot run `recipegraph build` and you cannot re-derive the graph. Use the pre-built one.
+
+   **This matters for #34 specifically**, because `mark_container_transfers` runs at BUILD time and its result is baked into `graph.json` as the `xf` flag. Do not conclude your fix works because the file still says 117. Re-run the detector in process against the loaded graph:
+
+   ```python
+   from recipegraph.model import Graph
+   from recipegraph import index
+   g = Graph.load("data/graph.json")
+   for r in g.recipes:          # clear what the old build baked in
+       r.transfer = False
+   flagged, containers = index.mark_container_transfers(g, quiet=False)
+   print(flagged, len(containers))   # want roughly 23,000, currently 117
+   ```
+
+   Then re-solve Borax and check the shape by hand: `nuclearcraft:compound:7` at qty 64 must not want Borax Solution Cans.
 
 2. **A running `serve` holds the CODE it started with.** The `/reload` button re-reads the graph and the stock file; it does NOT re-import Python. On 2026-07-26 this cost an hour: four separate defects were reported and none existed, because the server had been up since before the merge. Symptom: a fix you can see in the source and not in the browser. Restart the process. #38 is the fix for the underlying invisibility.
 
@@ -91,6 +107,8 @@ Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a
 - **#16's "open design question" was answered one way and is being reversed.** The zero-count mod options were made disabled-in-place rather than removed. Jake then asked for them to sort to the bottom; that is #32. Do not treat the issue body's reasoning as the current decision.
 - **`serve` was restarted for Jake at 22:03 local on 2026-07-26** and is running merged code. If a later session finds a stale process again, that is gotcha 2, not a new bug.
 - **No CI exists on this repo.** No workflows, no PR checks. `python3 -m unittest discover -s tests` is the whole gate, and it is on you to run it.
+- **The Tower checkout's `data/` is a SNAPSHOT taken 2026-07-26, not a live copy.** It will not follow a re-dump on Jake's desktop. If a measurement disagrees with one quoted in an issue, check the snapshot's age before concluding the code changed behaviour.
+- **The fixture in #31 is still worth building even though real data is available.** Real data proves a fix; a fixture stops the next regression, runs in milliseconds, and is the only one of the two that a contributor without Jake's base can use.
 - **`mod/logs/` and `mod/localmaven/` are build residue.** `mod/logs/` is now gitignored; `localmaven` already was. Do not commit either.
 
 ## Suggested order for the next session
