@@ -104,14 +104,20 @@ outline-offset:-2px}
    current-page state. Text-only links at 13.5px did not read as clickable. */
 nav.top{display:flex;gap:4px;font-size:13.5px;margin-bottom:22px;flex-wrap:wrap;
 border-bottom:1px solid var(--line);padding-bottom:2px}
-nav.top a,nav.top span.cur{display:flex;align-items:center;gap:7px;padding:8px 13px;
+nav.top a,nav.top .cur{display:flex;align-items:center;gap:7px;padding:8px 13px;
 text-decoration:none;border-radius:8px 8px 0 0;color:var(--dim);
 border-bottom:2px solid transparent;margin-bottom:-3px}
 @media(hover:hover){nav.top a:hover{background:var(--accent-soft);color:var(--accent)}}
-nav.top span.cur{color:var(--fg);font-weight:600;border-bottom-color:var(--accent)}
+/* `.cur`, not `span.cur`: the current SECTION is an <a> when the page sits below the tab
+   rather than on it, and it has to look identically active either way. */
+nav.top .cur{color:var(--fg);font-weight:600;border-bottom-color:var(--accent)}
+/* Needed because `nav.top .cur` and `nav.top a:hover` have equal specificity and .cur is
+   written later, so without this the one active tab that IS clickable is the only tab with
+   no hover feedback. */
+@media(hover:hover){nav.top a.cur:hover{background:var(--accent-soft);color:var(--accent)}}
 nav.top svg{width:15px;height:15px;flex:0 0 auto;stroke:currentColor;fill:none;
 stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-nav.top a:focus-visible,nav.top span.cur:focus-visible{outline:2px solid var(--accent);
+nav.top a:focus-visible,nav.top .cur:focus-visible{outline:2px solid var(--accent);
 outline-offset:2px}
 
 /* Machines page: an operable table, so filters sit above and state is a shape as well
@@ -304,7 +310,7 @@ table.mach tr[data-state=unavailable]{border-left-color:var(--need)}
 /* Four tabs at 13.5px with 13px of side padding wrapped onto two rows, spending a whole
    line of a phone screen on one tab that is always visible anyway. */
 nav.top{gap:0;font-size:12px;margin-bottom:16px}
-nav.top a,nav.top span.cur{padding:8px 7px;gap:4px;min-height:40px}
+nav.top a,nav.top .cur{padding:8px 7px;gap:4px;min-height:40px}
 .crumb{font-size:12.5px}
 }
 """
@@ -389,23 +395,28 @@ def _shell(title, body, css):
             % (_esc(title), css, SHELL_JS, body, PENDING_JS))
 
 
-def _wrap_fragment(title, fragment, state=None, crumb=""):
+def _wrap_fragment(title, fragment, state=None, crumb="", path=""):
     """Give an artifact-style fragment a real HTML document shell, with the real nav.
 
     The nav is `_nav`, not a hand-rolled back-link: a plan used to be the one page you
-    could not leave, and the one page that would not tell you its data was stale. Search
-    is marked current because a plan lives under it -- it is not a fifth tab.
+    could not leave, and the one page that would not tell you its data was stale. `path` is
+    the wrapped page's own path, which is what lets the Search tab stay a working link on a
+    page that lives under Search but is not Search.
 
     DO NOT move this into the renderer. The fragment has no document shell precisely so it
     can be published as a Claude Artifact unchanged, where none of these links resolve.
     """
     nav = ("<div class='wrap' style='padding-bottom:0'>%s%s</div>"
-           % (_nav("/", state), crumb)) if state is not None else ""
+           % (_nav(path, state), crumb)) if state is not None else ""
     return _shell(title, nav + fragment, HOME_CSS)
 
 
 def _crumb(label):
-    """`Search > this thing`, so the highlighted Search tab reads as a parent, not a lie."""
+    """`Search > this thing`, naming which search result you descended into.
+
+    The Search TAB is a working link now (#53), so this no longer exists to compensate for
+    an inert one. It still earns its place by naming the page's parent in words.
+    """
     return "<div class='crumb'><a href='/'>Search</a> &rsaquo; <b>%s</b></div>" % _esc(label)
 
 
@@ -485,20 +496,46 @@ def _stale_banner(state, back="/"):
             % (_esc(back), _esc(what)))
 
 
-def _nav(active="", state=None):
+# Pages that live UNDER a tab, mapped to the tab they live under. Every path a page can
+# render itself at is either a key here or a NAV_ITEMS href; `tests/test_server.py` asserts
+# both directions, because a path missing from both silently highlights nothing.
+NAV_PARENT = {
+    "/plan": "/",
+    "/explore": "/",
+    "/machine": "/machines",
+}
+
+
+def _nav(path="", state=None):
     """The tab bar, plus a stale-data warning when one is due.
+
+    `path` is the page's OWN path, not its section. The section's tab is highlighted either
+    way; what differs is that the section's own page renders an inert span and a page BELOW
+    it renders a working link.
+
+    DO NOT collapse those two back into one span. The call sites used to pass the section as
+    the active path, so `/plan` and `/explore` claimed to BE the search page: the one tab a
+    reader wants after finishing with a plan was the one turned off, and
+    `aria-current='page'` told a screen reader it was already on Search, which is not
+    recoverable by looking around. `aria-current='true'` on the child says "this is the
+    section you are in" without asserting the page. See #53.
 
     The banner rides along here because every page renders a nav and none of them should be
     able to forget it. Pass the state; omit it only where there is none (the 404 shell).
     """
+    section = NAV_PARENT.get(path, path)
     out = []
     for href, label, icon in NAV_ITEMS:
-        if href == active:
-            out.append("<span class='cur' aria-current='page'>%s%s</span>"
-                       % (_icon(icon), _esc(label)))
+        inner = _icon(icon) + _esc(label)
+        if href != section:
+            out.append("<a href='%s'>%s</a>" % (href, inner))
+        elif href == path:
+            out.append("<span class='cur' aria-current='page'>%s</span>" % inner)
         else:
-            out.append("<a href='%s'>%s%s</a>" % (href, _icon(icon), _esc(label)))
-    banner = _stale_banner(state, active or "/") if state is not None else ""
+            out.append("<a class='cur' aria-current='true' href='%s'>%s</a>" % (href, inner))
+    # `section`, not `path`: the reload form posts this back as where to return to, and
+    # `/plan` stripped of its item query is a 400.
+    banner = _stale_banner(state, section or "/") if state is not None else ""
     return "<nav class='top'>%s</nav>%s" % ("".join(out), banner)
 
 
@@ -996,7 +1033,7 @@ def machine_page(state, uid):
     if not info:
         return _page("Not found", "<div class='wrap'>%s<h1>No such category</h1>"
                      "<p class='hint2'><code>%s</code> is not in this graph.</p></div>"
-                     % (_nav("/machines", state), _esc(uid))), 404
+                     % (_nav("/machine", state), _esc(uid))), 404
 
     detail = machines_mod.responsibilities(state.graph, uid)
     st = info["state"]
@@ -1059,7 +1096,7 @@ def machine_page(state, uid):
     <div class="card"><h2><span>Consumes</span><span class="c">%s</span></h2>%s</div>
   </div>
 </div>""" % (
-        _nav("/machines", state),
+        _nav("/machine", state),
         _esc(info["title"] or uid), "{:,}".format(detail["recipes"]), _esc(uid),
         STATE_PILL.get(st, "mut"), STATE_LABEL.get(st, st),
         _esc(info["mod"] or "?"),
@@ -1280,7 +1317,7 @@ class Handler(BaseHTTPRequestHandler):
                            "searched": len(st.graph.names)}
                 return self._send(_wrap_fragment(
                     "Explore: %s" % query, render_explore_html(payload), st,
-                    _crumb("Explore “%s”" % query)))
+                    _crumb("Explore “%s”" % query), path="/explore"))
             if parts.path == "/plan":
                 key = one("item")
                 qty = max(1, int(one("qty", "1") or 1))
@@ -1301,12 +1338,16 @@ class Handler(BaseHTTPRequestHandler):
                         "<form class='search' method='get' action='/'>"
                         "<input type='search' name='q' value='%s' autofocus>"
                         "<button type='submit'>Search</button></form></div>"
-                        % (_nav(), _esc(key), _esc(path_of(key)))), 404)
+                        # `st`, and the real path: this 404 sits under /plan exactly as its
+                        # sibling below sits under /machines, and it was the one page with
+                        # neither a highlighted section nor a stale-data warning.
+                        % (_nav("/plan", st), _esc(key), _esc(path_of(key)))), 404)
                 with st.lock:
                     result = st.solver().solve(key, qty)
                 title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
-                    title, render_html(result, st.graph), st, _crumb(title)))
+                    title, render_html(result, st.graph), st, _crumb(title),
+                    path="/plan"))
             if parts.path == "/machines":
                 return self._send(machines_page(st, one("m"), one("q")))
             if parts.path == "/machine":

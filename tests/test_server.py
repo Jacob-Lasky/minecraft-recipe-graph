@@ -10,6 +10,7 @@ here ARE the HTTP behaviours: status codes, content types, and redirect targets.
 """
 
 import html as html_mod
+import inspect
 import json
 import os
 import re
@@ -176,14 +177,72 @@ class ServerTest(unittest.TestCase):
         body = self.get("/plan?item=mod%3Awidget&qty=4")[2]
         for href, label, _icon in server.NAV_ITEMS:
             self.assertIn(label, body, "plan page is missing the %s tab" % label)
-            if href != "/":
-                self.assertIn("href='%s'" % href, body, href)
-        self.assertIn("aria-current='page'", body, "Search should read as the parent tab")
+            # EVERY tab, Search included. This used to exempt "/" because the Search tab
+            # was rendered as an inert span here, which is the bug #53 reported.
+            self.assertIn("href='%s'" % href, body, href)
         self.assertIn("&rsaquo;", body, "and a breadcrumb should name the item")
 
     def test_explore_carries_the_nav_too(self):
         body = self.get("/explore?q=widget")[2]
         self.assertIn("href='/machines'", body)
+
+    # ---- nav: which tab is current, and whether it is clickable (#53) ----
+
+    def test_the_section_tab_is_a_working_link_on_a_page_below_it(self):
+        """#53: `/plan` and `/explore` passed the SECTION as the active path, so Search
+        rendered as an inert span on a page that was not Search. The one tab a reader wants
+        after finishing with a plan was the one turned off, and `aria-current='page'` told a
+        screen reader it was already there, which is not recoverable by looking around."""
+        for path in ("/plan?item=mod%3Awidget&qty=1", "/explore?q=widget",
+                     # the unknown-item 404 lives under /plan too
+                     "/plan?item=mod%3Anot_a_thing&qty=1"):
+            body = self.get(path)[2]
+            self.assertIn("<a class='cur' aria-current='true' href='/'", body, path)
+            self.assertNotIn("aria-current='page'", body,
+                             "%s is not the Search page and must not claim to be" % path)
+
+    def test_machine_detail_marks_its_section_without_claiming_to_be_it(self):
+        for path in ("/machine?uid=mod.press", "/machine?uid=nope.nope"):
+            body = self.get(path)[2]
+            self.assertIn("<a class='cur' aria-current='true' href='/machines'", body, path)
+            self.assertNotIn("aria-current='page'", body, path)
+
+    def test_the_tab_for_the_page_you_are_actually_on_stays_inert(self):
+        """The other half: a real "you are here" is still a span with aria-current='page',
+        because turning every tab into a link loses the distinction entirely."""
+        for href, _label, _icon in server.NAV_ITEMS:
+            body = self.get(href)[2]
+            self.assertIn("<span class='cur' aria-current='page'>", body, href)
+            self.assertNotIn("aria-current='true'", body, href)
+
+    def test_the_active_tab_is_styled_by_class_not_by_element(self):
+        """The CSS said `nav.top span.cur`, so the moment the current section became an <a>
+        on a child page it would have lost the highlight and looked like any other tab."""
+        body = self.get("/")[2]
+        self.assertIn("nav.top .cur{", body)
+        self.assertNotIn("nav.top span.cur", body)
+        # and the one active tab that IS clickable must still answer to hover, which needs
+        # its own rule to beat the equally-specific `.cur` colour written after `a:hover`
+        self.assertIn("nav.top a.cur:hover{", body)
+
+    def test_every_nav_path_the_server_passes_is_one_it_knows(self):
+        """`_nav` highlights nothing at all for a path in neither table, silently. This
+        scans the real call sites rather than a list kept beside them."""
+        known = {h for h, _l, _i in server.NAV_ITEMS} | set(server.NAV_PARENT)
+        passed = set(re.findall(r"""_nav\((["'])([^"']*)\1""",
+                                inspect.getsource(server)))
+        self.assertTrue(passed, "the call-site scan found nothing, so it proves nothing")
+        for _quote, path in passed:
+            if path:      # "" is the no-section shell, which is deliberate
+                self.assertIn(path, known,
+                              "_nav(%r) highlights no tab: add it to NAV_PARENT" % path)
+
+    def test_nav_parent_points_at_real_tabs_and_never_at_itself(self):
+        hrefs = {h for h, _l, _i in server.NAV_ITEMS}
+        for child, parent in server.NAV_PARENT.items():
+            self.assertIn(parent, hrefs, "%s is parented to a tab that does not exist" % child)
+            self.assertNotIn(child, hrefs,
+                             "%s is a tab, so it is its own page, not a child" % child)
 
     def test_a_plan_warns_when_its_data_went_stale(self):
         """The other half of the missing nav: a plan could not raise the banner either."""
@@ -191,6 +250,20 @@ class ServerTest(unittest.TestCase):
         try:
             body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
             self.assertIn("changed on disk", body)
+        finally:
+            self.state.load_all()
+
+    def test_reloading_from_a_child_page_returns_to_the_section_not_the_child(self):
+        """`_nav` takes the page's real path now, and the reload form's return target is
+        the one place that must still be the SECTION: `/plan` and `/machine` stripped of
+        their query are a 400 and a 404."""
+        os.utime(self.state.graph_path, None)
+        try:
+            for path, back in (("/plan?item=mod%3Awidget&qty=1", "/"),
+                               ("/explore?q=widget", "/"),
+                               ("/machine?uid=mod.press", "/machines")):
+                body = self.get(path)[2]
+                self.assertIn("name='back' value='%s'" % back, body, path)
         finally:
             self.state.load_all()
 
