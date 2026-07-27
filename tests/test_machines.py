@@ -240,6 +240,22 @@ class NoMachineNeededTest(unittest.TestCase):
         machines.save_overrides(path, {"mod.press": machines.HAVE})
         self.assertEqual(machines.load_no_machine(path), ["somepack.ritual"])
         self.assertEqual(machines.load_overrides(path), {"mod.press": machines.HAVE})
+        # And across a second save, which is where reading the list after truncating the
+        # file would quietly lose it.
+        machines.save_overrides(path, {"mod.press": machines.BUILDABLE})
+        self.assertEqual(machines.load_no_machine(path), ["somepack.ritual"])
+
+    def test_the_earliest_flat_format_is_not_carried_forward_forever(self):
+        # The first format let the whole document BE the overrides map. Preserving
+        # unrecognised keys would leave those entries in the file contradicting the UI.
+        path = os.path.join(tempfile.mkdtemp(), "machines.json")
+        with open(path, "w") as fh:
+            json.dump({"legacy.category": machines.HAVE}, fh)
+        self.assertEqual(machines.load_overrides(path), {"legacy.category": machines.HAVE})
+        machines.save_overrides(path, {"mod.press": machines.HAVE})
+        with open(path) as fh:
+            self.assertEqual(sorted(json.load(fh)),
+                             ["_comment", "no_machine", "overrides"])
 
     def test_a_file_with_neither_key_still_reads_as_empty(self):
         d = tempfile.mkdtemp()

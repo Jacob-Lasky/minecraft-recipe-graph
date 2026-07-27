@@ -436,23 +436,28 @@ def load_no_machine(path):
 
 
 def save_overrides(path, overrides):
-    """Rewrite the overrides, preserving everything else already in the file.
+    """Rewrite the file, carrying the hand-edited `no_machine` list across.
 
-    Read-modify-write rather than a fresh document: the file also carries `no_machine`,
-    which is hand-edited, and a blind rewrite would silently delete it the first time
-    anyone clicked a state button.
+    Read-modify-write rather than a fresh document, because a blind rewrite would delete
+    that list the first time anyone clicked a state button. But only the KNOWN keys are
+    carried: the earliest format let the whole document be the overrides map, and
+    preserving unrecognised top-level keys would leave those legacy entries in the file
+    forever, read by nothing and contradicting what the UI shows.
     """
-    doc = load_document(path)
-    doc["_comment"] = ("Manual machine availability. `overrides` values: have | "
-                       "buildable | unknown | unavailable, and win over anything "
-                       "auto-detected. `no_machine` lists category uids that need no "
-                       "machine at all, for production driven by a creature or by a "
-                       "structure JEI does not catalyse.")
-    doc["overrides"] = overrides
-    doc.setdefault("no_machine", [])
+    # Read BEFORE opening for write: `open(path, "w")` truncates, so reading inside the
+    # block would carry an empty list across every time.
+    keep = load_no_machine(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as fh:
-        json.dump(doc, fh, indent=1, sort_keys=True)
+        json.dump({
+            "_comment": "Manual machine availability. `overrides` values: have | "
+                        "buildable | unknown | unavailable, and win over anything "
+                        "auto-detected. `no_machine` lists category uids that need no "
+                        "machine at all, for production driven by a creature or by a "
+                        "structure JEI does not catalyse.",
+            "overrides": overrides,
+            "no_machine": keep,
+        }, fh, indent=1, sort_keys=True)
 
 
 def summarise(states):

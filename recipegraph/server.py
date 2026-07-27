@@ -195,6 +195,18 @@ border-top-color:var(--accent);animation:sp .8s linear infinite}
 """
 
 
+# Shared client helpers, in the shell so every page has them and no page ships a second
+# copy. `rgEsc` in particular: the search rows and the sources typeahead both build markup
+# from item names, and the second one started life stripping `<` and `&` instead of
+# escaping them, which quietly corrupts any name containing an ampersand.
+SHELL_JS = """
+window.rgEsc=function(s){
+  return String(s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+};
+"""
+
+
 # Every page links to /plan, and a plan is the one thing here that can block for seconds.
 # ONE delegated listener in the shell rather than markup per template, so no page can link
 # to a plan and forget the feedback.
@@ -254,9 +266,12 @@ def _shell(title, body, css):
     """
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>%s</title><style>%s</style></head><body>%s"
+            # SHELL_JS goes in the HEAD, not alongside PENDING_JS at the end of the body:
+            # the page scripts are inline and run the moment they are parsed, so a helper
+            # defined after them would not exist yet when they first call it.
+            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s"
             "<script>%s</script></body></html>"
-            % (_esc(title), css, body, PENDING_JS))
+            % (_esc(title), css, SHELL_JS, body, PENDING_JS))
 
 
 def _wrap_fragment(title, fragment, state=None, crumb=""):
@@ -492,10 +507,7 @@ HOME_JS = """
    var l=CHIPS[kind];
    return l?'<span class="t t-'+kind+'">'+l+'</span>':'';
  }
- function esc(s){
-   return String(s).replace(/[&<>"]/g,function(c){
-     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});
- }
+ var esc=window.rgEsc;
  function n(x){return x.toLocaleString();}
 
  function render(items,q){
@@ -769,7 +781,10 @@ def machines_page(state, message="", query=""):
         evidence = info["why"]
         if info.get("from_catalyst"):
             evidence += " (from JEI)"
-        hay = " ".join((name, uid, info["mod"], evidence, " ".join(cands))).lower()
+        # The squashed mod name as well as the display one, so typing the registry form
+        # you know ("industrialforegoing") finds a group JEI calls "Industrial Foregoing".
+        hay = " ".join((name, uid, info["mod"], info["mod"].replace(" ", ""),
+                        evidence, " ".join(cands))).lower()
         rows.append(
             "<tr data-state='%s' data-rank='%d' data-name='%s' data-uid='%s' "
             "data-mod='%s' data-recipes='%d' data-hay='%s'>"
@@ -968,8 +983,8 @@ SOURCES_JS = """
          .then(function(r){return r.json();})
          .then(function(d){
            list.innerHTML=(d.results||[]).map(function(it){
-             return '<option value="'+it.key.replace(/"/g,'&quot;')+'">'
-               +String(it.name).replace(/[<&"]/g,'')+'</option>';
+             return '<option value="'+window.rgEsc(it.key)+'">'
+               +window.rgEsc(it.name)+'</option>';
            }).join('');
          }).catch(function(){});
      },140);
@@ -1236,6 +1251,9 @@ class Handler(BaseHTTPRequestHandler):
         back = _safe_back(form)
         msg = ""
         if uid and target in machines_mod.STATES:
+            # Read, modify and write all inside the lock: two toggles in flight together
+            # would otherwise both start from the old map and the second save would drop
+            # the first one's change.
             with st.lock:
                 overrides = dict(st.overrides)
                 overrides[uid] = target
@@ -1258,6 +1276,15 @@ class Handler(BaseHTTPRequestHandler):
         action = (form.get("do") or [""])[0]
         key = (form.get("key") or [""])[0].strip()
         block = (form.get("block") or [""])[0].strip()
+        # The whole read-modify-write is inside the lock. This is a ThreadingHTTPServer,
+        # so two clicks in flight together would otherwise both read the old overrides
+        # and the second save would drop the first one's change.
+        with st.lock:
+            return self._apply_source_edit(action, key, block)
+
+    def _apply_source_edit(self, action, key, block):
+        """The body of a /sources edit. Caller holds the lock."""
+        st = self.state
         ov = st.source_overrides
         gens = dict(ov.get("generators") or {})
         off = set(ov.get("disabled") or ())
@@ -1293,9 +1320,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             return ""
 
-        with st.lock:
-            generators_mod.save_overrides(st.sources_path, gens, off, water)
-            st.refresh_machines()
+        generators_mod.save_overrides(st.sources_path, gens, off, water)
+        st.refresh_machines()
         return msg
 
 

@@ -270,6 +270,35 @@ class DiscriminatedStackTest(unittest.TestCase):
         self.assertEqual(g.bare_name("thaumadditions:vis_pod#perditio"),
                          "Perditio Vis Pod")
 
+    def test_a_built_graph_records_which_schema_produced_it(self):
+        """machines.SPECIES_SCHEMA gates a verdict on this, so it has to be recorded."""
+        inst = tempfile.mkdtemp()
+        dump = os.path.join(inst, "mc-recipe-dump")
+        os.makedirs(dump)
+        with open(os.path.join(dump, "summary.json"), "w") as fh:
+            json.dump({"schema": 3, "mod_version": "0.5.0"}, fh)
+        self.assertEqual(index.build(inst, quiet=True).dump_schema, 3)
+        # And an instance with no dump at all is 0, not None -- the gate compares numbers.
+        self.assertEqual(index.build(tempfile.mkdtemp(), quiet=True).dump_schema, 0)
+
+    def test_find_locates_the_dumped_names_beside_the_other_files(self):
+        inst = tempfile.mkdtemp()
+        self.assertIsNone(dump_names.find(inst))
+        dump = os.path.join(inst, "mc-recipe-dump")
+        os.makedirs(dump)
+        with open(os.path.join(dump, "names.json"), "w") as fh:
+            json.dump({"mod:x": "X"}, fh)
+        self.assertEqual(dump_names.load(dump_names.find(inst)), {"mod:x": "X"})
+
+    def test_dumped_names_reach_the_graph_without_overwriting_items_csv(self):
+        inst = tempfile.mkdtemp()
+        dump = os.path.join(inst, "mc-recipe-dump")
+        os.makedirs(dump)
+        with open(os.path.join(dump, "names.json"), "w") as fh:
+            json.dump({"forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone"}, fh)
+        g = index.build(inst, quiet=True)
+        self.assertEqual(g.names.get("forestry:bee_drone_ge#a3f19c02b8d1"), "Forest Drone")
+
     def test_dumped_names_load_and_a_bad_file_is_empty(self):
         d = tempfile.mkdtemp()
         path = os.path.join(d, "names.json")

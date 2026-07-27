@@ -97,7 +97,7 @@ def load_overrides(path):
 # or "gen" -- those match jewellery and generic machinery, and a candidate list full of
 # noise is one nobody reads.
 GENERATOR_HINTS = ("source", "generator", "condensator", "accumulator", "spring",
-                   "wellspring", "collector", "aggregator")
+                   "collector", "aggregator")
 
 
 def candidates(placed, overrides=None):
