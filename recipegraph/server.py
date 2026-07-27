@@ -1018,11 +1018,18 @@ def machine_page(state, uid):
 
     cands = info["candidates"]
     if cands:
+        # Each candidate carries ITS OWN verdict. Smelting really is done in more than
+        # the controller, and a page that showed only the winning candidate hid the other
+        # blocks that would also do -- and hid the fact that one of them is placed while
+        # the named one is not. See #27.
         cand_html = "<ul class='klist'>%s</ul>" % "".join(
             "<li><a href='%s'>%s</a><code>%s</code>"
-            "<span class='grow'></span></li>"
-            % (item_href(c), _item(state.graph, c), _esc(c))
-            for c in cands[:8])
+            "<span class='grow'></span>"
+            "<span class='pill %s' title='%s'>%s</span></li>"
+            % (item_href(c["key"]), _item(state.graph, c["key"]), _esc(c["key"]),
+               STATE_PILL.get(c["state"], "mut"), _esc(c["why"]),
+               STATE_LABEL.get(c["state"], c["state"]))
+            for c in info.get("candidate_states", [])[:8])
     else:
         cand_html = ("<div class='hint2' style='margin:0'>None found. The category title "
                      "did not match any item name and the id could not be guessed from "

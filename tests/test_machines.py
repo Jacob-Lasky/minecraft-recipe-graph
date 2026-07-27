@@ -373,6 +373,120 @@ class SameModTest(unittest.TestCase):
         self.assertNotIn("other mod", why)
 
 
+class LegacyTileEntityIdTest(unittest.TestCase):
+    """A dotted tile-entity id in the minecraft namespace is not a vanilla block (#27).
+
+    Tinkers registers old-style DOTTED tile-entity ids, and Forge namespaces a colon-less
+    registration into `minecraft:`, so the world save literally records
+    `minecraft:tconstruct.smeltery_controller` for a placed Smeltery Controller while
+    JEI's catalyst calls the machine `tconstruct:smeltery_controller`. The two can never
+    compare equal, so a machine Jake is standing next to read as one he could build.
+    """
+
+    def test_a_placed_smeltery_controller_is_recognised(self):
+        g = Graph()
+        g.names = {"tconstruct:smeltery_controller": "Smeltery Controller",
+                   "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="tconstruct.smeltery", machine="Smeltery"))
+        g.catalysts = {"tconstruct.smeltery": ["tconstruct:smeltery_controller"]}
+        state, why = machines.resolve(
+            g, placed={"minecraft:tconstruct.smeltery_controller": 1})[
+                "tconstruct.smeltery"]
+        self.assertEqual(state, machines.HAVE)
+        self.assertIn("placed", why)
+
+    def test_the_evidence_quotes_the_id_the_world_actually_recorded(self):
+        """The alias is for matching only. Evidence must stay verbatim, or it stops
+        being something Jake can grep for in the save."""
+        g = Graph()
+        g.names = {"tconstruct:smeltery_controller": "Smeltery Controller",
+                   "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="tconstruct.smeltery", machine="Smeltery"))
+        g.catalysts = {"tconstruct.smeltery": ["tconstruct:smeltery_controller"]}
+        _state, why = machines.resolve(
+            g, placed={"minecraft:tconstruct.smeltery_controller": 1})[
+                "tconstruct.smeltery"]
+        self.assertIn("minecraft:tconstruct.smeltery_controller", why)
+
+    def test_legacy_forms_are_aliased(self):
+        self.assertIn("tconstruct:smeltery_controller",
+                      machines.match_forms("minecraft:tconstruct.smeltery_controller"))
+        self.assertIn("ironchest:diamond", machines.match_forms("minecraft:ironchest.diamond"))
+
+    def test_the_state_suffix_is_still_stripped_from_an_aliased_id(self):
+        # `minecraft:mod.machine_idle` has to reach `mod:machine`, not `mod:machine_idle`.
+        self.assertIn("mod:machine", machines.match_forms("minecraft:mod.machine_idle"))
+
+    def test_a_real_vanilla_block_is_not_re_namespaced(self):
+        forms = machines.match_forms("minecraft:furnace")
+        self.assertEqual(forms, ("minecraft:furnace",))
+
+    def test_a_modded_id_that_already_has_a_namespace_is_left_alone(self):
+        # `agricraft:tile.crop` is correctly namespaced already; splitting on the dot
+        # would invent `tile:crop`.
+        self.assertEqual(machines.match_forms("agricraft:tile.crop"),
+                         ("agricraft:tile.crop",))
+
+    def test_an_undecodable_legacy_id_yields_no_bogus_modid(self):
+        """Woot registers `tile.woot_anvil`, so the save says `minecraft:tile.woot_anvil`.
+
+        `tile` is not a modid and nothing in the id says which mod owns it, so the alias
+        is `tile:woot_anvil`, which matches nothing. That is the honest outcome: 9 of the
+        29 dotted ids in the reference save are this shape, and guessing a modid out of
+        `woot_anvil` would be fabricating evidence. A manual override in machines.json is
+        the documented answer for those.
+        """
+        forms = machines.match_forms("minecraft:tile.woot_anvil")
+        self.assertNotIn("woot:anvil", forms)
+        self.assertNotIn("woot:woot_anvil", forms)
+
+    def test_every_candidate_carries_its_own_verdict(self):
+        """One category, several machines: "smelting is done in more than just that"."""
+        g = Graph()
+        g.names = {"mod:controller": "Controller", "mod:drain": "Drain",
+                   "mod:tank": "Tank", "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="mod.smeltery", machine="Smeltery"))
+        g.add(Recipe("mk", "t", [("mod:drain", 1)], [Ingredient(["mod:part"], 1)],
+                     category="minecraft.crafting"))
+        g.catalysts = {"mod.smeltery": ["mod:controller", "mod:drain", "mod:tank"]}
+        info = machines.describe(g, placed={"mod:controller": 1})["mod.smeltery"]
+        self.assertEqual([(c["key"], c["state"]) for c in info["candidate_states"]],
+                         [("mod:controller", machines.HAVE),
+                          ("mod:drain", machines.BUILDABLE),
+                          ("mod:tank", machines.UNAVAILABLE)])
+
+    def test_the_category_takes_the_most_direct_evidence_not_the_first_candidate(self):
+        # A block PLACED third beats one merely in stock at the top: standing next to a
+        # machine is stronger evidence than owning its item.
+        g = Graph()
+        g.names = {"mod:a": "A", "mod:b": "B", "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="mod.cat", machine="Cat"))
+        g.catalysts = {"mod.cat": ["mod:a", "mod:b"]}
+        info = machines.describe(g, placed={"mod:b": 1},
+                                 stock={"mod:a": 1})["mod.cat"]
+        self.assertEqual(info["state"], machines.HAVE)
+        self.assertIn("placed: mod:b", info["why"])
+
+    def test_a_zero_count_is_not_a_sighting(self):
+        g = Graph()
+        g.names = {"mod:a": "A", "mod:widget": "Widget"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="mod.cat", machine="Cat"))
+        g.catalysts = {"mod.cat": ["mod:a"]}
+        info = machines.describe(g, placed={"mod:a": 0})["mod.cat"]
+        self.assertEqual(info["state"], machines.UNAVAILABLE)
+
+    def test_a_placed_id_with_no_namespace_at_all_still_aliases(self):
+        # Nothing in the save writes this today, but `normalise_block` is public and a
+        # hand-written override may well say `tconstruct.smeltery_controller`.
+        self.assertIn("tconstruct:smeltery_controller",
+                      machines.match_forms("tconstruct.smeltery_controller"))
+
+
 class CatalystVariantTest(unittest.TestCase):
     """A catalyst is a claim about an ITEM, not about one NBT state of it.
 

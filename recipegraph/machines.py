@@ -160,11 +160,53 @@ def normalise_block(key):
     return key
 
 
-def _index(keys):
-    """{normalised id: original} for membership tests that ignore state suffixes."""
+def match_forms(key):
+    """Every normalised id a placed block should be findable under, verbatim form first.
+
+    A tile-entity id is NOT an item id. Mods that register a colon-less id the old way
+    (`GameRegistry.registerTileEntity(..., "tconstruct.smeltery_controller")`) get it
+    namespaced into `minecraft:` by Forge, so the world save literally records
+
+        minecraft:tconstruct.smeltery_controller     what is placed
+        tconstruct:smeltery_controller               what JEI calls the machine
+
+    and the two can never compare equal: a Smeltery Controller you are standing next to
+    reads as "buildable". So a dotted path in the MINECRAFT namespace also gets indexed
+    with its first segment promoted to a namespace. No vanilla registry name contains a
+    dot, which is what makes this unambiguous -- and `agricraft:tile.crop` is left alone,
+    because an id that already names its mod is not guessing at anything.
+
+    DO NOT extend this to invent a modid out of the remainder. `tile.woot_anvil` aliases
+    to the useless `tile:woot_anvil` and that is deliberate: nothing in the id says Woot
+    owns it, 9 of the 29 dotted ids in the reference save are that shape, and a guess
+    here would be fabricated evidence rather than a sighting. Overrides in machines.json
+    are the answer for those.
+    """
+    norm = normalise_block(key)
+    ns, _, path = norm.partition(":")
+    if not path:
+        ns, path = "minecraft", norm     # a hand-written override may omit the namespace
+    if ns != "minecraft" or "." not in path:
+        return (norm,)
+    modid, _, rest = path.partition(".")
+    if not modid or not rest:
+        return (norm,)
+    # Normalise again: the state suffix sits on the END of the legacy path, so
+    # `minecraft:mod.machine_idle` has to reach `mod:machine`, not `mod:machine_idle`.
+    return (norm, normalise_block("%s:%s" % (modid, rest)))
+
+
+def index_ids(keys):
+    """{normalised id: the id as recorded} for membership tests that ignore state suffixes.
+
+    Shared with generators.py, which asks the same question of the same `placed` map.
+    The value is always the VERBATIM id so evidence can quote what the save actually says
+    rather than a form this module invented.
+    """
     out = {}
     for k in keys:
-        out.setdefault(normalise_block(k), k)
+        for form in match_forms(k):
+            out.setdefault(form, k)
     return out
 
 
@@ -275,8 +317,11 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None,
     catalysts = order_by_specificity(catalysts) if catalysts else {}
     overrides = overrides or {}
     reverse_names = build_reverse(graph.names)
-    placed_index = _index(placed)
-    stock_index = _index(k for k, v in stock.items() if v)
+    # `if v` on both: a count of zero is not a sighting, and reporting "placed: X" for a
+    # block the scan counted none of would be a false claim. generators.resolve has always
+    # filtered; this did not.
+    placed_index = index_ids(k for k, v in placed.items() if v)
+    stock_index = index_ids(k for k, v in stock.items() if v)
 
     categories = {}
     counts = {}
@@ -292,6 +337,10 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None,
             "mod": mod_name(graph, uid),
             "recipes": counts.get(uid, 0),
             "candidates": [],
+            # Always present, even on the paths that never judge a candidate (manual
+            # override, hand crafting, nothing identified): the machine page reads this
+            # for every category and a missing key is a 500, not an empty list.
+            "candidate_states": [],
             "manual": uid in overrides,
         }
         out[uid] = rec
@@ -323,34 +372,49 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None,
         # so in the evidence rather than presenting a guess as a sighting.
         caveat = "" if rec["from_catalyst"] else _cross_mod_note(uid, cands)
 
-        built = [placed_index[normalise_block(c)] for c in cands
-                 if normalise_block(c) in placed_index]
-        if built:
-            rec.update(state=HAVE, why="placed: %s%s" % (built[0], caveat))
-            continue
-        held = [stock_index[normalise_block(c)] for c in cands
-                if normalise_block(c) in stock_index]
-        if held:
-            rec.update(state=HAVE, why="in stock: %s%s" % (held[0], caveat))
-            continue
-        # `producers_any_variant`, not `producers`. A catalyst is a claim about an ITEM,
-        # not about one particular NBT state of it, and at schema 3 the recipes for a
-        # machine that carries its level or augments in NBT all output a discriminated
-        # key while catalysts.json still names the bare one. Asking the narrow question
-        # put 16 Thermal Expansion categories and 3 Botania flowers into "no route" for
-        # machines that are plainly craftable. See #28.
-        makeable = [c for c in cands if graph.producers_any_variant(c)]
-        if makeable:
-            # Name the variant that is actually craftable when it differs from the
-            # catalyst, so the evidence stays checkable rather than asserting a route to
-            # a key that has no producers of its own.
-            made = graph.variants_of(makeable[0])
-            shown = (makeable[0] if graph.producers(makeable[0])
-                     else "%s (as %s)" % (makeable[0], made[0]))
-            rec.update(state=BUILDABLE, why="craftable: %s%s" % (shown, caveat))
-            continue
-        rec.update(state=UNAVAILABLE, why="no route to %s%s" % (cands[0], caveat))
+        # Every candidate judged, not just the winner. "Smelting is done in more than
+        # just the controller" is true of a lot of categories, and a page that shows one
+        # verdict hides the three other blocks that would also do. See #27.
+        verdicts = [(rank, state, why, c) for c, (rank, state, why)
+                    in ((c, _candidate_verdict(graph, c, placed_index, stock_index))
+                        for c in cands)]
+        rec["candidate_states"] = [{"key": c, "state": s, "why": w}
+                                   for _r, s, w, c in verdicts]
+        # min() over (rank, position) keeps the old order of DIRECTNESS: a placed block
+        # third in the list beats one merely in stock at the top, because standing next
+        # to a machine is stronger evidence than owning its item.
+        _rank, state, why, _c = min(
+            (v + (i,) for i, v in enumerate(verdicts)),
+            key=lambda v: (v[0], v[4]))[:4]
+        rec.update(state=state, why="%s%s" % (why, caveat))
     return out
+
+
+# Evidence ordered by how direct it is; the numbers exist only to rank verdicts.
+_PLACED, _IN_STOCK, _CRAFTABLE, _NO_ROUTE = range(4)
+
+
+def _candidate_verdict(graph, key, placed_index, stock_index):
+    """(rank, state, evidence) for ONE candidate machine item."""
+    norm = normalise_block(key)
+    if norm in placed_index:
+        return _PLACED, HAVE, "placed: %s" % placed_index[norm]
+    if norm in stock_index:
+        return _IN_STOCK, HAVE, "in stock: %s" % stock_index[norm]
+    # `producers_any_variant`, not `producers`. A catalyst is a claim about an ITEM, not
+    # about one particular NBT state of it, and at schema 3 the recipes for a machine
+    # that carries its level or augments in NBT all output a discriminated key while
+    # catalysts.json still names the bare one. Asking the narrow question put 16 Thermal
+    # Expansion categories and 3 Botania flowers into "no route" for machines that are
+    # plainly craftable. See #28.
+    if graph.producers_any_variant(key):
+        # Name the variant that is actually craftable when it differs from the catalyst,
+        # so the evidence stays checkable rather than asserting a route to a key that has
+        # no producers of its own.
+        shown = (key if graph.producers(key)
+                 else "%s (as %s)" % (key, graph.variants_of(key)[0]))
+        return _CRAFTABLE, BUILDABLE, "craftable: %s" % shown
+    return _NO_ROUTE, UNAVAILABLE, "no route to %s" % key
 
 
 def order_by_specificity(catalysts):

@@ -110,11 +110,17 @@ def candidates(placed, overrides=None):
     the graph says what an input-free block emits -- that is the whole reason this file
     is a curated list.
     """
+    from .machines import match_forms
+
     ov = overrides if isinstance(overrides, dict) else load_overrides(overrides)
     known = set(DEFAULT_GENERATORS) | set(ov.get("generators") or {})
+    # By match form, not by literal id: a placed `minecraft:mod.water_source` IS the
+    # `mod:water_source` already on the list, and offering it again as something to add
+    # sends the user to configure a generator that is already working.
+    known_forms = {f for b in known for f in match_forms(b)}
     out = []
     for block, n in sorted(placed.items()):
-        if not n or block in known:
+        if not n or any(f in known_forms for f in match_forms(block)):
             continue
         if any(h in str(block).lower() for h in GENERATOR_HINTS):
             out.append(block)
@@ -136,6 +142,31 @@ def save_overrides(path, generators=None, disabled=(), vanilla_water=True):
         }, fh, indent=1, sort_keys=True)
 
 
+def sightings(blocks, placed=None, stock=None):
+    """{curated block id: evidence} for the ones this world actually has.
+
+    The one place that decides whether a generator on the list is present, so `resolve`
+    and the `sources` command cannot disagree -- the CLI used to test `block in placed`
+    literally and reported blocks as unmatched that `resolve` had just matched.
+
+    Indexed with machines.index_ids for the same reason machine availability is: a legacy
+    dotted tile-entity id arrives from the save as `minecraft:mod.thing` and would never
+    literally equal the `mod:thing` this table is written in. See machines.match_forms.
+    """
+    from .machines import index_ids, normalise_block
+
+    placed_index = index_ids(b for b, n in (placed or {}).items() if n)
+    stock_index = index_ids(b for b, n in (stock or {}).items() if n)
+    out = {}
+    for block in blocks:
+        norm = normalise_block(block)
+        if norm in placed_index:
+            out[block] = "placed: %s" % placed_index[norm]
+        elif norm in stock_index:
+            out[block] = "in stock: %s" % stock_index[norm]
+    return out
+
+
 def resolve(placed=None, stock=None, overrides=None):
     """{output key: human reason} for everything an owned generator makes free.
 
@@ -143,35 +174,15 @@ def resolve(placed=None, stock=None, overrides=None):
     the same order of directness machine availability uses. A generator in a drive is not
     producing anything yet, but it is one place-block away, so it counts.
     """
-    from .machines import normalise_block
-
-    placed = placed or {}
-    stock = stock or {}
     ov = overrides if isinstance(overrides, dict) else load_overrides(overrides)
     disabled = ov.get("disabled") or set()
 
     table = dict(DEFAULT_GENERATORS)
     table.update(ov.get("generators") or {})
 
-    placed_index = {}
-    for block, n in placed.items():
-        if n:
-            placed_index.setdefault(normalise_block(block), block)
-    stock_index = {}
-    for block, n in stock.items():
-        if n:
-            stock_index.setdefault(normalise_block(block), block)
-
     free = {}
-    for block, outputs in table.items():
-        norm = normalise_block(block)
-        if norm in placed_index:
-            why = "placed: %s" % placed_index[norm]
-        elif norm in stock_index:
-            why = "in stock: %s" % stock_index[norm]
-        else:
-            continue
-        for key in outputs:
+    for block, why in sightings(table, placed, stock).items():
+        for key in table[block]:
             if key not in disabled:
                 free.setdefault(key, why)
 
