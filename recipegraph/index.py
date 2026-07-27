@@ -136,9 +136,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
                ", ".join("%s x%d" % (c, n) for c, n in top)))
     if len(kept) != before:
         g.recipes = kept
-        g._by_output = None
-        g._by_input = None
-        g._producer_cache = {}
+        g._invalidate()
         top = sorted(dropped_by_cat.items(), key=lambda t: -t[1])[:4]
         say("non-recipes: dropped %d of %d entries (%s) -- info panels, anvil "
             "permutations, loot tables and container fills are not production"

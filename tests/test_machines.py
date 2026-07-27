@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import fixtures  # noqa: E402
 from recipegraph import cost, index, machines  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
@@ -370,3 +371,72 @@ class SameModTest(unittest.TestCase):
         _state, why = machines.resolve(g, placed={"tinker_io:smart_output": 1})[
             "tinker_io:smart_output"]
         self.assertNotIn("other mod", why)
+
+
+class CatalystVariantTest(unittest.TestCase):
+    """A catalyst is a claim about an ITEM, not about one NBT state of it.
+
+    #28: at schema 3, every crafting recipe for a machine that carries its level or
+    augments in NBT outputs a discriminated key, while `catalysts.json` still names the
+    bare one. Availability looked the bare key up, found nothing, and reported "no route"
+    for 16 Thermal Expansion categories and 3 Botania flowers that are plainly craftable.
+    Unavailable is the most expensive state in the cost model, so every plan that could
+    touch those machines was distorted.
+    """
+
+    def test_a_bare_catalyst_finds_its_discriminated_variants(self):
+        g = fixtures.discriminated_graph()
+        self.assertEqual(g.producers(fixtures.MACHINE_BASE), [],
+                         "the bare key genuinely has no recipe of its own")
+        self.assertTrue(g.producers_any_variant(fixtures.MACHINE_BASE))
+        self.assertEqual(list(g.variants_of(fixtures.MACHINE_BASE)),
+                         [fixtures.MACHINE_VARIANT])
+
+    def test_the_category_reads_buildable_not_unavailable(self):
+        g = fixtures.discriminated_graph()
+        rec = machines.describe(g)["mod.arc_furnace"]
+        self.assertEqual(rec["state"], machines.BUILDABLE)
+        self.assertIn(fixtures.MACHINE_BASE, rec["why"])
+
+    def test_the_evidence_names_the_variant_that_is_actually_craftable(self):
+        # Otherwise the page asserts a route to a key with no producers, and the reader
+        # cannot check the claim by clicking it.
+        g = fixtures.discriminated_graph()
+        rec = machines.describe(g)["mod.arc_furnace"]
+        self.assertIn(fixtures.MACHINE_VARIANT, rec["why"])
+
+    def test_a_catalyst_with_no_variants_anywhere_is_still_unavailable(self):
+        # The widening must not turn "genuinely unreachable" into "buildable"; five real
+        # categories on the reference pack are correctly unavailable.
+        g = fixtures.discriminated_graph()
+        g.catalysts = {"mod.arc_furnace": ["mod:nonexistent_machine"]}
+        rec = machines.describe(g)["mod.arc_furnace"]
+        self.assertEqual(rec["state"], machines.UNAVAILABLE)
+
+    def test_the_solver_is_not_widened(self):
+        """`producers` must keep answering the narrow question.
+
+        The solver asks "give me exactly this stack". A machine with different augments
+        is not a substitute for the one a recipe called for, so widening `producers`
+        itself would let any plan satisfy an NBT-bearing ingredient with the wrong
+        variant. Only the catalyst question is widened.
+        """
+        g = fixtures.discriminated_graph()
+        self.assertEqual(g.producers(fixtures.MACHINE_BASE), [])
+        result = Solver(g).solve(fixtures.MACHINE_BASE, 1)
+        self.assertEqual(result["tree"]["status"], "raw")
+
+    def test_a_discriminated_key_does_not_widen_to_its_siblings(self):
+        # Asking for one variant must not pick up another variant's recipes.
+        g = fixtures.discriminated_graph()
+        self.assertEqual(g.producers_any_variant(fixtures.MACHINE_VARIANT),
+                         g.producers(fixtures.MACHINE_VARIANT))
+
+    def test_the_variant_index_survives_a_recipe_being_added(self):
+        # Every derived index is dropped through one `_invalidate`; a stale variant index
+        # would report a machine unbuildable until the process restarted.
+        g = fixtures.discriminated_graph()
+        self.assertEqual(list(g.variants_of("mod:later")), [])
+        g.add(Recipe("late", "t", [("mod:later#abcdef123456", 1)],
+                     [Ingredient(["mod:plate"], 1)], category="crafting"))
+        self.assertEqual(list(g.variants_of("mod:later")), ["mod:later#abcdef123456"])

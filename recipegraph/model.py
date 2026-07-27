@@ -235,19 +235,26 @@ class Graph:
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
         self.instance_dir = None
+        self._invalidate()
+
+    def _invalidate(self):
+        """Drop every derived index. The ONLY place that list is written down.
+
+        It used to be spelled out at each call site, and `index.build` reset three of the
+        five after dropping ~226k non-recipes, leaving `_ore_index` and `_labels` holding
+        entries for recipes that no longer existed. Adding an index meant finding every
+        site and the fourth one got missed.
+        """
         self._by_output = None
         self._by_input = None
         self._ore_index = None
         self._labels = None
+        self._variant_index = None
         self._producer_cache = {}
 
     def add(self, recipe):
         self.recipes.append(recipe)
-        self._by_output = None
-        self._by_input = None
-        self._ore_index = None
-        self._labels = None
-        self._producer_cache = {}
+        self._invalidate()
 
     @property
     def by_output(self):
@@ -344,6 +351,47 @@ class Graph:
         if meta not in (None, "*"):
             out.extend(self.by_output.get("%s:*" % base, ()))
         self._producer_cache[key] = out
+        return out
+
+    @property
+    def variant_index(self):
+        """base key -> [discriminated keys some recipe produces].
+
+        Only produced keys, because the question this answers is "can this item be made
+        in ANY NBT state", and an ingredient nobody makes cannot help answer it.
+        """
+        if self._variant_index is None:
+            idx = {}
+            for key in self.by_output:
+                base, disc = split_discriminator(key)
+                if disc is not None:
+                    idx.setdefault(base, []).append(key)
+            self._variant_index = idx
+        return self._variant_index
+
+    def variants_of(self, key):
+        return self.variant_index.get(key, ())
+
+    def producers_any_variant(self, key):
+        """`producers`, widened to every NBT variant of `key`.
+
+        For questions about the ITEM rather than about one NBT state of it. A JEI catalyst
+        names `thermalexpansion:machine:1`, while every crafting recipe for a Pulverizer
+        outputs `thermalexpansion:machine:1#f56885268ad5` because the level and augments
+        live in NBT. Asking `producers` for the bare key finds nothing and the machines
+        page concludes there is no route to a machine that is plainly craftable, which is
+        16 Thermal Expansion categories and 3 Botania flowers on the reference pack. See
+        #28.
+
+        DELIBERATELY NOT what `producers` does. The solver asks a different question:
+        "give me exactly this stack", and a Pulverizer with different augments is not a
+        substitute for the one a recipe called for. Widening `producers` itself would let
+        every plan satisfy any NBT-bearing ingredient with the wrong variant.
+        """
+        out = list(self.producers(key))
+        if split_discriminator(key)[1] is None:
+            for variant in self.variants_of(key):
+                out.extend(self.producers(variant))
         return out
 
     def real_producers(self, key):
