@@ -9,10 +9,11 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import (  # noqa: E402
-    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, norm_key,
-    split_discriminator,
+    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, merge_slots,
+    norm_key, split_discriminator,
 )
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
@@ -209,6 +210,144 @@ class TestPool(unittest.TestCase):
         before = set(s.pool)
         s.solve("mod:dust", 3)
         self.assertEqual(set(s.pool), before)
+
+
+def _grid_graph():
+    """A 3x3 of one ingredient, which is how a shaped recipe really parses: nine slots."""
+    g = Graph()
+    g.names = {"mod:clump": "Tiny Clump", "mod:ingot": "Ingot", "mod:ore": "Ore",
+               "mod:rod": "Rod", "mod:plate": "Plate"}
+    g.add(Recipe("compress", "t", [("mod:ingot", 1)],
+                 [Ingredient(["mod:clump"], 1) for _ in range(9)]))
+    g.add(Recipe("smelt", "t", [("mod:clump", 1)], [Ingredient(["mod:ore"], 1)]))
+    return g
+
+
+class TestMergeSlots(unittest.TestCase):
+    """The shared collapse both the solver and the item page are built on."""
+
+    def test_it_returns_the_first_slot_of_each_group(self):
+        first = Ingredient(["mod:clump"], 1, role="item")
+        rows = merge_slots([first, Ingredient(["mod:clump"], 2)],
+                           lambda i: tuple(i.alternatives))
+        self.assertEqual(len(rows), 1)
+        key, ing, qty, options = rows[0]
+        self.assertEqual(key, ("mod:clump",))
+        self.assertIs(ing, first, "the group's row describes its first slot")
+        self.assertEqual((qty, options), (3, 1))
+
+    def test_order_is_first_appearance(self):
+        rows = merge_slots([Ingredient(["b"], 1), Ingredient(["a"], 1),
+                            Ingredient(["b"], 1)], lambda i: tuple(i.alternatives))
+        self.assertEqual([r[0] for r in rows], [("b",), ("a",)])
+
+    def test_no_inputs_is_no_rows(self):
+        self.assertEqual(merge_slots([], lambda i: i), [])
+
+    def test_the_widest_slot_sets_the_option_count(self):
+        rows = merge_slots([Ingredient(["a"], 1), Ingredient(["a", "b", "c"], 1)],
+                           lambda i: i.alternatives[0])
+        self.assertEqual(rows[0][3], 3)
+
+
+class TestSlotMerging(unittest.TestCase):
+    """Slots resolving to the same thing collapse into one node (#24).
+
+    Nine identical subtrees where one would do also multiplies the node count by nine
+    at every such step, so the node cap was reached nine times sooner and the tree that
+    got truncated was mostly duplicate.
+    """
+
+    def test_a_3x3_of_one_ingredient_is_one_node_of_nine(self):
+        res = Solver(_grid_graph()).solve("mod:ingot", 1)
+        kids = res["tree"]["children"]
+        self.assertEqual(len(kids), 1, "nine slots of the same clump are one ingredient")
+        self.assertEqual(kids[0]["need"], 9)
+
+    def test_merging_collapses_the_duplicated_subtrees(self):
+        res = Solver(_grid_graph()).solve("mod:ingot", 1)
+        # ingot + clump + ore, rather than ingot + nine (clump + ore)
+        self.assertEqual(res["nodes"], 3)
+
+    def test_the_shopping_list_is_unchanged_by_merging(self):
+        res = Solver(_grid_graph()).solve("mod:ingot", 1)
+        self.assertEqual({r["key"]: r["qty"] for r in res["shopping_list"]},
+                         {"mod:ore": 9})
+
+    def test_quantities_still_scale_with_runs(self):
+        res = Solver(_grid_graph()).solve("mod:ingot", 4)
+        self.assertEqual(res["tree"]["children"][0]["need"], 36)
+
+    def test_slots_landing_on_different_items_do_not_merge(self):
+        g = _grid_graph()
+        g.add(Recipe("mixed", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 2), Ingredient(["mod:rod"], 3)]))
+        kids = Solver(g).solve("mod:plate", 1)["tree"]["children"]
+        self.assertEqual([(c["key"], c["need"]) for c in kids],
+                         [("mod:clump", 2), ("mod:rod", 3)])
+
+    def test_slots_merge_on_the_RESOLVED_alternative_not_the_declared_one(self):
+        """Different alternative LISTS that pick the same item still merge."""
+        g = _grid_graph()
+        g.ore_members = {"clumps": ["mod:clump"]}
+        g.add(Recipe("mixed", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 2),
+                      Ingredient(["mod:clump", "mod:rod"], 3)]))
+        kids = Solver(g).solve("mod:plate", 1)["tree"]["children"]
+        self.assertEqual(len(kids), 1, "both slots picked mod:clump")
+        self.assertEqual(kids[0]["need"], 5)
+
+    def test_an_ore_slot_does_not_merge_with_a_slot_naming_its_member(self):
+        """Deliberate: oredict resolution happens a level below the merge.
+
+        `ore:clumps` and `mod:clump` are different NODES -- the oredict one renders as
+        "any of these" with its own resolved_to. Merging them would have to throw one
+        label away. Measured on the reference pack, 13 of 117,685 recipes mix an ore
+        slot with a concrete member of that same ore, so the honest split costs almost
+        nothing and keeps both slots reported as authored.
+        """
+        g = _grid_graph()
+        g.ore_members = {"clumps": ["mod:clump"]}
+        g.add(Recipe("ores", "t", [("mod:plate", 1)],
+                     [Ingredient(["ore:clumps"], 2), Ingredient(["mod:clump"], 3)]))
+        kids = Solver(g).solve("mod:plate", 1)["tree"]["children"]
+        self.assertEqual([c["key"] for c in kids], ["ore:clumps", "mod:clump"])
+
+    def test_a_merged_node_reports_the_widest_slot_alternative_count(self):
+        g = _grid_graph()
+        g.add(Recipe("wide", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 1),
+                      Ingredient(["mod:clump", "mod:rod", "mod:ore"], 1)]))
+        kid = Solver(g, have={"mod:clump": 2}).solve("mod:plate", 1)["tree"]["children"][0]
+        self.assertEqual(kid["need"], 2)
+        self.assertEqual(kid["alt_count"], 3,
+                         "the merged node must not inherit the first slot's count of 1")
+
+    def test_stock_for_one_slot_does_not_satisfy_nine_of_them(self):
+        """`score_recipe` counted a satisfied INGREDIENT once per slot.
+
+        With one clump in stock, nine slots asking for one clump each all read as
+        satisfied, so a recipe the pool could barely start outranked one it could
+        finish.
+        """
+        g = _grid_graph()
+        # Two routes to a plate: nine clumps (one in stock) or two rods (both in stock).
+        g.add(Recipe("nine", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 1) for _ in range(9)]))
+        g.add(Recipe("two", "t", [("mod:plate", 1)], [Ingredient(["mod:rod"], 2)]))
+        res = Solver(g, have={"mod:clump": 1, "mod:rod": 2}).solve("mod:plate", 1)
+        self.assertEqual(res["tree"]["recipe"], "two")
+
+    def test_a_single_option_slot_carries_no_alternative_count(self):
+        kid = Solver(_grid_graph()).solve("mod:ingot", 1)["tree"]["children"][0]
+        self.assertNotIn("alt_count", kid, "nine slots of one option are still one option")
+
+    def test_the_slot_alternative_count_reaches_the_tree_html(self):
+        g = _grid_graph()
+        g.add(Recipe("wide", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump", "mod:rod", "mod:ore"], 1)]))
+        html = render.render_html(Solver(g).solve("mod:plate", 1))
+        self.assertIn("any of 3", html)
 
 
 class TestOredictGuess(unittest.TestCase):

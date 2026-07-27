@@ -9,7 +9,7 @@ iron ingot is consumed by thousands of recipes; rendering all of them would prod
 a useless page. Caps are reported in the output rather than silently applied.
 """
 
-from .model import split_key
+from .model import merge_slots, split_key
 from .names import build_reverse
 
 MAX_RESULTS = 60
@@ -132,11 +132,16 @@ def _recipe_brief(graph, recipe, have, direction):
         "source": recipe.source,
     }
     if direction == "makes":
+        # Merged the same way the plan tree merges, for the same reason: a 3x3 of one
+        # ingredient listed nine rows of "1x Tiny Clump" here too. Merged on the
+        # alternatives AS AUTHORED -- this view describes the recipe and has no inventory
+        # to pick a slot's alternative with. See model.merge_slots and #24.
         d["inputs"] = [
-            {"qty": ing.qty, "role": ing.role,
+            {"qty": qty, "role": ing.role,
              "alts": [_stack(graph, a, have) for a in ing.alternatives[:4]],
-             "alt_total": len(ing.alternatives)}
-            for ing in recipe.inputs
+             "alt_total": options}
+            for _key, ing, qty, options in merge_slots(
+                recipe.inputs, lambda i: tuple(i.alternatives))
         ]
         d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
                         "label": graph.bare_name(k), "qty": q}
@@ -145,7 +150,6 @@ def _recipe_brief(graph, recipe, have, direction):
         d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
                         "label": graph.bare_name(k), "qty": q}
                         for k, q in recipe.outputs]
-        d["input_count"] = len(recipe.inputs)
     return d
 
 

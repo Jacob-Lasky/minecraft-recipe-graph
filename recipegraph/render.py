@@ -263,6 +263,11 @@ def _node_html(node, depth=0):
         extra.append(_esc(node["category"]))
     if node.get("alternatives", 0) > 1:
         extra.append("%d recipes" % node["alternatives"])
+    # How many things the SLOT would have accepted, as opposed to how many recipes make
+    # what is in it. The solver has always written this and nothing rendered it, so a
+    # node standing in for an oredict slot looked like the only option it ever had.
+    if node.get("alt_count", 0) > 1:
+        extra.append("any of %d" % node["alt_count"])
     if node.get("note"):
         extra.append(_esc(node["note"]))
     if node.get("resolved_to"):

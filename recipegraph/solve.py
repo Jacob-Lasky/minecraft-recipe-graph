@@ -19,7 +19,7 @@ The three things that make this non-trivial, and how each is handled:
 import collections
 
 from .machines import is_hand_crafting
-from .model import split_key
+from .model import merge_slots, split_key
 
 STATUS_HAVE = "have"        # fully covered by inventory
 STATUS_PARTIAL = "partial"  # some from inventory, remainder crafted
@@ -177,15 +177,19 @@ class Solver:
         """
         satisfied = 0
         cyclic = 0
-        for ing in recipe.inputs:
-            alt = self.pick_alternative(ing)
-            if (self.available(alt) >= ing.qty or alt in self.craftables
+        # Scored on MERGED slots, the same view `_build` will expand. Per slot, nine cells
+        # asking for one clump each read as nine satisfied ingredients when stock held a
+        # single clump, and a 3x3 of one thing looked three times less simple than a
+        # recipe taking three different things.
+        slots = self._merge_slots(recipe)
+        for alt, qty, _options in slots:
+            if (self.available(alt) >= qty or alt in self.craftables
                     or alt in self.free_sources):
                 satisfied += 1
-            if alt in ancestors and self.available(alt) < ing.qty:
+            if alt in ancestors and self.available(alt) < qty:
                 cyclic += 1
-        # simplicity tiebreak: fewer inputs, and prefer plain crafting over machines
-        simple = 1.0 / (1 + len(recipe.inputs))
+        # simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines
+        simple = 1.0 / (1 + len(slots))
         plain = 0.1 if is_hand_crafting(recipe.category) else 0.0
         avail = self.availability_rank(recipe)
         # A container fill/empty never counts as production, so it loses to any real
@@ -367,14 +371,34 @@ class Solver:
                     recipe.machine or recipe.category, state[0], state[1])
 
         children = []
-        for ing in recipe.inputs:
-            alt = self.pick_alternative(ing)
-            child = self.expand(alt, ing.qty * runs, ancestors, depth + 1)
-            if len(ing.alternatives) > 1:
-                child["alt_count"] = len(ing.alternatives)
+        for alt, qty, alts in self._merge_slots(recipe):
+            child = self.expand(alt, qty * runs, ancestors, depth + 1)
+            if alts > 1:
+                child["alt_count"] = alts
             children.append(child)
         node["children"] = children
         return node
+
+    def _merge_slots(self, recipe):
+        """Input slots collapsed onto what each one RESOLVES to. See model.merge_slots.
+
+        The one view of a recipe's ingredients this class has: `score_recipe` ranks the
+        recipe by it and `_build` expands it, so the two cannot disagree about how many
+        ingredients there are.
+
+        Expanding a 3x3 of one ingredient per slot drew nine copies of an identical
+        subtree, which is nine times the nodes at every such step -- the node cap was
+        being spent on duplicates, so the tree that got truncated was mostly repeat.
+
+        The consequence specific to the solver is that resolution now happens once, up
+        front, rather than interleaved with expansion: `expand` draws stock down as it
+        goes, so a later slot used to see a smaller pool. That makes plans BETTER rather
+        than worse -- one `take` of 9 replaces nine takes of 1, and no slot can now pick a
+        different route because an earlier COPY OF ITSELF emptied the shelf.
+        """
+        return [(key, qty, options)
+                for key, _ing, qty, options in merge_slots(recipe.inputs,
+                                                           self.pick_alternative)]
 
     def _entry(self, key, qty):
         return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
