@@ -9,8 +9,10 @@ A real server on a real port rather than a mocked handler, because the things wo
 here ARE the HTTP behaviours: status codes, content types, and redirect targets.
 """
 
+import html as html_mod
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -21,8 +23,10 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import generators, machines, server  # noqa: E402
+import fixtures  # noqa: E402
+from recipegraph import generators, graphview, index, machines, server  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
+from recipegraph.solve import Solver  # noqa: E402
 
 
 def build_graph():
@@ -455,3 +459,166 @@ class EnsureGraphTest(unittest.TestCase):
     def test_the_instance_survives_a_save_and_load(self):
         self._write_graph(self.instance)
         self.assertEqual(Graph.load(self.graph_path).instance_dir, self.instance)
+
+
+class DiscriminatedLinkTest(unittest.TestCase):
+    """Every link a renderer emits must survive the trip back to the server.
+
+    #23: `graphview` percent-encoded the colon in an item key and left the `#` of an NBT
+    discriminator alone, so the browser treated the discriminator as a URL fragment and
+    never sent it. The server saw a key that does not exist, answered "No item with that
+    id", and the `qty` inside the discarded fragment was lost too. 298,765 of 340,324
+    named keys carry a discriminator, so that was most of the graph.
+
+    This is written as a PROPERTY over every href on every page rather than as an
+    assertion about the two call sites that were visible at the time. A new link builder
+    that forgets to encode is caught here without anybody remembering to add a case.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        graph_path = os.path.join(cls.dir, "graph.json")
+        g = fixtures.discriminated_graph()
+        index.mark_container_transfers(g)
+        g.save(graph_path)
+        cls.graph = g
+        have_path = os.path.join(cls.dir, "have.json")
+        with open(have_path, "w") as fh:
+            json.dump({"items": {}, "placed": {}}, fh)
+        cls.httpd, cls.state = server.serve(
+            graph_path, have_path, os.path.join(cls.dir, "machines.json"),
+            host="127.0.0.1", port=0,
+            sources_path=os.path.join(cls.dir, "sources.json"))
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=5)
+
+    def get(self, path):
+        url = "http://127.0.0.1:%d%s" % (self.port, path)
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as err:
+            with err:
+                return err.status, err.read().decode()
+
+    @staticmethod
+    def _hrefs(markup):
+        return re.findall(r"""href=["']([^"']+)["']""", markup)
+
+    @staticmethod
+    def _as_browser_sends(href):
+        """The request a browser actually makes: entities decoded, fragment dropped.
+
+        Dropping the fragment is the whole point. A test that parses the raw href sees
+        the discriminator and passes while every real click 404s.
+        """
+        return html_mod.unescape(href).split("#", 1)[0]
+
+    def _pages(self):
+        """Every server-rendered surface that can emit an item link."""
+        quoted = urllib.parse.quote(fixtures.NAMED_CAN, safe="")
+        return [
+            "/",
+            "/plan?item=%s&qty=1" % quoted,
+            "/explore?q=%s" % urllib.parse.quote("Can", safe=""),
+            "/machines",
+            "/machine?uid=%s" % urllib.parse.quote("mod.arc_furnace", safe=""),
+            "/sources",
+        ]
+
+    def test_every_page_renders(self):
+        for path in self._pages():
+            status, _body = self.get(path)
+            self.assertEqual(status, 200, path)
+
+    def test_dropping_the_fragment_changes_no_link(self):
+        """THE property. A correctly built href has no bare `#`, so what the browser
+        sends is byte-identical to what the renderer wrote.
+
+        Stated this way it needs no list of valid keys, which is what lets it cover the
+        sources page (which links `fluid:water`, free by default and absent from any
+        recipe) and every link builder added later.
+        """
+        checked = 0
+        for path in self._pages():
+            _status, body = self.get(path)
+            for href in self._hrefs(body):
+                raw = html_mod.unescape(href)
+                checked += 1
+                self.assertEqual(
+                    raw, self._as_browser_sends(href),
+                    "%s on %s carries an unencoded '#', so the browser truncates it "
+                    "and the server never sees the rest" % (href, path))
+        self.assertGreater(checked, 0, "no links were rendered, so nothing was proven")
+
+    def test_every_item_link_keeps_its_key_and_qty(self):
+        seen = 0
+        for path in self._pages():
+            _status, body = self.get(path)
+            for href in self._hrefs(body):
+                params = urllib.parse.parse_qs(
+                    urllib.parse.urlparse(self._as_browser_sends(href)).query)
+                if "item" not in params:
+                    continue
+                seen += 1
+                self.assertEqual(params.get("qty", ["missing"])[0], "1",
+                                 "%s on %s lost its qty" % (href, path))
+        self.assertGreater(seen, 0, "no item links were rendered")
+
+    def test_a_discriminated_key_actually_appears_in_a_link(self):
+        # Guards the two properties above: if nothing rendered ever carried a
+        # discriminator they would pass vacuously on bare keys.
+        found = []
+        for path in self._pages():
+            _status, body = self.get(path)
+            for href in self._hrefs(body):
+                params = urllib.parse.parse_qs(
+                    urllib.parse.urlparse(self._as_browser_sends(href)).query)
+                found.extend(k for k in params.get("item", []) if "#" in k)
+        self.assertTrue(found, "no rendered link carried an NBT discriminator")
+
+    def test_a_plan_for_a_discriminated_key_resolves_to_that_variant(self):
+        # The discriminator has to reach the solver, not just survive the URL. The base
+        # key is a real item here too, so a truncated link would silently plan the wrong
+        # thing rather than 404, which is the quieter half of #23.
+        _s, variant = self.get("/plan?item=%s&qty=1"
+                               % urllib.parse.quote(fixtures.NAMED_CAN, safe=""))
+        _s, base = self.get("/plan?item=%s&qty=1"
+                            % urllib.parse.quote(fixtures.CAN_BASE, safe=""))
+        self.assertIn("Brine Can", variant)
+        self.assertNotIn("Brine Can", base)
+
+    def test_an_unknown_key_still_404s(self):
+        status, body = self.get("/plan?item=%s&qty=1"
+                                % urllib.parse.quote("mod:nope#deadbeefcafe", safe=""))
+        self.assertEqual(status, 404)
+        self.assertIn("No item with that id", body)
+
+    def test_every_link_the_graph_diagram_emits_round_trips(self):
+        # The diagram is SVG built in graphview, not by the server, and it was the
+        # builder that broke. Drive it directly so the property covers it even if the
+        # plan page stops embedding the diagram.
+        result = Solver(self.graph).solve(fixtures.NAMED_CAN, 1)
+        svg = graphview.render_svg(result["tree"])
+        hrefs = self._hrefs(svg)
+        self.assertTrue(hrefs, "the diagram emitted no links")
+        for href in hrefs:
+            raw = html_mod.unescape(href)
+            self.assertEqual(raw, self._as_browser_sends(href), href)
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query)
+            self.assertIn(params["item"][0], self.graph.labels, href)
+            self.assertEqual(params["qty"][0], "1", href)
+
+    def test_the_client_side_builder_encodes_too(self):
+        # HOME_JS builds hrefs in the browser and no server-side render can see them.
+        # encodeURIComponent is the JS equivalent of quote(safe=""); a bare
+        # concatenation would reintroduce #23 on the search page alone.
+        self.assertIn("'/plan?item='+encodeURIComponent(", server.HOME_JS)
