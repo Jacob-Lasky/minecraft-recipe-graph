@@ -333,9 +333,21 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None,
         if held:
             rec.update(state=HAVE, why="in stock: %s%s" % (held[0], caveat))
             continue
-        makeable = [c for c in cands if graph.producers(c)]
+        # `producers_any_variant`, not `producers`. A catalyst is a claim about an ITEM,
+        # not about one particular NBT state of it, and at schema 3 the recipes for a
+        # machine that carries its level or augments in NBT all output a discriminated
+        # key while catalysts.json still names the bare one. Asking the narrow question
+        # put 16 Thermal Expansion categories and 3 Botania flowers into "no route" for
+        # machines that are plainly craftable. See #28.
+        makeable = [c for c in cands if graph.producers_any_variant(c)]
         if makeable:
-            rec.update(state=BUILDABLE, why="craftable: %s%s" % (makeable[0], caveat))
+            # Name the variant that is actually craftable when it differs from the
+            # catalyst, so the evidence stays checkable rather than asserting a route to
+            # a key that has no producers of its own.
+            made = graph.variants_of(makeable[0])
+            shown = (makeable[0] if graph.producers(makeable[0])
+                     else "%s (as %s)" % (makeable[0], made[0]))
+            rec.update(state=BUILDABLE, why="craftable: %s%s" % (shown, caveat))
             continue
         rec.update(state=UNAVAILABLE, why="no route to %s%s" % (cands[0], caveat))
     return out
