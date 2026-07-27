@@ -1,4 +1,4 @@
-"""Provenance for a dump: which mod version wrote it, to which file schema.
+"""summary.json: the dump's provenance, and JEI's own name for each category's mod.
 
 WHY THIS EXISTS. A dump directory was undatable. The only signal that `catalysts.json` was
 missing because the mod predated it -- rather than because the categories genuinely had no
@@ -10,30 +10,62 @@ SCHEMA tracks the SHAPE of the dumped files, not the mod version. Bump it in
 DumpCommand.java and here together when a file's shape changes:
   1  recipes.ndjson, oredict.json, names.json, skipped.ndjson, summary.json
   2  adds catalysts.json, and summary.json gains mod_version and schema
+  3  item stacks may carry `n`, a digest of the NBT that decides what the stack IS, and
+     names.json keys by the discriminated id so the digest has a readable name
 """
 
 import json
 import os
 
-SCHEMA = 2
+SCHEMA = 3
+
+
+def _document(dump_dir):
+    """summary.json as a dict, or {} if it is absent or unreadable.
+
+    Never raises: a missing or corrupt summary.json means an old or partial dump, which is
+    exactly the case this module is here to describe.
+    """
+    path = os.path.join(dump_dir, "summary.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        try:
+            doc = json.load(fh)
+        except ValueError:
+            return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def category_mods(dump_dir):
+    """{category uid: mod display name}, from JEI's own IRecipeCategory.getModName().
+
+    This is the ONLY authoritative answer to "which mod owns this category". Deriving it
+    from the uid's first token is a guess that fails whenever a uid does not begin with
+    its modid, and 3 of the first 3 examples anyone looked at were wrong:
+    `foregoing_plant_gatherer` is Industrial Foregoing, `safe_nuke_meatball` is Extreme
+    Reactors, `SoulBinder` is enderiomachines. On the reference pack all 674 categories
+    carry one.
+
+    NOT interchangeable with the registry modid. This is a display name with spaces and
+    capitals ("Industrial Foregoing"), and it will never substring-match
+    `industrialforegoing:plant_gatherer` -- machine identification must keep using
+    `machines.same_mod` on the uid. Two fields, two jobs.
+    """
+    cats = _document(dump_dir).get("categories")
+    if not isinstance(cats, dict):
+        return {}
+    out = {}
+    for uid, info in cats.items():
+        name = info.get("mod") if isinstance(info, dict) else None
+        if isinstance(name, str) and name.strip():
+            out[str(uid)] = name.strip()
+    return out
 
 
 def read(dump_dir):
-    """{'mod_version', 'schema', 'present'} for a dump directory.
-
-    Never raises: a missing or corrupt summary.json means an old or partial dump, which is
-    exactly the case this is here to describe.
-    """
-    path = os.path.join(dump_dir, "summary.json")
-    doc = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            try:
-                loaded = json.load(fh)
-                if isinstance(loaded, dict):
-                    doc = loaded
-            except ValueError:
-                pass
+    """{'mod_version', 'schema', 'present'} for a dump directory."""
+    doc = _document(dump_dir)
     schema = doc.get("schema")
     return {
         "mod_version": doc.get("mod_version"),

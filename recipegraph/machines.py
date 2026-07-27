@@ -57,6 +57,34 @@ ALWAYS_AVAILABLE = {
     "jei.information", "jei.description",
 }
 
+# Categories with no machine BY NATURE, which is a different answer from "we could not
+# work out which block this is". Bee and tree breeding happen in an Apiary that JEI
+# registers no catalyst for; a chicken lays where it stands, so the chicken IS the
+# machine. Reporting those as `unknown` reads as a tool failure and prices real, always
+# available production at 120x the cost of hand-crafting.
+#
+# This IS a list, and it has to be: nothing in a recipe distinguishes "needs no machine"
+# from "machine not identified". But it is a list of STRUCTURAL SITUATIONS -- production
+# driven by a living thing, or by a structure JEI does not catalyse -- rather than a
+# per-pack lookup, and a pack that needs another entry adds it to `machines.json` under
+# `no_machine` instead of editing this. Substrings, matched case-insensitively.
+NO_MACHINE_PATTERNS = (
+    "jeibees.mutation", "jeibees.produce",     # Forestry bees, trees, butterflies
+    "beetree",                                 # Bee Better At Bees, same production
+    "chickens.laying", "chickens.henhousing",  # the chicken is the machine
+)
+
+# Every pattern above describes production by a CREATURE, and a creature's identity lives
+# in NBT that the dump only began emitting at schema 3. Below that, all 437 bee mutations
+# are the same four keys, `produce.rootBees` is one input claiming to make 323 unrelated
+# items, and pricing that as free lets anything reach anything through a generic drone --
+# measured: Americium-242 rerouted onto bee larvae, diamond and glass panes.
+#
+# So the verdict is gated on the data being able to support it. `unknown`'s higher cost is
+# doing real work holding those edges back until then, and this self-heals on the next
+# /recipedump rather than needing a flag anyone has to remember. See issue #20.
+SPECIES_SCHEMA = 3
+
 # The two sources name hand-crafting differently: the JEI dump says `minecraft.crafting`,
 # the offline jar reader says `crafting_shaped` / `crafting_shapeless`. Both are a crafting
 # table. Matching only one of them left 10,301 offline recipes gated behind a machine the
@@ -76,6 +104,21 @@ def is_hand_crafting(category):
     """True for a crafting-table recipe under either source's naming convention."""
     cat = str(category or "")
     return any(cat.startswith(p) for p in _HAND_CRAFTING_PREFIXES)
+
+
+def needs_no_machine(category, extra=(), schema=0):
+    """True when a category has no machine by nature rather than none we could find.
+
+    `extra` is the user's own `no_machine` list and is never gated: an explicit human
+    decision outranks what the dump can prove. The built-in patterns are gated on
+    SPECIES_SCHEMA -- see the comment there for why.
+    """
+    cat = str(category or "").lower()
+    if cat in {str(e).lower() for e in extra}:
+        return True
+    if (schema or 0) < SPECIES_SCHEMA:
+        return False
+    return any(pat in cat for pat in NO_MACHINE_PATTERNS)
 
 # Machine blocks are commonly registered once per running state. NuclearCraft ships
 # `alloy_furnace_idle` / `alloy_furnace_active` as separate items while the placed tile
@@ -186,13 +229,32 @@ def candidate_items(graph, uid, machine_title, reverse_names, catalysts=None):
     return cands
 
 
-def resolve(graph, placed=None, stock=None, catalysts=None, overrides=None):
+def mod_name(graph, uid):
+    """Which mod owns a category, for grouping and display.
+
+    JEI's own `getModName()` when the dump carried one, and only then the uid's first
+    token. The guess is wrong whenever a uid does not begin with its modid, which produced
+    one-category "mods" called `foregoing`, `safe` and `soulbinder` for Industrial
+    Foregoing, Extreme Reactors and enderiomachines.
+
+    DO NOT feed this to `same_mod`. That compares REGISTRY modids and this is a display
+    name: "Industrial Foregoing" cannot match `industrialforegoing:plant_gatherer`, and
+    swapping them would break machine identification, which is currently correct.
+    """
+    known = getattr(graph, "category_mods", None) or {}
+    return known.get(uid) or (_tokens(uid) or [""])[0]
+
+
+def resolve(graph, placed=None, stock=None, catalysts=None, overrides=None,
+            no_machine=()):
     """Return {category_uid: (state, evidence)} for every category in the graph."""
     return {uid: (info["state"], info["why"])
-            for uid, info in describe(graph, placed, stock, catalysts, overrides).items()}
+            for uid, info in describe(graph, placed, stock, catalysts, overrides,
+                                      no_machine).items()}
 
 
-def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
+def describe(graph, placed=None, stock=None, catalysts=None, overrides=None,
+             no_machine=()):
     """Full per-category detail: state, evidence, candidate machine items, recipe count.
 
     `resolve` is the two-value view the solver and cost model consume; this is the view the
@@ -227,7 +289,7 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
         rec = {
             "uid": uid,
             "title": clean_label(title),
-            "mod": (_tokens(uid) or [""])[0],
+            "mod": mod_name(graph, uid),
             "recipes": counts.get(uid, 0),
             "candidates": [],
             "manual": uid in overrides,
@@ -239,6 +301,12 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
             continue
         if uid in ALWAYS_AVAILABLE or is_hand_crafting(uid):
             rec.update(state=HAVE, why="no machine needed")
+            continue
+        if needs_no_machine(uid, no_machine, getattr(graph, "dump_schema", 0)):
+            # Distinguished from the line above in the evidence, not the state: both are
+            # ungated, but "no machine needed" on a bee category is a claim about how
+            # breeding works and the reader should be able to check it.
+            rec.update(state=HAVE, why="no machine needed (bred, grown or laid)")
             continue
 
         # Catalysts from the dump mod are exact; fall back to name matching without them.
@@ -341,7 +409,8 @@ def responsibilities(graph, uid, limit=40):
     }
 
 
-def load_overrides(path):
+def load_document(path):
+    """machines.json as a dict. Missing or corrupt reads as empty rather than raising."""
     if not path or not os.path.exists(path):
         return {}
     with open(path) as fh:
@@ -349,17 +418,45 @@ def load_overrides(path):
             doc = json.load(fh)
         except ValueError:
             return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def load_overrides(path):
+    doc = load_document(path)
     raw = doc.get("overrides", doc)
+    if not isinstance(raw, dict):
+        return {}
     return {k: v for k, v in raw.items() if v in STATES}
 
 
+def load_no_machine(path):
+    """Extra category uids the user declares need no machine. See NO_MACHINE_PATTERNS."""
+    extra = load_document(path).get("no_machine")
+    return [str(u) for u in extra] if isinstance(extra, list) else []
+
+
 def save_overrides(path, overrides):
+    """Rewrite the file, carrying the hand-edited `no_machine` list across.
+
+    Read-modify-write rather than a fresh document, because a blind rewrite would delete
+    that list the first time anyone clicked a state button. But only the KNOWN keys are
+    carried: the earliest format let the whole document be the overrides map, and
+    preserving unrecognised top-level keys would leave those legacy entries in the file
+    forever, read by nothing and contradicting what the UI shows.
+    """
+    # Read BEFORE opening for write: `open(path, "w")` truncates, so reading inside the
+    # block would carry an empty list across every time.
+    keep = load_no_machine(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as fh:
         json.dump({
-            "_comment": "Manual machine availability. Values: have | buildable | "
-                        "unknown | unavailable. These win over anything auto-detected.",
+            "_comment": "Manual machine availability. `overrides` values: have | "
+                        "buildable | unknown | unavailable, and win over anything "
+                        "auto-detected. `no_machine` lists category uids that need no "
+                        "machine at all, for production driven by a creature or by a "
+                        "structure JEI does not catalyse.",
             "overrides": overrides,
+            "no_machine": keep,
         }, fh, indent=1, sort_keys=True)
 
 

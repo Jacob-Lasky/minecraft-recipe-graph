@@ -73,7 +73,8 @@ def _placed_and_stock(have_path):
 def _machine_states(graph, have_path, overrides_path):
     placed, stock = _placed_and_stock(have_path)
     overrides = machines.load_overrides(overrides_path)
-    return machines.resolve(graph, placed, stock, overrides=overrides), overrides
+    return machines.resolve(graph, placed, stock, overrides=overrides,
+                            no_machine=machines.load_no_machine(overrides_path)), overrides
 
 
 def _free_sources(have_path, sources_path):

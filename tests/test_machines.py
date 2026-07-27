@@ -1,5 +1,6 @@
 """Machine availability, non-recipe filtering, and cost-based recipe choice."""
 
+import json
 import os
 import sys
 import tempfile
@@ -146,7 +147,124 @@ class IdentificationTest(unittest.TestCase):
         self.assertEqual(rec["recipes"], 1)
         self.assertEqual(rec["title"], "Wire Mill")
         self.assertEqual(rec["candidates"], ["techreborn:wire_mill"])
-        self.assertEqual(rec["mod"], "techreborn")
+        self.assertEqual(rec["mod"], "techreborn",
+                         "with no dump the uid token is still the only thing to go on")
+
+
+class ModGroupingTest(unittest.TestCase):
+    """#14: three one-category 'mods' on the machines page that were not mods."""
+
+    @staticmethod
+    def _graph(uid, mod=None):
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:part": "Part"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category=uid, machine="Thing"))
+        if mod:
+            g.category_mods = {uid: mod}
+        return g
+
+    def test_jeis_mod_name_beats_the_uid_token(self):
+        for uid, jei, guessed in (
+                ("foregoing_plant_gatherer", "Industrial Foregoing", "foregoing"),
+                ("safe_nuke_meatball", "Extreme Reactors", "safe"),
+                ("SoulBinder", "enderiomachines", "soulbinder")):
+            self.assertEqual(machines.describe(self._graph(uid, jei))[uid]["mod"], jei)
+            self.assertEqual(machines.describe(self._graph(uid))[uid]["mod"], guessed,
+                             "and the guess is what we fall back to without a dump")
+
+    def test_the_display_name_never_reaches_machine_identification(self):
+        """Two fields, two jobs.
+
+        `same_mod` compares REGISTRY modids. Feeding it "Industrial Foregoing" would fail
+        against `industrialforegoing:plant_gatherer` and break identification, which is
+        currently correct -- so it must keep reading the uid.
+        """
+        uid = "foregoing_plant_gatherer"
+        g = self._graph(uid, "Industrial Foregoing")
+        self.assertTrue(machines.same_mod(uid, "foregoing:plant_gatherer"))
+        self.assertFalse(machines.same_mod(uid, "Industrial Foregoing:x"))
+        self.assertEqual(machines.mod_name(g, uid), "Industrial Foregoing")
+
+    def test_category_mods_survive_a_save_and_load(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "g.json")
+        self._graph("SoulBinder", "enderiomachines").save(path)
+        self.assertEqual(Graph.load(path).category_mods, {"SoulBinder": "enderiomachines"})
+
+
+class NoMachineNeededTest(unittest.TestCase):
+    """#15: bee, tree and chicken categories read as a tool failure but are not one."""
+
+    @staticmethod
+    def _graph(uid, schema=machines.SPECIES_SCHEMA):
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:part": "Part"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category=uid, machine="Apiary"))
+        g.dump_schema = schema
+        return g
+
+    def test_husbandry_categories_are_ungated_with_an_honest_reason(self):
+        for uid in ("bdew.jeibees.mutation.rootBees", "bdew.jeibees.produce.rootTrees",
+                    "chickens.Laying", "chickens.Henhousing", "beebetteratbees.beetree"):
+            state, why = machines.resolve(self._graph(uid))[uid]
+            self.assertEqual(state, machines.HAVE, uid)
+            self.assertIn("no machine needed", why, uid)
+            self.assertIn("bred, grown or laid", why,
+                          "%s: distinguishable from hand-crafting in the evidence" % uid)
+
+    def test_the_verdict_waits_for_a_dump_that_can_tell_bees_apart(self):
+        """Measured: ungating these at schema 2 rerouted Americium-242 through bee larvae.
+
+        Every pattern is creature-driven and a creature's identity is NBT, so before
+        schema 3 the category is one edge pretending to be 437 and `unknown`'s higher
+        cost is the only thing holding it back. See #20.
+        """
+        uid = "chickens.Laying"
+        state, why = machines.resolve(self._graph(uid, schema=2))[uid]
+        self.assertEqual(state, machines.UNKNOWN)
+        self.assertNotIn("no machine needed", why)
+
+    def test_a_user_declared_category_is_never_gated(self):
+        # An explicit human decision outranks what the dump can prove.
+        uid = "somepack.ritual"
+        g = self._graph(uid, schema=1)
+        state, _why = machines.resolve(g, no_machine=[uid])[uid]
+        self.assertEqual(state, machines.HAVE)
+
+    def test_saving_a_toggle_does_not_delete_the_hand_edited_list(self):
+        path = os.path.join(tempfile.mkdtemp(), "machines.json")
+        with open(path, "w") as fh:
+            json.dump({"no_machine": ["somepack.ritual"], "overrides": {}}, fh)
+        machines.save_overrides(path, {"mod.press": machines.HAVE})
+        self.assertEqual(machines.load_no_machine(path), ["somepack.ritual"])
+        self.assertEqual(machines.load_overrides(path), {"mod.press": machines.HAVE})
+        # And across a second save, which is where reading the list after truncating the
+        # file would quietly lose it.
+        machines.save_overrides(path, {"mod.press": machines.BUILDABLE})
+        self.assertEqual(machines.load_no_machine(path), ["somepack.ritual"])
+
+    def test_the_earliest_flat_format_is_not_carried_forward_forever(self):
+        # The first format let the whole document BE the overrides map. Preserving
+        # unrecognised keys would leave those entries in the file contradicting the UI.
+        path = os.path.join(tempfile.mkdtemp(), "machines.json")
+        with open(path, "w") as fh:
+            json.dump({"legacy.category": machines.HAVE}, fh)
+        self.assertEqual(machines.load_overrides(path), {"legacy.category": machines.HAVE})
+        machines.save_overrides(path, {"mod.press": machines.HAVE})
+        with open(path) as fh:
+            self.assertEqual(sorted(json.load(fh)),
+                             ["_comment", "no_machine", "overrides"])
+
+    def test_a_file_with_neither_key_still_reads_as_empty(self):
+        d = tempfile.mkdtemp()
+        self.assertEqual(machines.load_no_machine(os.path.join(d, "nope.json")), [])
+        bad = os.path.join(d, "bad.json")
+        with open(bad, "w") as fh:
+            fh.write("[1,2,3]")
+        self.assertEqual(machines.load_no_machine(bad), [])
+        self.assertEqual(machines.load_overrides(bad), {})
 
 
 class NonRecipeTest(unittest.TestCase):
@@ -155,9 +273,18 @@ class NonRecipeTest(unittest.TestCase):
                     "jeresources.worldgen", "VILLAGER_TRADE_CATEGORY", "chickens.Drops"):
             self.assertTrue(index.is_non_recipe(cat), cat)
 
+    def test_display_only_categories_are_dropped(self):
+        # #15: five categories that show you something rather than making it.
+        for cat in ("packagedauto:package_contents", "machine_produce_category",
+                    "chickens.Throws", "right_click_meatball", "meatball_puzzle"):
+            self.assertTrue(index.is_non_recipe(cat), cat)
+
     def test_real_production_categories_are_kept(self):
         for cat in ("nuclearcraft_crystallizer", "forestry.squeezer",
-                    "tconstruct.smeltery", "minecraft.crafting", "AlloySmelter"):
+                    "tconstruct.smeltery", "minecraft.crafting", "AlloySmelter",
+                    # Husbandry IS production; it just has no machine. Different answer,
+                    # different mechanism -- see machines.NO_MACHINE_PATTERNS.
+                    "bdew.jeibees.mutation.rootBees", "chickens.Laying"):
             self.assertFalse(index.is_non_recipe(cat), cat)
 
     def test_keep_list_overrides_the_pattern(self):

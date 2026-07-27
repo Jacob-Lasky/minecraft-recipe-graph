@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe, norm_key  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
@@ -115,6 +116,68 @@ class TestSolver(unittest.TestCase):
         res = Solver(_graph(), have={"mod:lattice": 1}).solve("mod:ingot", 1)
         needs = {r["key"]: r["qty"] for r in res["shopping_list"]}
         self.assertEqual(needs, {"mod:lattice": 3})
+
+
+class TestPool(unittest.TestCase):
+    """The stock pool, which `take` and `available` read on every single expansion."""
+
+    def _split_calls(self, pool_size, takes=50):
+        """How many split_key calls N takes cost against a pool of `pool_size` keys."""
+        pool = {"mod:thing%d" % i: 10 for i in range(pool_size)}
+        s = Solver(_graph(), have=pool)
+        calls = []
+        real = solve_mod.split_key
+        solve_mod.split_key = lambda k: (calls.append(k), real(k))[1]
+        try:
+            for i in range(takes):
+                s.take("mod:thing%d" % i, 1)
+        finally:
+            solve_mod.split_key = real
+        return len(calls)
+
+    def test_take_cost_does_not_grow_with_the_pool(self):
+        """#18: `take` scanned every pool key to discover it needed only one of them.
+
+        3,389 stocked keys made a 4,000-node plan cost 23 million split_key calls and
+        20 seconds. Asserting the two pool sizes cost the SAME is the durable form of
+        "not O(pool)" -- a threshold would drift with unrelated changes.
+        """
+        small = self._split_calls(100)
+        large = self._split_calls(2000)
+        self.assertEqual(small, large,
+                         "take is scanning the pool: %d calls at 100 keys, %d at 2000"
+                         % (small, large))
+
+    def test_wildcard_take_still_spans_metas(self):
+        """The pool scan existed to serve wildcards; the index must keep that working."""
+        s = Solver(_graph(), have={"mod:thing:1": 3, "mod:thing:2": 4, "other:x": 9})
+        self.assertEqual(s.available("mod:thing:*"), 7)
+        self.assertEqual(s.take("mod:thing:*", 6), 6)
+        self.assertEqual(s.pool["mod:thing:1"], 0)
+        self.assertEqual(s.pool["mod:thing:2"], 1)
+        self.assertEqual(s.pool["other:x"], 9, "an unrelated base must not be drained")
+
+    def test_wildcard_in_stock_is_not_counted_twice(self):
+        """`available` added pool[key] and then re-added it while scanning for the base."""
+        s = Solver(_graph(), have={"mod:thing:*": 5, "mod:thing:1": 2})
+        self.assertEqual(s.available("mod:thing:*"), 7)
+        self.assertEqual(s.take("mod:thing:*", 7), 7,
+                         "take must be able to deliver everything available() promised")
+
+    def test_pool_key_set_is_fixed_for_a_solvers_lifetime(self):
+        """The tripwire for the base index, which is built once and never invalidated.
+
+        `take` only DECREMENTS, and `_restore` swaps in a copy of the same keys, so the
+        index cannot go stale. If a future change inserts a key into `pool`, this fails
+        first and points at `_by_base` -- see the comment on `_index_pool`.
+        """
+        g = _graph()
+        g.add(Recipe("two", "t", [("mod:dust", 1)],
+                     [Ingredient(["mod:lattice"], 3), Ingredient(["mod:block"], 1)]))
+        s = Solver(g, have={"mod:lattice": 4, "mod:ingot": 2})
+        before = set(s.pool)
+        s.solve("mod:dust", 3)
+        self.assertEqual(set(s.pool), before)
 
 
 class TestOredictGuess(unittest.TestCase):

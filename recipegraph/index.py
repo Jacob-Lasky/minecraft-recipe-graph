@@ -6,7 +6,7 @@ import sys
 from .model import Graph
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
-from .sources import dump_meta
+from .sources import dump_meta, dump_names
 from .sources import hei_dump, jar_json, oredict
 
 
@@ -54,7 +54,29 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 
     # Provenance first: everything else read from this directory is only as current as the
     # dump that produced it, so say which mod wrote it before reporting what it contained.
-    say(dump_meta.describe(dump_meta.read(os.path.join(instance_dir, "mc-recipe-dump"))))
+    dump_dir = os.path.join(instance_dir, "mc-recipe-dump")
+    meta = dump_meta.read(dump_dir)
+    say(dump_meta.describe(meta))
+    g.dump_schema = meta["schema"] or 0
+
+    # After items.csv, and with setdefault, so the pack's own export stays authoritative
+    # for anything it covers. This only has to reach the keys items.csv cannot express.
+    dumped_names = dump_names.load(dump_names.find(instance_dir))
+    if dumped_names:
+        added = 0
+        for key, label in dumped_names.items():
+            if key not in g.names:
+                g.names[key] = label
+                added += 1
+        say("names: +%d from the dump that items.csv did not cover (%d discriminated "
+            "by NBT)" % (added, sum(1 for k in dumped_names if "#" in k)))
+
+    g.category_mods = dump_meta.category_mods(dump_dir)
+    if g.category_mods:
+        say("category mods: %d categories carry JEI's own mod name" % len(g.category_mods))
+    else:
+        say("category mods: summary.json has none -- the machines page will group by the "
+            "first token of each category uid, which is a guess")
 
     cat_path = catalysts_src.find(instance_dir)
     if cat_path:
@@ -151,7 +173,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 #   preview          Modular Machinery structure previews: the whole multiblock presented
 #                    as if it crafts a blueprint, so a plan could "craft" a blueprint by
 #                    building a 200-block structure
+#   package_contents Packaged Auto showing what is inside a package
+#   machine_produce  a list of everything a machine CAN output, not a recipe for any of it
+#   throws           Chickens' colour-egg throwing: an interaction with the world
+#   right_click      likewise, a use action presented in the recipe browser
+#   puzzle           a puzzle display
 # Squeezers, smelteries and centrifuges are REAL production and must not be added here.
+# Neither is bee or chicken breeding, which IS production and has no machine -- see
+# machines.NO_MACHINE_PATTERNS, a different answer to a different question.
 # Override per-pack with `--keep-category` if a pack uses one of these names for real work.
 NON_RECIPE_CATEGORY_PATTERNS = (
     "minecraft.anvil", "anvil",
@@ -162,6 +191,7 @@ NON_RECIPE_CATEGORY_PATTERNS = (
     "enchanter", "enchantment", "superenchant",
     "_stats", ".stats", ":stats",
     "preview",
+    "package_contents", "machine_produce", "throws", "right_click", "puzzle",
 )
 
 

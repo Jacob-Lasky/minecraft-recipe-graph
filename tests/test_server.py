@@ -21,7 +21,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import machines, server  # noqa: E402
+from recipegraph import generators, machines, server  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 
 
@@ -132,6 +132,45 @@ class ServerTest(unittest.TestCase):
     def test_a_non_numeric_quantity_is_a_bad_request_not_a_crash(self):
         self.assertEqual(self.get("/plan?item=mod%3Awidget&qty=lots")[0], 400)
 
+    def test_a_plan_carries_the_real_nav_not_a_bare_back_link(self):
+        """#13: the plan was the one page you could not leave.
+
+        Every other view renders `_nav`; the fragment shell hardcoded a single
+        `back to search` link, so Machines, Sources and Coverage were unreachable.
+        """
+        body = self.get("/plan?item=mod%3Awidget&qty=4")[2]
+        for href, label, _icon in server.NAV_ITEMS:
+            self.assertIn(label, body, "plan page is missing the %s tab" % label)
+            if href != "/":
+                self.assertIn("href='%s'" % href, body, href)
+        self.assertIn("aria-current='page'", body, "Search should read as the parent tab")
+        self.assertIn("&rsaquo;", body, "and a breadcrumb should name the item")
+
+    def test_explore_carries_the_nav_too(self):
+        body = self.get("/explore?q=widget")[2]
+        self.assertIn("href='/machines'", body)
+
+    def test_a_plan_warns_when_its_data_went_stale(self):
+        """The other half of the missing nav: a plan could not raise the banner either."""
+        os.utime(self.state.graph_path, None)
+        try:
+            body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+            self.assertIn("changed on disk", body)
+        finally:
+            self.state.load_all()
+
+    def test_every_page_kind_shows_that_a_plan_is_working(self):
+        """#18: a slow plan blocks with the OLD page on screen and no sign of life.
+
+        Asserted on both shells because they are separate wrappers, and the fragment one
+        is exactly the page that links to further plans.
+        """
+        for path in ("/", "/machines", "/sources", "/plan?item=mod%3Awidget&qty=1"):
+            body = self.get(path)[2]
+            self.assertIn("a[href^=\"/plan?\"]", body, path)
+            self.assertIn("el.className='working'", body, path)
+            self.assertIn(".working{", body, "%s: the scrim has no styling" % path)
+
     def test_the_infinite_source_reaches_the_rendered_plan(self):
         # End to end: a placed generator in the have file must make water free and be
         # reported on the page.
@@ -151,6 +190,29 @@ class ServerTest(unittest.TestCase):
         body = self.get("/machines")[2]
         for uid in self.state.machine_info:
             self.assertIn(uid, body, uid)
+
+    def test_the_filters_get_what_they_need_to_narrow_each_other(self):
+        """#16: MACHINES_JS recounts both axes, and it reads these attributes to do it.
+
+        The counting itself is exercised in a browser (the page has no server round-trip
+        for it); this is the server-to-client contract that would silently empty the
+        dropdown if a name changed.
+        """
+        body = self.get("/machines")[2]
+        self.assertIn("data-label=", body, "option labels the client rewrites counts onto")
+        self.assertIn("data-mod=", body, "the row attribute the mod tally groups by")
+        self.assertIn("data-state=", body, "the row attribute the state tally groups by")
+        self.assertIn("<span class='n'>", body, "the chip count the client rewrites")
+
+    def test_the_unidentified_hint_reflects_whether_a_dump_was_read(self):
+        # Telling someone who has already dumped to go and dump reads as the tool not
+        # noticing what it is holding.
+        self.assertIn("Run <code>/recipedump</code>", self.get("/machines")[2])
+        self.state.graph.catalysts = {"mod.press": ["mod:press"]}
+        try:
+            self.assertIn("residue after reading JEI", self.get("/machines")[2])
+        finally:
+            self.state.graph.catalysts = {}
 
     # ---- the toggle form ----
 
@@ -198,6 +260,78 @@ class ServerTest(unittest.TestCase):
             _status, loc = self.post({"uid": "mod.press", "state": machines.HAVE,
                                       "back": hostile})
             self.assertTrue(loc.startswith("/machines?"), "%s -> %s" % (hostile, loc))
+
+    # ---- editing infinite sources (#17) ----
+
+    def source_post(self, fields):
+        status, loc = self.post(fields, path="/sources")
+        self.assertEqual(status, 303)
+        return urllib.parse.unquote(loc.partition("m=")[2])
+
+    def test_the_page_explains_a_source_before_telling_you_how_to_add_one(self):
+        body = self.get("/sources")[2]
+        self.assertIn("emits a resource from no inputs", body)
+        self.assertNotIn("recipegraph sources --add", body,
+                         "the CLI syntax with two unexplained placeholders is what "
+                         "made this unusable")
+
+    def test_a_source_can_be_added_and_removed_from_the_page(self):
+        try:
+            msg = self.source_post({"do": "add", "block": "mod:press",
+                                    "key": "fluid:water"})
+            self.assertIn("now makes", msg)
+            self.assertEqual(
+                self.state.source_overrides["generators"]["mod:press"], ["fluid:water"])
+            self.assertIn("mod:press", self.get("/sources")[2])
+            self.assertIn("removed", self.source_post({"do": "forget",
+                                                       "block": "mod:press"}))
+            self.assertNotIn("mod:press", self.state.source_overrides["generators"])
+        finally:
+            self.source_post({"do": "forget", "block": "mod:press"})
+
+    def test_a_typo_is_refused_rather_than_silently_making_nothing_free(self):
+        msg = self.source_post({"do": "add", "block": "mod:press", "key": "mod:nonsense"})
+        self.assertIn("no item or fluid", msg)
+        self.assertNotIn("mod:press", self.state.source_overrides["generators"])
+
+    def test_disabling_a_source_removes_it_from_what_is_free(self):
+        self.assertIn("fluid:water", self.state.free_sources)
+        try:
+            self.source_post({"do": "disable", "key": "fluid:water"})
+            self.assertNotIn("fluid:water", self.state.free_sources)
+            self.source_post({"do": "enable", "key": "fluid:water"})
+            self.assertIn("fluid:water", self.state.free_sources)
+        finally:
+            self.source_post({"do": "enable", "key": "fluid:water"})
+
+    def test_vanilla_water_is_a_visible_switch(self):
+        try:
+            self.assertIn("vanilla infinite water off",
+                          self.source_post({"do": "vanilla"}))
+            self.assertFalse(self.state.source_overrides["vanilla_water"])
+            self.assertIn("vanilla infinite water on",
+                          self.source_post({"do": "vanilla"}))
+        finally:
+            if not self.state.source_overrides["vanilla_water"]:
+                self.source_post({"do": "vanilla"})
+
+    def test_an_unknown_action_changes_nothing(self):
+        before = dict(self.state.source_overrides["generators"])
+        self.assertEqual(self.source_post({"do": "drop_table"}), "")
+        self.assertEqual(self.state.source_overrides["generators"], before)
+
+    def test_placed_blocks_are_offered_as_candidates(self):
+        # Nobody knows the registry name of the block they built; the world scan does.
+        self.assertEqual(
+            generators.candidates({"mod:lava_source": 1, "minecraft:chest": 4}, {}),
+            ["mod:lava_source"])
+        self.assertEqual(
+            generators.candidates({"nuclearcraft:water_source": 1}, {}), [],
+            "a built-in generator is already handled, not a candidate")
+        self.assertEqual(
+            generators.candidates({"mod:lava_source": 1},
+                                  {"generators": {"mod:lava_source": ["fluid:lava"]}}),
+            [], "and neither is one you already added")
 
     # ---- staleness ----
 

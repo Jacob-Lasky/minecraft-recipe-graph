@@ -13,6 +13,7 @@ Design notes that are load-bearing:
 """
 
 import json
+import re
 
 WILDCARD_META = 32767
 
@@ -65,6 +66,22 @@ def _prettify(registry_name):
     # `Tbu` and `NaOH` into `Naoh`.
     return " ".join(w if any(c.isupper() for c in w) else w.capitalize()
                     for w in words) or registry_name
+
+
+_DIGEST = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _variant_label(suffix):
+    """How to read the `#suffix` on a discriminated key when nothing named it.
+
+    Two kinds live here. An aspect (`#perditio`) is a word and reads as one. A dump
+    discriminator is a 12-hex digest of the stack's NBT, which reads as line noise, so it
+    is labelled as what it is and shortened. Never collapse two digests to one label:
+    telling a Forest drone from a Meadows drone is the entire point.
+    """
+    if _DIGEST.match(suffix):
+        return "variant %s" % suffix[:6]
+    return suffix.capitalize()
 
 
 def split_key(key):
@@ -160,6 +177,16 @@ class Graph:
         # guess from the category's display title, which is often the recipe type rather
         # than the machine. Empty on a graph built before the dump mod emitted catalysts.
         self.catalysts = {}
+        # category uid -> the mod's DISPLAY name, from JEI's IRecipeCategory.getModName().
+        # Grouping and display only. NOT a registry modid: "Industrial Foregoing" will
+        # never match `industrialforegoing:plant_gatherer`, and machine identification must
+        # keep using `machines.same_mod` on the uid. See sources/dump_meta.category_mods.
+        self.category_mods = {}
+        # Which dump schema produced this graph, 0 for none. Recorded because some
+        # judgements are only SAFE once the data supports them: see
+        # machines.SPECIES_SCHEMA, where "bee breeding needs no machine" has to wait for
+        # a dump that can tell one bee from another.
+        self.dump_schema = 0
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -342,7 +369,7 @@ class Graph:
         if "#" in key:
             stem, aspect = key.rsplit("#", 1)
             label = self.names.get(stem) or self.bare_name(stem)
-            pretty = aspect.capitalize()
+            pretty = _variant_label(aspect)
             if "%s" in label:
                 return label % pretty
             return "%s (%s)" % (label, pretty)
@@ -385,6 +412,8 @@ class Graph:
             "ore_members": self.ore_members,
             "ore_guessed": sorted(self.ore_guessed),
             "catalysts": self.catalysts,
+            "category_mods": self.category_mods,
+            "dump_schema": self.dump_schema,
             "instance_dir": self.instance_dir,
         }
 
@@ -402,5 +431,7 @@ class Graph:
         g.ore_members = d.get("ore_members", {})
         g.ore_guessed = set(d.get("ore_guessed", ()))
         g.catalysts = d.get("catalysts") or {}
+        g.category_mods = d.get("category_mods") or {}
+        g.dump_schema = d.get("dump_schema") or 0
         g.instance_dir = d.get("instance_dir")
         return g

@@ -9,3 +9,4 @@ mod/run/
 plan*.html
 *.pyc
 __pycache__/
+mod/logs/

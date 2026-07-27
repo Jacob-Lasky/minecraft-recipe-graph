@@ -122,6 +122,9 @@ border:1px solid var(--line);background:var(--card);color:var(--dim);letter-spac
 color:var(--accent)}
 .chip-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .chip-btn .n{font-variant-numeric:tabular-nums;opacity:.7;margin-left:5px}
+/* A filter that can no longer match anything reads as an honest zero rather than
+   disappearing, so the list never jumps under the cursor. */
+.chip-btn:disabled,.toolbar select option:disabled{opacity:.42;cursor:not-allowed}
 
 table.mach{width:100%;border-collapse:collapse;font-size:13.5px}
 table.mach th{text-align:left;font:600 10.5px var(--mono);letter-spacing:.1em;
@@ -164,6 +167,89 @@ font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .klist a:hover{color:var(--accent);text-decoration:underline}
 .klist .grow{flex:1 1 auto}
 .klist code{font:11.5px var(--mono);color:var(--dim);word-break:break-all}
+
+/* Breadcrumb for the fragment pages. A plan is not a tab, so the nav marks Search as
+   current and this says which item you are under. */
+.crumb{font-size:13px;color:var(--dim);margin:-12px 0 0}
+.crumb b{color:var(--fg);font-weight:600}
+.crumb a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.crumb a:hover{color:var(--accent);border-bottom-color:currentColor}
+
+/* "Working" scrim. A plan is solved server-side, so the browser keeps showing the OLD
+   page until it lands and a slow one reads as a dead click. */
+.working{position:fixed;inset:0;display:none;align-items:flex-start;justify-content:center;
+background:rgba(20,22,25,.42);z-index:50}
+.working.on{display:flex}
+.workbox{margin-top:22vh;display:flex;gap:15px;align-items:center;background:var(--card);
+border:1px solid var(--line);border-radius:12px;padding:16px 20px;
+max-width:min(92vw,430px);box-shadow:0 14px 44px rgba(0,0,0,.24)}
+.workbox b{display:block;font-size:15px;margin-bottom:3px;overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.workbox span{display:block;font-size:13px;color:var(--dim)}
+.spin{width:20px;height:20px;flex:0 0 auto;border-radius:50%;border:2.5px solid var(--line);
+border-top-color:var(--accent);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* No substitute animation: the label already says what is happening, so a reader who has
+   asked for stillness gets a plain ring rather than a slower spin. */
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-color:var(--accent)}}
+"""
+
+
+# Shared client helpers, in the shell so every page has them and no page ships a second
+# copy. `rgEsc` in particular: the search rows and the sources typeahead both build markup
+# from item names, and the second one started life stripping `<` and `&` instead of
+# escaping them, which quietly corrupts any name containing an ampersand.
+SHELL_JS = """
+window.rgEsc=function(s){
+  return String(s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+};
+"""
+
+
+# Every page links to /plan, and a plan is the one thing here that can block for seconds.
+# ONE delegated listener in the shell rather than markup per template, so no page can link
+# to a plan and forget the feedback.
+PENDING_JS = """
+(function(){
+ var el=null, timer=null;
+ function show(label){
+   if(!el){
+     el=document.createElement('div');
+     el.className='working';
+     el.setAttribute('role','status'); el.setAttribute('aria-live','polite');
+     el.innerHTML='<div class="workbox"><div class="spin"></div><div>'
+       +'<b class="wl"></b><span>Solving the recipe tree. A deep item takes a moment.'
+       +'</span></div></div>';
+     document.body.appendChild(el);
+   }
+   el.querySelector('.wl').textContent=label;
+   el.classList.add('on');
+ }
+ function hide(){clearTimeout(timer); if(el)el.classList.remove('on');}
+ // A plan link's text is not just the item name: search rows carry stock and recipe-count
+ // pills and the raw id, which ran together into "Planning Widgetnone2 recipes". Strip the
+ // decorations rather than special-casing each page's markup.
+ function label(a){
+   var c=a.cloneNode(true);
+   c.querySelectorAll('.pill,.id2,.t,code').forEach(function(x){x.remove();});
+   return (c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,58);
+ }
+ document.addEventListener('click',function(e){
+   var t=e.target, a=t&&t.closest?t.closest('a[href^="/plan?"]'):null;
+   // Modified clicks open a new tab, so THIS page is not going anywhere and a scrim over
+   // it would be a lie that only the back button clears.
+   if(!a||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+   var name=label(a);
+   // Held back briefly: most plans land in tens of milliseconds and a flash of "working"
+   // is worse feedback than none.
+   clearTimeout(timer);
+   timer=setTimeout(function(){show(name?'Planning '+name+'\\u2026':'Planning\\u2026');},150);
+ });
+ // Returning here restores the page from the bfcache with the scrim still up.
+ window.addEventListener('pageshow',hide);
+ window.addEventListener('pagehide',hide);
+})();
 """
 
 
@@ -172,21 +258,44 @@ def _item(graph, key):
     return kind_chip(graph.kind(key)) + _esc(graph.bare_name(key))
 
 
-def _wrap_fragment(title, fragment):
-    """Give an artifact-style fragment a real HTML document shell."""
+def _shell(title, body, css):
+    """The one document wrapper. Both page kinds go through it so neither can drift.
+
+    `css` differs by caller: a fragment already carries the base CSS inline (that is what
+    makes it publishable as an Artifact), a server-rendered page does not.
+    """
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>%s</title></head><body>%s<div class='wrap' style='padding-top:0'>"
-            "<nav class='top'><a href='/'>&larr; back to search</a></nav></div>"
-            "<style>%s</style></body></html>"
-            % (_esc(title), fragment, HOME_CSS))
+            # SHELL_JS goes in the HEAD, not alongside PENDING_JS at the end of the body:
+            # the page scripts are inline and run the moment they are parsed, so a helper
+            # defined after them would not exist yet when they first call it.
+            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s"
+            "<script>%s</script></body></html>"
+            % (_esc(title), css, SHELL_JS, body, PENDING_JS))
+
+
+def _wrap_fragment(title, fragment, state=None, crumb=""):
+    """Give an artifact-style fragment a real HTML document shell, with the real nav.
+
+    The nav is `_nav`, not a hand-rolled back-link: a plan used to be the one page you
+    could not leave, and the one page that would not tell you its data was stale. Search
+    is marked current because a plan lives under it -- it is not a fifth tab.
+
+    DO NOT move this into the renderer. The fragment has no document shell precisely so it
+    can be published as a Claude Artifact unchanged, where none of these links resolve.
+    """
+    nav = ("<div class='wrap' style='padding-bottom:0'>%s%s</div>"
+           % (_nav("/", state), crumb)) if state is not None else ""
+    return _shell(title, nav + fragment, HOME_CSS)
+
+
+def _crumb(label):
+    """`Search > this thing`, so the highlighted Search tab reads as a parent, not a lie."""
+    return "<div class='crumb'><a href='/'>Search</a> &rsaquo; <b>%s</b></div>" % _esc(label)
 
 
 def _page(title, body):
-    return ("<!doctype html><html><head><meta charset=utf-8>"
-            "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>%s</title><style>%s%s</style></head><body>%s</body></html>"
-            % (_esc(title), CSS, HOME_CSS, body))
+    return _shell(title, body, CSS + HOME_CSS)
 
 
 # Inline SVG, because the artifact CSP blocks every off-host request and an icon font
@@ -341,12 +450,17 @@ class State:
         """Recompute machine states and the cost table (cost depends on machine state)."""
         overrides = machines_mod.load_overrides(self.machines_path)
         self.overrides = overrides
-        self.machine_info = machines_mod.describe(self.graph, self.placed, self.have,
-                                                  overrides=overrides)
+        self.machine_info = machines_mod.describe(
+            self.graph, self.placed, self.have, overrides=overrides,
+            no_machine=machines_mod.load_no_machine(self.machines_path))
         self.states = {uid: (i["state"], i["why"])
                        for uid, i in self.machine_info.items()}
+        # Kept on the State, not resolved inline: /sources renders the raw overrides too
+        # (what you disabled, whether vanilla water is on), and re-reading the file per
+        # request would let the page disagree with the costs computed from it.
+        self.source_overrides = generators_mod.load_overrides(self.sources_path)
         self.free_sources = generators_mod.resolve(
-            self.placed, self.have, generators_mod.load_overrides(self.sources_path))
+            self.placed, self.have, self.source_overrides)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
@@ -393,10 +507,7 @@ HOME_JS = """
    var l=CHIPS[kind];
    return l?'<span class="t t-'+kind+'">'+l+'</span>':'';
  }
- function esc(s){
-   return String(s).replace(/[&<>"]/g,function(c){
-     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});
- }
+ var esc=window.rgEsc;
  function n(x){return x.toLocaleString();}
 
  function render(items,q){
@@ -547,7 +658,8 @@ MACHINES_JS = """
  var q=document.getElementById('mq'), sel=document.getElementById('mmod'),
      rows=Array.prototype.slice.call(document.querySelectorAll('#mbody tr[data-state]')),
      body=document.getElementById('mbody'), shown=document.getElementById('mshown'),
-     none=document.getElementById('mnone'), active={};
+     none=document.getElementById('mnone'), active={},
+     opts=Array.prototype.slice.call(sel.options);
  document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
    b.addEventListener('click',function(){
      var on=b.getAttribute('aria-pressed')==='true';
@@ -556,9 +668,52 @@ MACHINES_JS = """
      apply();
    });
  });
+ // The two filters narrow EACH OTHER. Picking a state used to leave the mod dropdown
+ // listing every mod at its full count, including mods with nothing in that state, so
+ // choosing one produced an empty table with no hint why.
+ //
+ // Counts come from the OTHER axis only and deliberately ignore the text box: counting
+ // against everything is more truthful but makes every number move while you type, and a
+ // moving target is harder to read than a slightly generous one.
+ function tally(){
+   var mod=sel.value, states=Object.keys(active), byMod={}, byState={};
+   rows.forEach(function(r){
+     if(!states.length||active[r.dataset.state]){
+       byMod[r.dataset.mod]=(byMod[r.dataset.mod]||0)+1;
+     }
+     if(!mod||r.dataset.mod===mod){
+       byState[r.dataset.state]=(byState[r.dataset.state]||0)+1;
+     }
+   });
+   return {mod:byMod, state:byState};
+ }
+ function reconcile(){
+   // A selection that can no longer match anything is CLEARED rather than left to show an
+   // empty table. Dropping a selection only ever widens the result, so one pass converges.
+   var t=tally(), changed=false;
+   if(sel.value && !t.mod[sel.value]){sel.value=''; changed=true;}
+   Object.keys(active).forEach(function(s){
+     if(!t.state[s]){delete active[s]; changed=true;}
+   });
+   return changed ? tally() : t;
+ }
  function apply(){
-   var text=(q.value||'').toLowerCase().trim(), mod=sel.value,
-       states=Object.keys(active), n=0;
+   var t=reconcile(), mod=sel.value, states=Object.keys(active),
+       text=(q.value||'').toLowerCase().trim(), n=0;
+   opts.forEach(function(o){
+     if(!o.value)return;                       // the "every mod" entry has no count
+     var c=t.mod[o.value]||0;
+     o.textContent=o.dataset.label+' ('+c+')';
+     // Disabled rather than removed: removing makes the list jump under the cursor,
+     // and a visible zero is an answer.
+     o.disabled=!c;
+   });
+   document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
+     var c=t.state[b.dataset.state]||0;
+     b.querySelector('.n').textContent=c;
+     b.disabled=!c && !active[b.dataset.state];
+     b.setAttribute('aria-pressed', active[b.dataset.state]?'true':'false');
+   });
    rows.forEach(function(r){
      var ok=(!text||r.dataset.hay.indexOf(text)>=0)
          && (!mod||r.dataset.mod===mod)
@@ -626,7 +781,10 @@ def machines_page(state, message="", query=""):
         evidence = info["why"]
         if info.get("from_catalyst"):
             evidence += " (from JEI)"
-        hay = " ".join((name, uid, info["mod"], evidence, " ".join(cands))).lower()
+        # The squashed mod name as well as the display one, so typing the registry form
+        # you know ("industrialforegoing") finds a group JEI calls "Industrial Foregoing".
+        hay = " ".join((name, uid, info["mod"], info["mod"].replace(" ", ""),
+                        evidence, " ".join(cands))).lower()
         rows.append(
             "<tr data-state='%s' data-rank='%d' data-name='%s' data-uid='%s' "
             "data-mod='%s' data-recipes='%d' data-hay='%s'>"
@@ -649,8 +807,12 @@ def machines_page(state, message="", query=""):
         "%s<span class='n'>%d</span></button>"
         % (s, STATE_LABEL.get(s, s), counts.get(s, 0))
         for s in machines_mod.STATES)
-    options = "".join("<option value='%s'>%s (%d)</option>" % (_esc(m), _esc(m or "?"), n)
-                      for m, n in sorted(mods.items(), key=lambda kv: (-kv[1], kv[0])))
+    # `data-label` so the client can rewrite the count as the state filter narrows without
+    # having to parse the existing "(28)" back out of the text.
+    options = "".join(
+        "<option value='%s' data-label='%s'>%s (%d)</option>"
+        % (_esc(m), _esc(m or "?"), _esc(m or "?"), n)
+        for m, n in sorted(mods.items(), key=lambda kv: (-kv[1], kv[0])))
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Machines</div>
@@ -689,8 +851,7 @@ def machines_page(state, message="", query=""):
     </table>
     <div class="hint2" style="margin:12px 0 0"><b id="mshown">%d</b> of %d categories
       shown. <b>Unidentified</b> means this tool could not work out which block the
-      category corresponds to, not that you cannot use it &mdash; run
-      <code>/recipedump</code> with mod v0.4.0 to fix most of these.</div>
+      category corresponds to, not that you cannot use it. %s</div>
   </div>
 </div>
 <script>%s</script>""" % (
@@ -702,6 +863,13 @@ def machines_page(state, message="", query=""):
         counts.get("unavailable", 0),
         "{:,}".format(recipes_by_state.get("unavailable", 0)),
         _esc(query), options, chips, "".join(rows), len(rows), len(rows),
+        # Telling someone who has already dumped to go and dump reads as the tool not
+        # noticing what it is holding, so say which case they are in.
+        ("These are the residue after reading JEI's own &ldquo;made in&rdquo; list, and "
+         "mostly have no machine at all."
+         if getattr(state.graph, "catalysts", None) else
+         "Run <code>/recipedump</code> with the current mod and rebuild to fix most of "
+         "these: JEI knows the exact mapping and this graph was built without it."),
         MACHINES_JS,
     )
     return _page("Machines", body)
@@ -789,37 +957,134 @@ def machine_page(state, uid):
     return _page(info["title"] or uid, body), 200
 
 
-def sources_page(state):
-    """What the planner treats as free, and on what evidence."""
+def _source_button(action, label, title, **fields):
+    """One POST button on /sources. Same shape as the machine toggle, one implementation."""
+    hidden = "".join("<input type='hidden' name='%s' value='%s'>" % (k, _esc(v))
+                     for k, v in fields.items())
+    return ("<form method='post' action='/sources'>"
+            "<input type='hidden' name='do' value='%s'>%s"
+            "<button type='submit' title='%s'>%s</button></form>"
+            % (action, hidden, _esc(title), _esc(label)))
+
+
+SOURCES_JS = """
+(function(){
+ // Typeahead into a datalist rather than a custom popup: the browser already does the
+ // filtering, the keyboard handling and the accessibility, and this field is used once
+ // in a while rather than constantly like the main search.
+ var box=document.getElementById('okey'), list=document.getElementById('okeys'), t=null;
+ if(box&&list){
+   box.addEventListener('input',function(){
+     var q=box.value.trim();
+     clearTimeout(t);
+     if(q.length<2)return;
+     t=setTimeout(function(){
+       fetch('/suggest?q='+encodeURIComponent(q))
+         .then(function(r){return r.json();})
+         .then(function(d){
+           list.innerHTML=(d.results||[]).map(function(it){
+             return '<option value="'+window.rgEsc(it.key)+'">'
+               +window.rgEsc(it.name)+'</option>';
+           }).join('');
+         }).catch(function(){});
+     },140);
+   });
+ }
+ // A candidate chip fills the block field and moves you to the part only you can answer.
+ document.querySelectorAll('button[data-block]').forEach(function(b){
+   b.addEventListener('click',function(){
+     document.getElementById('oblock').value=b.dataset.block;
+     if(box)box.focus();
+   });
+ });
+})();
+"""
+
+
+def sources_page(state, message=""):
+    """What the planner treats as free, on what evidence, and how to change it."""
+    ov = state.source_overrides
     rows = "".join(
         "<tr><td><a class='mname' href='/plan?item=%s&qty=1'>%s</a><br><code>%s</code></td>"
-        "<td class='hint2' style='margin:0'>%s</td></tr>"
-        % (urllib.parse.quote(key), _item(state.graph, key), _esc(key), _esc(why))
+        "<td class='hint2' style='margin:0'>%s</td>"
+        "<td><div class='acts'>%s</div></td></tr>"
+        % (urllib.parse.quote(key), _item(state.graph, key), _esc(key), _esc(why),
+           _source_button("disable", "not free", "stop treating this as free", key=key))
         for key, why in sorted(state.free_sources.items()))
-    known = sorted(generators_mod.DEFAULT_GENERATORS)
-    unmatched = "".join(
-        "<li><span class='c'></span><code>%s</code></li>" % _esc(b)
-        for b in known if b not in state.placed and b not in state.have)
+
+    disabled = "".join(
+        "<li><span class='grow'>%s</span><code>%s</code>%s</li>"
+        % (_item(state.graph, key), _esc(key),
+           _source_button("enable", "restore", "treat this as free again", key=key))
+        for key in sorted(ov.get("disabled") or ()))
+
+    mine = ov.get("generators") or {}
+    added = "".join(
+        "<li><span class='grow'><code>%s</code> &rarr; %s</span>%s</li>"
+        % (_esc(block), ", ".join(_item(state.graph, k) for k in outs),
+           _source_button("forget", "remove", "remove this generator", block=block))
+        for block, outs in sorted(mine.items()))
+
+    cands = generators_mod.candidates(state.placed, ov)
+    chips = "".join(
+        "<button class='chip-btn' type='button' data-block='%s'>%s</button>" % (_esc(b), _esc(b))
+        for b in cands[:24])
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Infinite sources</div>
   <h1>What costs you nothing<span class="x">%d</span></h1>
-  <div class="hint2">A resource here is treated as effectively free, so plans stop
-   reconstructing it from exotic chains. Draw is still counted and reported on every plan
-   &mdash; free does not mean invisible.</div>
+  <div class="hint2">An infinite source is a block that emits a resource from no inputs
+   &mdash; a water source, a cobblestone generator. Because it has no recipe, a recipe
+   graph cannot find it, so this is a list rather than a search. Anything on it is priced
+   as effectively free, which is what stops a plan rebuilding water out of 71 snowballs.
+   Draw is still counted and reported on every plan: free does not mean invisible.%s</div>
   <div class="card"><h2><span>Free right now</span></h2>
     <table class="mach">%s</table></div>
-  <div class="card"><h2><span>Known generators not in this world</span>
-    <span class="c">%d</span></h2>
-    <div class="hint2" style="margin:0 0 10px">Detection is a curated list, not a search:
-     an input-free block has no recipe, so a recipe graph cannot find it. Add yours with
-     <code>recipegraph sources --add &lt;block id&gt;=&lt;item or fluid key&gt;</code>.</div>
+
+  <div class="card"><h2><span>Add a source</span></h2>
+    <div class="hint2" style="margin:0 0 12px">Name the block you built and the resource
+     it makes. The output has to be stated by hand for the same reason the list exists:
+     nothing in the graph says what an input-free block emits.</div>
+    <form class="search" method="post" action="/sources">
+      <input type="hidden" name="do" value="add">
+      <input id="oblock" name="block" type="search" placeholder="Block id, e.g. nuclearcraft:water_source"
+             list="pblocks" autocomplete="off" spellcheck="false" required>
+      <datalist id="pblocks">%s</datalist>
+      <input id="okey" name="key" type="search" placeholder="Makes&hellip; water, cobblestone"
+             list="okeys" autocomplete="off" spellcheck="false" required>
+      <datalist id="okeys"></datalist>
+      <button type="submit">Add</button>
+    </form>
+    %s
+  </div>
+
+  <div class="card"><h2><span>Yours</span><span class="c">%d</span></h2>
     <ul class="klist">%s</ul></div>
-</div>""" % (
+  <div class="card"><h2><span>Switched off</span><span class="c">%d</span></h2>
+    <div class="hint2" style="margin:0 0 10px">These stay off whatever the world says, and
+     survive a rebuild.</div>
+    <ul class="klist">%s</ul></div>
+  <div class="card"><h2><span>Vanilla infinite water</span></h2>
+    <div class="hint2" style="margin:0 0 10px">Two source blocks and a bucket give
+     unlimited water in a default 1.12.2 world. It is a claim about this pack rather than
+     a sighting, so it is a switch: currently <b>%s</b>.</div>
+    %s</div>
+</div>
+<script>%s</script>""" % (
         _nav("/sources", state), len(state.free_sources),
-        rows or "<tr class='empty-row'><td colspan='2'>Nothing detected.</td></tr>",
-        sum(1 for b in known if b not in state.placed and b not in state.have),
-        unmatched or "<li class='hint2'>All known generators are present.</li>",
+        (" <b>%s</b>" % _esc(message)) if message else "",
+        rows or "<tr class='empty-row'><td colspan='3'>Nothing detected.</td></tr>",
+        "".join("<option value='%s'>" % _esc(b) for b in sorted(state.placed)),
+        ("<div class='hint2' style='margin:12px 0 0'>Placed in your world and not on the "
+         "list yet:</div><div class='chips' style='margin:8px 0 0'>%s</div>" % chips)
+        if chips else "",
+        len(mine), added or "<li class='hint2'>Nothing added by hand yet.</li>",
+        len(ov.get("disabled") or ()),
+        disabled or "<li class='hint2'>Nothing switched off.</li>",
+        "on" if ov.get("vanilla_water", True) else "off",
+        _source_button("vanilla", "switch off" if ov.get("vanilla_water", True) else "switch on",
+                       "this pack does or does not have infinite water"),
+        SOURCES_JS,
     )
     return _page("Infinite sources", body)
 
@@ -892,7 +1157,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload = {"query": query, "results": results,
                            "searched": len(st.graph.names)}
                 return self._send(_wrap_fragment(
-                    "Explore: %s" % query, render_explore_html(payload)))
+                    "Explore: %s" % query, render_explore_html(payload), st,
+                    _crumb("Explore “%s”" % query)))
             if parts.path == "/plan":
                 key = one("item")
                 qty = max(1, int(one("qty", "1") or 1))
@@ -916,16 +1182,16 @@ class Handler(BaseHTTPRequestHandler):
                         % (_nav(), _esc(key), _esc(key.split(":")[-1]))), 404)
                 with st.lock:
                     result = st.solver().solve(key, qty)
+                title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
-                    "%s x%d" % (result["target_name"], qty),
-                    render_html(result, st.graph)))
+                    title, render_html(result, st.graph), st, _crumb(title)))
             if parts.path == "/machines":
                 return self._send(machines_page(st, one("m"), one("q")))
             if parts.path == "/machine":
                 page, status = machine_page(st, one("uid"))
                 return self._send(page, status)
             if parts.path == "/sources":
-                return self._send(sources_page(st))
+                return self._send(sources_page(st, one("m")))
             if parts.path == "/stats":
                 return self._send(stats_page(st))
             if parts.path == "/favicon.ico":
@@ -946,13 +1212,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(_page("Not found", "<div class='wrap'><h1>Not found</h1>"
                          "<p><a href='/'>Back to search</a></p></div>"), 404)
 
+    def _redirect(self, back, msg=""):
+        """303 back to where the form was submitted from, carrying a one-line result."""
+        sep = "&" if "?" in back else "?"
+        self.send_response(303)
+        self.send_header("Location", "%s%sm=%s" % (back, sep, urllib.parse.quote(msg)))
+        self.end_headers()
+
     def do_POST(self):
         parts = urllib.parse.urlparse(self.path)
-        if parts.path not in ("/machines", "/reload"):
+        if parts.path not in ("/machines", "/reload", "/sources"):
             return self._send("", 404)
         length = int(self.headers.get("Content-Length") or 0)
         form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
         st = self.state
+        if parts.path == "/sources":
+            return self._redirect("/sources", self._edit_sources(form))
         if parts.path == "/reload":
             # Blocking on purpose: loading a 72 MB graph takes tens of seconds, and doing it
             # in the background while still serving the old one would mean the page you land
@@ -976,6 +1251,9 @@ class Handler(BaseHTTPRequestHandler):
         back = _safe_back(form)
         msg = ""
         if uid and target in machines_mod.STATES:
+            # Read, modify and write all inside the lock: two toggles in flight together
+            # would otherwise both start from the old map and the second save would drop
+            # the first one's change.
             with st.lock:
                 overrides = dict(st.overrides)
                 overrides[uid] = target
@@ -984,10 +1262,67 @@ class Handler(BaseHTTPRequestHandler):
                 # plans would rank against stale availability.
                 st.refresh_machines()
             msg = "%s set to %s" % (uid, target)
-        sep = "&" if "?" in back else "?"
-        self.send_response(303)
-        self.send_header("Location", "%s%sm=%s" % (back, sep, urllib.parse.quote(msg)))
-        self.end_headers()
+        self._redirect(back, msg)
+
+    def _edit_sources(self, form):
+        """Apply one /sources form action and return the line to show. Never raises.
+
+        Same POST-then-refresh-then-303 shape as the machine toggle, because it is the
+        same kind of thing: a user judgement the world scan cannot make. Costs are
+        recomputed inside the lock -- an infinite source changes what every plan prefers,
+        so leaving the cost table behind would rank against the old answer.
+        """
+        st = self.state
+        action = (form.get("do") or [""])[0]
+        key = (form.get("key") or [""])[0].strip()
+        block = (form.get("block") or [""])[0].strip()
+        # The whole read-modify-write is inside the lock. This is a ThreadingHTTPServer,
+        # so two clicks in flight together would otherwise both read the old overrides
+        # and the second save would drop the first one's change.
+        with st.lock:
+            return self._apply_source_edit(action, key, block)
+
+    def _apply_source_edit(self, action, key, block):
+        """The body of a /sources edit. Caller holds the lock."""
+        st = self.state
+        ov = st.source_overrides
+        gens = dict(ov.get("generators") or {})
+        off = set(ov.get("disabled") or ())
+        water = ov.get("vanilla_water", True)
+
+        if action == "add":
+            if not block or not key:
+                return "give both a block id and what it makes"
+            if key not in st.graph.names and not st.graph.producers(key) \
+                    and not key.startswith("fluid:"):
+                # A typo would silently make nothing free, which looks identical to the
+                # feature not working.
+                return "no item or fluid called %s -- pick one from the list" % key
+            gens.setdefault(block, [])
+            if key in gens[block]:
+                return "%s already makes %s" % (block, key)
+            gens[block] = gens[block] + [key]
+            msg = "%s now makes %s" % (block, key)
+        elif action == "forget" and block:
+            if block not in gens:
+                return "%s was not added by hand" % block
+            del gens[block]
+            msg = "removed %s" % block
+        elif action == "disable" and key:
+            off.add(key)
+            msg = "%s is no longer treated as free" % key
+        elif action == "enable" and key:
+            off.discard(key)
+            msg = "%s can be free again" % key
+        elif action == "vanilla":
+            water = not water
+            msg = "vanilla infinite water %s" % ("on" if water else "off")
+        else:
+            return ""
+
+        generators_mod.save_overrides(st.sources_path, gens, off, water)
+        st.refresh_machines()
+        return msg
 
 
 def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
