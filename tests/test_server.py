@@ -213,6 +213,26 @@ class ServerTest(unittest.TestCase):
         self.assertIn("Press", body)
         self.assertEqual(self.get("/machine?uid=nope.nope")[0], 404)
 
+    def test_each_candidate_machine_shows_its_own_state(self):
+        """#27: one category, several machines. The page used to show only the winner.
+
+        Overrides are cleared first because a manual override short-circuits candidate
+        judging, and the toggle tests in this class share the same machines.json.
+        """
+        with open(self.machines_path, "w") as fh:
+            fh.write("{}")
+        self.state.refresh_machines()
+        cands = self.state.machine_info["mod.press"]["candidate_states"]
+        self.assertEqual([c["key"] for c in cands], ["mod:press"])
+        body = self.get("/machine?uid=mod.press")[2]
+        for c in cands:
+            self.assertIn(c["key"], body, c["key"])
+            self.assertIn(c["why"], body, c["why"])
+
+    def test_a_category_with_no_candidates_still_carries_the_key(self):
+        for uid, info in self.state.machine_info.items():
+            self.assertIn("candidate_states", info, uid)
+
     def test_machines_page_lists_every_category(self):
         body = self.get("/machines")[2]
         for uid in self.state.machine_info:
@@ -359,6 +379,27 @@ class ServerTest(unittest.TestCase):
             generators.candidates({"mod:lava_source": 1},
                                   {"generators": {"mod:lava_source": ["fluid:lava"]}}),
             [], "and neither is one you already added")
+
+    def test_a_legacy_dotted_id_is_not_offered_for_a_generator_already_handled(self):
+        """#27: the save records `minecraft:mod.water_source` for a colon-less TE id.
+
+        That IS the `mod:water_source` already on the list, and `resolve` matches it, so
+        offering it as something to add sends the user to configure a generator that is
+        already working.
+        """
+        placed = {"minecraft:mod.water_source": 1}
+        ov = {"generators": {"mod:water_source": ["fluid:water"]}}
+        self.assertEqual(generators.candidates(placed, ov), [])
+        self.assertEqual(generators.resolve(placed, {}, ov).get("fluid:water"),
+                         "placed: minecraft:mod.water_source")
+
+    def test_sightings_and_resolve_agree_about_what_is_present(self):
+        """The CLI's "N of M matched" line is computed from `sightings`; if it used a
+        literal `in placed` it would contradict the list printed above it."""
+        placed = {"minecraft:mod.water_source": 1, "mod:other_idle": 2}
+        seen = generators.sightings(["mod:water_source", "mod:other", "mod:absent"],
+                                    placed, {})
+        self.assertEqual(sorted(seen), ["mod:other", "mod:water_source"])
 
     # ---- staleness ----
 

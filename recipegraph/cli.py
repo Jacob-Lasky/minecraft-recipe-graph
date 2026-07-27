@@ -484,8 +484,11 @@ def cmd_sources(args):
     # Detection is a curated list, so say what was NOT matched rather than implying the
     # world was searched exhaustively.
     known = set(generators.DEFAULT_GENERATORS) | set(ov["generators"])
-    unmatched = sorted(b for b in known
-                       if b not in placed and b not in stock)
+    # `sightings`, not `b not in placed`: the literal test called a block unmatched that
+    # `resolve` had just matched through a state suffix or a legacy dotted id, so the
+    # count under the list contradicted the list itself.
+    seen = generators.sightings(known, placed, stock)
+    unmatched = sorted(b for b in known if b not in seen)
     print("\n%d known generator blocks, %d matched in this world."
           % (len(known), len(known) - len(unmatched)))
     print("Detection is a curated list, not a search: add yours with")
