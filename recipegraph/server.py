@@ -416,8 +416,12 @@ def _crumb(label):
 
     The Search TAB is a working link now (#53), so this no longer exists to compensate for
     an inert one. It still earns its place by naming the page's parent in words.
+
+    The link text comes from NAV_ITEMS rather than being spelled here, so renaming the tab
+    cannot leave the crumb calling it something else.
     """
-    return "<div class='crumb'><a href='/'>Search</a> &rsaquo; <b>%s</b></div>" % _esc(label)
+    return ("<div class='crumb'><a href='/'>%s</a> &rsaquo; <b>%s</b></div>"
+            % (_esc(NAV_LABELS["/"]), _esc(label)))
 
 
 def _page(title, body):
@@ -446,6 +450,9 @@ NAV_ITEMS = (
     ("/sources", "Sources", "sources"),
     ("/stats", "Coverage", "coverage"),
 )
+
+# So a breadcrumb pointing at a tab cannot call it something the tab does not.
+NAV_LABELS = {href: label for href, label, _icon in NAV_ITEMS}
 
 
 # The files whose contents are held in memory, as (attribute holding the path, prose for the

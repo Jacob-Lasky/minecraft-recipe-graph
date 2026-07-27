@@ -237,6 +237,11 @@ class ServerTest(unittest.TestCase):
                 self.assertIn(path, known,
                               "_nav(%r) highlights no tab: add it to NAV_PARENT" % path)
 
+    def test_the_breadcrumb_calls_the_root_tab_what_the_tab_calls_itself(self):
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        self.assertIn("<div class='crumb'><a href='/'>%s</a>" % server.NAV_LABELS["/"],
+                      body)
+
     def test_nav_parent_points_at_real_tabs_and_never_at_itself(self):
         hrefs = {h for h, _l, _i in server.NAV_ITEMS}
         for child, parent in server.NAV_PARENT.items():
