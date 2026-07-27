@@ -28,6 +28,10 @@ STATUS_RAW = "raw"          # no recipe known and not in inventory -> shopping l
 STATUS_SOURCE = "source"    # an infinite generator you own makes this; nothing to plan
 STATUS_CYCLE = "cycle"      # recipe loops back on an ancestor
 STATUS_DEPTH = "depth"      # hit the depth/size cap
+# A pack placeholder standing in for an instruction: loot, a quest gate, a class of
+# materials, or a mechanic. Not craftable and not shoppable, so it leaves the shopping list
+# and is reported on its own. See tokens.py.
+STATUS_TOKEN = "token"
 
 
 def _count_cycles(node):
@@ -62,7 +66,8 @@ def _index_pool(pool):
 class Solver:
     def __init__(self, graph, have=None, raw=None, overrides=None,
                  max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
-                 work_budget=None, machine_states=None, costs=None, free_sources=None):
+                 work_budget=None, machine_states=None, costs=None, free_sources=None,
+                 token_kinds=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self._by_base = _index_pool(self.pool)
@@ -92,6 +97,10 @@ class Solver:
         # a machine merely because it could not be identified would hide real routes.
         self.machine_states = machine_states or {}
         self.machines_needed = {}
+        # {key: kind} from tokens.resolve. Empty by default so a bare Solver behaves exactly
+        # as before; the CLI and the server supply it. See tokens.py.
+        self.token_kinds = dict(token_kinds or {})
+        self.tokens_needed = collections.Counter()
         # Precomputed lower-bound cost per item. Without it recipe choice is greedy and
         # local, which is how a two-step chemical route lost to an enormous chain through
         # machines that happened to be owned. See cost.py.
@@ -292,6 +301,15 @@ class Solver:
 
         candidates = self.g.real_producers(key)
         if not candidates:
+            kind = self.token_kinds.get(key)
+            if kind:
+                # Tallied apart from `leaf_totals`, which IS the shopping list. "1 Dungeon
+                # Drop" on a list of materials to gather reads as a thing to acquire; it is
+                # an instruction, and it belongs with the other instructions.
+                node["status"] = STATUS_TOKEN
+                node["token_kind"] = kind
+                self.tokens_needed[key] += remainder
+                return node
             node["status"] = STATUS_RAW
             self.leaf_totals[key] += remainder
             return node
@@ -341,11 +359,12 @@ class Solver:
         counted twice; `from_sources` was added for exactly that reason.
         """
         return (self.pool.copy(), self.used_from_stock.copy(),
-                self.leaf_totals.copy(), self.from_sources.copy(), self.nodes)
+                self.leaf_totals.copy(), self.from_sources.copy(),
+                self.tokens_needed.copy(), self.nodes)
 
     def _restore(self, snap):
         (self.pool, self.used_from_stock, self.leaf_totals,
-         self.from_sources, self.nodes) = snap
+         self.from_sources, self.tokens_needed, self.nodes) = snap
 
     def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth):
         """Expand one specific recipe choice for `key`."""
@@ -418,6 +437,9 @@ class Solver:
             "from_sources": [dict(self._entry(k, n),
                                   why=self.free_sources.get(k, ""))
                              for k, n in self.from_sources.most_common()],
+            "tokens_needed": [dict(self._entry(k, n),
+                                   token_kind=self.token_kinds.get(k, ""))
+                              for k, n in self.tokens_needed.most_common()],
             "machines_to_build": [
                 {"category": cat, "machine": m, "state": st, "why": why}
                 for cat, (m, st, why) in sorted(self.machines_needed.items())

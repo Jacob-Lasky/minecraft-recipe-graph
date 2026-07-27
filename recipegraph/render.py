@@ -14,7 +14,9 @@ import json
 from .graphview import DIAGRAM_CSS, render_diagram
 from .htmlutil import esc as _esc
 from .htmlutil import machine_href
-from .present import KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, is_roadblock
+from . import tokens as tokens_mod
+from .present import (KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, is_roadblock,
+                      status_badge)
 
 CSS = """
 /* Palette: warm-paper / slate ground with a certus-quartz teal accent taken from
@@ -129,6 +131,12 @@ letter-spacing:.03em;white-space:nowrap}
 .craft{background:var(--craftbg);color:var(--craft)}
 .need{background:var(--needbg);color:var(--need)}
 .muted{background:var(--mutedbg);color:var(--dim)}
+/* Grouped rows in the "Not crafted, obtained" panel. The group heading is a row rather
+   than a nested table so the quantity column still lines up across every group. */
+.tgroup{font:600 10px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;
+color:var(--dim);padding-top:11px}
+tr:first-child>.tgroup{padding-top:0}
+.tname{padding-left:2px}
 .kids{margin-left:15px;border-left:1px solid var(--line);padding-left:9px}
 .meta{color:var(--dim);font-size:11.5px}
 /* Machine links, in the tree's meta line and in the machines panel. `color:inherit` and no
@@ -325,7 +333,7 @@ def _machine_bit(node, name):
 
 def _node_html(node, depth=0):
     status = node.get("status", "craft")
-    label, cls = STATUS_LABEL.get(status, (status, "muted"))
+    label, cls = status_badge(status, node.get("token_kind"))
     kids = node.get("children") or []
     need_flag = 1 if _has_need(node) else 0
 
@@ -440,6 +448,33 @@ def _sources_html(entries):
             '</div>' % ("{:,}".format(total), _rows(entries)))
 
 
+def _tokens_html(entries):
+    """Pack placeholders, grouped by what they actually ask of the player.
+
+    Its own panel rather than lines in "You still need", because a shopping list is a list
+    of things to acquire and these are instructions. A plan that says "1 Dungeon Drop, 1
+    From Battle Tower Loot" alongside "128 Granite" invites reading three materials where
+    there are one material and one instruction.
+
+    Grouped by kind, with the individual placeholders still named underneath. That is the
+    rollup Jake asked for and the reason it stops short of a single "drop" line: "Battle
+    Tower" and "go fishing" are genuinely different afternoons, and collapsing them would
+    trade one kind of uselessness for another.
+    """
+    if not entries:
+        return ""
+    blocks = []
+    for _kind, label, rows in tokens_mod.group(entries):
+        blocks.append(
+            '<tr><td colspan="2" class="tgroup">%s</td></tr>%s'
+            % (_esc(label),
+               "".join('<tr><td class="tname">%s</td><td class="n">%s</td></tr>'
+                       % (named(e), "{:,}".format(e["qty"])) for e in rows)))
+    return ('<div class="card"><h2><span>Not crafted, obtained</span>'
+            '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>'
+            '</div>' % (len(entries), "".join(blocks)))
+
+
 def render_html(result, graph=None, coverage_note=None):
     tree = result["tree"]
     diagram_svg, diagram_legend = render_diagram(tree)
@@ -507,7 +542,7 @@ def render_html(result, graph=None, coverage_note=None):
       <div class="card">
         <h2><span>Drawn from AE2 stock</span><span class="c">%d</span></h2>
         <div class="scroll"><table>%s</table></div>
-      </div>%s%s
+      </div>%s%s%s
     </div>
   </div>
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
@@ -535,6 +570,7 @@ def render_html(result, graph=None, coverage_note=None):
         len(used),
         _rows(used),
         _sources_html(result.get("from_sources")),
+        _tokens_html(result.get("tokens_needed")),
         _machines_html(result.get("machines_to_build")),
         JS,
     )

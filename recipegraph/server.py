@@ -24,7 +24,8 @@ from . import cost as cost_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
-from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES
+from . import tokens as tokens_mod
+from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES, DEFAULT_TOKENS
 from .htmlutil import esc as _esc
 from .htmlutil import item_href, machine_href
 from .model import Graph, path_of
@@ -563,11 +564,13 @@ def _stamp(path):
 class State:
     """Loaded once; requests read it. Rebuilt when overrides change or the files do."""
 
-    def __init__(self, graph_path, have_path, machines_path, sources_path=None):
+    def __init__(self, graph_path, have_path, machines_path, sources_path=None,
+                 tokens_path=None):
         self.graph_path = graph_path
         self.have_path = have_path
         self.machines_path = machines_path
         self.sources_path = sources_path or DEFAULT_SOURCES
+        self.tokens_path = tokens_path or DEFAULT_TOKENS
         self.lock = threading.Lock()
         self.load_all()
 
@@ -620,6 +623,10 @@ class State:
         self.source_overrides = generators_mod.load_overrides(self.sources_path)
         self.free_sources = generators_mod.resolve(
             self.placed, self.have, self.source_overrides)
+        # Resolved once per load for the same reason the source overrides are: re-reading
+        # per request would let two plans in one session disagree about what a token is.
+        self.token_kinds = tokens_mod.resolve(
+            tokens_mod.load_overrides(self.tokens_path))
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
@@ -627,7 +634,7 @@ class State:
     def solver(self):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
                       machine_states=self.states, costs=self.costs,
-                      free_sources=self.free_sources)
+                      free_sources=self.free_sources, token_kinds=self.token_kinds)
 
 
 HOME_JS = """
@@ -1497,8 +1504,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
           port=DEFAULT_PORT,
-          sources_path=None):
-    state = State(graph_path, have_path, machines_path, sources_path)
+          sources_path=None, tokens_path=None):
+    state = State(graph_path, have_path, machines_path, sources_path, tokens_path)
     Handler.state = state
     httpd = ThreadingHTTPServer((host, port), Handler)
     return httpd, state
