@@ -15,6 +15,7 @@ from .graphview import DIAGRAM_CSS, render_diagram
 from .htmlutil import esc as _esc
 from .htmlutil import machine_href
 from . import tokens as tokens_mod
+from .solve import STATUS_RAW, STATUS_TOKEN
 from .present import (KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, is_roadblock,
                       status_badge)
 
@@ -281,7 +282,14 @@ document.getElementById('col').onclick=function(){setAll(false)};
 
 
 def _has_need(node):
-    if node.get("status") == "raw":
+    """Whether this node or anything below it is still on the player to obtain.
+
+    STATUS_TOKEN counts as well as STATUS_RAW. A placeholder leaves the shopping list, but
+    the button says "show only what I need" and a Dungeon Drop is emphatically something
+    you need: filtering it out would answer "4 Screws" to a plan that also wants two
+    afternoons of loot.
+    """
+    if node.get("status") in (STATUS_RAW, STATUS_TOKEN):
         return True
     return any(_has_need(c) for c in node.get("children") or ())
 

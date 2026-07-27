@@ -85,7 +85,7 @@ def _token_kinds(args):
     Read through `tokens.resolve` rather than reaching for DEFAULT_TOKENS directly, so the
     plan, the `tokens` listing and any future caller all see the same effective map.
     """
-    return tokens_mod.resolve(tokens_mod.load_overrides(getattr(args, "tokens", None)))
+    return tokens_mod.for_path(getattr(args, "tokens", None))
 
 
 def _free_sources(have_path, sources_path):

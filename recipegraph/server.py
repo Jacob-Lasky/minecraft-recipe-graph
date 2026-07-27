@@ -625,8 +625,7 @@ class State:
             self.placed, self.have, self.source_overrides)
         # Resolved once per load for the same reason the source overrides are: re-reading
         # per request would let two plans in one session disagree about what a token is.
-        self.token_kinds = tokens_mod.resolve(
-            tokens_mod.load_overrides(self.tokens_path))
+        self.token_kinds = tokens_mod.for_path(self.tokens_path)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)

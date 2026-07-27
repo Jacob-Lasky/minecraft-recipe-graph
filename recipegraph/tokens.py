@@ -161,6 +161,15 @@ def resolve(overrides=None):
     return out
 
 
+def for_path(path):
+    """The effective `{key: kind}` for an overrides file path. The one composition.
+
+    Both the CLI and the server need "load the file, merge it over the defaults", and two
+    copies of that is two places to update when resolution grows a step.
+    """
+    return resolve(load_overrides(path))
+
+
 def group(entries):
     """`[(kind, label, [entry, ...])]` in KINDS order, skipping kinds with nothing in them.
 

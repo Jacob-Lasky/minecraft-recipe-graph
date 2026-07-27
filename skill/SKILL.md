@@ -151,6 +151,16 @@ and a plan said "build tile.null.name". `model.is_unlocalized` recognises the sh
 too. It RELABELS and never deletes: `Graph.labels` is built from `names` and search is
 built from `labels`, so dropping the key would make the item unfindable.
 
+**A pack placeholder is not an ingredient.** The scripts define one item per SOURCE of
+loot, so a plan asked for a "Dungeon Drop" AND a "From Battle Tower Loot" as if they were
+two materials. `tokens.py` curates 37 of them across four kinds, and the plan groups by kind
+while still naming the sources. DETECTION IS CURATED, NEVER A SUBSTRING: `vibranium_chest`
+is a CHESTPLATE, one of four armour pieces, and `vox_ponds_token_legs` is armour too, so
+matching "chest" or "token" rewrites real gear into "go find it in a chest". `recipegraph
+tokens` lists what is recognised and offers what is not; the offer test is only "needed by
+one recipe, made by none", which is also true of Ogerite Ore, so its output is for a human
+to read. Extend via `data/tokens.json` or `tokens --add KEY=KIND`.
+
 **261 Modular Machinery blueprints share one legitimate name.** Separate problem from the
 above, and still open: every `modularmachinery:itemblueprint#<digest>` is called "Machine
 Blueprint", so a plan says "craft a Machine Blueprint" without saying which of 261 machines

@@ -253,6 +253,57 @@ class PresentationTest(unittest.TestCase):
     def test_the_group_heading_is_styled(self):
         self.assertIn(".tgroup{", render.CSS)
 
+    def test_show_only_what_i_need_still_shows_the_placeholders(self):
+        """They left the shopping list, not the plan. The button says "what I need" and a
+        Dungeon Drop is emphatically something you need, so filtering it out would answer
+        "4 Screws" to a plan that also wants two afternoons of loot."""
+        result = Solver(drop_graph(), token_kinds=PlanningTest.KINDS).solve("mod:plate", 1)
+        page = render.render_html(result)
+        for name in ("Dungeon Drop", "From Battle Tower Loot"):
+            self.assertIn(
+                'data-hasneed="1" data-blocked="0"><span class="qty">1&times;</span>'
+                '<span class="nm">%s</span>' % name, page,
+                "%s would be hidden by the need filter" % name)
+
+
+class TokensCommandTest(unittest.TestCase):
+    """The listing is how a curated list stays honest, so its guards are worth testing."""
+
+    class Args(object):
+        def __init__(self, **kw):
+            self.graph = kw.get("graph")
+            self.file = kw.get("file")
+            self.limit = kw.get("limit", 5)
+            self.add = kw.get("add")
+            self.disable = kw.get("disable")
+
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "graph.json")
+        drop_graph().save(self.path)
+        self.ov = os.path.join(tempfile.mkdtemp(), "tokens.json")
+
+    def _run(self, **kw):
+        from recipegraph import cli
+        return cli.cmd_tokens(self.Args(graph=self.path, file=self.ov, **kw))
+
+    def test_a_bad_kind_is_refused_rather_than_written(self):
+        # Writing it would put a key in the file that `resolve` then silently drops, so the
+        # user's edit would appear to work and do nothing.
+        self.assertEqual(self._run(add=["mod:x=nonsense"]), 2)
+        self.assertFalse(os.path.exists(self.ov))
+
+    def test_a_malformed_pair_is_refused(self):
+        self.assertEqual(self._run(add=["mod:x"]), 2)
+        self.assertFalse(os.path.exists(self.ov))
+
+    def test_a_good_addition_is_written_and_then_recognised(self):
+        self.assertEqual(self._run(add=["contenttweaker:mine=loot"]), 0)
+        self.assertEqual(tokens.for_path(self.ov)["contenttweaker:mine"], tokens.LOOT)
+
+    def test_disabling_removes_a_curated_default(self):
+        self.assertEqual(self._run(disable=["contenttweaker:dungeon_drop"]), 0)
+        self.assertNotIn("contenttweaker:dungeon_drop", tokens.for_path(self.ov))
+
 
 if __name__ == "__main__":
     unittest.main()
