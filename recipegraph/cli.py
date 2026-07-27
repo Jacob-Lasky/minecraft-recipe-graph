@@ -229,6 +229,7 @@ def cmd_plan(args):
 
 def cmd_explore(args):
     from . import explore
+    from . import present
     from .render import render_explore_html
 
     g = _load_graph(args.graph)
@@ -236,9 +237,14 @@ def cmd_explore(args):
     for k, v in (extra_names or {}).items():
         g.names.setdefault(k, v)
 
-    results = explore.search(g, args.query, have=have, limit=args.limit)
+    hits = explore.search(g, args.query, have=have, limit=args.limit)
+    results = hits.results
     if not results:
         print("no item name matched %r" % args.query, file=sys.stderr)
+        if hits.hidden:
+            # Distinguishes "that word is nowhere in the pack" from "every match is an NBT
+            # variant nothing can make". Only the second is worth widening the query for.
+            print(present.hidden_note(hits.hidden), file=sys.stderr)
         hints = explore.name_hints(g, args.query)
         if hints:
             print("did you mean: %s" % ", ".join(hints), file=sys.stderr)
@@ -254,7 +260,11 @@ def cmd_explore(args):
             flags.append("ore: " + ",".join(r["oredicts"][:3]))
         print("%-44s %-38s %s" % (r["key"], r["name"][:38], " | ".join(flags)))
 
-    payload = {"query": args.query, "results": results, "searched": len(g.names)}
+    if hits.hidden:
+        print("\n" + present.hidden_note(hits.hidden))
+
+    payload = {"query": args.query, "results": results, "hidden": hits.hidden,
+               "searched": len(g.live_keys), "named": len(g.labels)}
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(payload, fh, indent=1)

@@ -317,6 +317,7 @@ class Graph:
         self._by_input = None
         self._ore_index = None
         self._labels = None
+        self._live_keys = None
         self._variant_index = None
         self._producer_cache = {}
 
@@ -394,6 +395,50 @@ class Graph:
                         out[key] = self.bare_name(key)
             self._labels = out
         return self._labels
+
+    @property
+    def live_keys(self):
+        """Keys some recipe or catalyst actually touches. 167,365 of 342,070 labels.
+
+        The other 174,705 are DEAD: no recipe makes them, no recipe uses them, nothing
+        names them as a machine. They cannot be planned or explored and can only push a
+        real result down a search page -- six identical "Pluton Scythe" NBT variants buried
+        Plutonium-238 through -242 on the first page of a search for `plut`. See #26.
+
+        MUST STAY IN STEP WITH `producers` AND `consumers`, because a key hidden here while
+        those two would have found recipes for it is an item that exists, works when linked
+        to, and cannot be found. That is why the widenings below are not optional:
+
+          * wildcard meta -- `producers`/`consumers` fall back to `base:*`, so every meta
+            of a base some recipe wildcards is reachable;
+          * oredict -- `consumers` reaches an item through any ore it belongs to, so a
+            member of an ore some recipe consumes is reachable even if nothing names it;
+          * catalysts -- 51 keys, `thermalexpansion:machine:1` among them, are named ONLY
+            as a JEI catalyst. Their recipes output a discriminated variant instead (see
+            `producers_any_variant` and #28), so the bare key has no edge of its own and
+            hiding it would make the Pulverizer unsearchable.
+
+        Deliberately NOT widened from a bare key to its produced variants. That would
+        re-admit the duplicate rows this exists to remove, and the bare key stays reachable
+        by direct link and from the machines page.
+
+        Stock is not a graph fact and is applied by the caller: see `explore.rank_matches`,
+        where an item you hold is never hidden however dead the graph thinks it is.
+        """
+        if self._live_keys is None:
+            live = set(self.by_output) | set(self.by_input)
+            for key in self.by_input:
+                if key.startswith("ore:"):
+                    live.update(self.ore_members.get(key[4:]) or ())
+            for keys in self.catalysts.values():
+                live.update(keys)
+            wild_bases = {split_key(k)[0] for k in live if split_key(k)[1] == "*"}
+            if wild_bases:
+                for key in self.labels:
+                    if key not in live and split_key(key)[0] in wild_bases:
+                        live.add(key)
+            self._live_keys = live
+        return self._live_keys
 
     def consumers(self, key):
         out = list(self.by_input.get(key, ()))

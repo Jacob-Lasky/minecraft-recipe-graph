@@ -297,6 +297,39 @@ quantity.
 If a plan looks insane, suspect a false edge from a display-only category before suspecting
 the solver.
 
+## Half the named keys are dead, and search must not offer them
+
+`names.json` records every stack the dump SAW, including ones from categories filtered out
+afterwards. **174,705 of 342,070 searchable labels are touched by no recipe at all** -- damaged
+and enchanted tool variants, mostly. Six identical "Pluton Scythe" NBT variants and a "Pluton
+Banner", all `makes=0 uses=0`, pushed Plutonium-238 through -242 off the first page of a
+search for `plut`. `Graph.live_keys` is the filter; `explore.rank_matches` applies it.
+
+**`live_keys` has to stay in step with `producers` and `consumers`.** A key hidden from search
+while those two would have found recipes for it is an item that exists, works when you link to
+it, and cannot be found. Three widenings are load-bearing and each has a test:
+
+| widening | why |
+| --- | --- |
+| wildcard meta | `producers`/`consumers` fall back to `base:*` |
+| oredict | `consumers` reaches an item through any ore it belongs to |
+| catalysts | 51 keys, `thermalexpansion:machine:1` among them, appear ONLY as a JEI catalyst; their recipes output a discriminated variant instead (#28) |
+
+Deliberately NOT widened from a bare key to its produced variants: that re-admits the
+duplicate rows the filter exists to remove.
+
+**Stock overrules the graph.** An item you hold is never hidden, however dead the graph thinks
+it is. A stack in the AE2 system is a fact about the world; "no recipe touches it" is a fact
+about the dump.
+
+**The count is reported, never applied silently** -- the same rule the per-item caps follow.
+`present.hidden_note` is the one place that sentence is written; the typeahead gets the
+finished string from `/suggest` rather than formatting its own, and `tests/test_present.py`
+fails if a second copy appears anywhere in `recipegraph/`.
+
+Fixing this also fixed the ordering complaint that came with it. `fluid:plutonium` outranking
+`Plutonium-238` needed no ranking change at all once the dead keys were gone.
+
 ## The one thing to get right
 
 **Check graph coverage before trusting a "no recipe" answer.** The offline graph only has

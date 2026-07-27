@@ -6,8 +6,12 @@ do I have any, and is it even craftable in this pack".
 
 Result sets are capped per item (see MAX_*) because a common intermediate like an
 iron ingot is consumed by thousands of recipes; rendering all of them would produce
-a useless page. Caps are reported in the output rather than silently applied.
+a useless page. Caps are reported in the output rather than silently applied, and so is
+the dead-key filter below -- a search that quietly drops half the graph is worse than one
+that admits to it.
 """
+
+import collections
 
 from .model import merge_slots, split_key
 from .names import build_reverse
@@ -16,26 +20,48 @@ MAX_RESULTS = 60
 MAX_PRODUCERS = 8
 MAX_CONSUMERS = 12
 
+# What every entry point returns: the rows, and how many matches were suppressed as dead.
+# A plain list was the old shape and it had nowhere to put the count, which is how the
+# suppression would have become silent. Named fields so `hits.results` reads at the call
+# site and a stale `for x in hits` cannot quietly iterate a two-tuple.
+Matches = collections.namedtuple("Matches", "results hidden")
 
-def rank_keys(graph, query, have=None, limit=MAX_RESULTS):
-    """Item keys matching `query`, best first. The shared ranking for search and suggest.
+
+def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
+    """Item keys matching `query`, best first, plus the count of dead matches dropped.
 
     Split out from `search` so search-as-you-type does not pay for the full `describe` of
     every hit: `describe` walks producers and consumers per item, which is the right cost
     for a page and far too much for a keystroke.
+
+    Renamed from `rank_keys` when the return type changed from a list to `Matches`. A
+    rename rather than a quiet signature change ON PURPOSE: a call site left un-updated now
+    fails at import instead of iterating a two-tuple and rendering the word "results".
     """
     have = have or {}
     q = query.strip().lower()
     if not q:
-        return []
+        return Matches([], 0)
     terms = q.split()
     scored = []
+    hidden = 0
+    live = graph.live_keys
 
     # graph.labels, not graph.names: names covers items only, and a fluid the chemistry
     # chains need must be findable by name too.
     for key, label in graph.labels.items():
         low = label.lower()
         if not all(t in low or t in key.lower() for t in terms):
+            continue
+        # Checked AFTER the term match, not before: `_stock_of` splits the key and may scan
+        # the pool, and paying that for all 342,070 labels on every keystroke would cost
+        # far more than the filter saves. Only matches reach here.
+        #
+        # Anything you actually hold stays findable however dead the graph thinks it is.
+        # A stack in an AE2 system is a fact about the world; "no recipe touches it" is a
+        # fact about the dump, and the dump does not get to overrule the world.
+        if key not in live and not _stock_of(key, have):
+            hidden += 1
             continue
         # exact > prefix > word-boundary > substring; shorter names win ties
         if low == q:
@@ -71,7 +97,7 @@ def rank_keys(graph, query, have=None, limit=MAX_RESULTS):
         out.append(key)
         if len(out) >= limit:
             break
-    return out
+    return Matches(out, hidden)
 
 
 def suggest(graph, query, have=None, limit=25):
@@ -82,8 +108,9 @@ def suggest(graph, query, have=None, limit=25):
     kind of thing you are looking at without opening anything).
     """
     have = have or {}
+    hits = rank_matches(graph, query, have, limit)
     out = []
-    for key in rank_keys(graph, query, have, limit):
+    for key in hits.results:
         out.append({
             "key": key,
             "name": graph.display(key),
@@ -93,14 +120,14 @@ def suggest(graph, query, have=None, limit=25):
             "makes": len(graph.real_producers(key)),
             "uses": len(graph.consumers(key)),
         })
-    return out
+    return Matches(out, hits.hidden)
 
 
 def search(graph, query, have=None, limit=MAX_RESULTS):
     """Full detail for every item matching `query`."""
     have = have or {}
-    return [describe(graph, key, have)
-            for key in rank_keys(graph, query, have, limit)]
+    hits = rank_matches(graph, query, have, limit)
+    return Matches([describe(graph, key, have) for key in hits.results], hits.hidden)
 
 
 def _stack(graph, key, have):
@@ -176,20 +203,22 @@ def describe(graph, key, have=None):
     }
 
 
-def resolve_one(graph, query):
-    """Best single key for a query, or None."""
-    hits = search(graph, query, limit=1)
-    return hits[0]["key"] if hits else None
-
-
 def name_hints(graph, query, limit=10):
     """Cheap name-only suggestions, for a CLI 'did you mean' line.
 
     Distinct from `suggest`, which returns rows for the web typeahead. The two had the same
     name once and the later definition silently shadowed the earlier.
+
+    Filtered to live keys and to labels that are not the query itself, because this line
+    only ever appears when the search found nothing. Unfiltered it answered "no item name
+    matched 'pluton scythe' / did you mean: pluton scythe", which reads as a malfunction:
+    the name does exist, every key wearing it is dead, and `hidden_note` has already said
+    so on the line above.
     """
     rev = build_reverse(graph.names)
     q = query.strip().lower()
-    hits = [label for label in rev if q in label]
+    live = graph.live_keys
+    hits = [label for label in rev
+            if q in label and label != q and any(k in live for k in rev[label])]
     hits.sort(key=len)
     return hits[:limit]

@@ -170,6 +170,49 @@ class KindChipTest(unittest.TestCase):
         self.assertIn("%%CHIPS%%", server.HOME_JS)
 
 
+class HiddenNoteTest(unittest.TestCase):
+    """One wording for suppressed dead matches, across three surfaces. See #26."""
+
+    def test_nothing_hidden_says_nothing(self):
+        self.assertEqual(present.hidden_note(0), "")
+
+    def test_the_count_is_grouped_and_the_reason_is_given(self):
+        # "174705 hidden" is both hard to read and an invitation to wonder what else is
+        # being withheld. Both halves of that are the point of the sentence.
+        note = present.hidden_note(174705)
+        self.assertIn("174,705", note)
+        self.assertIn("no recipe makes or uses them", note)
+
+    def test_the_explore_page_prints_it(self):
+        page = render.render_explore_html(
+            {"query": "plut", "results": [], "hidden": 94, "searched": 12})
+        self.assertIn(present.hidden_note(94), page)
+
+    def test_the_explore_page_says_nothing_when_nothing_was_hidden(self):
+        page = render.render_explore_html(
+            {"query": "plut", "results": [], "hidden": 0, "searched": 12})
+        self.assertNotIn("no recipe makes or uses them", page)
+
+    def test_the_browser_is_handed_the_sentence_rather_than_writing_one(self):
+        # The typeahead renders client-side, so the temptation is a second copy of the
+        # wording in JS. It gets `note` from /suggest instead; a copy in the script is the
+        # regression this catches.
+        self.assertNotIn("no recipe makes or uses", server.HOME_JS)
+        self.assertIn("d.note", server.HOME_JS)
+
+    def test_only_one_module_writes_the_sentence(self):
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        wrote = []
+        for name in sorted(os.listdir(root)):
+            if not name.endswith(".py"):
+                continue
+            with open(os.path.join(root, name)) as fh:
+                if "no recipe makes or uses them" in fh.read():
+                    wrote.append(name)
+        self.assertEqual(wrote, ["present.py"])
+
+
 class SharedEscapeTest(unittest.TestCase):
     def test_only_one_escape_implementation_remains(self):
         # Three modules had their own identical `_esc`; one of them diverging is the sort of

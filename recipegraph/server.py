@@ -30,7 +30,8 @@ from .htmlutil import esc as _esc
 from .htmlutil import item_href, machine_href
 from .model import Graph, path_of
 from .names import build_reverse
-from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, kind_chip_json)
+from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, hidden_note,
+                      kind_chip_json)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
 
@@ -629,6 +630,15 @@ class State:
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
+        # The two search indexes, built here rather than on first use. Between them they
+        # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
+        # them is a keystroke -- so left lazy, the first search of a session stalls while
+        # every later one is instant, which reads as "the search is broken" rather than as
+        # "the index is warming". Startup already costs 40 to 90 seconds and the
+        # healthcheck's start-period covers it. Both counts are then what /explore reports,
+        # so neither is warm-up-only state waiting to go stale.
+        self.named = len(self.graph.labels)
+        self.searchable = len(self.graph.live_keys)
 
     def solver(self):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
@@ -675,16 +685,21 @@ HOME_JS = """
  var esc=window.rgEsc;
  function n(x){return x.toLocaleString();}
 
- function render(items,q){
+ // Suppressed dead matches are REPORTED, never silently dropped: half the pack's named
+ // keys are NBT variants no recipe touches, and a search that quietly removes them looks
+ // the same as one that is broken. `dead` arrives from /suggest as a finished sentence
+ // rather than a count to format here, so the page and the terminal cannot word it
+ // differently: present.hidden_note is the only place it is written.
+ function render(items,q,dead){
    rows=[]; sel=-1;
    if(!q){list.innerHTML=''; note.textContent=''; shelf.hidden=false; return;}
    shelf.hidden=true;
    if(!items.length){
      list.innerHTML='';
-     note.textContent='Nothing matches \\u201c'+q+'\\u201d.';
+     note.textContent='Nothing matches \\u201c'+q+'\\u201d.'+(dead?' '+dead+'.':'');
      return;
    }
-   note.textContent='';
+   note.textContent=dead||'';
    list.innerHTML=items.map(function(it,i){
      // "made by / used by" in place: where an item sits in the graph is often the whole
      // answer, so it should not need a second page load to see.
@@ -752,7 +767,7 @@ HOME_JS = """
    // Reflect the query in the URL without a navigation, so a search survives reload and
    // can be shared, and the back button still works.
    history.replaceState(null,'',q?'/?q='+encodeURIComponent(q):'/');
-   if(!q){render([],'');return;}
+   if(!q){render([],'','');return;}
    var mine=++seq;
    fetch('/suggest?q='+encodeURIComponent(q))
      .then(function(r){return r.json();})
@@ -760,7 +775,7 @@ HOME_JS = """
        // Drop a slow response that a later keystroke has already superseded, or results
        // flicker back to a stale query.
        if(mine!==seq)return;
-       render(d.results||[],q);
+       render(d.results||[],q,d.note||'');
      })
      .catch(function(){if(mine===seq)note.textContent='Search failed.';});
  }
@@ -1320,14 +1335,20 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path == "/suggest":
                 # The only JSON endpoint. Everything else is server-rendered; this exists
                 # because a keystroke must not re-render a page.
-                results = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
-                return self._send(json.dumps({"results": results}),
+                hits = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
+                return self._send(json.dumps({"results": hits.results,
+                                              "hidden": hits.hidden,
+                                              "note": hidden_note(hits.hidden)}),
                                   ctype="application/json; charset=utf-8")
             if parts.path == "/explore":
                 query = one("q")
-                results = explore_mod.search(st.graph, query, have=st.have, limit=40)
-                payload = {"query": query, "results": results,
-                           "searched": len(st.graph.names)}
+                hits = explore_mod.search(st.graph, query, have=st.have, limit=40)
+                # `searched` is what search actually looked at, not len(names): more
+                # than half the named keys are dead and never enter the scan, so the old
+                # figure claimed a reach the search does not have.
+                payload = {"query": query, "results": hits.results,
+                           "hidden": hits.hidden,
+                           "searched": st.searchable, "named": st.named}
                 return self._send(_wrap_fragment(
                     "Explore: %s" % query, render_explore_html(payload), st,
                     _crumb("Explore “%s”" % query), path="/explore"))
