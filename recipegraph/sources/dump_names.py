@@ -18,6 +18,8 @@ it is applied with setdefault, leaving any name already loaded in place.
 import json
 import os
 
+from ..names import clean_label
+
 
 def find(instance_dir):
     path = os.path.join(instance_dir, "mc-recipe-dump", "names.json")
@@ -25,7 +27,15 @@ def find(instance_dir):
 
 
 def load(path):
-    """{key: display name}. Missing or malformed reads as empty rather than raising."""
+    """{key: display name}. Missing or malformed reads as empty rather than raising.
+
+    FORMAT CODES ARE STRIPPED, exactly as `load_items_csv` does for the pack's own
+    export. `getDisplayName()` returns what the game DRAWS, section signs and all, so
+    14,425 of the 340,324 names on the reference pack arrived as `§3Abyssalnite Axe`
+    or `Borax Solution Cell§r`. Rendered outside Minecraft those are literal
+    characters: they show in search results, they sort ahead of every letter, and a
+    leading code hides the first word of the name behind punctuation.
+    """
     if not path or not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -35,5 +45,13 @@ def load(path):
             return {}
     if not isinstance(doc, dict):
         return {}
-    return {str(k): str(v) for k, v in doc.items()
-            if isinstance(v, str) and v.strip()}
+    out = {}
+    for key, value in doc.items():
+        if not isinstance(value, str):
+            continue
+        # clean_label returns None for a name that was ONLY formatting, which is not a
+        # name; dropping it lets the usual fallbacks render the key instead.
+        label = clean_label(value)
+        if label:
+            out[str(key)] = label
+    return out

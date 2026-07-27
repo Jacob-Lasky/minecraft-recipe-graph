@@ -299,6 +299,28 @@ class DiscriminatedStackTest(unittest.TestCase):
         g = index.build(inst, quiet=True)
         self.assertEqual(g.names.get("forestry:bee_drone_ge#a3f19c02b8d1"), "Forest Drone")
 
+    def test_dumped_names_have_their_format_codes_stripped(self):
+        """`getDisplayName()` returns what the game DRAWS, section signs and all, so
+        14,425 of 340,324 names on the reference pack arrived as `\u00a73Abyssalnite Axe`
+        or `Borax Solution Cell\u00a7r`. Outside Minecraft those are literal characters:
+        they show in search results, they sort ahead of every letter, and a leading code
+        hides the first word behind punctuation. items.csv was already cleaned; this was
+        the one source that was not."""
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "names.json")
+        with open(path, "w") as fh:
+            json.dump({"a:b#1": "\u00a73Abyssalnite Axe",
+                       "c:d": "Borax Solution Cell\u00a7r",
+                       "e:f": "\u00a7r",
+                       "g:h": "Plain"}, fh)
+        got = dump_names.load(path)
+        self.assertEqual(got["a:b#1"], "Abyssalnite Axe")
+        self.assertEqual(got["c:d"], "Borax Solution Cell")
+        self.assertEqual(got["g:h"], "Plain")
+        # A name that was ONLY formatting is not a name; dropping it lets the usual
+        # fallbacks render the key instead of an empty string.
+        self.assertNotIn("e:f", got)
+
     def test_dumped_names_load_and_a_bad_file_is_empty(self):
         d = tempfile.mkdtemp()
         path = os.path.join(d, "names.json")
