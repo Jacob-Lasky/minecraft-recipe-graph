@@ -40,12 +40,32 @@ def _count_nodes(node):
     return 1 + sum(_count_nodes(c) for c in node.get("children") or ())
 
 
+def _index_pool(pool):
+    """`base key -> the pool keys sharing it`, so a wildcard lookup is not a pool scan.
+
+    Built ONCE, in __init__, and never invalidated. That is safe because the pool's KEY
+    SET is fixed for a solver's lifetime: `take` only ever decrements existing entries,
+    nothing inserts, and `_restore` swaps in a copy of the same keys. If you ever add a
+    key to `pool`, this index is what breaks -- update it here too.
+    `TestPool.test_pool_key_set_is_fixed_for_a_solvers_lifetime` is the tripwire.
+
+    Without it, `take` filtered all 3,389 stocked keys on every call in order to use one
+    of them, which cost 23 million `split_key` calls and 20 seconds for a 4,000-node
+    plan. It read as linear and was quadratic: more nodes means more takes, each O(pool).
+    """
+    index = {}
+    for key in pool:
+        index.setdefault(split_key(key)[0], []).append(key)
+    return index
+
+
 class Solver:
     def __init__(self, graph, have=None, raw=None, overrides=None,
                  max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
                  work_budget=None, machine_states=None, costs=None, free_sources=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
+        self._by_base = _index_pool(self.pool)
         self.raw = set(raw or ())            # user-declared "stop here" items
         self.craftables = set(craftables or ())  # AE2 autocraftable -> treat as have
         # {key: why} for outputs of an infinite generator the player owns. These terminate
@@ -81,16 +101,22 @@ class Solver:
 
     # ---- inventory ------------------------------------------------------
 
+    def _equivalent(self, key):
+        """The pool keys `key` may draw on, exact key first.
+
+        Only a wildcard meta draws on anything but itself, so the common case never
+        touches the index at all. `k != key` matters: a wildcard that is ITSELF stocked
+        appears in its own base bucket, and counting it twice made `available` promise
+        more than `take` could deliver.
+        """
+        base, meta = split_key(key)
+        if meta != "*":
+            return (key,)
+        return (key,) + tuple(k for k in self._by_base.get(base, ()) if k != key)
+
     def available(self, key):
         """Stock for a key, counting a wildcard-meta variant as interchangeable."""
-        n = self.pool.get(key, 0)
-        base, meta = split_key(key)
-        if meta == "*":
-            for k, v in self.pool.items():
-                kb, _ = split_key(k)
-                if kb == base:
-                    n += v
-        return n
+        return sum(self.pool.get(k, 0) for k in self._equivalent(key))
 
     def take(self, key, want):
         got = min(want, self.available(key))
@@ -98,11 +124,9 @@ class Solver:
             return 0
         remaining = got
         # drain the exact key first, then wildcard-equivalent metas
-        for k in [key] + [k for k in list(self.pool) if k != key and split_key(k)[0] == split_key(key)[0]]:
+        for k in self._equivalent(key):
             if remaining <= 0:
                 break
-            if split_key(key)[1] != "*" and k != key:
-                continue
             avail = self.pool.get(k, 0)
             if avail <= 0:
                 continue

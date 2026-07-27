@@ -132,6 +132,45 @@ class ServerTest(unittest.TestCase):
     def test_a_non_numeric_quantity_is_a_bad_request_not_a_crash(self):
         self.assertEqual(self.get("/plan?item=mod%3Awidget&qty=lots")[0], 400)
 
+    def test_a_plan_carries_the_real_nav_not_a_bare_back_link(self):
+        """#13: the plan was the one page you could not leave.
+
+        Every other view renders `_nav`; the fragment shell hardcoded a single
+        `back to search` link, so Machines, Sources and Coverage were unreachable.
+        """
+        body = self.get("/plan?item=mod%3Awidget&qty=4")[2]
+        for href, label, _icon in server.NAV_ITEMS:
+            self.assertIn(label, body, "plan page is missing the %s tab" % label)
+            if href != "/":
+                self.assertIn("href='%s'" % href, body, href)
+        self.assertIn("aria-current='page'", body, "Search should read as the parent tab")
+        self.assertIn("&rsaquo;", body, "and a breadcrumb should name the item")
+
+    def test_explore_carries_the_nav_too(self):
+        body = self.get("/explore?q=widget")[2]
+        self.assertIn("href='/machines'", body)
+
+    def test_a_plan_warns_when_its_data_went_stale(self):
+        """The other half of the missing nav: a plan could not raise the banner either."""
+        os.utime(self.state.graph_path, None)
+        try:
+            body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+            self.assertIn("changed on disk", body)
+        finally:
+            self.state.load_all()
+
+    def test_every_page_kind_shows_that_a_plan_is_working(self):
+        """#18: a slow plan blocks with the OLD page on screen and no sign of life.
+
+        Asserted on both shells because they are separate wrappers, and the fragment one
+        is exactly the page that links to further plans.
+        """
+        for path in ("/", "/machines", "/sources", "/plan?item=mod%3Awidget&qty=1"):
+            body = self.get(path)[2]
+            self.assertIn("a[href^=\"/plan?\"]", body, path)
+            self.assertIn("el.className='working'", body, path)
+            self.assertIn(".working{", body, "%s: the scrim has no styling" % path)
+
     def test_the_infinite_source_reaches_the_rendered_plan(self):
         # End to end: a placed generator in the have file must make water free and be
         # reported on the page.

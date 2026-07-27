@@ -164,6 +164,77 @@ font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .klist a:hover{color:var(--accent);text-decoration:underline}
 .klist .grow{flex:1 1 auto}
 .klist code{font:11.5px var(--mono);color:var(--dim);word-break:break-all}
+
+/* Breadcrumb for the fragment pages. A plan is not a tab, so the nav marks Search as
+   current and this says which item you are under. */
+.crumb{font-size:13px;color:var(--dim);margin:-12px 0 0}
+.crumb b{color:var(--fg);font-weight:600}
+.crumb a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.crumb a:hover{color:var(--accent);border-bottom-color:currentColor}
+
+/* "Working" scrim. A plan is solved server-side, so the browser keeps showing the OLD
+   page until it lands and a slow one reads as a dead click. */
+.working{position:fixed;inset:0;display:none;align-items:flex-start;justify-content:center;
+background:rgba(20,22,25,.42);z-index:50}
+.working.on{display:flex}
+.workbox{margin-top:22vh;display:flex;gap:15px;align-items:center;background:var(--card);
+border:1px solid var(--line);border-radius:12px;padding:16px 20px;
+max-width:min(92vw,430px);box-shadow:0 14px 44px rgba(0,0,0,.24)}
+.workbox b{display:block;font-size:15px;margin-bottom:3px;overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.workbox span{display:block;font-size:13px;color:var(--dim)}
+.spin{width:20px;height:20px;flex:0 0 auto;border-radius:50%;border:2.5px solid var(--line);
+border-top-color:var(--accent);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* No substitute animation: the label already says what is happening, so a reader who has
+   asked for stillness gets a plain ring rather than a slower spin. */
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-color:var(--accent)}}
+"""
+
+
+# Every page links to /plan, and a plan is the one thing here that can block for seconds.
+# ONE delegated listener in the shell rather than markup per template, so no page can link
+# to a plan and forget the feedback.
+PENDING_JS = """
+(function(){
+ var el=null, timer=null;
+ function show(label){
+   if(!el){
+     el=document.createElement('div');
+     el.className='working';
+     el.setAttribute('role','status'); el.setAttribute('aria-live','polite');
+     el.innerHTML='<div class="workbox"><div class="spin"></div><div>'
+       +'<b class="wl"></b><span>Solving the recipe tree. A deep item takes a moment.'
+       +'</span></div></div>';
+     document.body.appendChild(el);
+   }
+   el.querySelector('.wl').textContent=label;
+   el.classList.add('on');
+ }
+ function hide(){clearTimeout(timer); if(el)el.classList.remove('on');}
+ // A plan link's text is not just the item name: search rows carry stock and recipe-count
+ // pills and the raw id, which ran together into "Planning Widgetnone2 recipes". Strip the
+ // decorations rather than special-casing each page's markup.
+ function label(a){
+   var c=a.cloneNode(true);
+   c.querySelectorAll('.pill,.id2,.t,code').forEach(function(x){x.remove();});
+   return (c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,58);
+ }
+ document.addEventListener('click',function(e){
+   var t=e.target, a=t&&t.closest?t.closest('a[href^="/plan?"]'):null;
+   // Modified clicks open a new tab, so THIS page is not going anywhere and a scrim over
+   // it would be a lie that only the back button clears.
+   if(!a||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+   var name=label(a);
+   // Held back briefly: most plans land in tens of milliseconds and a flash of "working"
+   // is worse feedback than none.
+   clearTimeout(timer);
+   timer=setTimeout(function(){show(name?'Planning '+name+'\\u2026':'Planning\\u2026');},150);
+ });
+ // Returning here restores the page from the bfcache with the scrim still up.
+ window.addEventListener('pageshow',hide);
+ window.addEventListener('pagehide',hide);
+})();
 """
 
 
@@ -172,21 +243,41 @@ def _item(graph, key):
     return kind_chip(graph.kind(key)) + _esc(graph.bare_name(key))
 
 
-def _wrap_fragment(title, fragment):
-    """Give an artifact-style fragment a real HTML document shell."""
+def _shell(title, body, css):
+    """The one document wrapper. Both page kinds go through it so neither can drift.
+
+    `css` differs by caller: a fragment already carries the base CSS inline (that is what
+    makes it publishable as an Artifact), a server-rendered page does not.
+    """
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>%s</title></head><body>%s<div class='wrap' style='padding-top:0'>"
-            "<nav class='top'><a href='/'>&larr; back to search</a></nav></div>"
-            "<style>%s</style></body></html>"
-            % (_esc(title), fragment, HOME_CSS))
+            "<title>%s</title><style>%s</style></head><body>%s"
+            "<script>%s</script></body></html>"
+            % (_esc(title), css, body, PENDING_JS))
+
+
+def _wrap_fragment(title, fragment, state=None, crumb=""):
+    """Give an artifact-style fragment a real HTML document shell, with the real nav.
+
+    The nav is `_nav`, not a hand-rolled back-link: a plan used to be the one page you
+    could not leave, and the one page that would not tell you its data was stale. Search
+    is marked current because a plan lives under it -- it is not a fifth tab.
+
+    DO NOT move this into the renderer. The fragment has no document shell precisely so it
+    can be published as a Claude Artifact unchanged, where none of these links resolve.
+    """
+    nav = ("<div class='wrap' style='padding-bottom:0'>%s%s</div>"
+           % (_nav("/", state), crumb)) if state is not None else ""
+    return _shell(title, nav + fragment, HOME_CSS)
+
+
+def _crumb(label):
+    """`Search > this thing`, so the highlighted Search tab reads as a parent, not a lie."""
+    return "<div class='crumb'><a href='/'>Search</a> &rsaquo; <b>%s</b></div>" % _esc(label)
 
 
 def _page(title, body):
-    return ("<!doctype html><html><head><meta charset=utf-8>"
-            "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>%s</title><style>%s%s</style></head><body>%s</body></html>"
-            % (_esc(title), CSS, HOME_CSS, body))
+    return _shell(title, body, CSS + HOME_CSS)
 
 
 # Inline SVG, because the artifact CSP blocks every off-host request and an icon font
@@ -892,7 +983,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload = {"query": query, "results": results,
                            "searched": len(st.graph.names)}
                 return self._send(_wrap_fragment(
-                    "Explore: %s" % query, render_explore_html(payload)))
+                    "Explore: %s" % query, render_explore_html(payload), st,
+                    _crumb("Explore “%s”" % query)))
             if parts.path == "/plan":
                 key = one("item")
                 qty = max(1, int(one("qty", "1") or 1))
@@ -916,9 +1008,9 @@ class Handler(BaseHTTPRequestHandler):
                         % (_nav(), _esc(key), _esc(key.split(":")[-1]))), 404)
                 with st.lock:
                     result = st.solver().solve(key, qty)
+                title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
-                    "%s x%d" % (result["target_name"], qty),
-                    render_html(result, st.graph)))
+                    title, render_html(result, st.graph), st, _crumb(title)))
             if parts.path == "/machines":
                 return self._send(machines_page(st, one("m"), one("q")))
             if parts.path == "/machine":
