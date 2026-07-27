@@ -1,0 +1,24 @@
+# The build context is source only. Everything below either does not belong in a Python
+# runtime image or is large enough to make the build crawl.
+
+# 115 MB of graph, plus the AE2 snapshot and the metrics DB. Bind-mounted at runtime.
+data/
+
+# A Gradle project for the Minecraft mod, its build output and its local maven cache.
+mod/
+
+# Pre-built mod jars for players to download.
+dist/
+
+.git/
+.github/
+.planning/
+tests/
+docs/
+skill/
+tools/
+
+**/__pycache__/
+**/*.pyc
+*.md
+LICENSE
