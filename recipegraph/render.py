@@ -97,7 +97,13 @@ details{margin:0}
 summary{cursor:pointer;padding:4px 6px;border-radius:7px;list-style:none;
 display:flex;gap:9px;align-items:baseline}
 summary::-webkit-details-marker{display:none}
-summary:hover{background:var(--accent-soft)}
+/* HOVER IS GATED ON `hover:hover` THROUGHOUT THIS SHEET, AND MUST STAY THAT WAY.
+   A touch browser has no pointer to move away, so it leaves `:hover` applied to the last
+   thing tapped until you tap something else. `button:hover` sets exactly the accent
+   border and text colour that `[aria-pressed=true]` does, so unselecting a state chip
+   cleared its background and left it looking selected. Reported as "the background turns
+   off but it still remains highlighted". Any new `:hover` rule needs the same wrapper. */
+@media(hover:hover){summary:hover{background:var(--accent-soft)}}
 summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .tw{color:var(--dim);flex:0 0 11px;font-size:10px;transition:transform .12s ease}
 details[open]>summary .tw{transform:rotate(90deg)}
@@ -119,7 +125,7 @@ letter-spacing:.03em;white-space:nowrap}
 .bar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
 button{font:500 12.5px var(--sans);padding:6px 12px;border:1px solid var(--line);
 background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
-button:hover{border-color:var(--accent);color:var(--accent)}
+@media(hover:hover){button:hover{border-color:var(--accent);color:var(--accent)}}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .leaf{padding:4px 6px 4px 26px;display:flex;gap:9px;align-items:baseline}
 .foot{margin-top:26px;font-size:12.5px;color:var(--dim);border-top:1px solid var(--line);

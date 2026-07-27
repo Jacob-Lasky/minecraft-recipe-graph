@@ -51,12 +51,19 @@ border-radius:9px;padding:11px 14px;font-size:13.5px;margin-bottom:20px}
 form.stale span{flex:1 1 260px}
 form.stale button{font:600 12.5px var(--sans);padding:7px 14px;border-radius:8px;
 border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}
-form.stale button:hover{background:var(--warn);color:var(--card)}
+/* HOVER IS GATED ON `hover:hover` THROUGHOUT THIS SHEET, AND MUST STAY THAT WAY.
+   A touch browser has no pointer to move away, so it leaves `:hover` applied to the last
+   thing tapped until you tap something else. `button:hover` sets exactly the accent
+   border and text colour that `[aria-pressed=true]` does, so unselecting a state chip
+   cleared its background and left it looking selected. Reported as "the background turns
+   off but it still remains highlighted". Any new `:hover` rule needs the same wrapper. */
+@media(hover:hover){form.stale button:hover{background:var(--warn);color:var(--card)}}
 .hits{list-style:none;padding:0;margin:0}
 .hits li{border-bottom:1px solid var(--line);display:flex;align-items:stretch;gap:8px}
 .hits a{display:flex;gap:12px;align-items:baseline;padding:10px 4px;text-decoration:none;
 color:inherit;flex:1 1 auto;min-width:0;border-radius:8px}
-.hits a:hover,.hits a.on{background:var(--accent-soft)}
+.hits a.on{background:var(--accent-soft)}
+@media(hover:hover){.hits a:hover{background:var(--accent-soft)}}
 /* Keyboard selection must be visible even when the pointer is elsewhere, so `.on` gets a
    ring rather than only the hover tint. */
 .hits a.on{box-shadow:inset 0 0 0 2px var(--accent)}
@@ -66,10 +73,10 @@ text-overflow:ellipsis;white-space:nowrap}
 .hits .id2{font:11.5px var(--mono);color:var(--dim);flex:0 0 auto}
 .hits a.det{flex:0 0 auto;font:11.5px var(--sans);color:var(--dim);align-self:center;
 padding:6px 10px}
-.hits a.det:hover{color:var(--accent);background:none;text-decoration:underline}
+@media(hover:hover){.hits a.det:hover{color:var(--accent);background:none;text-decoration:underline}}
 .hits button.star{flex:0 0 auto;align-self:center;background:none;border:0;cursor:pointer;
 font-size:16px;line-height:1;color:var(--dim);padding:6px 4px}
-.hits button.star:hover{color:var(--warn)}
+@media(hover:hover){.hits button.star:hover{color:var(--warn)}}
 .hits button.star.on{color:var(--warn)}
 .hits button.star:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
@@ -83,10 +90,10 @@ color:var(--dim);margin:0 0 10px}
 border-radius:99px;background:var(--card);overflow:hidden}
 .pin a{display:flex;align-items:center;gap:2px;padding:6px 13px;text-decoration:none;
 color:inherit;font-size:13.5px}
-.pin a:hover{background:var(--accent-soft);color:var(--accent)}
+@media(hover:hover){.pin a:hover{background:var(--accent-soft);color:var(--accent)}}
 .pin button{background:none;border:0;border-left:1px solid var(--line);cursor:pointer;
 color:var(--dim);padding:7px 10px;font-size:13px;line-height:1}
-.pin button:hover{color:var(--need)}
+@media(hover:hover){.pin button:hover{color:var(--need)}}
 .pin button:focus-visible,.pin a:focus-visible{outline:2px solid var(--accent);
 outline-offset:-2px}
 .pill{font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;flex:0 0 auto}
@@ -100,7 +107,7 @@ border-bottom:1px solid var(--line);padding-bottom:2px}
 nav.top a,nav.top span.cur{display:flex;align-items:center;gap:7px;padding:8px 13px;
 text-decoration:none;border-radius:8px 8px 0 0;color:var(--dim);
 border-bottom:2px solid transparent;margin-bottom:-3px}
-nav.top a:hover{background:var(--accent-soft);color:var(--accent)}
+@media(hover:hover){nav.top a:hover{background:var(--accent-soft);color:var(--accent)}}
 nav.top span.cur{color:var(--fg);font-weight:600;border-bottom-color:var(--accent)}
 nav.top svg{width:15px;height:15px;flex:0 0 auto;stroke:currentColor;fill:none;
 stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
@@ -132,22 +139,22 @@ table.mach th{text-align:left;font:600 10.5px var(--mono);letter-spacing:.1em;
 text-transform:uppercase;color:var(--dim);padding:0 10px 8px 0;white-space:nowrap;
 border-bottom:1px solid var(--line)}
 table.mach th.sortable{cursor:pointer;user-select:none}
-table.mach th.sortable:hover{color:var(--accent)}
+@media(hover:hover){table.mach th.sortable:hover{color:var(--accent)}}
 table.mach th .ar{opacity:0;font-size:9px}
 table.mach th[aria-sort] .ar{opacity:1;color:var(--accent)}
 table.mach td{padding:7px 10px 7px 0;border-top:1px solid var(--line);
 vertical-align:baseline}
-table.mach tbody tr:hover{background:var(--accent-soft)}
+@media(hover:hover){table.mach tbody tr:hover{background:var(--accent-soft)}}
 table.mach td.n{text-align:right;font-family:var(--mono);
 font-variant-numeric:tabular-nums;white-space:nowrap;width:1%}
 table.mach a.mname{color:inherit;text-decoration:none;font-weight:550}
-table.mach a.mname:hover{color:var(--accent);text-decoration:underline}
+@media(hover:hover){table.mach a.mname:hover{color:var(--accent);text-decoration:underline}}
 table.mach code{font:11.5px var(--mono);color:var(--dim)}
 table.mach form{display:inline}
 table.mach .acts{display:flex;gap:4px;justify-content:flex-end}
 table.mach button{font:11.5px var(--sans);padding:2px 8px;border:1px solid var(--line);
 border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer;white-space:nowrap}
-table.mach button:hover{border-color:var(--accent);color:var(--accent)}
+@media(hover:hover){table.mach button:hover{border-color:var(--accent);color:var(--accent)}}
 /* A severity stripe so state reads before any text is parsed. */
 table.mach tr[data-state] td:first-child{border-left:3px solid transparent}
 table.mach tr[data-state=have] td:first-child{border-left-color:var(--ok)}
@@ -165,7 +172,7 @@ border-top:1px solid var(--line)}
 .klist .c{font:11.5px var(--mono);color:var(--dim);flex:0 0 auto;
 font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .klist a{color:inherit;text-decoration:none;min-width:0}
-.klist a:hover{color:var(--accent);text-decoration:underline}
+@media(hover:hover){.klist a:hover{color:var(--accent);text-decoration:underline}}
 .klist .grow{flex:1 1 auto}
 .klist code{font:11.5px var(--mono);color:var(--dim);word-break:break-all}
 
@@ -174,7 +181,7 @@ font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .crumb{font-size:13px;color:var(--dim);margin:-12px 0 0}
 .crumb b{color:var(--fg);font-weight:600}
 .crumb a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
-.crumb a:hover{color:var(--accent);border-bottom-color:currentColor}
+@media(hover:hover){.crumb a:hover{color:var(--accent);border-bottom-color:currentColor}}
 
 /* "Working" scrim. A plan is solved server-side, so the browser keeps showing the OLD
    page until it lands and a slow one reads as a dead click. */
@@ -193,6 +200,21 @@ border-top-color:var(--accent);animation:sp .8s linear infinite}
 /* No substitute animation: the label already says what is happening, so a reader who has
    asked for stillness gets a plain ring rather than a slower spin. */
 @media (prefers-reduced-motion:reduce){.spin{animation:none;border-color:var(--accent)}}
+
+/* THE `hidden` ATTRIBUTE MUST BEAT EVERY `display` RULE IN THIS SHEET.
+
+   `hidden` works through the UA rule `[hidden]{display:none}`, which carries almost no
+   specificity, so ANY author rule that sets `display` on the same element silently wins
+   and the element stays on screen. The machines page hides rows with `r.hidden=!ok`, and
+   the phone card layout below sets `table.mach tr{display:flex}` (specificity 0,1,2
+   against 0,1,0). Result: filtering set the attribute on 499 of 503 rows, the counter
+   read "4", and all 503 stayed visible. The "nothing matches" row is a `tr` too, so it
+   was permanently on screen as well.
+
+   `!important` rather than a more specific selector on purpose: the bug is a whole CLASS
+   of mistake, reintroduced by the next `display` rule anyone adds, and "hidden means
+   hidden" is not a rule any layout should get to negotiate with. */
+[hidden]{display:none!important}
 
 /* PHONE. Same rule as the block at the end of render.CSS, and it must stay last here for
    the same reason: these override the desktop rules above by cascade order.
@@ -245,8 +267,23 @@ table.mach .acts button{padding:8px 12px;min-height:40px;display:inline-flex;
 align-items:center}
 /* The machine name is the primary target of the card, so give it a real one. */
 table.mach td.c-name a.mname{display:inline-flex;align-items:center;min-height:40px}
-/* A hover tint on a touch screen sticks after the tap and reads as a selection. */
-table.mach tbody tr:hover{background:transparent}
+
+/* SEARCH RESULTS. A result row is a name, three pills, a registry id, a details link and
+   a star. Only the name was allowed to shrink (`flex:1 1 auto`); everything else is
+   `flex:0 0 auto`. At 390px the fixed content alone is wider than the row, so the name
+   was squeezed to ZERO WIDTH and the id printed on top of the details link. Every result
+   read as a nameless row of pills, which is why search looked broken rather than narrow.
+
+   This predates the card layout; it was missed because the phone audit only ever loaded
+   pages, never typed into one. Interactive state needs auditing too.
+
+   The name gets its own full-width line and the rest wraps under it. */
+.hits a{flex-wrap:wrap;gap:5px 8px;align-items:center;padding:9px 4px}
+.hits .nm2{flex:1 1 100%;white-space:normal;overflow:visible;text-overflow:clip;
+line-height:1.35}
+.hits .id2{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+.hits a.det{padding:8px 10px}
+.hits button.star{padding:8px 6px}
 
 /* The mod dropdown had no width bound, so a long mod name made it wider than the screen
    and it was the second thing spilling out of the machines page. */

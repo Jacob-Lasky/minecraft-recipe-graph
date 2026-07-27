@@ -694,3 +694,50 @@ class MobileLayoutTest(unittest.TestCase):
                       server.HOME_CSS)
         self.assertIn("table.mach tr[data-state=have]{border-left-color:var(--ok)}",
                       server.HOME_CSS)
+
+class TouchAffordanceTest(unittest.TestCase):
+    """Rules that only make sense with a pointer, and the one that must beat them all.
+
+    Both bugs here shipped in the phone-layout change and were found by using the site on
+    a phone, not by reading it.
+    """
+
+    def test_hidden_beats_every_display_rule(self):
+        """`hidden` works through `[hidden]{display:none}` in the UA sheet, which has
+        almost no specificity, so any author `display` on the same element wins and the
+        element stays on screen.
+
+        `table.mach tr{display:flex}` did exactly that: filtering set the attribute on 499
+        of 503 rows and the counter read "4" while all 503 stayed visible, and the
+        "nothing matches" row (a `tr` too) was permanently on screen.
+        """
+        self.assertIn("[hidden]{display:none!important}", server.HOME_CSS)
+
+    def test_no_hover_rule_escapes_the_hover_media_query(self):
+        """A touch browser has no pointer to move away, so `:hover` sticks to the last
+        thing tapped. `button:hover` sets the same accent border and text colour as
+        `[aria-pressed=true]`, so unselecting a state chip cleared its background and left
+        it looking selected.
+
+        Written as a lint over the whole sheet rather than a check of the one rule that
+        caused it, because the next `:hover` anyone adds has the same problem.
+        """
+        for name, sheet in (("render.CSS", render.CSS), ("HOME_CSS", server.HOME_CSS),
+                            ("EXPLORE_CSS", render.EXPLORE_CSS),
+                            ("DIAGRAM_CSS", graphview.DIAGRAM_CSS)):
+            # Comments explain the rule and say ":hover" while doing it.
+            for line in re.sub(r"/\*.*?\*/", "", sheet, flags=re.S).splitlines():
+                if ":hover" not in line:
+                    continue
+                self.assertIn(
+                    "@media(hover:hover)", line,
+                    "%s has a :hover rule outside the hover media query, so it will "
+                    "stick after a tap on a touch screen:\n    %s" % (name, line.strip()))
+
+    def test_a_search_result_keeps_its_name(self):
+        """Only the name could shrink in a result row; the pills and the id are
+        `flex:0 0 auto`. At 390px the fixed content is wider than the row, so the name was
+        squeezed to zero width and the id printed on top of the details link. Every
+        result read as a nameless row of pills."""
+        self.assertIn(".hits .nm2{flex:1 1 100%", server.HOME_CSS)
+        self.assertIn(".hits a{flex-wrap:wrap", server.HOME_CSS)

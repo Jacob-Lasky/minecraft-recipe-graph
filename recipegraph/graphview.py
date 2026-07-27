@@ -190,7 +190,9 @@ DIAGRAM_CSS = """
 .diagram{display:block}
 .diagram .lk path{fill:none;stroke:var(--line);stroke-width:1.4}
 .diagram .nd a{cursor:pointer}
-.diagram .nd:hover rect:first-of-type{stroke-opacity:1}
+/* Gated like every other :hover in this project: a touch browser leaves the state
+   applied to the last node tapped, so one box stays highlighted while you read. */
+@media(hover:hover){.diagram .nd:hover rect:first-of-type{stroke-opacity:1}}
 .diagram text{font-family:var(--sans);font-size:11.5px;dominant-baseline:auto}
 .diagram .mk{font-family:var(--mono);font-size:10.5px;font-weight:700;fill:#fff;
 text-anchor:middle}

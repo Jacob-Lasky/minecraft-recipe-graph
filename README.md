@@ -218,6 +218,24 @@ The server notices the file changed and says so; the **Reload** button picks it 
 a restart. That button re-reads the graph and the stock file, it does not re-import Python,
 so a code change still needs a new image.
 
+### Checking it on a phone
+
+The UI gets used on a phone, and phone bugs do not show up in a desktop browser window
+made narrow: sticky `:hover`, `[hidden]` losing to a `display` rule, a flex item refusing
+to shrink below an unbreakable registry id. `tools/mobile-audit.js` drives a real browser
+at 390px against a running server and fails loudly on all three.
+
+```bash
+npm i playwright && npx playwright install chromium
+node tools/mobile-audit.js http://127.0.0.1:8765
+```
+
+Not a dependency of the tool and not run by CI, which stays stdlib-only.
+
+It exercises **interactive** state as well as loading each page, because that is where the
+misses have been: an audit that only navigated to every page passed cleanly while every
+search result was rendering with its name squeezed to zero width.
+
 ## The dump mod
 
 `mod/` is a client-side Forge mod adding one command, `/recipedump`. The dump is spread
