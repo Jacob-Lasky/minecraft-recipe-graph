@@ -225,5 +225,121 @@ class DiagramWiringTest(unittest.TestCase):
         self.assertIn("per the key above", page)
 
 
+class TreeRoadblockTest(unittest.TestCase):
+    """#37: the solver has always written `machine_state` onto a craft node and the tree
+    renderer ignored it, so a step whose machine does not exist looked exactly like a step
+    whose machine is placed and running."""
+
+    @staticmethod
+    def _page(state, why="craftable: mod:press"):
+        tree = {"key": "mod:out", "label": "Out", "kind": "item", "need": 1,
+                "status": solve.STATUS_CRAFT, "category": "mod.press", "machine": "Press",
+                "children": [{"key": "mod:in", "label": "In", "kind": "item", "need": 1,
+                              "status": solve.STATUS_HAVE}]}
+        if state:
+            tree["machine_state"] = state
+            if state != machines.HAVE:
+                tree["machine_why"] = why
+        return render.render_html({
+            "target": "mod:out", "target_name": "Out", "qty": 1, "nodes": 2, "tree": tree,
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [], "truncated": False,
+        })
+
+    def test_a_blocked_step_carries_its_state_and_the_reason(self):
+        page = self._page(machines.BUILDABLE)
+        self.assertIn('<span class="badge warn"', page)
+        self.assertIn(present.STATE_LABEL[machines.BUILDABLE], page)
+        self.assertIn('title="craftable: mod:press"', page,
+                      "machines.resolve's own words for WHY, not a generic label")
+
+    def test_a_machine_you_have_gets_no_badge(self):
+        """The plan is mostly owned machines. Badging all of them is a wall of green that
+        hides the few that matter."""
+        page = self._page(machines.HAVE)
+        self.assertIn("Press", page)
+        self.assertNotIn('<span class="badge ok">have</span>', page)
+
+    def test_the_machine_name_links_to_the_page_that_explains_it(self):
+        self.assertIn('href="/machine?uid=mod.press"', self._page(machines.BUILDABLE))
+
+    def test_a_blocked_branch_is_marked_all_the_way_up(self):
+        """Hiding a branch whose roadblock is three levels down would hide the answer with
+        the noise, which is the mistake `data-hasneed` already avoids."""
+        page = self._page(machines.UNAVAILABLE)
+        self.assertIn('data-blocked="1"', page)
+        # the child has no machine of its own, so it is not itself a roadblock
+        self.assertIn('data-blocked="0"', page)
+
+    def test_the_filter_button_appears_only_when_something_is_blocked(self):
+        """A button that empties the tree reads as a broken filter, not as "nothing is
+        blocked"."""
+        self.assertIn('id="blockedonly"', self._page(machines.BUILDABLE))
+        self.assertNotIn('id="blockedonly"', self._page(machines.HAVE))
+        self.assertNotIn('id="blockedonly"', self._page(None))
+
+    def test_the_two_tree_filters_cannot_both_be_on(self):
+        """Both narrow the same tree by setting `display`, so with both active, turning one
+        off would leave nodes hidden while its own button read "Show every step"."""
+        page = self._page(machines.BUILDABLE)
+        self.assertIn("active=(active===id)?null:id", page)
+        self.assertIn("Show every step", page)
+
+    def test_every_state_the_tree_can_badge_has_a_class_the_sheet_defines(self):
+        for state in machines.STATES:
+            self.assertIn(".%s{" % present.STATE_BADGE[state], render.CSS, state)
+
+    def test_the_machine_link_is_styled_for_the_prose_it_sits_in(self):
+        """An unstyled <a> takes the browser default, blue and underlined, inside dim
+        11.5px meta text, and there is one per craft node. It follows `.crumb a`."""
+        self.assertIn(".mlink{color:inherit;text-decoration:none", render.CSS)
+        # Gated like every other :hover in this sheet, per the standing rule up top.
+        self.assertIn("@media(hover:hover){.mlink:hover", render.CSS)
+
+    def test_the_machines_panel_links_and_explains_the_same_as_the_tree(self):
+        """The panel is the SUMMARY of the roadblocks the tree marks, and it listed them as
+        dead text with no reason, so the one place holding the whole list was the one place
+        you could not click through from."""
+        page = render.render_html({
+            "target": "mod:x", "target_name": "X", "qty": 1, "nodes": 1,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [{"category": "mod.press", "machine": "Press",
+                                   "state": machines.BUILDABLE,
+                                   "why": "craftable: mod:press"}],
+            "truncated": False,
+        })
+        self.assertIn('<a class="mlink" href="/machine?uid=mod.press">Press</a>', page)
+        self.assertIn('title="craftable: mod:press"', page)
+
+    def test_a_machine_with_no_category_still_renders(self):
+        # `machine_href` has nothing to point at, and a dead link is worse than plain text.
+        # Asserted on the anchor, not on the word: `.mlink` is in the stylesheet regardless.
+        page = render.render_html({
+            "target": "mod:x", "target_name": "X", "qty": 1, "nodes": 1,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [{"machine": "Press", "state": machines.BUILDABLE}],
+            "truncated": False,
+        })
+        self.assertNotIn('<a class="mlink"', page)
+        self.assertIn("<td>Press</td>", page)
+
+
+class RoadblockPredicateTest(unittest.TestCase):
+    def test_only_a_machine_you_do_not_have_counts(self):
+        self.assertFalse(present.is_roadblock(machines.HAVE))
+        for state in (machines.BUILDABLE, machines.UNKNOWN, machines.UNAVAILABLE):
+            self.assertTrue(present.is_roadblock(state), state)
+
+    def test_no_machine_at_all_is_not_a_roadblock(self):
+        # Hand crafting, and any category the solver never resolved a machine for. Flagging
+        # these would put a warning on most of a plan.
+        for empty in ("", None):
+            self.assertFalse(present.is_roadblock(empty), repr(empty))
+
+
 if __name__ == "__main__":
     unittest.main()

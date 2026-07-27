@@ -101,6 +101,27 @@ STATE_LABEL = {
 STATE_PILL = {HAVE: "ok", BUILDABLE: "warnp", UNKNOWN: "mut", UNAVAILABLE: "no"}
 STATE_BADGE = {HAVE: "ok", BUILDABLE: "warn", UNKNOWN: "muted", UNAVAILABLE: "need"}
 
+
+def is_roadblock(machine_state):
+    """True when a plan step's machine is something to sort out before that step can run.
+
+    The one definition, because the tree marks these nodes, the diagram outlines them and the
+    filter button hides everything else, and three independent readings of "blocked" would
+    drift.
+
+    A machine you HAVE is not a roadblock, and neither is no machine at all: hand crafting
+    and any recipe whose category the solver never resolved a machine for carry no state, and
+    flagging those would put a warning on most of a plan. What Jake asked for is narrower:
+    "idc to see it if the machine exists already, but if the machine needs to be built then
+    that's important to know where the roadblock is". See #37.
+
+    `unknown` DOES count, even though it means "this tool could not identify the machine"
+    rather than "you do not have it". Silently treating unidentified as fine would hide a
+    real wall behind a tooling gap. It carries the muted badge and reads "unidentified", so
+    the render says which of the two it is rather than overstating.
+    """
+    return bool(machine_state) and machine_state != HAVE
+
 # Sort order: most useful first. Derived from machines.STATES so the two cannot disagree
 # about which states exist.
 STATE_RANK = {state: i for i, state in enumerate(STATES)}

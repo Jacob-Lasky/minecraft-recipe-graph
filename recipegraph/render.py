@@ -13,7 +13,8 @@ import json
 
 from .graphview import DIAGRAM_CSS, render_diagram
 from .htmlutil import esc as _esc
-from .present import KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL
+from .htmlutil import machine_href
+from .present import KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, is_roadblock
 
 CSS = """
 /* Palette: warm-paper / slate ground with a certus-quartz teal accent taken from
@@ -130,6 +131,13 @@ letter-spacing:.03em;white-space:nowrap}
 .muted{background:var(--mutedbg);color:var(--dim)}
 .kids{margin-left:15px;border-left:1px solid var(--line);padding-left:9px}
 .meta{color:var(--dim);font-size:11.5px}
+/* Machine links, in the tree's meta line and in the machines panel. `color:inherit` and no
+   underline, matching `.crumb a`: a default blue underlined link inside dim 11.5px prose
+   outshouts the item name it sits behind, and there are one of these per craft node. The
+   dotted rule is what still says it is clickable. */
+.mlink{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
+@media(hover:hover){.mlink:hover{color:var(--accent);border-bottom-style:solid}}
+.mlink:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .bar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
 button{font:500 12.5px var(--sans);padding:6px 12px;border:1px solid var(--line);
 background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
@@ -223,12 +231,30 @@ function setAll(open){document.querySelectorAll('.tree details')
   .forEach(function(d){d.open=open});}
 document.getElementById('exp').onclick=function(){setAll(true)};
 document.getElementById('col').onclick=function(){setAll(false)};
-document.getElementById('needonly').onclick=function(){
-  var on=this.dataset.on==='1';this.dataset.on=on?'0':'1';
-  this.textContent=on?'Show only what I need':'Show everything';
-  document.querySelectorAll('.tree [data-hasneed=0]').forEach(function(e){
-    e.style.display=on?'':'none';});
-};
+// The two tree filters are MUTUALLY EXCLUSIVE on purpose. Both narrow the same tree by
+// setting `display`, so with both switched on, turning one off would leave nodes hidden
+// while its own button reads "Show every step". One at a time keeps every label honest and
+// keeps the hide decision in a single pass.
+(function(){
+  var FILTERS={needonly:{attr:'hasneed',off:'Show only what I need'},
+               blockedonly:{attr:'blocked',off:'Show only blocked steps'}};
+  var active=null;
+  function apply(){
+    var attr=active?FILTERS[active].attr:null;
+    document.querySelectorAll('.tree [data-hasneed]').forEach(function(e){
+      e.style.display=(attr&&e.dataset[attr]==='0')?'none':'';});
+    Object.keys(FILTERS).forEach(function(id){
+      var b=document.getElementById(id);
+      if(!b)return;
+      var on=id===active;
+      b.dataset.on=on?'1':'0';
+      b.setAttribute('aria-pressed',String(on));
+      b.textContent=on?'Show every step':FILTERS[id].off;});
+  }
+  Object.keys(FILTERS).forEach(function(id){
+    var b=document.getElementById(id);
+    if(b)b.onclick=function(){active=(active===id)?null:id;apply();};});
+})();
 (function(){
   var btn=document.getElementById('diag'), tree=document.getElementById('treebox'),
       diag=document.getElementById('diagbox'), cols=document.getElementById('cols');
@@ -252,6 +278,51 @@ def _has_need(node):
     return any(_has_need(c) for c in node.get("children") or ())
 
 
+def _has_roadblock(node):
+    """Whether this node or anything below it waits on a machine you do not have."""
+    if is_roadblock(node.get("machine_state")):
+        return True
+    return any(_has_roadblock(c) for c in node.get("children") or ())
+
+
+def _machine_link(uid, name):
+    """A machine's name, linked to the page explaining it when there is a uid to link to.
+
+    Shared by the tree node and the "machines to build first" panel. The panel is the
+    SUMMARY of the same roadblocks the tree marks, and it listed them as dead text while the
+    tree linked them, so the one place with the whole list was the one place you could not
+    click through from.
+    """
+    if not uid:
+        return _esc(name)
+    return '<a class="mlink" href="%s">%s</a>' % (machine_href(uid), _esc(name))
+
+
+def _machine_bit(node, name):
+    """The machine on a tree node: its name, linked, plus a state badge when it blocks.
+
+    The name was plain grey text at the same weight as the recipe count, so the one fact that
+    decides whether a step can run at all read as trailing prose. Two changes: it links to
+    `/machine?uid=`, which already explains the whole category, and it carries the state
+    badge when `is_roadblock`.
+
+    NO badge when the machine is on hand. The plan is mostly owned machines, so badging all
+    of them would be a wall of green that hides the four that matter. That is the ask: only
+    the roadblock is worth marking.
+    """
+    label = _machine_link(node.get("category"), name)
+    state = node.get("machine_state")
+    if not is_roadblock(state):
+        return label
+    # `title` carries machines.resolve's own words for WHY, which is the difference between
+    # "craft the controller" and "no recipe makes this at all".
+    why = node.get("machine_why") or ""
+    return '%s <span class="badge %s"%s>%s</span>' % (
+        label, STATE_BADGE.get(state, "need"),
+        (' title="%s"' % _esc(why)) if why else "",
+        _esc(STATE_LABEL.get(state, state)))
+
+
 def _node_html(node, depth=0):
     status = node.get("status", "craft")
     label, cls = STATUS_LABEL.get(status, (status, "muted"))
@@ -262,13 +333,14 @@ def _node_html(node, depth=0):
         '<span class="qty">%s&times;</span>' % "{:,}".format(node.get("need", 1)),
         '<span class="nm">%s' % named(node),
     ]
+    blocked = is_roadblock(node.get("machine_state"))
     extra = []
     if node.get("from_stock"):
         extra.append("%s from stock" % "{:,}".format(node["from_stock"]))
     if node.get("machine") and node.get("machine") != node.get("category"):
-        extra.append(_esc(node["machine"]))
+        extra.append(_machine_bit(node, node["machine"]))
     elif node.get("category") and not str(node["category"]).startswith("crafting"):
-        extra.append(_esc(node["category"]))
+        extra.append(_machine_bit(node, node["category"]))
     if node.get("alternatives", 0) > 1:
         extra.append("%d recipes" % node["alternatives"])
     # How many things the SLOT would have accepted, as opposed to how many recipes make
@@ -286,14 +358,21 @@ def _node_html(node, depth=0):
     bits.append('<span class="badge %s">%s</span>' % (cls, label))
     inner = "".join(bits)
 
+    # Two independent filters, so two attributes. `data-blocked` is 1 when this node OR
+    # anything under it needs a machine you do not have: hiding a branch whose roadblock is
+    # three levels down would hide the answer along with the noise, which is exactly the
+    # mistake `data-hasneed` already avoids.
+    block_flag = 1 if _has_roadblock(node) else 0
     if not kids:
-        return '<div class="leaf" data-hasneed="%d">%s</div>' % (need_flag, inner)
+        return ('<div class="leaf" data-hasneed="%d" data-blocked="%d">%s</div>'
+                % (need_flag, block_flag, inner))
 
     open_attr = " open" if depth < 2 else ""
     return (
-        '<details data-hasneed="%d"%s><summary><span class="tw">&#9656;</span>%s</summary>'
+        '<details data-hasneed="%d" data-blocked="%d"%s>'
+        '<summary><span class="tw">&#9656;</span>%s</summary>'
         '<div class="kids">%s</div></details>'
-        % (need_flag, open_attr, inner,
+        % (need_flag, block_flag, open_attr, inner,
            "".join(_node_html(k, depth + 1) for k in kids))
     )
 
@@ -313,9 +392,10 @@ def _machines_html(machines):
     if not machines:
         return ""
     rows = "".join(
-        '<tr><td>%s</td><td><span class="badge %s">%s</span></td></tr>'
-        % (_esc(m.get("machine") or m.get("category")),
+        '<tr><td>%s</td><td><span class="badge %s"%s>%s</span></td></tr>'
+        % (_machine_link(m.get("category"), m.get("machine") or m.get("category")),
            STATE_BADGE.get(m.get("state"), "need"),
+           (' title="%s"' % _esc(m["why"])) if m.get("why") else "",
            _esc(STATE_LABEL.get(m.get("state"), m.get("state", "?"))))
         for m in machines)
     unknowns = sum(1 for m in machines if m.get("state") == "unknown")
@@ -363,6 +443,10 @@ def _sources_html(entries):
 def render_html(result, graph=None, coverage_note=None):
     tree = result["tree"]
     diagram_svg, diagram_legend = render_diagram(tree)
+    # Only offered when there is something to filter TO. A button that empties the tree is
+    # worse than no button: it reads as a broken filter rather than as "nothing is blocked".
+    blocked_button = ('\n    <button id="blockedonly" data-on="0" aria-pressed="false">'
+                      'Show only blocked steps</button>') if _has_roadblock(tree) else ""
     need = result.get("shopping_list") or []
     used = result.get("used_from_stock") or []
 
@@ -398,7 +482,7 @@ def render_html(result, graph=None, coverage_note=None):
     <button id="diag" aria-pressed="false">Show as diagram</button>
     <button id="exp">Expand all</button>
     <button id="col">Collapse all</button>
-    <button id="needonly" data-on="0">Show only what I need</button>
+    <button id="needonly" data-on="0" aria-pressed="false">Show only what I need</button>%s
   </div>
   <div class="card" id="diagbox" hidden>
     <h2><span>Flow</span><span class="c">left to right</span></h2>
@@ -441,6 +525,7 @@ def render_html(result, graph=None, coverage_note=None):
         "{:,}".format(total_used),
         "{:,}".format(len(need) + len(used)),
         warnbar,
+        blocked_button,
         diagram_legend,
         diagram_svg,
         "{:,}".format(result["nodes"]),

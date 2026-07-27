@@ -16,7 +16,7 @@ meaningful direction, and a force layout would throw both away in exchange for w
 
 from .htmlutil import esc as _esc
 from .htmlutil import item_href
-from .present import STATUS_STYLE, status_legend
+from .present import STATE_LABEL, STATUS_STYLE, is_roadblock, status_legend
 from .solve import STATUS_CRAFT
 
 # Geometry. Rows are tight because a real plan is tall and narrow: 100 nodes at 30px is
@@ -92,6 +92,11 @@ def layout(tree, max_nodes=400):
             "status": node.get("status", STATUS_CRAFT),
             "need": node.get("need", 1),
             "machine": node.get("machine") or node.get("category") or "",
+            # Carried so the diagram can SHOW a roadblock rather than only mention it in a
+            # hover title. The solver has always written it and this record dropped it, which
+            # is why the machine was hover-only here while the tree printed it inline. See
+            # #37.
+            "machine_state": node.get("machine_state") or "",
             "row": 0,
             "cut": False,
         }
@@ -121,22 +126,30 @@ def layout(tree, max_nodes=400):
     return nodes, links, rows
 
 
-def render_legend(nodes):
-    """The colour key for a set of laid-out nodes, or "" when there is nothing to key.
+def _render_legend(nodes):
+    """The key for a set of laid-out nodes, or "" when there is nothing to key.
 
-    Takes the LAID-OUT nodes rather than the tree, because a plan can be truncated at
-    `max_nodes` and a legend must describe the boxes that are actually on the page. Built
-    from the same `present` tables the boxes are filled from.
+    PRIVATE, and takes the LAID-OUT nodes rather than the tree, because a plan can be
+    truncated at `max_nodes` and the key must describe the boxes actually on the page.
+    Exposing it would invite a caller with a different node set and a key that quietly
+    disagrees with the diagram beside it.
+
+    Two encodings, because the diagram carries two independent facts. FILL is what the plan
+    does with the item, from the same `present` tables the boxes use. OUTLINE is whether the
+    step waits on a machine, which is not a colour precisely so it cannot compete with the
+    fill.
 
     Fills arrive as `var(--token)`, so they go in a style attribute: the swatch has to be the
     exact colour of the box it explains, and that colour is only knowable from the token.
     """
-    rows = status_legend({n["status"] for n in nodes})
+    rows = ['<li><span class="sw" style="background:%s;border-color:%s"></span>%s</li>'
+            % (fill, ink, _esc(labels))
+            for fill, ink, labels in status_legend({n["status"] for n in nodes})]
+    if any(is_roadblock(n["machine_state"]) for n in nodes):
+        rows.append('<li><span class="sw dash"></span>needs a machine you do not have</li>')
     if not rows:
         return ""
-    return ('<ul class="legend">%s</ul>' % "".join(
-        '<li><span class="sw" style="background:%s;border-color:%s"></span>%s</li>'
-        % (fill, ink, _esc(labels)) for fill, ink, labels in rows))
+    return '<ul class="legend">%s</ul>' % "".join(rows)
 
 
 def render_diagram(tree, max_nodes=400):
@@ -176,16 +189,29 @@ def render_diagram(tree, max_nodes=400):
     for n in nodes:
         fill, ink = STATUS_STYLE.get(n["status"], STATUS_STYLE[STATUS_CRAFT])
         nx, ny = x(n), y(n)
+        blocked = is_roadblock(n["machine_state"])
         title = "%s × %s%s" % (n["full"], "{:,}".format(n["need"]),
                                     ("  · " + n["machine"]) if n["machine"] else "")
+        if blocked:
+            # Still in the title, because the outline says THAT a step is blocked and only
+            # the words say by what and how badly.
+            title += "  · machine %s" % STATE_LABEL.get(n["machine_state"],
+                                                        n["machine_state"])
         qty = "{:,}".format(n["need"])
         if n["kind"] == "fluid":
             qty += " mB"
+        # A DIFFERENT CHANNEL from the fill, deliberately. Fill already carries the plan's
+        # status for the item and machine availability is a separate axis, so encoding it as
+        # another colour would make two facts compete for one signal. A dashed, full-opacity
+        # outline is legible at a glance, costs none of the box's 226px of interior, and
+        # cannot be confused with a fill.
+        box_stroke = ' stroke-opacity="1" stroke-width="1.6" stroke-dasharray="4 2.5"' \
+            if blocked else ' stroke-opacity=".35"'
         boxes.append(
             '<g class="nd"><title>%s</title>'
             '<a href="%s">'
             '<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s"'
-            ' stroke="%s" stroke-opacity=".35"/>'
+            ' stroke="%s"%s/>'
             '<rect x="%.1f" y="%.1f" width="17" height="17" rx="4"'
             ' fill="hsl(%d 42%% 52%%)"/>'
             '<text x="%.1f" y="%.1f" class="mk">%s</text>'
@@ -193,7 +219,7 @@ def render_diagram(tree, max_nodes=400):
             '<text x="%.1f" y="%.1f" class="qt" fill="%s">%s</text>'
             '</a></g>'
             % (_esc(title), item_href(n["key"]),
-               nx, ny, BOX_W, BOX_H, fill, ink,
+               nx, ny, BOX_W, BOX_H, fill, ink, box_stroke,
                nx + 4, ny + 3.5, _hue(n["key"]),
                nx + 12.5, ny + 15.5, _esc(_mark(n)),
                nx + 26, ny + 16, ink, _esc(n["label"]),
@@ -207,7 +233,7 @@ def render_diagram(tree, max_nodes=400):
         'role="img" aria-label="crafting plan diagram">'
         '<g class="lk">%s</g>%s</svg>'
         % (width, height, width, height, "".join(edges), "".join(boxes)),
-        render_legend(nodes),
+        _render_legend(nodes),
     )
 
 
@@ -238,4 +264,8 @@ background:var(--card);padding:6px}
 font-size:11.5px;color:var(--dim)}
 .legend li{display:flex;align-items:center;gap:6px}
 .legend .sw{width:11px;height:11px;border-radius:3px;border:1px solid;flex:0 0 auto}
+/* The outline key. Transparent fill on purpose: this entry is about the BORDER, and giving
+   it a background would read as a fifth fill colour, which is the confusion the two
+   channels exist to avoid. */
+.legend .sw.dash{background:transparent;border:1.5px dashed var(--dim);border-radius:3px}
 """
