@@ -160,6 +160,11 @@ class Graph:
         # guess from the category's display title, which is often the recipe type rather
         # than the machine. Empty on a graph built before the dump mod emitted catalysts.
         self.catalysts = {}
+        # category uid -> the mod's DISPLAY name, from JEI's IRecipeCategory.getModName().
+        # Grouping and display only. NOT a registry modid: "Industrial Foregoing" will
+        # never match `industrialforegoing:plant_gatherer`, and machine identification must
+        # keep using `machines.same_mod` on the uid. See sources/dump_meta.category_mods.
+        self.category_mods = {}
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -385,6 +390,7 @@ class Graph:
             "ore_members": self.ore_members,
             "ore_guessed": sorted(self.ore_guessed),
             "catalysts": self.catalysts,
+            "category_mods": self.category_mods,
             "instance_dir": self.instance_dir,
         }
 
@@ -402,5 +408,6 @@ class Graph:
         g.ore_members = d.get("ore_members", {})
         g.ore_guessed = set(d.get("ore_guessed", ()))
         g.catalysts = d.get("catalysts") or {}
+        g.category_mods = d.get("category_mods") or {}
         g.instance_dir = d.get("instance_dir")
         return g

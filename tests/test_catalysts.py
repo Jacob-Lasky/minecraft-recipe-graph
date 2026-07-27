@@ -243,6 +243,29 @@ class DumpProvenanceTest(unittest.TestCase):
         self.assertFalse(meta["present"])
         self.assertIn("unknown", dump_meta.describe(meta))
 
+    def test_category_mod_names_are_read_from_the_same_summary(self):
+        """#14: the right answer was in the dump all along and nothing read it."""
+        d = self._dir({"schema": dump_meta.SCHEMA, "categories": {
+            "foregoing_plant_gatherer": {"dumped": 12, "mod": "Industrial Foregoing"},
+            "safe_nuke_meatball": {"dumped": 3, "mod": "Extreme Reactors"},
+            "SoulBinder": {"dumped": 9, "mod": "enderiomachines"},
+        }})
+        self.assertEqual(dump_meta.category_mods(d), {
+            "foregoing_plant_gatherer": "Industrial Foregoing",
+            "safe_nuke_meatball": "Extreme Reactors",
+            "SoulBinder": "enderiomachines",
+        })
+
+    def test_a_blank_or_missing_mod_name_is_skipped_not_stored(self):
+        # An empty string would win over the uid fallback and show a nameless group.
+        d = self._dir({"categories": {"a": {"mod": "  "}, "b": {"dumped": 1},
+                                      "c": {"mod": "Real"}, "d": "not a dict"}})
+        self.assertEqual(dump_meta.category_mods(d), {"c": "Real"})
+
+    def test_an_old_dump_yields_no_mod_names_rather_than_raising(self):
+        for doc in (None, {"schema": 1, "recipes": 4}, {"categories": ["a", "b"]}):
+            self.assertEqual(dump_meta.category_mods(self._dir(doc)), {})
+
     def test_a_newer_schema_tells_you_to_update_the_reader(self):
         meta = dump_meta.read(self._dir({"mod_version": "9.0.0",
                                          "schema": dump_meta.SCHEMA + 1}))

@@ -186,6 +186,22 @@ def candidate_items(graph, uid, machine_title, reverse_names, catalysts=None):
     return cands
 
 
+def mod_name(graph, uid):
+    """Which mod owns a category, for grouping and display.
+
+    JEI's own `getModName()` when the dump carried one, and only then the uid's first
+    token. The guess is wrong whenever a uid does not begin with its modid, which produced
+    one-category "mods" called `foregoing`, `safe` and `soulbinder` for Industrial
+    Foregoing, Extreme Reactors and enderiomachines.
+
+    DO NOT feed this to `same_mod`. That compares REGISTRY modids and this is a display
+    name: "Industrial Foregoing" cannot match `industrialforegoing:plant_gatherer`, and
+    swapping them would break machine identification, which is currently correct.
+    """
+    known = getattr(graph, "category_mods", None) or {}
+    return known.get(uid) or (_tokens(uid) or [""])[0]
+
+
 def resolve(graph, placed=None, stock=None, catalysts=None, overrides=None):
     """Return {category_uid: (state, evidence)} for every category in the graph."""
     return {uid: (info["state"], info["why"])
@@ -227,7 +243,7 @@ def describe(graph, placed=None, stock=None, catalysts=None, overrides=None):
         rec = {
             "uid": uid,
             "title": clean_label(title),
-            "mod": (_tokens(uid) or [""])[0],
+            "mod": mod_name(graph, uid),
             "recipes": counts.get(uid, 0),
             "candidates": [],
             "manual": uid in overrides,

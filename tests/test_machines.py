@@ -146,7 +146,50 @@ class IdentificationTest(unittest.TestCase):
         self.assertEqual(rec["recipes"], 1)
         self.assertEqual(rec["title"], "Wire Mill")
         self.assertEqual(rec["candidates"], ["techreborn:wire_mill"])
-        self.assertEqual(rec["mod"], "techreborn")
+        self.assertEqual(rec["mod"], "techreborn",
+                         "with no dump the uid token is still the only thing to go on")
+
+
+class ModGroupingTest(unittest.TestCase):
+    """#14: three one-category 'mods' on the machines page that were not mods."""
+
+    @staticmethod
+    def _graph(uid, mod=None):
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:part": "Part"}
+        g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category=uid, machine="Thing"))
+        if mod:
+            g.category_mods = {uid: mod}
+        return g
+
+    def test_jeis_mod_name_beats_the_uid_token(self):
+        for uid, jei, guessed in (
+                ("foregoing_plant_gatherer", "Industrial Foregoing", "foregoing"),
+                ("safe_nuke_meatball", "Extreme Reactors", "safe"),
+                ("SoulBinder", "enderiomachines", "soulbinder")):
+            self.assertEqual(machines.describe(self._graph(uid, jei))[uid]["mod"], jei)
+            self.assertEqual(machines.describe(self._graph(uid))[uid]["mod"], guessed,
+                             "and the guess is what we fall back to without a dump")
+
+    def test_the_display_name_never_reaches_machine_identification(self):
+        """Two fields, two jobs.
+
+        `same_mod` compares REGISTRY modids. Feeding it "Industrial Foregoing" would fail
+        against `industrialforegoing:plant_gatherer` and break identification, which is
+        currently correct -- so it must keep reading the uid.
+        """
+        uid = "foregoing_plant_gatherer"
+        g = self._graph(uid, "Industrial Foregoing")
+        self.assertTrue(machines.same_mod(uid, "foregoing:plant_gatherer"))
+        self.assertFalse(machines.same_mod(uid, "Industrial Foregoing:x"))
+        self.assertEqual(machines.mod_name(g, uid), "Industrial Foregoing")
+
+    def test_category_mods_survive_a_save_and_load(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "g.json")
+        self._graph("SoulBinder", "enderiomachines").save(path)
+        self.assertEqual(Graph.load(path).category_mods, {"SoulBinder": "enderiomachines"})
 
 
 class NonRecipeTest(unittest.TestCase):

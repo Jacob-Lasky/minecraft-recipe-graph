@@ -54,7 +54,15 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 
     # Provenance first: everything else read from this directory is only as current as the
     # dump that produced it, so say which mod wrote it before reporting what it contained.
-    say(dump_meta.describe(dump_meta.read(os.path.join(instance_dir, "mc-recipe-dump"))))
+    dump_dir = os.path.join(instance_dir, "mc-recipe-dump")
+    say(dump_meta.describe(dump_meta.read(dump_dir)))
+
+    g.category_mods = dump_meta.category_mods(dump_dir)
+    if g.category_mods:
+        say("category mods: %d categories carry JEI's own mod name" % len(g.category_mods))
+    else:
+        say("category mods: summary.json has none -- the machines page will group by the "
+            "first token of each category uid, which is a guess")
 
     cat_path = catalysts_src.find(instance_dir)
     if cat_path:
