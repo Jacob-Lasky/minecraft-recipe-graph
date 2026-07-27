@@ -31,29 +31,114 @@ class RankingTest(unittest.TestCase):
     def test_a_fluid_the_recipes_reference_is_findable(self):
         # items.csv covers items only, so searching "boric" used to find the placed block
         # (0 recipes) and never the fluid the chemistry chain actually needs.
-        keys = explore.rank_keys(chem_graph(), "boric")
+        keys = explore.rank_matches(chem_graph(), "boric").results
         self.assertIn("fluid:boric_acid", keys)
 
     def test_an_exact_fluid_name_outranks_items_merely_containing_the_word(self):
         # `fluid:water` was indexed as "[fluid] water", so "water" matched only as a
         # substring and "Water Egg" came first.
-        keys = explore.rank_keys(chem_graph(), "water")
+        keys = explore.rank_matches(chem_graph(), "water").results
         self.assertEqual(keys[0], "fluid:water")
 
     def test_matching_on_the_registry_id_still_works(self):
-        keys = explore.rank_keys(chem_graph(), "boric_acid")
+        keys = explore.rank_matches(chem_graph(), "boric_acid").results
         self.assertIn("fluid:boric_acid", keys)
 
     def test_an_empty_query_matches_nothing(self):
-        self.assertEqual(explore.rank_keys(chem_graph(), "   "), [])
+        self.assertEqual(explore.rank_matches(chem_graph(), "   "), ([], 0))
 
     def test_limit_is_respected(self):
-        self.assertEqual(len(explore.rank_keys(chem_graph(), "a", limit=1)), 1)
+        self.assertEqual(len(explore.rank_matches(chem_graph(), "a", limit=1).results), 1)
+
+
+class DeadKeyTest(unittest.TestCase):
+    """A key nothing touches is not searchable, and the count says so. See #26.
+
+    On the reference pack this is 174,705 of 342,070 labels. Six identical "Pluton Scythe"
+    NBT variants and a "Pluton Banner", all with no recipe and no use, pushed
+    Plutonium-238 through -242 off the first page of a search for `plut`.
+    """
+
+    def test_a_key_no_recipe_touches_is_not_offered(self):
+        # `nuclearcraft:fluid_boric_acid` is the PLACED BLOCK. It shares its display name
+        # with the fluid the chemistry chain needs and has no recipes at all, so it could
+        # only ever push the real answer down.
+        hits = explore.rank_matches(chem_graph(), "boric")
+        self.assertEqual(hits.results, ["fluid:boric_acid"])
+        self.assertEqual(hits.hidden, 1)
+
+    def test_nothing_live_is_lost(self):
+        g = chem_graph()
+        for key in ("fluid:boric_acid", "chickens:liquid_egg", "mod:widget", "fluid:water"):
+            self.assertIn(key, g.live_keys, key)
+
+    def test_something_you_hold_is_never_hidden(self):
+        # A stack in the AE2 system is a fact about the world; "no recipe touches it" is a
+        # fact about the dump, and the dump does not overrule the world.
+        hits = explore.rank_matches(chem_graph(), "boric",
+                                    have={"nuclearcraft:fluid_boric_acid": 3})
+        self.assertIn("nuclearcraft:fluid_boric_acid", hits.results)
+        self.assertEqual(hits.hidden, 0)
+
+    def test_a_catalyst_stays_searchable_with_no_edge_of_its_own(self):
+        # 51 keys on the reference pack, `thermalexpansion:machine:1` among them, appear
+        # ONLY as a JEI catalyst: their crafting recipes output a discriminated variant
+        # instead (#28). Hiding those makes the Pulverizer unfindable.
+        g = chem_graph()
+        g.names["mod:press"] = "Hydraulic Press"
+        g.catalysts = {"mod.press": ["mod:press"]}
+        g._invalidate()
+        self.assertEqual(explore.rank_matches(g, "press").results, ["mod:press"])
+
+    def test_an_oredict_member_stays_searchable(self):
+        # `consumers` reaches an item through any ore it belongs to, so a member of an ore
+        # some recipe consumes is reachable even when nothing names the item directly.
+        # Hiding it here would contradict the item page, which lists that recipe.
+        g = Graph()
+        g.names = {"mod:tin_ingot": "Tin Ingot"}
+        g.ore_members = {"ingotTin": ["mod:tin_ingot"]}
+        g.add(Recipe("r", "t", [("mod:wire", 1)],
+                     [Ingredient(["ore:ingotTin"], 1)], category="c"))
+        hits = explore.rank_matches(g, "tin ingot")
+        # `ore:ingotTin` matches on its key too, and is a real searchable thing.
+        self.assertEqual(hits.results[0], "mod:tin_ingot")
+        self.assertEqual(hits.hidden, 0)
+        self.assertTrue(g.consumers("mod:tin_ingot"))
+
+    def test_a_wildcard_meta_keeps_its_siblings_searchable(self):
+        # `producers`/`consumers` fall back to `base:*`, so every meta of a wildcarded base
+        # is reachable and must stay findable.
+        g = Graph()
+        g.names = {"mod:dye:4": "Lapis Lazuli"}
+        g.add(Recipe("r", "t", [("mod:out", 1)],
+                     [Ingredient(["mod:dye:*"], 1)], category="c"))
+        self.assertEqual(explore.rank_matches(g, "lapis").results, ["mod:dye:4"])
+        self.assertTrue(g.consumers("mod:dye:4"))
+
+    def test_did_you_mean_never_offers_a_dead_name_or_the_query_itself(self):
+        # This line only prints when the search found nothing, so "no item name matched
+        # 'boric acid' / did you mean: boric acid" reads as a malfunction. The name really
+        # does exist; every key wearing it is dead, which the hidden count already said.
+        g = Graph()
+        g.names = {"mod:dead": "Boric Acid", "mod:live": "Boric Acid Cell"}
+        g.add(Recipe("r", "t", [("mod:live", 1)], [Ingredient(["mod:x"], 1)], category="c"))
+        # `build_reverse` keys on the lowercased label, which is what this returns.
+        self.assertEqual(explore.name_hints(g, "boric acid"), ["boric acid cell"])
+
+    def test_the_filter_never_hides_more_than_the_accessors_would(self):
+        # The invariant that matters: anything `live_keys` drops must genuinely have no
+        # recipes, or search and the item page disagree about whether an item exists.
+        g = chem_graph()
+        g.names["mod:dead"] = "Dead Thing"
+        for key in g.labels:
+            if key not in g.live_keys:
+                self.assertFalse(g.producers(key), key)
+                self.assertFalse(g.consumers(key), key)
 
 
 class SuggestTest(unittest.TestCase):
     def test_rows_carry_what_the_typeahead_shows(self):
-        rows = explore.suggest(chem_graph(), "boric")
+        rows = explore.suggest(chem_graph(), "boric").results
         row = next(r for r in rows if r["key"] == "fluid:boric_acid")
         self.assertEqual(row["kind"], "fluid")
         self.assertEqual(row["label"], "Boric Acid")
@@ -62,7 +147,7 @@ class SuggestTest(unittest.TestCase):
 
     def test_stock_comes_from_the_have_set(self):
         rows = explore.suggest(chem_graph(), "water egg",
-                               have={"chickens:liquid_egg": 12})
+                               have={"chickens:liquid_egg": 12}).results
         self.assertEqual(rows[0]["stock"], 12)
 
     def test_makes_excludes_container_transfers(self):
@@ -74,13 +159,15 @@ class SuggestTest(unittest.TestCase):
                           [Ingredient(["mod:can"], 1)], category="squeezer")
         transfer.transfer = True
         g.add(transfer)
-        rows = explore.suggest(g, "stuff")
+        rows = explore.suggest(g, "stuff").results
         self.assertEqual(rows[0]["makes"], 0)
 
-    def test_suggest_and_search_agree_on_order(self):
+    def test_suggest_and_search_agree_on_order_and_on_what_was_hidden(self):
         g = chem_graph()
-        self.assertEqual([r["key"] for r in explore.suggest(g, "boric")],
-                         [r["key"] for r in explore.search(g, "boric")])
+        sug, sea = explore.suggest(g, "boric"), explore.search(g, "boric")
+        self.assertEqual([r["key"] for r in sug.results],
+                         [r["key"] for r in sea.results])
+        self.assertEqual(sug.hidden, sea.hidden)
 
 
 class ItemPageSlotTest(unittest.TestCase):

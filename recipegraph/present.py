@@ -164,3 +164,22 @@ def kind_chip_json():
     it rather than restating it is what keeps one source of truth.
     """
     return json.dumps(KIND_CHIP)
+
+
+# Why a search result was suppressed, in the ONE wording every surface uses: the explore
+# page, the typeahead note and the CLI's `find`. It lived in three places for about an hour
+# -- a Python f-string, a hand-written copy inside the browser JS, and a third in cli.py --
+# which is three chances for the page and the terminal to explain the same number
+# differently. The browser gets the finished sentence from `/suggest` rather than a count to
+# format itself, for the same reason `kind_chip_json` ships the chip map instead of letting
+# the JS keep its own.
+#
+# The count is REPORTED, never applied silently: `Graph.live_keys` drops 52% of the pack's
+# named keys, and a search that removes half the graph without saying so is
+# indistinguishable from one that is broken. The sentence says WHY, because "174,705 hidden"
+# on its own invites the reader to wonder what else is being kept from them.
+def hidden_note(hidden):
+    """"`N hidden: no recipe makes or uses them`, or "" when nothing was suppressed."""
+    if not hidden:
+        return ""
+    return "%s hidden: no recipe makes or uses them" % "{:,}".format(hidden)
