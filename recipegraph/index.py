@@ -6,7 +6,7 @@ import sys
 from .model import Graph
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
-from .sources import dump_meta
+from .sources import dump_meta, dump_names
 from .sources import hei_dump, jar_json, oredict
 
 
@@ -58,6 +58,18 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     meta = dump_meta.read(dump_dir)
     say(dump_meta.describe(meta))
     g.dump_schema = meta["schema"] or 0
+
+    # After items.csv, and with setdefault, so the pack's own export stays authoritative
+    # for anything it covers. This only has to reach the keys items.csv cannot express.
+    dumped_names = dump_names.load(dump_names.find(instance_dir))
+    if dumped_names:
+        added = 0
+        for key, label in dumped_names.items():
+            if key not in g.names:
+                g.names[key] = label
+                added += 1
+        say("names: +%d from the dump that items.csv did not cover (%d discriminated "
+            "by NBT)" % (added, sum(1 for k in dumped_names if "#" in k)))
 
     g.category_mods = dump_meta.category_mods(dump_dir)
     if g.category_mods:

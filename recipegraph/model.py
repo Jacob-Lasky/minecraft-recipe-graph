@@ -13,6 +13,7 @@ Design notes that are load-bearing:
 """
 
 import json
+import re
 
 WILDCARD_META = 32767
 
@@ -65,6 +66,22 @@ def _prettify(registry_name):
     # `Tbu` and `NaOH` into `Naoh`.
     return " ".join(w if any(c.isupper() for c in w) else w.capitalize()
                     for w in words) or registry_name
+
+
+_DIGEST = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _variant_label(suffix):
+    """How to read the `#suffix` on a discriminated key when nothing named it.
+
+    Two kinds live here. An aspect (`#perditio`) is a word and reads as one. A dump
+    discriminator is a 12-hex digest of the stack's NBT, which reads as line noise, so it
+    is labelled as what it is and shortened. Never collapse two digests to one label:
+    telling a Forest drone from a Meadows drone is the entire point.
+    """
+    if _DIGEST.match(suffix):
+        return "variant %s" % suffix[:6]
+    return suffix.capitalize()
 
 
 def split_key(key):
@@ -352,7 +369,7 @@ class Graph:
         if "#" in key:
             stem, aspect = key.rsplit("#", 1)
             label = self.names.get(stem) or self.bare_name(stem)
-            pretty = aspect.capitalize()
+            pretty = _variant_label(aspect)
             if "%s" in label:
                 return label % pretty
             return "%s (%s)" % (label, pretty)

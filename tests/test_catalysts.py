@@ -12,7 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph import index, machines  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.sources import catalysts as catalysts_src  # noqa: E402
-from recipegraph.sources import dump_meta  # noqa: E402
+from recipegraph.sources import dump_meta, dump_names  # noqa: E402
+from recipegraph.sources import hei_dump  # noqa: E402
 
 
 def write(doc):
@@ -212,6 +213,75 @@ class SpecificityTest(unittest.TestCase):
         info = machines.describe(g, placed={"mm:melter_controller": 1})
         self.assertEqual(info["mm.melter"]["state"], machines.HAVE)
         self.assertIn("melter_controller", info["mm.melter"]["why"])
+
+
+class DiscriminatedStackTest(unittest.TestCase):
+    """#20: every bee in the pack was the same four keys, because the dump drops NBT."""
+
+    @staticmethod
+    def _recipes(lines):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "recipes.ndjson")
+        with open(path, "w") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return list(hei_dump.extract(path))
+
+    def test_the_nbt_digest_becomes_part_of_the_key(self):
+        got = self._recipes([{
+            "cat": "bdew.jeibees.mutation.rootBees", "title": "Bee Breeding",
+            "in": [[{"i": "forestry:bee_drone_ge", "m": 0, "c": 1,
+                     "n": "a3f19c02b8d1"}]],
+            "out": [{"i": "forestry:bee_princess_ge", "m": 0, "c": 1,
+                     "n": "7e40bb115c92"}],
+        }])
+        self.assertEqual(got[0].inputs[0].alternatives,
+                         ["forestry:bee_drone_ge#a3f19c02b8d1"])
+        self.assertEqual(got[0].outputs, [("forestry:bee_princess_ge#7e40bb115c92", 1)])
+
+    def test_two_species_are_two_keys_not_one(self):
+        got = self._recipes([
+            {"cat": "c", "in": [[{"i": "forestry:bee_drone_ge", "n": "aaaaaaaaaaaa"}]],
+             "out": [{"i": "mod:comb_a", "c": 1}]},
+            {"cat": "c", "in": [[{"i": "forestry:bee_drone_ge", "n": "bbbbbbbbbbbb"}]],
+             "out": [{"i": "mod:comb_b", "c": 1}]},
+        ])
+        self.assertNotEqual(got[0].inputs[0].alternatives,
+                            got[1].inputs[0].alternatives)
+
+    def test_a_stack_with_no_discriminator_is_untouched(self):
+        # An older dump has no `n` at all and must behave exactly as it did before.
+        got = self._recipes([{"cat": "c", "in": [[{"i": "minecraft:stone", "m": 0}]],
+                              "out": [{"i": "minecraft:stone_brick", "c": 1}]}])
+        self.assertEqual(got[0].inputs[0].alternatives, ["minecraft:stone"])
+
+    def test_a_digest_reads_as_a_variant_rather_than_line_noise(self):
+        g = Graph()
+        g.names = {"forestry:bee_drone_ge": "Bee Drone"}
+        self.assertEqual(g.bare_name("forestry:bee_drone_ge#a3f19c02b8d1"),
+                         "Bee Drone (variant a3f19c)")
+        # And JEI's own name wins outright once names.json has been read.
+        g.names["forestry:bee_drone_ge#a3f19c02b8d1"] = "Forest Drone"
+        self.assertEqual(g.bare_name("forestry:bee_drone_ge#a3f19c02b8d1"), "Forest Drone")
+
+    def test_an_aspect_suffix_still_reads_as_a_word(self):
+        g = Graph()
+        g.names = {"thaumadditions:vis_pod": "%s Vis Pod"}
+        self.assertEqual(g.bare_name("thaumadditions:vis_pod#perditio"),
+                         "Perditio Vis Pod")
+
+    def test_dumped_names_load_and_a_bad_file_is_empty(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "names.json")
+        with open(path, "w") as fh:
+            json.dump({"forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone",
+                       "mod:blank": "  ", "mod:notastring": 7}, fh)
+        self.assertEqual(dump_names.load(path),
+                         {"forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone"})
+        self.assertEqual(dump_names.load(os.path.join(d, "nope.json")), {})
+        with open(path, "w") as fh:
+            fh.write("{oh no")
+        self.assertEqual(dump_names.load(path), {})
 
 
 class DumpProvenanceTest(unittest.TestCase):

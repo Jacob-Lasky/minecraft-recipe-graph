@@ -16,6 +16,11 @@ loading whole). Written by RecipeDumpMod.java; keep the two in sync.
 `in` is a list of SLOTS, each slot a list of interchangeable stacks. That nesting
 is deliberate and must be preserved -- it is where oredict/multi-input choice
 lives, and flattening it would destroy the solver's ability to pick what you own.
+
+An item stack may carry `"n"`, a digest of the NBT that decides what it IS (schema 3
+and up). It becomes a `#suffix` on the key, so a Forest drone and a Meadows drone are
+different ingredients -- see DumpCommand.discriminator. Absent on older dumps, which
+then behave exactly as before.
 """
 
 import json
@@ -27,9 +32,14 @@ from ..names import clean_label
 def _stack_key(entry):
     if "f" in entry:
         return fluid_key(entry["f"])
-    if "i" in entry:
-        return norm_key(entry["i"], entry.get("m", 0))
-    return None
+    if "i" not in entry:
+        return None
+    key = norm_key(entry["i"], entry.get("m", 0))
+    # `#suffix` rather than a separate field: it is the convention the AE2 reader already
+    # uses for vis pods, `model.bare_name` already renders it, and it keeps a
+    # discriminated stack from ever unifying with the bare item by accident.
+    nbt = entry.get("n")
+    return "%s#%s" % (key, nbt) if nbt else key
 
 
 def _slot_to_ingredient(slot, role="item"):

@@ -8,6 +8,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +22,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTBase;
+import net.minecraft.nbt.NBTPrimitive;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagByteArray;
+import net.minecraft.nbt.NBTTagIntArray;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.text.TextComponentString;
 import net.minecraftforge.common.MinecraftForge;
@@ -502,10 +510,18 @@ public class DumpCommand extends CommandBase {
             return null;
         }
         int meta = stack.getItemDamage();
+        String nbt = discriminator(stack);
         if (names != null) {
             String key = meta == 0 ? id.toString() : id + ":" + meta;
+            if (nbt != null) {
+                key = key + "#" + nbt;
+            }
             if (!names.containsKey(key)) {
                 try {
+                    // Keyed by the DISCRIMINATED id, so "Forest Drone" and "Meadows
+                    // Drone" get their own names. The digest is unreadable on its own;
+                    // this is what makes it usable, and it is why the two must be
+                    // written from the same place.
                     names.put(key, stack.getDisplayName());
                 } catch (Throwable ignored) {
                     // a few modded items throw on getDisplayName outside a render pass
@@ -513,7 +529,144 @@ public class DumpCommand extends CommandBase {
             }
         }
         return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
-                + ",\"c\":" + stack.getCount() + "}";
+                + ",\"c\":" + stack.getCount()
+                + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"") + "}";
+    }
+
+    /**
+     * Tags that never change WHAT an item is, only its condition or presentation.
+     *
+     * Stripped before the digest so a repaired pickaxe and a fresh one stay one key.
+     * Keep this list SHORT and justified: every entry is a claim that two stacks
+     * differing only by that tag are interchangeable in a recipe, and a wrong entry
+     * silently merges two ingredients that are not the same thing.
+     */
+    private static final String[] COSMETIC_TAGS = {
+        "RepairCost",     // anvil work penalty
+        "display",        // rename and lore
+        "HideFlags",      // tooltip presentation
+        "Damage",         // durability; the meta already carries the variant
+    };
+
+    /**
+     * A short, stable id for the part of an ItemStack's NBT that decides WHAT IT IS,
+     * or null when the stack carries no identity beyond its id and meta.
+     *
+     * WHY THIS EXISTS. Every bee in the pack was the same four item keys, because the
+     * species lives in the `Genome` tag and this method used to not exist. All 437
+     * mutations dumped as one repeated edge, `produce.rootBees` read as one generic
+     * drone making 323 unrelated items, and the breeding hierarchy was not merely
+     * uncodified but unrepresentable. Same for trees, butterflies and chickens.
+     *
+     * A DIGEST rather than a decoded species name, on purpose. Reading Forestry's
+     * chromosome layout would fix Forestry and nothing else; every mod that hides an
+     * item's identity in NBT has its own structure, and there are ~410 of them. The
+     * digest asks only "is this the same stack", which is the question the graph
+     * actually needs. Readability comes from names.json, which is keyed by the
+     * discriminated id and holds JEI's own display name -- "Forest Drone".
+     *
+     * The serialisation is canonical (compound keys sorted) because NBTTagCompound is
+     * backed by a HashMap and its toString order is an implementation detail. A
+     * discriminator that changed between dumps would split one item into two keys.
+     */
+    static String discriminator(ItemStack stack) {
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || tag.isEmpty()) {
+            return null;
+        }
+        NBTTagCompound copy = tag.copy();
+        for (String cosmetic : COSMETIC_TAGS) {
+            copy.removeTag(cosmetic);
+        }
+        if (copy.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        canonical(copy, sb);
+        // FNV-1a, 48 bits kept. Not a checksum: it only has to separate the few thousand
+        // NBT variants in one pack, and 48 bits makes a collision there vanishingly
+        // unlikely while staying short enough to read in a key.
+        long h = 0xcbf29ce484222325L;
+        for (int i = 0; i < sb.length(); i++) {
+            h = (h ^ sb.charAt(i)) * 0x100000001b3L;
+        }
+        return String.format("%012x", h & 0xffffffffffffL);
+    }
+
+    /**
+     * NBT as a deterministic, LANGUAGE-NEUTRAL string. Compound keys sorted, lists in
+     * order, every value tagged with its type.
+     *
+     * Deliberately not `NBTBase.toString()`, which is a Java implementation detail:
+     * a byte renders "5b", a string comes back quoted and escaped, a float carries an
+     * "f". The world-save reader on the python side has to be able to compute the SAME
+     * digest for the same stack, or your bees in AE2 will not match the bees in a recipe,
+     * and it cannot reproduce Java's formatting. Floats go in as their IEEE-754 bits for
+     * the same reason: decimal float formatting differs between the two languages and
+     * would silently split one item into two keys.
+     *
+     * THIS FORMAT IS PART OF SCHEMA 3. Changing it changes every discriminated key.
+     */
+    private static void canonical(NBTBase node, StringBuilder sb) {
+        switch (node.getId()) {
+            case 1: sb.append('b').append(((NBTPrimitive) node).getByte()); break;
+            case 2: sb.append('s').append(((NBTPrimitive) node).getShort()); break;
+            case 3: sb.append('i').append(((NBTPrimitive) node).getInt()); break;
+            case 4: sb.append('l').append(((NBTPrimitive) node).getLong()); break;
+            case 5:
+                sb.append('f').append(Float.floatToIntBits(((NBTPrimitive) node).getFloat()));
+                break;
+            case 6:
+                sb.append('d').append(
+                        Double.doubleToLongBits(((NBTPrimitive) node).getDouble()));
+                break;
+            case 7:
+                sb.append('B');
+                for (byte v : ((NBTTagByteArray) node).getByteArray()) {
+                    sb.append(v).append(',');
+                }
+                break;
+            case 8:
+                // Raw characters, length-prefixed so a string can never be confused with
+                // the structure around it.
+                String s = ((NBTTagString) node).getString();
+                sb.append('t').append(s.length()).append(':').append(s);
+                break;
+            case 9: {
+                NBTTagList l = (NBTTagList) node;
+                sb.append('[');
+                for (int i = 0; i < l.tagCount(); i++) {
+                    canonical(l.get(i), sb);
+                    sb.append(';');
+                }
+                sb.append(']');
+                break;
+            }
+            case 10: {
+                NBTTagCompound c = (NBTTagCompound) node;
+                List<String> keys = new ArrayList<String>(c.getKeySet());
+                Collections.sort(keys);
+                sb.append('{');
+                for (String k : keys) {
+                    sb.append(k.length()).append(':').append(k).append('=');
+                    canonical(c.getTag(k), sb);
+                    sb.append(';');
+                }
+                sb.append('}');
+                break;
+            }
+            case 11:
+                sb.append('I');
+                for (int v : ((NBTTagIntArray) node).getIntArray()) {
+                    sb.append(v).append(',');
+                }
+                break;
+            default:
+                // NBTTagEnd and anything a future Forge adds. Tagged by id so an unknown
+                // type still contributes, and still contributes the SAME way every run.
+                sb.append('x').append(node.getId()).append(':').append(node.toString());
+                break;
+        }
     }
 
     private static String fluid(Object o) {
@@ -543,9 +696,10 @@ public class DumpCommand extends CommandBase {
      * Bumped whenever the SHAPE of any dumped file changes, not when the mod version does.
      * The reader compares it and says so rather than misparsing a newer or older dump in
      * silence. 1 = recipes.ndjson + oredict + names + skipped + summary; 2 adds
-     * catalysts.json.
+     * catalysts.json; 3 adds the NBT discriminator `n` on stacks, and names.json keys
+     * by the discriminated id.
      */
-    static final int SCHEMA = 2;
+    static final int SCHEMA = 3;
 
     private static void writeSummary(File file, Map<String, int[]> perCategory,
                                      Map<String, String> categoryMod,

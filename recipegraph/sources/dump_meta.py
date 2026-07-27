@@ -10,12 +10,14 @@ SCHEMA tracks the SHAPE of the dumped files, not the mod version. Bump it in
 DumpCommand.java and here together when a file's shape changes:
   1  recipes.ndjson, oredict.json, names.json, skipped.ndjson, summary.json
   2  adds catalysts.json, and summary.json gains mod_version and schema
+  3  item stacks may carry `n`, a digest of the NBT that decides what the stack IS, and
+     names.json keys by the discriminated id so the digest has a readable name
 """
 
 import json
 import os
 
-SCHEMA = 2
+SCHEMA = 3
 
 
 def _document(dump_dir):

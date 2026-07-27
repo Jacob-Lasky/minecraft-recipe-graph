@@ -50,7 +50,20 @@ def heiJar = project.findProperty('hei_jar')
 dependencies {
     if (heiJar && file(heiJar).exists()) {
         compileOnly files(heiJar)
+        // Also at TEST runtime: DumpCommand references JEI types in its signatures, so
+        // the class cannot even load without them, however little of it a test touches.
+        testRuntimeOnly files(heiJar)
     }
+    // The NBT discriminator defines part of the dump schema (a digest that decides
+    // whether two stacks are the same ingredient), and "it compiled" is not evidence
+    // that it is stable or that it ignores what it claims to ignore. RFG puts the
+    // patched Minecraft on the test classpath, so NBT can be exercised for real without
+    // launching the game.
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    testLogging { events 'passed', 'failed', 'skipped' }
 }
 
 // Fail with an actionable message rather than 40 "package mezz.jei.api does not exist"
