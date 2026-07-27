@@ -10,7 +10,10 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import solve as solve_mod  # noqa: E402
-from recipegraph.model import Graph, Ingredient, Recipe, norm_key  # noqa: E402
+from recipegraph.model import (  # noqa: E402
+    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, norm_key,
+    split_discriminator,
+)
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
@@ -29,6 +32,34 @@ class TestKeys(unittest.TestCase):
 
     def test_bare_name_gets_minecraft_namespace(self):
         self.assertEqual(norm_key("diamond"), "minecraft:diamond")
+
+    def test_base_key_strips_only_the_discriminator(self):
+        self.assertEqual(base_key("forestry:can:1#48a337d94489"), "forestry:can:1")
+        # The meta survives. Collapsing it would merge every metadata variant of an item
+        # into one pseudo-item; see the container detector.
+        self.assertEqual(base_key("tconstruct:ingots:3"), "tconstruct:ingots:3")
+        self.assertEqual(base_key("minecraft:stone"), "minecraft:stone")
+        self.assertEqual(base_key("fluid:water"), "fluid:water")
+
+    def test_split_discriminator_reports_absence_as_none(self):
+        # None rather than "" so a caller can tell "no discriminator" from a key that
+        # ends in a bare '#'.
+        self.assertEqual(split_discriminator("mod:x"), ("mod:x", None))
+        self.assertEqual(split_discriminator("mod:x#abc"), ("mod:x", "abc"))
+        # An aspect key is discriminated too, and predates the dump digests.
+        self.assertEqual(split_discriminator("thaumadditions:vis_pod#perditio"),
+                         ("thaumadditions:vis_pod", "perditio"))
+
+    def test_is_item_key_covers_every_non_item_namespace(self):
+        # Guards the single list the detector, split_key and kind all read. A namespace
+        # added to NON_ITEM_KINDS without a `kind` entry would fail here.
+        g = Graph()
+        for name in NON_ITEM_KINDS:
+            key = "%s:thing" % name
+            self.assertFalse(is_item_key(key), key)
+            self.assertEqual(g.kind(key), name)
+        self.assertTrue(is_item_key("minecraft:stone"))
+        self.assertEqual(g.kind("minecraft:stone"), "item")
 
 
 class TestJarJson(unittest.TestCase):

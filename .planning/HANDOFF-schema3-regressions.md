@@ -13,7 +13,9 @@ Fix, in this order, on one branch:
 
 Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a new mod build.
 
-**You have the real graph.** A checkout with real data sits at `/coding/minecraft-recipe-graph` inside the pocket-dev container (`/mnt/user/misc/coding/minecraft-recipe-graph` on Tower). Verified 2026-07-26 from inside the container: `Graph.load` returns 117,685 recipes at schema 3 in 13 seconds, the 230-test suite passes in 17 seconds, and the P0 symptom reproduces (`sum(1 for r in g.recipes if r.transfer)` is **117**, and should be roughly 23,000). Prove every fix against that, not only against a fixture.
+**You have the real graph.** A checkout with real data sits at `/coding/minecraft-recipe-graph` inside the pocket-dev container (`/mnt/user/misc/coding/minecraft-recipe-graph` on Tower). Verified 2026-07-26 from inside the container: `Graph.load` returns 117,685 recipes at schema 3 in 13 seconds, the 230-test suite passes in 17 seconds, and the P0 symptom reproduces (`sum(1 for r in g.recipes if r.transfer)` is **117**, and should be roughly 7,000). Prove every fix against that, not only against a fixture.
+
+**Correction, measured 2026-07-26:** the target is **7,016**, not the 23,000 quoted below and in #34. 7,016 is what the detector flags on this graph once every `#discriminator` is stripped, which is the pre-schema-3 behaviour it has to restore, and it agrees with the README's own "~7k of 344k recipes". Nobody has produced a measurement that yields 23,000.
 
 ## What shipped (verified 2026-07-26)
 
@@ -33,7 +35,7 @@ Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a
 
 | Issue | P | One line |
 | --- | --- | --- |
-| #34 | P0 | Container detection went from ~23,000 flagged recipes to **117**. Borax resolves to "43 Borax Solution Cans". |
+| #34 | P0 | Container detection went from 7,016 flagged recipes to **117**. Borax resolves to "43 Borax Solution Cans". |
 | #23 | P0 | 298,765 of 340,324 keys carry a `#`; the renderer does not escape it, so most plan links 404 and drop `qty`. |
 | #28 | P1 | 16 Thermal Expansion categories read "no route". Three stacked causes, named in the issue. |
 | #31 | P1 | No test puts a discriminated key through the whole pipeline. This is why the three above shipped. |
@@ -75,7 +77,7 @@ Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a
    for r in g.recipes:          # clear what the old build baked in
        r.transfer = False
    flagged, containers = index.mark_container_transfers(g, quiet=False)
-   print(flagged, len(containers))   # want roughly 23,000, currently 117
+   print(flagged, len(containers))   # want 7,016, currently 117
    ```
 
    Then re-solve Borax and check the shape by hand: `nuclearcraft:compound:7` at qty 64 must not want Borax Solution Cans.
@@ -106,7 +108,7 @@ Nothing here is blocked on a human. Nothing here needs the game, a re-dump, or a
 - **#15 is still open and its verdict is shipped but GATED.** The code is in `machines.NO_MACHINE_PATTERNS` and does nothing below schema 3. Reading the issue body alone would suggest it is unimplemented.
 - **#16's "open design question" was answered one way and is being reversed.** The zero-count mod options were made disabled-in-place rather than removed. Jake then asked for them to sort to the bottom; that is #32. Do not treat the issue body's reasoning as the current decision.
 - **`serve` was restarted for Jake at 22:03 local on 2026-07-26** and is running merged code. If a later session finds a stale process again, that is gotcha 2, not a new bug.
-- **No CI exists on this repo.** No workflows, no PR checks. `python3 -m unittest discover -s tests` is the whole gate, and it is on you to run it.
+- **CI DOES exist**, contrary to an earlier note here: `.github/workflows/test.yml` runs the unit suite and `compileall` on every push and PR, against Python 3.8 and 3.13. **3.8 is the floor**, so no walrus-in-comprehension, no `dict |`, no `match`. Run `python3 -m unittest discover -s tests` locally anyway; the workflow is the backstop, not the loop.
 - **The Tower checkout's `data/` is a SNAPSHOT taken 2026-07-26, not a live copy.** It will not follow a re-dump on Jake's desktop. If a measurement disagrees with one quoted in an issue, check the snapshot's age before concluding the code changed behaviour.
 - **The fixture in #31 is still worth building even though real data is available.** Real data proves a fix; a fixture stops the next regression, runs in milliseconds, and is the only one of the two that a contributor without Jake's base can use.
 - **`mod/logs/` and `mod/localmaven/` are build residue.** `mod/logs/` is now gitignored; `localmaven` already was. Do not commit either.

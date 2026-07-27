@@ -84,9 +84,53 @@ def _variant_label(suffix):
     return suffix.capitalize()
 
 
+# The namespaces that are NOT concrete items. Fluids, oredict names and essentia aspects
+# carry neither a meta nor an NBT discriminator, so every routine that picks items out of
+# a mixed key list has to know them.
+#
+# ONE list, in one order. `split_key`, `kind` and the container detector each carried
+# their own copy, two of them in a different order, which is three places to update when
+# `essentia:` arrived and three chances to miss one. `present.KIND_CHIP` is deliberately
+# separate: it is the presentation layer and has its own completeness tests.
+NON_ITEM_KINDS = ("fluid", "essentia", "ore")
+NON_ITEM_PREFIXES = tuple("%s:" % k for k in NON_ITEM_KINDS)
+
+
+def is_item_key(key):
+    """True for a concrete item key, False for a fluid, oredict or essentia key."""
+    return not key.startswith(NON_ITEM_PREFIXES)
+
+
+def split_discriminator(key):
+    """Return (key_without_discriminator, discriminator_or_None).
+
+    An NBT-discriminated key is `mod:name[:meta]#suffix`, where the suffix is appended
+    last and never contains a `#` of its own (see sources/hei_dump._stack_key), so one
+    rsplit is exact rather than a guess.
+    """
+    if "#" in key:
+        base, disc = key.rsplit("#", 1)
+        return base, disc
+    return key, None
+
+
+def base_key(key):
+    """The item key a discriminated stack is a variant of; unchanged for plain keys.
+
+    `forestry:can:1#48a337d94489` -> `forestry:can:1`. Use this wherever a question is
+    about the ITEM rather than about one particular NBT state of it: "is this a
+    container", "can this machine be built".
+
+    DO NOT also strip the meta. Meta distinguishes genuinely different items, and
+    collapsing it would merge `tconstruct:ingots:0` with `tconstruct:ingots:3` into one
+    pseudo-item that appears to melt into every molten metal in the pack.
+    """
+    return split_discriminator(key)[0]
+
+
 def split_key(key):
     """Return (base_key_without_meta, meta_or_None) for concrete item keys."""
-    if key.startswith(("ore:", "fluid:", "essentia:")):
+    if not is_item_key(key):
         return key, None
     parts = key.split(":")
     if len(parts) >= 3:
@@ -299,10 +343,6 @@ class Graph:
         base, meta = split_key(key)
         if meta not in (None, "*"):
             out.extend(self.by_output.get("%s:*" % base, ()))
-            if meta == 0:
-                pass
-            elif base in self.by_output:
-                pass
         self._producer_cache[key] = out
         return out
 
@@ -335,12 +375,9 @@ class Graph:
         times down a plan is fatiguing, and the bracket text is only there because plain
         terminal output has no other way to say it.
         """
-        if key.startswith("fluid:"):
-            return "fluid"
-        if key.startswith("essentia:"):
-            return "essentia"
-        if key.startswith("ore:"):
-            return "ore"
+        for name, prefix in zip(NON_ITEM_KINDS, NON_ITEM_PREFIXES):
+            if key.startswith(prefix):
+                return name
         return "item"
 
     def bare_name(self, key):
@@ -366,8 +403,8 @@ class Graph:
         # `mod:item#aspect` -- an NBT-discriminated stack. Names for these are format
         # strings in items.csv ("%s Vis Pod"), so fill the placeholder with the aspect
         # rather than showing a raw %s to the user.
-        if "#" in key:
-            stem, aspect = key.rsplit("#", 1)
+        stem, aspect = split_discriminator(key)
+        if aspect is not None:
             label = self.names.get(stem) or self.bare_name(stem)
             pretty = _variant_label(aspect)
             if "%s" in label:
