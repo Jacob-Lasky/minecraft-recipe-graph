@@ -45,6 +45,43 @@ class StatusCoverageTest(unittest.TestCase):
         self.assertEqual(set(present.ALL_STATUSES), set(present.STATUS_LABEL))
         self.assertEqual(set(present.ALL_STATUSES), set(present.STATUS_STYLE))
 
+    def test_every_status_reaches_the_legend(self):
+        """#49: the diagram coloured four states and explained none. A status with a fill
+        and no legend row is a colour on the page that nothing accounts for."""
+        listed = set()
+        for _fill, _ink, labels in present.status_legend():
+            listed.update(labels.split(", "))
+        self.assertEqual(listed, {lab for lab, _cls in present.STATUS_LABEL.values()})
+
+    def test_the_legend_says_what_the_tree_badge_says(self):
+        """One vocabulary. A reader who learns "part stock" from the tree has to recognise
+        it in the legend, so the legend takes its words from STATUS_LABEL rather than
+        spelling its own."""
+        for status in present.ALL_STATUSES:
+            fill, _ink = present.STATUS_STYLE[status]
+            label = present.STATUS_LABEL[status][0]
+            row = [r for r in present.status_legend([status]) if r[0] == fill]
+            self.assertEqual([(fill, label)], [(r[0], r[2]) for r in row], status)
+
+    def test_statuses_that_share_a_fill_share_one_legend_row(self):
+        """`have` and `source` are both green. Two identical swatches in one legend reads
+        as a legend bug rather than as the truth, which is that green means either."""
+        rows = present.status_legend()
+        self.assertEqual(len(rows), len({fill for fill, _ink, _lab in rows}))
+        green = [lab for fill, _ink, lab in rows if fill == "var(--okbg)"]
+        self.assertEqual(green, ["in stock, infinite"])
+
+    def test_the_legend_only_covers_the_statuses_asked_for(self):
+        rows = present.status_legend(["craft"])
+        self.assertEqual(rows, [("var(--craftbg)", "var(--craft)", "craft")])
+        self.assertEqual(present.status_legend([]), [])
+
+    def test_legend_order_does_not_depend_on_the_caller(self):
+        """A set comes in, so without an explicit order the legend would reshuffle between
+        two plans containing the same statuses."""
+        self.assertEqual(present.status_legend({"raw", "have", "craft"}),
+                         present.status_legend(["craft", "raw", "have"]))
+
     def test_the_badge_class_is_one_the_stylesheet_defines(self):
         # A class with no rule renders as unstyled text, which reads as a missing badge.
         for _label, cls in present.STATUS_LABEL.values():
@@ -136,10 +173,26 @@ class DiagramWiringTest(unittest.TestCase):
             "machines_to_build": [], "truncated": False,
         }
         page = render.render_html(result)
+        svg, legend = graphview.render_diagram(result["tree"])
         self.assertIn(".diagram{", page)
         self.assertIn('id="diagbox"', page)
         self.assertIn('class="diagram"', page)
-        self.assertIn(graphview.render_svg(result["tree"]), page)
+        self.assertIn(svg, page)
+        # #49: the legend is the half that makes the fills readable, and an unstyled one
+        # would render as a bullet list rather than as swatches, so assert both again.
+        self.assertIn(legend, page)
+        self.assertIn("NEED", legend)
+        for rule in (".legend{", ".legend li{", ".legend .sw{"):
+            self.assertIn(rule, page, rule)
+        # It has to sit ABOVE the diagram: a reader meets the key before the boxes rather
+        # than after scrolling a tall plan.
+        self.assertLess(page.index(legend), page.index(svg))
+        # The note below the diagram explains the per-mod SWATCH, which is a different axis
+        # from the box fill. It used to be the only colour text on the page, so a reader
+        # looking for what blue meant was pointed at the wrong thing; it now says which axis
+        # it is talking about and defers to the key for the other.
+        self.assertIn("groups items by mod", page)
+        self.assertIn("per the key above", page)
 
 
 if __name__ == "__main__":

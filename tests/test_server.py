@@ -757,7 +757,7 @@ class DiscriminatedLinkTest(unittest.TestCase):
         # builder that broke. Drive it directly so the property covers it even if the
         # plan page stops embedding the diagram.
         result = Solver(self.graph).solve(fixtures.NAMED_CAN, 1)
-        svg = graphview.render_svg(result["tree"])
+        svg, _legend = graphview.render_diagram(result["tree"])
         hrefs = self._hrefs(svg)
         self.assertTrue(hrefs, "the diagram emitted no links")
         for href in hrefs:
@@ -812,6 +812,14 @@ class MobileLayoutTest(unittest.TestCase):
                       server.HOME_CSS)
         self.assertIn("td.c-why{flex:1 1 100%;order:4;font-size:12.5px;"
                       "overflow-wrap:anywhere}", server.HOME_CSS)
+
+    def test_the_diagram_legend_wraps_instead_of_running_off_the_edge(self):
+        # #49. Four to five entries do not fit across 360px of usable width. The diagram
+        # next to it scrolls inside `.diagwrap`, which is right for a wide SVG and wrong
+        # here: a legend entry parked off the right edge of a scroller is an unexplained
+        # colour, which is the whole bug.
+        self.assertIn("flex-wrap:wrap", graphview.DIAGRAM_CSS)
+        self.assertNotIn("overflow:auto", graphview.DIAGRAM_CSS.split(".legend{")[1])
 
     def test_the_state_stripe_moves_to_the_card_edge(self):
         # On desktop the stripe is on the first cell, which is the row's left edge. In a

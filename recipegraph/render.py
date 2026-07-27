@@ -11,7 +11,7 @@ strict CSP that blocks every off-host request.
 
 import json
 
-from .graphview import DIAGRAM_CSS, render_svg
+from .graphview import DIAGRAM_CSS, render_diagram
 from .htmlutil import esc as _esc
 from .present import KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL
 
@@ -354,6 +354,7 @@ def _sources_html(entries):
 
 def render_html(result, graph=None, coverage_note=None):
     tree = result["tree"]
+    diagram_svg, diagram_legend = render_diagram(tree)
     need = result.get("shopping_list") or []
     used = result.get("used_from_stock") or []
 
@@ -393,10 +394,13 @@ def render_html(result, graph=None, coverage_note=None):
   </div>
   <div class="card" id="diagbox" hidden>
     <h2><span>Flow</span><span class="c">left to right</span></h2>
+    %s
     <div class="diagwrap">%s</div>
-    <div class="meta" style="margin-top:9px">Swatch colour groups items by mod and the
-      letter stands in for the icon; real item textures need a sprite sheet the dump mod
-      does not render yet. Click any box to plan that item on its own.</div>
+    <div class="meta" style="margin-top:9px">A box is filled by what the plan does with
+      that item, per the key above. The small SWATCH inside each box is a different axis:
+      its colour groups items by mod and the letter stands in for the icon, because real
+      item textures need a sprite sheet the dump mod does not render yet. Click any box to
+      plan that item on its own.</div>
   </div>
   <div class="cols" id="cols">
     <div class="card" id="treebox">
@@ -429,7 +433,8 @@ def render_html(result, graph=None, coverage_note=None):
         "{:,}".format(total_used),
         "{:,}".format(len(need) + len(used)),
         warnbar,
-        render_svg(tree),
+        diagram_legend,
+        diagram_svg,
         "{:,}".format(result["nodes"]),
         _node_html(tree),
         len(need),
