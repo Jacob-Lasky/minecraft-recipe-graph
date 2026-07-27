@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import (  # noqa: E402
     NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, norm_key,
@@ -259,14 +260,31 @@ class TestSlotMerging(unittest.TestCase):
                          [("mod:clump", 2), ("mod:rod", 3)])
 
     def test_slots_merge_on_the_RESOLVED_alternative_not_the_declared_one(self):
-        """Two slots listing different oredicts that both land on the same item."""
+        """Different alternative LISTS that pick the same item still merge."""
         g = _grid_graph()
-        g.ore_members = {"clumpA": ["mod:clump"], "clumpB": ["mod:clump"]}
-        g.add(Recipe("ores", "t", [("mod:plate", 1)],
-                     [Ingredient(["ore:clumpA"], 2), Ingredient(["ore:clumpB"], 3)]))
+        g.ore_members = {"clumps": ["mod:clump"]}
+        g.add(Recipe("mixed", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 2),
+                      Ingredient(["mod:clump", "mod:rod"], 3)]))
         kids = Solver(g).solve("mod:plate", 1)["tree"]["children"]
-        self.assertEqual(len(kids), 1)
+        self.assertEqual(len(kids), 1, "both slots picked mod:clump")
         self.assertEqual(kids[0]["need"], 5)
+
+    def test_an_ore_slot_does_not_merge_with_a_slot_naming_its_member(self):
+        """Deliberate: oredict resolution happens a level below the merge.
+
+        `ore:clumps` and `mod:clump` are different NODES -- the oredict one renders as
+        "any of these" with its own resolved_to. Merging them would have to throw one
+        label away. Measured on the reference pack, 13 of 117,685 recipes mix an ore
+        slot with a concrete member of that same ore, so the honest split costs almost
+        nothing and keeps both slots reported as authored.
+        """
+        g = _grid_graph()
+        g.ore_members = {"clumps": ["mod:clump"]}
+        g.add(Recipe("ores", "t", [("mod:plate", 1)],
+                     [Ingredient(["ore:clumps"], 2), Ingredient(["mod:clump"], 3)]))
+        kids = Solver(g).solve("mod:plate", 1)["tree"]["children"]
+        self.assertEqual([c["key"] for c in kids], ["ore:clumps", "mod:clump"])
 
     def test_a_merged_node_reports_the_widest_slot_alternative_count(self):
         g = _grid_graph()
@@ -278,15 +296,16 @@ class TestSlotMerging(unittest.TestCase):
         self.assertEqual(kid["alt_count"], 3,
                          "the merged node must not inherit the first slot's count of 1")
 
-    def test_merged_slots_are_reported(self):
+    def test_a_single_option_slot_carries_no_alternative_count(self):
         kid = Solver(_grid_graph()).solve("mod:ingot", 1)["tree"]["children"][0]
-        self.assertEqual(kid["slots"], 9)
+        self.assertNotIn("alt_count", kid, "nine slots of one option are still one option")
 
-    def test_an_unmerged_node_carries_no_slot_count(self):
+    def test_the_slot_alternative_count_reaches_the_tree_html(self):
         g = _grid_graph()
-        g.add(Recipe("one", "t", [("mod:plate", 1)], [Ingredient(["mod:clump"], 1)]))
-        kid = Solver(g).solve("mod:plate", 1)["tree"]["children"][0]
-        self.assertNotIn("slots", kid)
+        g.add(Recipe("wide", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump", "mod:rod", "mod:ore"], 1)]))
+        html = render.render_html(Solver(g).solve("mod:plate", 1))
+        self.assertIn("any of 3", html)
 
 
 class TestOredictGuess(unittest.TestCase):

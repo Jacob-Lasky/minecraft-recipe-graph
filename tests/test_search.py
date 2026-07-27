@@ -83,6 +83,40 @@ class SuggestTest(unittest.TestCase):
                          [r["key"] for r in explore.search(g, "boric")])
 
 
+class ItemPageSlotTest(unittest.TestCase):
+    """The item page lists a recipe's ingredients, and had the same per-slot repeat (#24)."""
+
+    def _brief(self, inputs):
+        g = Graph()
+        g.names = {"mod:clump": "Tiny Clump", "mod:ingot": "Ingot", "mod:rod": "Rod"}
+        g.add(Recipe("r", "t", [("mod:ingot", 1)], inputs, category="c"))
+        return explore.describe(g, "mod:ingot")["makes"][0]
+
+    def test_nine_slots_of_one_ingredient_are_one_row_of_nine(self):
+        rows = self._brief([Ingredient(["mod:clump"], 1) for _ in range(9)])["inputs"]
+        self.assertEqual([(r["alts"][0]["key"], r["qty"]) for r in rows],
+                         [("mod:clump", 9)])
+
+    def test_distinct_ingredients_stay_distinct(self):
+        rows = self._brief([Ingredient(["mod:clump"], 2),
+                            Ingredient(["mod:rod"], 3)])["inputs"]
+        self.assertEqual([(r["alts"][0]["key"], r["qty"]) for r in rows],
+                         [("mod:clump", 2), ("mod:rod", 3)])
+
+    def test_slots_offering_different_choices_are_not_merged_here(self):
+        """Unlike the solver: with no inventory there is nothing to pick with, so the
+        rows describe the recipe as authored."""
+        rows = self._brief([Ingredient(["mod:clump"], 1),
+                            Ingredient(["mod:clump", "mod:rod"], 1)])["inputs"]
+        self.assertEqual(len(rows), 2)
+
+    def test_the_alternative_count_survives_a_merge(self):
+        rows = self._brief([Ingredient(["mod:clump", "mod:rod"], 1),
+                            Ingredient(["mod:clump", "mod:rod"], 1)])["inputs"]
+        self.assertEqual(rows[0]["qty"], 2)
+        self.assertEqual(rows[0]["alt_total"], 2)
+
+
 class IndexTest(unittest.TestCase):
     def test_ore_membership_is_indexed_not_rescanned(self):
         g = Graph()

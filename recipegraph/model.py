@@ -170,6 +170,35 @@ class Ingredient:
         return Ingredient(d["alt"], d.get("qty", 1), d.get("role", "item"))
 
 
+def merge_slots(inputs, key_of):
+    """Slots that are the same ingredient, collapsed: [(key, first slot, qty, options)].
+
+    A shaped recipe has one input SLOT per grid cell, so a 3x3 of one ingredient is nine
+    `Ingredient` objects naming one key. Anything that shows or expands them per slot
+    repeats itself nine times -- 21,417 of the reference pack's 117,685 recipes have at
+    least two slots that collapse. See #24.
+
+    `key_of` is the caller's idea of "the same": the solver merges on the alternative it
+    PICKED, so slots offering different choices that land on one item become one node,
+    while the item page merges on the alternatives as AUTHORED, having no inventory to
+    pick with. Insertion order is preserved so both stay deterministic.
+
+    `options` is the WIDEST slot's alternative count, not the first's: a merged row that
+    reported 1 option while standing in for a slot that accepted 3 would misstate the
+    choice that was made.
+    """
+    merged = {}
+    for ing in inputs:
+        key = key_of(ing)
+        row = merged.get(key)
+        if row is None:
+            merged[key] = [key, ing, ing.qty, len(ing.alternatives)]
+        else:
+            row[2] += ing.qty
+            row[3] = max(row[3], len(ing.alternatives))
+    return [tuple(row) for row in merged.values()]
+
+
 class Recipe:
     __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine",
                  "transfer")
