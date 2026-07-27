@@ -11,8 +11,10 @@ jobs:
     strategy:
       matrix:
         # 3.8 is the floor the code claims to support; test the claim rather than
-        # assuming it. No pip install step exists on purpose -- stdlib only.
-        python-version: ["3.8", "3.13"]
+        # assuming it. 3.14 is the line the Dockerfile ships, so the version that runs on
+        # the server is a version that is tested. Bump the two together or the pairing
+        # rots. No pip install step exists on purpose -- stdlib only.
+        python-version: ["3.8", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

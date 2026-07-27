@@ -9,17 +9,19 @@ Answers "what do I actually need to make X" for a ~410-mod 1.12.2 pack by comput
 whole recipe tree at once and stopping wherever the player's AE2 network already has the
 ingredient. Replaces clicking through JEI one hop at a time.
 
-Tool lives at `~/Coding/minecraft-recipe-graph`. Pure Python 3 stdlib, no install step.
+Pure Python 3 stdlib, no install step. The checkout path is machine-specific: take it
+from the path map in `MACHINE.md` rather than assuming, since it is `/coding/...` on
+the server and `~/Coding/...` elsewhere.
 
 ## Why you cannot just grep JEI
 
-**JEI is a viewer, not a database — it ships zero recipe data.** `HadEnoughItems.jar`
+**JEI is a viewer, not a database: it ships zero recipe data.** `HadEnoughItems.jar`
 contains 0 recipe files (verified). Every recipe you page through in the JEI GUI was handed
 to JEI at runtime by the owning mod's JEI plugin, out of that mod's own in-memory
 registries. There is no on-disk index to search, in JEI or anywhere else.
 
 That is why the answer is a dump-at-runtime mod rather than decompilation. Decompiling is
-only ever the fallback for an isolated hardcoded constant (a search radius, a tick rate) —
+only ever the fallback for an isolated hardcoded constant (a search radius, a tick rate),
 never for recipes, because at 366 jars it does not scale and NuclearCraft-style recipe
 registration is procedural anyway.
 
@@ -42,9 +44,67 @@ noise and reads as an apology for a defect that is no longer there. State what i
 python3 -m recipegraph.cli serve      # http://127.0.0.1:8765
 ```
 
-Search -> click an item -> plan. Machines page toggles availability per category. Prefer
-pointing the user at this over running `plan` for them repeatedly. Nothing auto-starts:
+Four pages: **Search** (types-as-you-go, showing stock plus how many recipes make and consume
+each item, with favourites and recents), **Machines** (filterable and sortable, each row
+linking to a detail view of what that machine makes and consumes), **Sources** (what is
+treated as free and on what evidence), **Coverage**. A plan renders as a nested list or as a
+left-to-right flow diagram.
+
+Prefer pointing the user at this over running `plan` for them repeatedly. Nothing auto-starts:
 the mod only writes JSON files, and the server is started by hand.
+
+### It runs as a container on Tower
+
+The UI is worth having up when the gaming PC is off, so it is containerised and running:
+
+```
+http://192.168.86.183:8765        # Tower, LAN only, no auth
+docker logs recipegraph
+docker restart recipegraph        # after a new image; /reload does NOT re-import Python
+```
+
+Rebuild and redeploy after a code change (the running container holds the code it started
+with):
+
+```bash
+cd /coding/minecraft-recipe-graph && docker build -t minecraft-recipe-graph:local .
+docker rm -f recipegraph
+docker run -d --name recipegraph -p 8765:8765 \
+  -v /mnt/user/misc/coding/minecraft-recipe-graph/data:/data \
+  --user 99:100 --memory=4g --memory-swap=4g --restart unless-stopped \
+  minecraft-recipe-graph:local
+```
+
+The bind-mount source is a HOST path (`/mnt/user/misc/coding/...`), not this container's
+`/coding` view. Give it the wrong one and the `-v` still succeeds, mounting an empty
+directory, and the server exits "no graph at /data/graph.json".
+
+Give it 40 to 90 seconds before concluding it failed: it loads a 115 MB graph before
+answering anything, which is why the health check has a 180 second start period.
+
+**THE DESKTOP BUILDS, TOWER ONLY SERVES.** `build` needs the ~410 mod jars and a 165 MB
+`recipes.ndjson`, none of which live on Tower and none of which should. The gaming machine
+runs `/recipedump`, builds, and rsyncs the finished artifacts over:
+
+```bash
+recipegraph build --instance '<instance>/minecraft' --out data/graph.json
+recipegraph have  --regions '<world>/region/r.*.mca' --out data/ae2_have.json
+rsync -avz --partial data/graph.json data/ae2_have.json \
+      tower:/mnt/user/misc/coding/minecraft-recipe-graph/data/
+```
+
+That moves ~115 MB rather than several gigabytes of jars. Tower notices the file changed
+and the **Reload** button picks it up with no restart.
+
+**Item icons are not available and cannot be faked from the id.** A registry id does not map
+to a texture path by any convention; the mapping lives in each mod's models and blockstate
+JSON. Real icons need a sprite sheet rendered by the dump mod. The diagram uses a per-mod hue
+plus an initial, which is a real signal rather than a placeholder imitating an icon.
+
+**Presentation lives in `present.py`, keyed by the constants themselves.** Node statuses and
+machine states are rendered by four different components; each used to keep its own dict of
+bare string literals, so adding a status would have drawn silently wrong. Add the case there,
+never a local dict in a renderer -- `tests/test_present.py` asserts completeness both ways.
 
 ## Machine availability drives recipe choice
 
@@ -53,22 +113,76 @@ python3 -m recipegraph.cli machines --match nuclearcraft
 python3 -m recipegraph.cli machines --set nuclearcraft_crystallizer=have
 ```
 
-Three states per JEI category: `have` (block placed in the world, or item in stock),
-`buildable` (the machine itself is craftable), `unavailable`. Placed tile entities are read
-from the world save during `have`, so this is evidence, not configuration. Plans report a
-"machines you do not have yet" list. Manual overrides in `data/machines.json` always win.
+FOUR states per JEI category: `have` (block placed in the world, or item in stock),
+`buildable` (the machine itself is craftable), `unknown` (could not be identified at all),
+`unavailable` (identified, no route to it). Placed tile entities are read from the world save
+during `have`, so this is evidence, not configuration. Manual overrides in
+`data/machines.json` always win.
+
+**`unknown` is not a synonym for `unavailable`, and collapsing them is catastrophic.** Machine
+identity is guessed from the category's display title, and a JEI title is usually the recipe
+TYPE, not the machine: "Casting" is made in a Casting Table, "Smelting" in a Smeltery
+Controller, "Cover Crafting" in nothing at all. That heuristic misses about two categories in
+three. Priced as unusable, that walled off 40% of the graph. `unknown` costs more than
+`buildable` and far less than `unavailable`.
+
+**Category uids fight the matcher in three ways**, all now handled and all worth recognising
+if a machine reads wrongly: titles carry format codes (`"Wire Mill§r"`); uids are camelCase
+while registry names are snake_case (`TechReborn.WireMill` -> `techreborn:wire_mill`); and a
+modid can itself contain an underscore, so `tinker_io:smart_output` tokenises to `tinker` and
+looks like a different mod. Evidence from a cross-mod name match is labelled
+"(name match, other mod)" because it IS a guess -- Extra Utilities' "Furnace" category
+matches `minecraft:furnace`.
+
+**`catalysts.json` from dump mod v0.4.0+ removes the guessing.** It is JEI's own "made in"
+list, so it is the authoritative category to machine mapping and beats every heuristic. If
+`recipegraph build` prints "catalysts.json not present", the machines page is working from
+name matching and roughly two thirds of it is `unknown`.
 
 Machine state feeds the **cost estimate**, which is what actually picks recipes. Local
 scoring alone fails badly: it once preferred 100,000 items through a machine already owned
 over 2 items through one that needed building.
 
+## The cost model is load-bearing, and it fails silently
+
+**If every fluid prices near 0.0, the cost model is inert and recipe choice is back to being
+greedy.** `FLUID_SCALE` must be applied to recipe OUTPUT quantities as well as inputs: scaling
+one side made every fluid-to-fluid hop divide the cost by 1000, so a ten-hop chain priced at
+1e-30 and the table looked populated while discriminating between nothing. Symptom to watch
+for: a plan that routes through a nuclear fission chain to obtain a common reagent.
+
+Chemistry chains run 10+ hops, so the Bellman-Ford relaxation needs ~20 passes, not 6. The
+table is cached at `data/.cost-cache.json`, fingerprinted on graph mtime, stock, machine
+states AND the tuning constants -- so editing `MACHINE_COST` invalidates it rather than
+silently reusing old prices.
+
+## Infinite generators are a curated list, not an inference
+
+A plan for one Borax once drew its water from 71 Snowballs and 12 Wet Sponges while nine
+infinite water sources sat placed in the base. An input-free block has no recipe, which is
+exactly why a recipe graph cannot find it, so `generators.py` maps blocks to what they emit
+and matches against placed tile entities. Extend with
+`recipegraph sources --add <block>=<item or fluid key>`.
+
+**Free is not zero.** Seeding an output at cost 0 blinds the ranker to quantity and a plan
+will ask for a swimming pool. And generator draw is reported in its own list on the plan,
+never folded into stock: 934,400 mB of water must be visible, not absent.
+
 ## Most of a JEI dump is not recipes
 
-On the reference pack **222,673 of 343,859 dumped entries were not production recipes** --
+On the reference pack **235,226 of 343,860 dumped entries were not production recipes** --
 `minecraft.anvil` repair permutations (77k), `EIOTank`/`forestry.bottler` container fills
-(133k), plus JEI info panels, worldgen, villager trades and loot tables. They are dropped
-at build time. Leaving them in produced plans wanting 2,000,000 mB of water and an
-ingredient called "Dropped by Fishing Methods".
+(133k), plus JEI info panels, worldgen, villager trades, loot tables, Tinkers' material stat
+tables and Modular Machinery structure previews. A further **11,634 are no-ops**: recipes that
+consume at least as much of every output as they produce (`Empty Cell -> Empty Cell`,
+`Scepter + Ender Pearl -> Scepter`, chisel variant tables, charging a flux capacitor).
+
+**The obvious no-op test is wrong and drops real recipes.** "Every output is also an input"
+discarded 3,560 good recipes, including `Chest + Tripwire Hook -> Trapped Chest` (a trapped
+chest is one of three things the chest slot accepts, so the output hid among the
+alternatives) and `1 Spectral Fern -> 3 Spectral Fern` in a Phytogenic Insolator, which is
+the entire point of the machine. The rule needs an unambiguous input slot AND no increase in
+quantity.
 
 If a plan looks insane, suspect a false edge from a display-only category before suspecting
 the solver.
@@ -107,6 +221,10 @@ python3 -m recipegraph.cli track
 python3 -m recipegraph.cli chart --window 2h --html chart.html
 python3 -m recipegraph.cli metrics             # db size / row counts
 
+# infinite generators: what is free, and add your own
+python3 -m recipegraph.cli sources
+python3 -m recipegraph.cli sources --add mymod:water_well=fluid:water
+
 # what is the graph blind to? (needs dump mod v0.2.0+)
 python3 -m recipegraph.cli gaps --dump-dir '<instance>/minecraft/mc-recipe-dump'
 ```
@@ -117,7 +235,7 @@ quoting a fluid figure.
 
 **Rates are NET, and say so when reporting them.** AE2 exposes stock levels, not machine
 throughput, so an item produced and consumed at equal speed reads flat. Do not describe
-these as production rates. Network power is the exception — AE2 publishes real rolling
+these as production rates. Network power is the exception: AE2 publishes real rolling
 averages, but only over the OpenComputers live feed, not the world save.
 
 Useful `plan` flags: `--ignore-stock` (pretend nothing is owned), `--exact` (skip
@@ -141,6 +259,7 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 | crafting recipes | `assets/*/recipes/*.json` in mod jars | ~10.3k, offline |
 | machine recipes | `/recipedump` mod → `mc-recipe-dump/recipes.ndjson` | **required for chemistry chains** |
 | ore dictionary | dump mod's `oredict.json`, or `/ct oredict` → `crafttweaker.log` | otherwise inferred from names (labelled heuristic, ~43% recovery) |
+| category → machine | dump mod's `catalysts.json` (v0.4.0+) | **authoritative**; without it two thirds of categories read `unknown` |
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
 
 ## Gotchas that cost real debugging time
@@ -168,7 +287,20 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
   16,000 mB borax_solution` as an ordinary recipe, so any fluid looks free to anyone
   holding a tank. These are flagged as `transfer` at build time by two structural signals
   (same item in and out; one item "producing" 8+ distinct fluids) and always lose to a real
-  recipe. ~23k of 344k recipes on the reference pack.
+  recipe. ~7k of 344k recipes on the reference pack.
+- **A penalty is not enough: a transfer must NEVER produce a fluid.** 500 still beats
+  infinity, so with water free the solver routed `Water Can -> squeeze -> 1,000 mB uranium
+  fluoride`. The dump drops the NBT saying WHICH fluid a filled can holds, so every filled
+  Forestry can collapses to `forestry:can:1` and the graph believes squeezing a can of water
+  yields uranium fluoride. `Graph.real_producers` suppresses the fluid direction only --
+  filling a container is real work and still counts. A fluid whose only route is emptying a
+  container correctly comes out as NEED.
+- **Fluids referenced only by recipes must be indexed for search.** `items.csv` covers items,
+  so "Boric Acid" found `nuclearcraft:fluid_boric_acid` (the placed block, no recipes) and
+  never `fluid:boric_acid`, which every chemistry chain needs. `Graph.labels` collects
+  fluid/essentia/oredict keys from the recipes and holds the BARE name -- indexing the
+  bracketed "[fluid] water" made the query "water" a substring match, so `fluid:water` (88
+  recipes, 2,383 uses) ranked below "Water Egg".
 - **The solver's backtracking needs a work budget, not just a node cap.** `nodes` is
   rewound when a failed branch is discarded, so discarded work never counts toward
   `max_nodes`; on a 340k-recipe graph the search never returns. A monotonic `work` counter
@@ -176,6 +308,27 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 - **Read on the client, write on the server.** Recipes and configs are identical on both
   sides, so reading the local client instance is fine. The *world save* must come from
   wherever the world actually lives.
+- **Ask about the ITEM, not about one NBT state of it: use `model.base_key`.** A schema-3
+  dump gives every NBT variant its own key, and any code comparing whole keys silently
+  stops matching. That took container detection from 7,016 flagged recipes to 117, and
+  Borax went back to asking for 43 Borax Solution Cans. `base_key` strips the `#digest`
+  and nothing else, so it needs no schema gate: it is the identity function on an older
+  dump. **It must not strip the meta too** -- that merges `tconstruct:ingots:0` with
+  `:3` into one pseudo-container that appears to melt into every molten metal in the pack.
+- **A container empty does NOT return the empty container.** Forestry's squeezer gives you
+  the can's MATERIAL: `forestry:can:1#48a337d94489 -> forestry:ingot_tin + 1,000 mB
+  borax_solution`. So the tempting `X#d -> X` fill/empty test looks exact and catches 368
+  of 7,016. Detection is the two counting signals, compared on base keys, not a direction
+  test.
+- **Never build a link to an item by hand: use `htmlutil.item_href`.** 298,765 of 340,324
+  named keys carry a `#`, and a builder that encodes the colon but not the hash makes the
+  browser treat the discriminator as a URL fragment. The server then sees a truncated key
+  and answers "No item with that id", losing the `qty` in the discarded fragment too. It
+  reads as missing data rather than as a broken link, and when the base key happens to
+  exist it silently plans the wrong item instead of 404ing. `quote(safe="")`, always.
+- **Test link building as a property, not per call site.** "A correct href contains no bare
+  `#`, so what the browser sends is byte-identical to what the renderer wrote" needs no
+  list of valid keys, so it covers every builder including ones added later.
 
 ## Related
 

@@ -164,6 +164,60 @@ memory, which is why this is a long-running server rather than a per-request scr
 Pages reuse the same renderers as the CLI's `--html` flag, so there is one implementation
 of each view rather than a UI and an API drifting apart.
 
+## Running the UI on a server
+
+The UI is worth keeping up when the machine that plays Minecraft is off, so there is a
+`Dockerfile`. It is a plain `python:3.14-slim-trixie` with the package copied in and no
+install step, because the tool is stdlib only.
+
+```bash
+docker build -t minecraft-recipe-graph:local .
+
+docker run -d --name recipegraph \
+  -p 8765:8765 \
+  -v /srv/minecraft-recipe-graph/data:/data \
+  --user 99:100 \
+  --memory=4g --memory-swap=4g \
+  --restart unless-stopped \
+  minecraft-recipe-graph:local
+```
+
+Everything mutable lives in the one `/data` mount: `graph.json`, `ae2_have.json`, the
+machine and free-source overrides, the metrics DB and the cost cache. Nothing
+Minecraft-related needs to exist on the server.
+
+**The container binds `0.0.0.0` and that is not a relaxation of the rule above.** Binding
+the loopback default inside a container would make the server unreachable through its own
+published port, so the boundary moves outward to the port publish. There is still no
+authentication and the graph still exposes a live base's contents, so publish it to a LAN
+or to `127.0.0.1`, never to a public interface.
+
+`--user 99:100` is for UnRAID hosts, whose array shares expect `nobody:users`; drop or
+change it elsewhere. The health check allows a 180 second start period because loading a
+115 MB graph takes 40 to 90 seconds, and a shorter one restarts the container forever
+while it is doing exactly what it should.
+
+### Feeding it from the machine that plays
+
+Build on the box that has the pack, ship the result:
+
+```bash
+# on the gaming machine, after /recipedump
+recipegraph build --instance '<instance>/minecraft' --out data/graph.json
+recipegraph have  --regions '<world>/region/r.*.mca' --out data/ae2_have.json
+
+rsync -avz --partial data/graph.json data/ae2_have.json \
+      server:/srv/minecraft-recipe-graph/data/
+```
+
+`build` reads the ~410 mod jars and a ~165 MB `recipes.ndjson`, so it belongs where those
+already are. Shipping the built graph moves ~115 MB instead of several gigabytes of jars,
+and the server needs no copy of the pack.
+
+The server notices the file changed and says so; the **Reload** button picks it up without
+a restart. That button re-reads the graph and the stock file, it does not re-import Python,
+so a code change still needs a new image.
+
 ## The dump mod
 
 `mod/` is a client-side Forge mod adding one command, `/recipedump`. The dump is spread
