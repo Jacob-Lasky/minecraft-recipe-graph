@@ -68,6 +68,20 @@ def _prettify(registry_name):
                     for w in words) or registry_name
 
 
+def path_of(key):
+    """The registry path of a key: `mod:name`, `mod:name:3`, `mod:name#a3f19c` -> `name`.
+
+    What a key still says about an item once the modid, the meta and any NBT discriminator
+    are stripped, which is the ONLY human-readable thing it carries when no source named
+    the item. Shared by the display fallback in `Graph.bare_name` and by the unknown-item
+    page, which prefills its search box with this. That page used `key.split(":")[-1]`,
+    which handed `mod:thing:3` back as "3" and searched for the meta.
+    """
+    stem, _disc = split_discriminator(key)
+    base, _meta = split_key(stem)
+    return base.partition(":")[2] or base
+
+
 def is_unlocalized(label):
     """True when a label is Minecraft's unlocalized lang KEY rather than a name.
 
@@ -521,7 +535,7 @@ class Graph:
             # variable, not an item. 174 recipe-referenced keys land here. The full key is
             # still rendered beside the name in search rows and on the item page, so the
             # modid is not lost by prettifying.
-            label = _prettify(base.partition(":")[2] or base)
+            label = _prettify(path_of(base))
         return label if meta in (0, None) else "%s (%s)" % (label, meta)
 
     # Text prefixes, for the CLI and anything else without colour. `ore` reads "oredict"

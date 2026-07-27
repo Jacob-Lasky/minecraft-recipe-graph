@@ -153,6 +153,14 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertIn("No item with that id", body)
 
+    def test_the_unknown_item_page_prefills_the_name_not_the_meta(self):
+        """It prefilled with `key.split(":")[-1]`, so a 404 on `mod:thing:3` offered to
+        search for "3" -- the one page whose whole job is "search for it by name"."""
+        status, _c, body = self.get("/plan?item=mod%3Adoes_not_exist%3A3&qty=1")
+        self.assertEqual(status, 404)
+        self.assertIn("value='does_not_exist'", body)
+        self.assertNotIn("value='3'", body)
+
     def test_a_missing_item_parameter_does_not_500(self):
         self.assertEqual(self.get("/plan")[0], 400)
 

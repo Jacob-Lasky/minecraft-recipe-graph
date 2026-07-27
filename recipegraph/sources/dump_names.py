@@ -51,6 +51,14 @@ def load(path):
             continue
         # clean_label returns None for a name that was ONLY formatting, which is not a
         # name; dropping it lets the usual fallbacks render the key instead.
+        #
+        # DO NOT also drop unlocalized lang keys here (`tile.null.name`, 1,429 of them).
+        # It looks like the same cleanup and it is not: a dropped key is absent from
+        # `graph.names`, `Graph.labels` is built from `names`, and search is built from
+        # `labels`, so the item stops being findable at all. `model.is_unlocalized` plus
+        # `Graph.relabel_unlocalized` handle those by REPLACING the label and keeping the
+        # key. A format-only label can be dropped precisely because that path has other
+        # fallbacks; an item losing its only index entry has none. See #52.
         label = clean_label(value)
         if label:
             out[str(key)] = label

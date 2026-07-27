@@ -15,7 +15,7 @@ from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import (  # noqa: E402
     NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, is_unlocalized,
-    merge_slots, norm_key, split_discriminator,
+    merge_slots, norm_key, path_of, split_discriminator,
 )
 from recipegraph.names import resolve  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
@@ -437,6 +437,29 @@ class UnlocalizedNameTest(unittest.TestCase):
         """174 recipe-referenced keys have no name from any source. They used to render
         as a raw id next to properly-cased names."""
         self.assertEqual(Graph().bare_name("minecraft:scroll_buff"), "Scroll Buff")
+
+    def test_display_does_not_bracket_a_relabelled_item_as_a_non_item(self):
+        """`display` decides the `[fluid]`/`[oredict]` prefix by whether the key is in
+        `names`, so relabelling in place (rather than deleting) is what keeps an item
+        from suddenly reading as a bracketed type."""
+        g = Graph()
+        g.names = {"mod:thing": "tile.null.name"}
+        g.relabel_unlocalized()
+        self.assertEqual(g.display("mod:thing"), "Thing")
+        # And a key no source ever named still gets no bogus type prefix.
+        self.assertEqual(Graph().display("mod:thing"), "Thing")
+        # while a genuine non-item keeps the prefix it has always had
+        self.assertEqual(Graph().display("fluid:boric_acid"), "[fluid] Boric Acid")
+
+    def test_path_of_strips_modid_meta_and_discriminator(self):
+        self.assertEqual(path_of("mod:thing"), "thing")
+        self.assertEqual(path_of("mod:thing:3"), "thing")
+        self.assertEqual(path_of("mod:thing:*"), "thing")
+        self.assertEqual(path_of("mod:thing#a3f19c02b8d1"), "thing")
+        self.assertEqual(path_of("mod:thing:3#a3f19c02b8d1"), "thing")
+        self.assertEqual(path_of("fluid:boric_acid"), "boric_acid")
+        # No colon at all: the whole string is the path, not an empty one.
+        self.assertEqual(path_of("thing"), "thing")
 
     def test_loading_a_graph_json_relabels_without_a_rebuild(self):
         """The fix has to reach the 115 MB file already on disk: rebuilding needs the game
