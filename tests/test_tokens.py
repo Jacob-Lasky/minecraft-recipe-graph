@@ -5,6 +5,7 @@ a "From Battle Tower Loot" as though they were two materials to gather, when the
 instruction with two sources.
 """
 
+import io
 import json
 import os
 import sys
@@ -283,8 +284,16 @@ class TokensCommandTest(unittest.TestCase):
         self.ov = os.path.join(tempfile.mkdtemp(), "tokens.json")
 
     def _run(self, **kw):
+        """Stdout captured: the listing is the command's whole point and printing it into
+        the suite output buries every other test's failure message."""
         from recipegraph import cli
-        return cli.cmd_tokens(self.Args(graph=self.path, file=self.ov, **kw))
+        buf, err = io.StringIO(), io.StringIO()
+        stdout, stderr = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = buf, err
+        try:
+            return cli.cmd_tokens(self.Args(graph=self.path, file=self.ov, **kw))
+        finally:
+            sys.stdout, sys.stderr = stdout, stderr
 
     def test_a_bad_kind_is_refused_rather_than_written(self):
         # Writing it would put a key in the file that `resolve` then silently drops, so the
