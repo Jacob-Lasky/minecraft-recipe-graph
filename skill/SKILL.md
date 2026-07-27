@@ -141,6 +141,25 @@ nothing else, and CI stays stdlib-only.
 `§3Abyssalnite Axe`. `dump_names.load` cleans them now, the same way `load_items_csv`
 always did; if a new name source appears it needs `clean_label` too.
 
+**`getDisplayName()` also returns unlocalized lang keys.** 1,429 names arrived as
+`tile.null.name` and similar, which is what the game draws for a block whose mod shipped no
+lang entry. 268 of them were the SAME string, so 268 unrelated items rendered identically
+and a plan said "build tile.null.name". `model.is_unlocalized` recognises the shape and
+`Graph.relabel_unlocalized` swaps in the prettified registry path. It runs from
+`Graph.load` and from `index.build` (after every name source merges, before
+`oredict.guess_from_names` reads a name); a third way of populating `names` has to call it
+too. It RELABELS and never deletes: `Graph.labels` is built from `names` and search is
+built from `labels`, so dropping the key would make the item unfindable.
+
+**261 Modular Machinery blueprints share one legitimate name.** Separate problem from the
+above, and still open: every `modularmachinery:itemblueprint#<digest>` is called "Machine
+Blueprint", so a plan says "craft a Machine Blueprint" without saying which of 261 machines
+it builds. Deriving the name from the recipe the blueprint feeds looks like the answer,
+255 of the 261 map to exactly one output, but that rule is unsafe in general: the same
+shape names `bloodmagic:blood_tank:12#…` "Rite of Super-Enchanting" (it is a reagent
+container, not a rite) and a `tinker_io:crushed_ore` variant "Pure Metal". The machine id
+lives in the blueprint's NBT, so the fix is dump-side.
+
 **A multi-column table cannot be 390px wide.** The machines table rendered 1,424px. Rows
 become cards below 700px, ordered by the `c-` classes on each cell. Those classes are the
 contract between the row template and the card CSS, and `tests/test_server.py` asserts it

@@ -27,7 +27,7 @@ from . import machines as machines_mod
 from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES
 from .htmlutil import esc as _esc
 from .htmlutil import item_href, machine_href
-from .model import Graph
+from .model import Graph, path_of
 from .names import build_reverse
 from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, kind_chip_json)
 from .render import CSS, kind_chip, render_explore_html, render_html
@@ -1301,7 +1301,7 @@ class Handler(BaseHTTPRequestHandler):
                         "<form class='search' method='get' action='/'>"
                         "<input type='search' name='q' value='%s' autofocus>"
                         "<button type='submit'>Search</button></form></div>"
-                        % (_nav(), _esc(key), _esc(key.split(":")[-1]))), 404)
+                        % (_nav(), _esc(key), _esc(path_of(key)))), 404)
                 with st.lock:
                     result = st.solver().solve(key, qty)
                 title = "%s x%d" % (result["target_name"], qty)

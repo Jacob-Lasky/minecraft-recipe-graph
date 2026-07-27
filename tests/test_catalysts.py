@@ -299,6 +299,20 @@ class DiscriminatedStackTest(unittest.TestCase):
         g = index.build(inst, quiet=True)
         self.assertEqual(g.names.get("forestry:bee_drone_ge#a3f19c02b8d1"), "Forest Drone")
 
+    def test_a_dumped_lang_key_is_relabelled_on_the_way_into_the_graph(self):
+        """#52. `index.build` is the other way `names` gets populated, so it has to run
+        the same pass `Graph.load` does, and it has to run it AFTER both name sources are
+        merged."""
+        inst = tempfile.mkdtemp()
+        dump = os.path.join(inst, "mc-recipe-dump")
+        os.makedirs(dump)
+        with open(os.path.join(dump, "names.json"), "w") as fh:
+            json.dump({"modularmachinery:safe_fission_hep239_controller": "tile.null.name"},
+                      fh)
+        g = index.build(inst, quiet=True)
+        self.assertEqual(g.names["modularmachinery:safe_fission_hep239_controller"],
+                         "Safe Fission Hep239 Controller")
+
     def test_dumped_names_have_their_format_codes_stripped(self):
         """`getDisplayName()` returns what the game DRAWS, section signs and all, so
         14,425 of 340,324 names on the reference pack arrived as `\u00a73Abyssalnite Axe`

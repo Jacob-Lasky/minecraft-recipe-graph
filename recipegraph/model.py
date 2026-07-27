@@ -68,6 +68,45 @@ def _prettify(registry_name):
                     for w in words) or registry_name
 
 
+def path_of(key):
+    """The registry path of a key: `mod:name`, `mod:name:3`, `mod:name#a3f19c` -> `name`.
+
+    What a key still says about an item once the modid, the meta and any NBT discriminator
+    are stripped, which is the ONLY human-readable thing it carries when no source named
+    the item. Shared by the display fallback in `Graph.bare_name` and by the unknown-item
+    page, which prefills its search box with this. That page used `key.split(":")[-1]`,
+    which handed `mod:thing:3` back as "3" and searched for the meta.
+    """
+    stem, _disc = split_discriminator(key)
+    base, _meta = split_key(stem)
+    return base.partition(":")[2] or base
+
+
+def is_unlocalized(label):
+    """True when a label is Minecraft's unlocalized lang KEY rather than a name.
+
+    `tile.null.name` is what the game renders for a block whose mod shipped no lang entry,
+    and `getDisplayName()` hands it back as if it were a name. It is not one. Measured on
+    the reference pack: 1,429 of 340,324 labels have this shape, and 268 of them are the
+    identical string `tile.null.name`, so 268 unrelated items -- including all eight
+    Modular Machinery fission controllers -- render as the same three words. See #52.
+
+    Shape: dot-separated, no spaces, ending in `.name`. DO NOT tighten this to a
+    `tile.`/`item.` prefix: the leading segment is also `parttype` (39 labels),
+    `fluid` (3) and a bare modid, and those are just as unusable. The no-space test is
+    load-bearing in the other direction -- `Spawn entity.blackfrost.name` is the one label
+    that ends in `.name` and contains a space, it is half localized, and keeping it beats
+    replacing it with a registry path.
+
+    Sibling of `names.clean_label`, which drops a label that was ONLY colour codes. Same
+    job, opposite module, and they cannot merge: `names` imports `model`. If you add a
+    third "is this label real" rule, put it in one of these two, not a new place.
+    """
+    if not label:
+        return False
+    return label.endswith(".name") and " " not in label and label.count(".") >= 2
+
+
 _DIGEST = re.compile(r"^[0-9a-f]{12}$")
 
 
@@ -488,10 +527,16 @@ class Graph:
                 return label % pretty
             return "%s (%s)" % (label, pretty)
         base, meta = split_key(key)
-        if base in self.names:
-            return (self.names[base] if meta in (0, None)
-                    else "%s (%s)" % (self.names[base], meta))
-        return key
+        label = self.names.get(base)
+        if label is None:
+            # Nothing named this item, so its registry path is the only thing left that
+            # identifies it -- the same treatment a fluid gets above, for the same reason:
+            # `minecraft:scroll_buff` sitting raw next to properly-cased names reads as a
+            # variable, not an item. 174 recipe-referenced keys land here. The full key is
+            # still rendered beside the name in search rows and on the item page, so the
+            # modid is not lost by prettifying.
+            label = _prettify(path_of(base))
+        return label if meta in (0, None) else "%s (%s)" % (label, meta)
 
     # Text prefixes, for the CLI and anything else without colour. `ore` reads "oredict"
     # rather than "ore" because it means "any member of", not "an ore".
@@ -508,6 +553,39 @@ class Graph:
         if key in self.names:
             return name
         return self.KIND_PREFIX.get(self.kind(key), "") + name
+
+    def relabel_unlocalized(self):
+        """Replace every label that is only an unlocalized lang key. Returns how many.
+
+        Rewrites `names` itself rather than filtering at display time, because ONE pass
+        then fixes every consumer at once: the search index (`labels` is built from
+        `names`), name -> key lookup (`names.build_reverse`, which otherwise resolves the
+        string "tile.null.name" to 268 unrelated items), the CLI, and every HTML surface.
+        Handling it inside `bare_name` alone would leave all of those still reading the
+        junk. See #52.
+
+        The keys are KEPT, only relabelled. Deleting them -- which is the tidier-looking
+        fix, and the one #52 proposed -- would drop each item out of `labels` and so out of
+        search entirely, which is worse than an ugly name.
+
+        TWO passes, and they must stay two: a discriminated key takes its stem's name, so
+        every unlocalized label has to be gone before any replacement is computed, or the
+        result would depend on dict iteration order.
+
+        Callers: `Graph.load` and `index.build`, which are the only two ways `names` gets
+        populated. A third one has to call this too.
+        """
+        junk = [k for k, v in self.names.items() if is_unlocalized(v)]
+        if not junk:
+            return 0
+        for key in junk:
+            del self.names[key]
+        for key in junk:
+            self.names[key] = self.bare_name(key)
+        # Only `_labels` is actually stale, but `_invalidate` is the one sanctioned place
+        # that knows the list of derived indexes, and the rest rebuild lazily.
+        self._invalidate()
+        return len(junk)
 
     def referenced_ores(self):
         """Ore names actually used as an input by some recipe."""
@@ -548,4 +626,8 @@ class Graph:
         g.category_mods = d.get("category_mods") or {}
         g.dump_schema = d.get("dump_schema") or 0
         g.instance_dir = d.get("instance_dir")
+        # Here rather than only in `index.build`, so an ALREADY BUILT graph.json is fixed
+        # without a rebuild. Rebuilding needs the game running and a fresh dump; the 115 MB
+        # file on disk is what every surface reads today.
+        g.relabel_unlocalized()
         return g
