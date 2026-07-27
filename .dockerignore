@@ -18,6 +18,10 @@ docs/
 skill/
 tools/
 
+node_modules/
+package.json
+pnpm-lock.yaml
+
 **/__pycache__/
 **/*.pyc
 *.md
