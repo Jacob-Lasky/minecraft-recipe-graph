@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph.model import (  # noqa: E402
-    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, norm_key,
-    split_discriminator,
+    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, merge_slots,
+    norm_key, split_discriminator,
 )
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
@@ -223,6 +223,33 @@ def _grid_graph():
     return g
 
 
+class TestMergeSlots(unittest.TestCase):
+    """The shared collapse both the solver and the item page are built on."""
+
+    def test_it_returns_the_first_slot_of_each_group(self):
+        first = Ingredient(["mod:clump"], 1, role="item")
+        rows = merge_slots([first, Ingredient(["mod:clump"], 2)],
+                           lambda i: tuple(i.alternatives))
+        self.assertEqual(len(rows), 1)
+        key, ing, qty, options = rows[0]
+        self.assertEqual(key, ("mod:clump",))
+        self.assertIs(ing, first, "the group's row describes its first slot")
+        self.assertEqual((qty, options), (3, 1))
+
+    def test_order_is_first_appearance(self):
+        rows = merge_slots([Ingredient(["b"], 1), Ingredient(["a"], 1),
+                            Ingredient(["b"], 1)], lambda i: tuple(i.alternatives))
+        self.assertEqual([r[0] for r in rows], [("b",), ("a",)])
+
+    def test_no_inputs_is_no_rows(self):
+        self.assertEqual(merge_slots([], lambda i: i), [])
+
+    def test_the_widest_slot_sets_the_option_count(self):
+        rows = merge_slots([Ingredient(["a"], 1), Ingredient(["a", "b", "c"], 1)],
+                           lambda i: i.alternatives[0])
+        self.assertEqual(rows[0][3], 3)
+
+
 class TestSlotMerging(unittest.TestCase):
     """Slots resolving to the same thing collapse into one node (#24).
 
@@ -295,6 +322,21 @@ class TestSlotMerging(unittest.TestCase):
         self.assertEqual(kid["need"], 2)
         self.assertEqual(kid["alt_count"], 3,
                          "the merged node must not inherit the first slot's count of 1")
+
+    def test_stock_for_one_slot_does_not_satisfy_nine_of_them(self):
+        """`score_recipe` counted a satisfied INGREDIENT once per slot.
+
+        With one clump in stock, nine slots asking for one clump each all read as
+        satisfied, so a recipe the pool could barely start outranked one it could
+        finish.
+        """
+        g = _grid_graph()
+        # Two routes to a plate: nine clumps (one in stock) or two rods (both in stock).
+        g.add(Recipe("nine", "t", [("mod:plate", 1)],
+                     [Ingredient(["mod:clump"], 1) for _ in range(9)]))
+        g.add(Recipe("two", "t", [("mod:plate", 1)], [Ingredient(["mod:rod"], 2)]))
+        res = Solver(g, have={"mod:clump": 1, "mod:rod": 2}).solve("mod:plate", 1)
+        self.assertEqual(res["tree"]["recipe"], "two")
 
     def test_a_single_option_slot_carries_no_alternative_count(self):
         kid = Solver(_grid_graph()).solve("mod:ingot", 1)["tree"]["children"][0]

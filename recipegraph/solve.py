@@ -177,15 +177,19 @@ class Solver:
         """
         satisfied = 0
         cyclic = 0
-        for ing in recipe.inputs:
-            alt = self.pick_alternative(ing)
-            if (self.available(alt) >= ing.qty or alt in self.craftables
+        # Scored on MERGED slots, the same view `_build` will expand. Per slot, nine cells
+        # asking for one clump each read as nine satisfied ingredients when stock held a
+        # single clump, and a 3x3 of one thing looked three times less simple than a
+        # recipe taking three different things.
+        slots = self._merge_slots(recipe)
+        for alt, qty, _options in slots:
+            if (self.available(alt) >= qty or alt in self.craftables
                     or alt in self.free_sources):
                 satisfied += 1
-            if alt in ancestors and self.available(alt) < ing.qty:
+            if alt in ancestors and self.available(alt) < qty:
                 cyclic += 1
-        # simplicity tiebreak: fewer inputs, and prefer plain crafting over machines
-        simple = 1.0 / (1 + len(recipe.inputs))
+        # simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines
+        simple = 1.0 / (1 + len(slots))
         plain = 0.1 if is_hand_crafting(recipe.category) else 0.0
         avail = self.availability_rank(recipe)
         # A container fill/empty never counts as production, so it loses to any real
@@ -377,6 +381,10 @@ class Solver:
 
     def _merge_slots(self, recipe):
         """Input slots collapsed onto what each one RESOLVES to. See model.merge_slots.
+
+        The one view of a recipe's ingredients this class has: `score_recipe` ranks the
+        recipe by it and `_build` expands it, so the two cannot disagree about how many
+        ingredients there are.
 
         Expanding a 3x3 of one ingredient per slot drew nine copies of an identical
         subtree, which is nine times the nodes at every such step -- the node cap was
