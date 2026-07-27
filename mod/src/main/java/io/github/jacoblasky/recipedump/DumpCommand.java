@@ -345,7 +345,11 @@ public class DumpCommand extends CommandBase {
                     "%s skipped, all recorded in skipped.ndjson (per-category counts in summary.json)",
                     formatCount(failed)));
             // The files are useless on their own, and in-game chat is the only place the
-            // player is looking at this moment, so name the next two steps and the URL.
+            // player is looking at this moment, so name the next step and the URL.
+            //
+            // ONE step, not two: `serve` builds the graph itself when the dump is newer,
+            // so telling anyone to run `build` first is telling them to do work the tool
+            // already did. Keep this in step with cli.ensure_graph.
             //
             // The port matches recipegraph.server.DEFAULT_PORT; it cannot be shared across
             // the language boundary, so changing one means grepping 8765 for the others.
@@ -354,8 +358,8 @@ public class DumpCommand extends CommandBase {
             // planner is a separate program that may not be installed or running, and
             // pointing at a dead URL is worse than saying nothing. DO NOT reduce this to
             // just the link.
-            reply(sender, "next: run `recipegraph build` to load these, then "
-                    + "`recipegraph serve` and open http://localhost:8765");
+            reply(sender, "next: run `recipegraph serve` and open http://localhost:8765 "
+                    + "-- it will load this dump on the way up");
         }
     }
 

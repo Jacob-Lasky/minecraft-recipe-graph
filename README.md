@@ -148,8 +148,13 @@ recipegraph serve            # http://127.0.0.1:8765
 ```
 
 Search for an item, click it, get the plan. Also a Machines page where availability can be
-toggled per category with one click, and a Coverage page. Stdlib `http.server` only, no
-Flask and no pip.
+toggled per category with one click, a Sources page for the resources a generator makes
+free, and a Coverage page. Stdlib `http.server` only, no Flask and no pip.
+
+**This is the only step after a dump.** `serve` builds the graph itself when there isn't
+one or the dump is newer, and the graph remembers the instance it came from, so step 2
+above is only needed when you want to control how it is built (`--no-guess`, a different
+`--out`) or to see the coverage report as it runs.
 
 Bound to **127.0.0.1** deliberately: the graph exposes the contents of a live base and
 there is no authentication, so widening it to `--host 0.0.0.0` has to be an explicit
