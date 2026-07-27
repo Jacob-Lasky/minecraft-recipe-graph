@@ -92,6 +92,35 @@ def load_overrides(path):
     }
 
 
+# Substrings that make a placed block worth OFFERING as a source. A prompt, never a
+# claim: nothing is added until the user names what it produces. Deliberately not "well"
+# or "gen" -- those match jewellery and generic machinery, and a candidate list full of
+# noise is one nobody reads.
+GENERATOR_HINTS = ("source", "generator", "condensator", "accumulator", "spring",
+                   "wellspring", "collector", "aggregator")
+
+
+def candidates(placed, overrides=None):
+    """Placed blocks that look like generators and are not on the list yet.
+
+    Nobody knows the registry name of the block they built, which is why the CLI's
+    `--add <block id>=<key>` was unusable in practice. The world scan already knows every
+    tile entity, so the ids can be offered instead of recalled. Name-shaped, so it is a
+    prompt and not a claim: the OUTPUT still has to be stated by hand, because nothing in
+    the graph says what an input-free block emits -- that is the whole reason this file
+    is a curated list.
+    """
+    ov = overrides if isinstance(overrides, dict) else load_overrides(overrides)
+    known = set(DEFAULT_GENERATORS) | set(ov.get("generators") or {})
+    out = []
+    for block, n in sorted(placed.items()):
+        if not n or block in known:
+            continue
+        if any(h in str(block).lower() for h in GENERATOR_HINTS):
+            out.append(block)
+    return out
+
+
 def save_overrides(path, generators=None, disabled=(), vanilla_water=True):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as fh:

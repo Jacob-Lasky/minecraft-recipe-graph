@@ -21,7 +21,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import machines, server  # noqa: E402
+from recipegraph import generators, machines, server  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 
 
@@ -260,6 +260,78 @@ class ServerTest(unittest.TestCase):
             _status, loc = self.post({"uid": "mod.press", "state": machines.HAVE,
                                       "back": hostile})
             self.assertTrue(loc.startswith("/machines?"), "%s -> %s" % (hostile, loc))
+
+    # ---- editing infinite sources (#17) ----
+
+    def source_post(self, fields):
+        status, loc = self.post(fields, path="/sources")
+        self.assertEqual(status, 303)
+        return urllib.parse.unquote(loc.partition("m=")[2])
+
+    def test_the_page_explains_a_source_before_telling_you_how_to_add_one(self):
+        body = self.get("/sources")[2]
+        self.assertIn("emits a resource from no inputs", body)
+        self.assertNotIn("recipegraph sources --add", body,
+                         "the CLI syntax with two unexplained placeholders is what "
+                         "made this unusable")
+
+    def test_a_source_can_be_added_and_removed_from_the_page(self):
+        try:
+            msg = self.source_post({"do": "add", "block": "mod:press",
+                                    "key": "fluid:water"})
+            self.assertIn("now makes", msg)
+            self.assertEqual(
+                self.state.source_overrides["generators"]["mod:press"], ["fluid:water"])
+            self.assertIn("mod:press", self.get("/sources")[2])
+            self.assertIn("removed", self.source_post({"do": "forget",
+                                                       "block": "mod:press"}))
+            self.assertNotIn("mod:press", self.state.source_overrides["generators"])
+        finally:
+            self.source_post({"do": "forget", "block": "mod:press"})
+
+    def test_a_typo_is_refused_rather_than_silently_making_nothing_free(self):
+        msg = self.source_post({"do": "add", "block": "mod:press", "key": "mod:nonsense"})
+        self.assertIn("no item or fluid", msg)
+        self.assertNotIn("mod:press", self.state.source_overrides["generators"])
+
+    def test_disabling_a_source_removes_it_from_what_is_free(self):
+        self.assertIn("fluid:water", self.state.free_sources)
+        try:
+            self.source_post({"do": "disable", "key": "fluid:water"})
+            self.assertNotIn("fluid:water", self.state.free_sources)
+            self.source_post({"do": "enable", "key": "fluid:water"})
+            self.assertIn("fluid:water", self.state.free_sources)
+        finally:
+            self.source_post({"do": "enable", "key": "fluid:water"})
+
+    def test_vanilla_water_is_a_visible_switch(self):
+        try:
+            self.assertIn("vanilla infinite water off",
+                          self.source_post({"do": "vanilla"}))
+            self.assertFalse(self.state.source_overrides["vanilla_water"])
+            self.assertIn("vanilla infinite water on",
+                          self.source_post({"do": "vanilla"}))
+        finally:
+            if not self.state.source_overrides["vanilla_water"]:
+                self.source_post({"do": "vanilla"})
+
+    def test_an_unknown_action_changes_nothing(self):
+        before = dict(self.state.source_overrides["generators"])
+        self.assertEqual(self.source_post({"do": "drop_table"}), "")
+        self.assertEqual(self.state.source_overrides["generators"], before)
+
+    def test_placed_blocks_are_offered_as_candidates(self):
+        # Nobody knows the registry name of the block they built; the world scan does.
+        self.assertEqual(
+            generators.candidates({"mod:lava_source": 1, "minecraft:chest": 4}, {}),
+            ["mod:lava_source"])
+        self.assertEqual(
+            generators.candidates({"nuclearcraft:water_source": 1}, {}), [],
+            "a built-in generator is already handled, not a candidate")
+        self.assertEqual(
+            generators.candidates({"mod:lava_source": 1},
+                                  {"generators": {"mod:lava_source": ["fluid:lava"]}}),
+            [], "and neither is one you already added")
 
     # ---- staleness ----
 

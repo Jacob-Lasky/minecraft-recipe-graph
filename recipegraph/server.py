@@ -440,8 +440,12 @@ class State:
             no_machine=machines_mod.load_no_machine(self.machines_path))
         self.states = {uid: (i["state"], i["why"])
                        for uid, i in self.machine_info.items()}
+        # Kept on the State, not resolved inline: /sources renders the raw overrides too
+        # (what you disabled, whether vanilla water is on), and re-reading the file per
+        # request would let the page disagree with the costs computed from it.
+        self.source_overrides = generators_mod.load_overrides(self.sources_path)
         self.free_sources = generators_mod.resolve(
-            self.placed, self.have, generators_mod.load_overrides(self.sources_path))
+            self.placed, self.have, self.source_overrides)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
@@ -938,37 +942,134 @@ def machine_page(state, uid):
     return _page(info["title"] or uid, body), 200
 
 
-def sources_page(state):
-    """What the planner treats as free, and on what evidence."""
+def _source_button(action, label, title, **fields):
+    """One POST button on /sources. Same shape as the machine toggle, one implementation."""
+    hidden = "".join("<input type='hidden' name='%s' value='%s'>" % (k, _esc(v))
+                     for k, v in fields.items())
+    return ("<form method='post' action='/sources'>"
+            "<input type='hidden' name='do' value='%s'>%s"
+            "<button type='submit' title='%s'>%s</button></form>"
+            % (action, hidden, _esc(title), _esc(label)))
+
+
+SOURCES_JS = """
+(function(){
+ // Typeahead into a datalist rather than a custom popup: the browser already does the
+ // filtering, the keyboard handling and the accessibility, and this field is used once
+ // in a while rather than constantly like the main search.
+ var box=document.getElementById('okey'), list=document.getElementById('okeys'), t=null;
+ if(box&&list){
+   box.addEventListener('input',function(){
+     var q=box.value.trim();
+     clearTimeout(t);
+     if(q.length<2)return;
+     t=setTimeout(function(){
+       fetch('/suggest?q='+encodeURIComponent(q))
+         .then(function(r){return r.json();})
+         .then(function(d){
+           list.innerHTML=(d.results||[]).map(function(it){
+             return '<option value="'+it.key.replace(/"/g,'&quot;')+'">'
+               +String(it.name).replace(/[<&"]/g,'')+'</option>';
+           }).join('');
+         }).catch(function(){});
+     },140);
+   });
+ }
+ // A candidate chip fills the block field and moves you to the part only you can answer.
+ document.querySelectorAll('button[data-block]').forEach(function(b){
+   b.addEventListener('click',function(){
+     document.getElementById('oblock').value=b.dataset.block;
+     if(box)box.focus();
+   });
+ });
+})();
+"""
+
+
+def sources_page(state, message=""):
+    """What the planner treats as free, on what evidence, and how to change it."""
+    ov = state.source_overrides
     rows = "".join(
         "<tr><td><a class='mname' href='/plan?item=%s&qty=1'>%s</a><br><code>%s</code></td>"
-        "<td class='hint2' style='margin:0'>%s</td></tr>"
-        % (urllib.parse.quote(key), _item(state.graph, key), _esc(key), _esc(why))
+        "<td class='hint2' style='margin:0'>%s</td>"
+        "<td><div class='acts'>%s</div></td></tr>"
+        % (urllib.parse.quote(key), _item(state.graph, key), _esc(key), _esc(why),
+           _source_button("disable", "not free", "stop treating this as free", key=key))
         for key, why in sorted(state.free_sources.items()))
-    known = sorted(generators_mod.DEFAULT_GENERATORS)
-    unmatched = "".join(
-        "<li><span class='c'></span><code>%s</code></li>" % _esc(b)
-        for b in known if b not in state.placed and b not in state.have)
+
+    disabled = "".join(
+        "<li><span class='grow'>%s</span><code>%s</code>%s</li>"
+        % (_item(state.graph, key), _esc(key),
+           _source_button("enable", "restore", "treat this as free again", key=key))
+        for key in sorted(ov.get("disabled") or ()))
+
+    mine = ov.get("generators") or {}
+    added = "".join(
+        "<li><span class='grow'><code>%s</code> &rarr; %s</span>%s</li>"
+        % (_esc(block), ", ".join(_item(state.graph, k) for k in outs),
+           _source_button("forget", "remove", "remove this generator", block=block))
+        for block, outs in sorted(mine.items()))
+
+    cands = generators_mod.candidates(state.placed, ov)
+    chips = "".join(
+        "<button class='chip-btn' type='button' data-block='%s'>%s</button>" % (_esc(b), _esc(b))
+        for b in cands[:24])
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Infinite sources</div>
   <h1>What costs you nothing<span class="x">%d</span></h1>
-  <div class="hint2">A resource here is treated as effectively free, so plans stop
-   reconstructing it from exotic chains. Draw is still counted and reported on every plan
-   &mdash; free does not mean invisible.</div>
+  <div class="hint2">An infinite source is a block that emits a resource from no inputs
+   &mdash; a water source, a cobblestone generator. Because it has no recipe, a recipe
+   graph cannot find it, so this is a list rather than a search. Anything on it is priced
+   as effectively free, which is what stops a plan rebuilding water out of 71 snowballs.
+   Draw is still counted and reported on every plan: free does not mean invisible.%s</div>
   <div class="card"><h2><span>Free right now</span></h2>
     <table class="mach">%s</table></div>
-  <div class="card"><h2><span>Known generators not in this world</span>
-    <span class="c">%d</span></h2>
-    <div class="hint2" style="margin:0 0 10px">Detection is a curated list, not a search:
-     an input-free block has no recipe, so a recipe graph cannot find it. Add yours with
-     <code>recipegraph sources --add &lt;block id&gt;=&lt;item or fluid key&gt;</code>.</div>
+
+  <div class="card"><h2><span>Add a source</span></h2>
+    <div class="hint2" style="margin:0 0 12px">Name the block you built and the resource
+     it makes. The output has to be stated by hand for the same reason the list exists:
+     nothing in the graph says what an input-free block emits.</div>
+    <form class="search" method="post" action="/sources">
+      <input type="hidden" name="do" value="add">
+      <input id="oblock" name="block" type="search" placeholder="Block id, e.g. nuclearcraft:water_source"
+             list="pblocks" autocomplete="off" spellcheck="false" required>
+      <datalist id="pblocks">%s</datalist>
+      <input id="okey" name="key" type="search" placeholder="Makes&hellip; water, cobblestone"
+             list="okeys" autocomplete="off" spellcheck="false" required>
+      <datalist id="okeys"></datalist>
+      <button type="submit">Add</button>
+    </form>
+    %s
+  </div>
+
+  <div class="card"><h2><span>Yours</span><span class="c">%d</span></h2>
     <ul class="klist">%s</ul></div>
-</div>""" % (
+  <div class="card"><h2><span>Switched off</span><span class="c">%d</span></h2>
+    <div class="hint2" style="margin:0 0 10px">These stay off whatever the world says, and
+     survive a rebuild.</div>
+    <ul class="klist">%s</ul></div>
+  <div class="card"><h2><span>Vanilla infinite water</span></h2>
+    <div class="hint2" style="margin:0 0 10px">Two source blocks and a bucket give
+     unlimited water in a default 1.12.2 world. It is a claim about this pack rather than
+     a sighting, so it is a switch: currently <b>%s</b>.</div>
+    %s</div>
+</div>
+<script>%s</script>""" % (
         _nav("/sources", state), len(state.free_sources),
-        rows or "<tr class='empty-row'><td colspan='2'>Nothing detected.</td></tr>",
-        sum(1 for b in known if b not in state.placed and b not in state.have),
-        unmatched or "<li class='hint2'>All known generators are present.</li>",
+        (" <b>%s</b>" % _esc(message)) if message else "",
+        rows or "<tr class='empty-row'><td colspan='3'>Nothing detected.</td></tr>",
+        "".join("<option value='%s'>" % _esc(b) for b in sorted(state.placed)),
+        ("<div class='hint2' style='margin:12px 0 0'>Placed in your world and not on the "
+         "list yet:</div><div class='chips' style='margin:8px 0 0'>%s</div>" % chips)
+        if chips else "",
+        len(mine), added or "<li class='hint2'>Nothing added by hand yet.</li>",
+        len(ov.get("disabled") or ()),
+        disabled or "<li class='hint2'>Nothing switched off.</li>",
+        "on" if ov.get("vanilla_water", True) else "off",
+        _source_button("vanilla", "switch off" if ov.get("vanilla_water", True) else "switch on",
+                       "this pack does or does not have infinite water"),
+        SOURCES_JS,
     )
     return _page("Infinite sources", body)
 
@@ -1075,7 +1176,7 @@ class Handler(BaseHTTPRequestHandler):
                 page, status = machine_page(st, one("uid"))
                 return self._send(page, status)
             if parts.path == "/sources":
-                return self._send(sources_page(st))
+                return self._send(sources_page(st, one("m")))
             if parts.path == "/stats":
                 return self._send(stats_page(st))
             if parts.path == "/favicon.ico":
@@ -1096,13 +1197,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(_page("Not found", "<div class='wrap'><h1>Not found</h1>"
                          "<p><a href='/'>Back to search</a></p></div>"), 404)
 
+    def _redirect(self, back, msg=""):
+        """303 back to where the form was submitted from, carrying a one-line result."""
+        sep = "&" if "?" in back else "?"
+        self.send_response(303)
+        self.send_header("Location", "%s%sm=%s" % (back, sep, urllib.parse.quote(msg)))
+        self.end_headers()
+
     def do_POST(self):
         parts = urllib.parse.urlparse(self.path)
-        if parts.path not in ("/machines", "/reload"):
+        if parts.path not in ("/machines", "/reload", "/sources"):
             return self._send("", 404)
         length = int(self.headers.get("Content-Length") or 0)
         form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
         st = self.state
+        if parts.path == "/sources":
+            return self._redirect("/sources", self._edit_sources(form))
         if parts.path == "/reload":
             # Blocking on purpose: loading a 72 MB graph takes tens of seconds, and doing it
             # in the background while still serving the old one would mean the page you land
@@ -1134,10 +1244,59 @@ class Handler(BaseHTTPRequestHandler):
                 # plans would rank against stale availability.
                 st.refresh_machines()
             msg = "%s set to %s" % (uid, target)
-        sep = "&" if "?" in back else "?"
-        self.send_response(303)
-        self.send_header("Location", "%s%sm=%s" % (back, sep, urllib.parse.quote(msg)))
-        self.end_headers()
+        self._redirect(back, msg)
+
+    def _edit_sources(self, form):
+        """Apply one /sources form action and return the line to show. Never raises.
+
+        Same POST-then-refresh-then-303 shape as the machine toggle, because it is the
+        same kind of thing: a user judgement the world scan cannot make. Costs are
+        recomputed inside the lock -- an infinite source changes what every plan prefers,
+        so leaving the cost table behind would rank against the old answer.
+        """
+        st = self.state
+        action = (form.get("do") or [""])[0]
+        key = (form.get("key") or [""])[0].strip()
+        block = (form.get("block") or [""])[0].strip()
+        ov = st.source_overrides
+        gens = dict(ov.get("generators") or {})
+        off = set(ov.get("disabled") or ())
+        water = ov.get("vanilla_water", True)
+
+        if action == "add":
+            if not block or not key:
+                return "give both a block id and what it makes"
+            if key not in st.graph.names and not st.graph.producers(key) \
+                    and not key.startswith("fluid:"):
+                # A typo would silently make nothing free, which looks identical to the
+                # feature not working.
+                return "no item or fluid called %s -- pick one from the list" % key
+            gens.setdefault(block, [])
+            if key in gens[block]:
+                return "%s already makes %s" % (block, key)
+            gens[block] = gens[block] + [key]
+            msg = "%s now makes %s" % (block, key)
+        elif action == "forget" and block:
+            if block not in gens:
+                return "%s was not added by hand" % block
+            del gens[block]
+            msg = "removed %s" % block
+        elif action == "disable" and key:
+            off.add(key)
+            msg = "%s is no longer treated as free" % key
+        elif action == "enable" and key:
+            off.discard(key)
+            msg = "%s can be free again" % key
+        elif action == "vanilla":
+            water = not water
+            msg = "vanilla infinite water %s" % ("on" if water else "off")
+        else:
+            return ""
+
+        with st.lock:
+            generators_mod.save_overrides(st.sources_path, gens, off, water)
+            st.refresh_machines()
+        return msg
 
 
 def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
