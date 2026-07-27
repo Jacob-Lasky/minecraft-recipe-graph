@@ -24,7 +24,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import fixtures  # noqa: E402
-from recipegraph import generators, graphview, index, machines, server  # noqa: E402
+from recipegraph import generators, graphview, index, machines, render, server  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
@@ -83,6 +83,29 @@ class ServerTest(unittest.TestCase):
             status, ctype, _body = self.get(href)
             self.assertEqual(status, 200, href)
             self.assertIn("text/html", ctype, href)
+
+    def test_every_machines_cell_carries_its_card_class(self):
+        """The markup half of the phone-layout contract; the CSS half is in
+        MobileLayoutTest. Rendered, not asserted against a constant, so a change to the
+        row template cannot pass by updating the constant alongside it."""
+        self._assert_cell_classes("/machines",
+                                  ("c-state", "c-name", "c-recipes", "c-why", "c-acts"))
+
+    def test_every_sources_cell_carries_its_card_class(self):
+        self._assert_cell_classes("/sources", ("c-name", "c-why", "c-acts"))
+
+    def _assert_cell_classes(self, path, classes):
+        body = self.get(path)[2]
+        # Match the token inside a class attribute, so `c-name` cannot be satisfied by the
+        # word appearing in a comment or an id somewhere else on the page. Some cells carry
+        # a second class (`n c-recipes`, `hint2 c-why`), hence the token scan.
+        present = set()
+        for attr in re.findall(r"""class=['"]([^'"]+)['"]""", body):
+            present.update(attr.split())
+        for cls in classes:
+            self.assertIn(cls, present,
+                          "%s is styled by the card layout but %s does not emit it"
+                          % (cls, path))
 
     def test_unknown_path_is_a_404(self):
         self.assertEqual(self.get("/nope")[0], 404)
@@ -622,3 +645,52 @@ class DiscriminatedLinkTest(unittest.TestCase):
         # encodeURIComponent is the JS equivalent of quote(safe=""); a bare
         # concatenation would reintroduce #23 on the search page alone.
         self.assertIn("'/plan?item='+encodeURIComponent(", server.HOME_JS)
+
+
+class MobileLayoutTest(unittest.TestCase):
+    """The phone layout is a contract between markup and CSS, so test it as one.
+
+    On a 390px viewport the machines table rendered 1,424px wide, so three of its five
+    columns were off-screen and every page scrolled sideways. The fix turns each row into
+    a card, which only works while the cells carry the `c-` classes the CSS orders them
+    by. Drop one in the markup and the page silently goes back to being a table that does
+    not fit, and nothing else in the suite would notice.
+
+    Asserted against the CSS text rather than a rendered pixel because the rules only
+    apply under a media query; what is checkable here is that both halves of the contract
+    exist and agree. The widths themselves were measured in a real browser.
+    """
+
+    CELL_CLASSES = ("c-state", "c-name", "c-recipes", "c-why", "c-acts")
+
+    def test_the_card_css_styles_every_class_the_markup_emits(self):
+        # A class emitted but unstyled is a cell that falls back to source order, which is
+        # how the state pill would end up above the machine name.
+        for cls in self.CELL_CLASSES:
+            self.assertIn("td.%s" % cls, server.HOME_CSS, cls)
+
+    def test_both_stylesheets_carry_a_phone_block(self):
+        # render.CSS covers the plan fragment, HOME_CSS the server-rendered pages. A phone
+        # gets one of each, so both need narrow rules.
+        self.assertIn("@media(max-width:640px)", render.CSS)
+        self.assertIn("@media(max-width:700px)", server.HOME_CSS)
+
+    def test_the_unbreakable_string_guards_are_present(self):
+        # Registry ids and the #28 evidence string have no space to break at, and a flex
+        # item defaults to min-width:auto. Without these the cards are as wide as the
+        # longest id whatever flex-basis says: a 571px page on a 390px screen, and the
+        # overflow is INSIDE the cell, so no element's bounding box looks wrong.
+        self.assertIn("overflow-wrap:anywhere", render.CSS)
+        self.assertIn("table.mach code,table.mach a.mname{overflow-wrap:anywhere}",
+                      server.HOME_CSS)
+        self.assertIn("td.c-why{flex:1 1 100%;order:4;font-size:12.5px;"
+                      "overflow-wrap:anywhere}", server.HOME_CSS)
+
+    def test_the_state_stripe_moves_to_the_card_edge(self):
+        # On desktop the stripe is on the first cell, which is the row's left edge. In a
+        # card the first cell is not an edge, and the stripe rendered as a coloured bar
+        # floating in the middle of the row.
+        self.assertIn("table.mach tr[data-state] td:first-child{border-left:0}",
+                      server.HOME_CSS)
+        self.assertIn("table.mach tr[data-state=have]{border-left-color:var(--ok)}",
+                      server.HOME_CSS)
