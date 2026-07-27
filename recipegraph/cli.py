@@ -15,7 +15,9 @@ import sys
 
 from . import index
 from . import machines
+from . import tokens as tokens_mod
 from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST,
+                       DEFAULT_TOKENS,
                        DEFAULT_MACHINES, DEFAULT_METRICS_DB, DEFAULT_PORT, DEFAULT_SOURCES)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
@@ -75,6 +77,15 @@ def _machine_states(graph, have_path, overrides_path):
     overrides = machines.load_overrides(overrides_path)
     return machines.resolve(graph, placed, stock, overrides=overrides,
                             no_machine=machines.load_no_machine(overrides_path)), overrides
+
+
+def _token_kinds(args):
+    """{key: kind} for pack placeholders, honouring the user's overrides file.
+
+    Read through `tokens.resolve` rather than reaching for DEFAULT_TOKENS directly, so the
+    plan, the `tokens` listing and any future caller all see the same effective map.
+    """
+    return tokens_mod.for_path(getattr(args, "tokens", None))
 
 
 def _free_sources(have_path, sources_path):
@@ -159,7 +170,7 @@ def cmd_plan(args):
                                          free_sources=free)
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
                     costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
-                    free_sources=free)
+                    free_sources=free, token_kinds=_token_kinds(args))
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
@@ -171,7 +182,21 @@ def cmd_plan(args):
     for row in result["shopping_list"][: args.limit]:
         print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))
     if not result["shopping_list"]:
-        print("  nothing: fully covered by stock")
+        # NOT "fully covered by stock" when placeholders remain. That sentence on a plan
+        # that still needs a Dungeon Drop is simply false, and it is the sentence a reader
+        # stops at.
+        print("  nothing"
+              if result.get("tokens_needed") else "  nothing: fully covered by stock")
+
+    if result.get("tokens_needed"):
+        # Printed for the same reason infinite-source draw is: moving these off the
+        # shopping list must not move them off the page. Grouped, because the whole point
+        # is that "Dungeon Drop" and "From Battle Tower Loot" are one instruction.
+        print("\n-- not crafted, obtained --")
+        for _kind, label, rows in tokens_mod.group(result["tokens_needed"]):
+            print("  %s:" % label)
+            for row in rows:
+                print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))
     if result["used_from_stock"]:
         print("\n-- drawn from your AE2 stock --")
         for row in result["used_from_stock"][:15]:
@@ -432,7 +457,7 @@ def cmd_serve(args):
     print("loading graph %s ..." % args.graph, file=sys.stderr)
     httpd, state = server.serve(args.graph, args.have, args.machines,
                                 host=args.host, port=args.port,
-                                sources_path=args.sources)
+                                sources_path=args.sources, tokens_path=args.tokens)
     print("recipegraph UI on http://%s:%d  (%s recipes, %s stocked items)"
           % (args.host, args.port, "{:,}".format(len(state.graph.recipes)),
              "{:,}".format(len(state.have))))
@@ -443,6 +468,65 @@ def cmd_serve(args):
         print("\nstopped")
     finally:
         httpd.server_close()
+    return 0
+
+
+def cmd_tokens(args):
+    """Show which pack placeholders are recognised, and offer the ones that are not."""
+    g = _load_graph(args.graph)
+    ov = tokens_mod.load_overrides(args.file)
+    added = dict(ov.get("tokens") or {})
+    disabled = set(ov.get("disabled") or ())
+    dirty = False
+    for pair in args.add or ():
+        if "=" not in pair:
+            print("--add expects KEY=KIND, got %r" % pair, file=sys.stderr)
+            return 2
+        key, kind = (part.strip() for part in pair.split("=", 1))
+        if kind not in tokens_mod.KINDS:
+            print("unknown kind %r; expected one of %s"
+                  % (kind, ", ".join(tokens_mod.KINDS)), file=sys.stderr)
+            return 2
+        added[key] = kind
+        disabled.discard(key)
+        dirty = True
+    for key in args.disable or ():
+        disabled.add(key.strip())
+        added.pop(key.strip(), None)
+        dirty = True
+    if dirty:
+        tokens_mod.save_overrides(args.file, added, disabled)
+        print("wrote %s" % args.file)
+        ov = tokens_mod.load_overrides(args.file)
+    known = tokens_mod.resolve(ov)
+    by_kind = {}
+    for key, kind in known.items():
+        by_kind.setdefault(kind, []).append(key)
+    total = 0
+    for kind in tokens_mod.KINDS:
+        keys = by_kind.get(kind)
+        if not keys:
+            continue
+        keys.sort(key=lambda k: (-len(g.by_input.get(k, ())), k))
+        slots = sum(len(g.by_input.get(k, ())) for k in keys)
+        total += slots
+        print("%s -- %s (%d ids, %d recipe slots)"
+              % (kind, tokens_mod.KIND_LABEL[kind], len(keys), slots))
+        for key in keys:
+            n = len(g.by_input.get(key, ()))
+            # A curated id no recipe uses is the signal the list has drifted from the pack.
+            flag = "" if n else "   <- UNUSED by any recipe in this graph"
+            print("  %5d  %-44s %s%s" % (n, key, g.bare_name(key), flag))
+        print("")
+    print("recognised: %d ids across %d recipe slots" % (len(known), total))
+
+    offered = tokens_mod.candidates(g, known, limit=args.limit)
+    if offered:
+        print("\nnot recognised, most-used first. These are OFFERS, not findings: the test")
+        print("is only 'some recipe needs it and none makes it', which is also true of any")
+        print("item the dump has no recipe for. Add real ones with --add KEY=KIND.")
+        for key, name, n in offered:
+            print("  %5d  %-44s %s" % (n, key, name))
     return 0
 
 
@@ -581,6 +665,8 @@ def main(argv=None):
                    help="infinite generator additions and removals")
     p.add_argument("--ignore-sources", action="store_true",
                    help="do not treat infinite generator output as free")
+    p.add_argument("--tokens", default=DEFAULT_TOKENS,
+                   help="pack placeholder additions and removals")
     p.add_argument("--no-cost", action="store_true",
                    help="skip the cost precompute and choose recipes greedily")
     p.add_argument("--exact", action="store_true")
@@ -630,6 +716,7 @@ def main(argv=None):
     p.add_argument("--instance", help="pack's minecraft/ dir, if the graph must be built "
                                       "(remembered from the last build otherwise)")
     p.add_argument("--sources", default=DEFAULT_SOURCES)
+    p.add_argument("--tokens", default=DEFAULT_TOKENS)
     p.add_argument("--no-build", action="store_true",
                    help="never build; only warn if the graph is behind the dump")
     p.add_argument("--have", default=DEFAULT_HAVE)
@@ -660,6 +747,19 @@ def main(argv=None):
     p.add_argument("--no-vanilla-water", action="store_true",
                    help="this pack has disabled infinite water spreading")
     p.set_defaults(fn=cmd_sources)
+
+    p = sub.add_parser("tokens",
+                       help="pack placeholders that stand in for an instruction")
+    p.add_argument("--graph", default=DEFAULT_GRAPH)
+    p.add_argument("--file", default=DEFAULT_TOKENS, help="additions and removals")
+    p.add_argument("--limit", type=int, default=25,
+                   help="how many unrecognised candidates to offer")
+    p.add_argument("--add", nargs="+", metavar="KEY=KIND",
+                   help="e.g. contenttweaker:my_drop=loot; kinds: "
+                        + ", ".join(tokens_mod.KINDS))
+    p.add_argument("--disable", nargs="+", metavar="KEY",
+                   help="stop treating a key as a placeholder")
+    p.set_defaults(fn=cmd_tokens)
 
     p = sub.add_parser("stats", help="graph coverage")
     p.set_defaults(fn=cmd_stats)

@@ -18,14 +18,15 @@ import json
 
 from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
 from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_HAVE, STATUS_PARTIAL,
-                    STATUS_RAW, STATUS_SOURCE)
+                    STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
+from .tokens import KIND_BADGE
 
 # The oredict node the solver emits from `resolve_ore`, which is a string rather than a
 # STATUS_* constant there because it is a display distinction, not a resolution outcome.
 STATUS_OREDICT = "oredict"
 
-ALL_STATUSES = (STATUS_HAVE, STATUS_PARTIAL, STATUS_CRAFT, STATUS_RAW, STATUS_SOURCE,
-                STATUS_CYCLE, STATUS_DEPTH, STATUS_OREDICT)
+ALL_STATUSES = (STATUS_HAVE, STATUS_PARTIAL, STATUS_CRAFT, STATUS_RAW, STATUS_TOKEN,
+                STATUS_SOURCE, STATUS_CYCLE, STATUS_DEPTH, STATUS_OREDICT)
 
 # status -> (badge text, css class). The class names are the semantic tokens in render.CSS.
 STATUS_LABEL = {
@@ -33,6 +34,9 @@ STATUS_LABEL = {
     STATUS_PARTIAL: ("part stock", "warn"),
     STATUS_CRAFT: ("craft", "craft"),
     STATUS_RAW: ("NEED", "need"),
+    # Generic; `status_badge` refines it per token kind, because "go get" is a lie on a
+    # quest gate you cannot go and get.
+    STATUS_TOKEN: ("go get", "need"),
     STATUS_SOURCE: ("infinite", "ok"),
     STATUS_CYCLE: ("loop", "muted"),
     STATUS_DEPTH: ("cut off", "muted"),
@@ -49,6 +53,13 @@ STATUS_STYLE = {
     STATUS_PARTIAL: ("var(--warnbg)", "var(--warn)"),
     STATUS_CRAFT: ("var(--craftbg)", "var(--craft)"),
     STATUS_RAW: ("var(--needbg)", "var(--need)"),
+    # SHARES the need fill on purpose, rather than earning a ninth colour. Both mean "this
+    # is not coming out of a crafting step, you have to obtain it", which is the distinction
+    # the diagram's fill exists to draw; what separates them is WHY, and that is a word, not
+    # a hue. `status_legend` already groups statuses that share a fill, so the key reads
+    # "NEED, go get" on one red row rather than showing two reds and inviting the reader to
+    # hunt for a difference that is not there.
+    STATUS_TOKEN: ("var(--needbg)", "var(--need)"),
     STATUS_SOURCE: ("var(--okbg)", "var(--ok)"),
     STATUS_CYCLE: (_MUTED, "var(--dim)"),
     STATUS_DEPTH: (_MUTED, "var(--dim)"),
@@ -100,6 +111,20 @@ STATE_LABEL = {
 # two components have different class vocabularies; both are complete and both are checked.
 STATE_PILL = {HAVE: "ok", BUILDABLE: "warnp", UNKNOWN: "mut", UNAVAILABLE: "no"}
 STATE_BADGE = {HAVE: "ok", BUILDABLE: "warn", UNKNOWN: "muted", UNAVAILABLE: "need"}
+
+
+def status_badge(status, token_kind=None):
+    """`(text, css class)` for a node's badge, refined by token kind where there is one.
+
+    One status covers every pack placeholder, because they behave identically to the solver:
+    no recipe, not stock, stop here. They do not read identically to a player, though, so
+    the WORD comes from the kind. Badging a quest gate "go get" would send someone hunting
+    for an item that unlocks by playing the story.
+    """
+    text, cls = STATUS_LABEL.get(status, (status, "muted"))
+    if status == STATUS_TOKEN and token_kind in KIND_BADGE:
+        return KIND_BADGE[token_kind], cls
+    return text, cls
 
 
 def is_roadblock(machine_state):
