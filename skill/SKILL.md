@@ -112,6 +112,26 @@ longest unbreakable word, and `flex-basis` is simply ignored. Registry ids
 have no break opportunity, so any container holding one needs `min-width:0` AND
 `overflow-wrap:anywhere`. One without the other does nothing.
 
+**`[hidden]` LOSES TO ANY AUTHOR `display` RULE.** `[hidden]{display:none}` lives in the
+UA sheet with almost no specificity, so `table.mach tr{display:flex}` beat it and the
+machines filter set the attribute on 499 of 503 rows, reported "4", and left all 503 on
+screen. `[hidden]{display:none!important}` is in HOME_CSS and must stay.
+
+**Gate every `:hover` on `@media(hover:hover)`.** A touch browser leaves `:hover` applied
+to the last thing tapped, and the generic `button:hover` sets the same accent border as
+`[aria-pressed=true]`, so unselecting a chip looked like it stayed selected. There is a
+test that lints all four stylesheets for this.
+
+**Audit INTERACTIVE state, not just page loads.** `tools/mobile-audit.js` types into
+search and taps a filter chip, because an audit that only navigated to each page passed
+clean while every search result rendered with its name at zero width. Run it against a
+running server: `node tools/mobile-audit.js http://host:8765` (needs a local
+`npm i playwright`; it is not a repo dependency and CI stays stdlib-only).
+
+**`getDisplayName()` returns format codes.** 14,425 of 340,324 names arrived as
+`§3Abyssalnite Axe`. `dump_names.load` cleans them now, the same way `load_items_csv`
+always did; if a new name source appears it needs `clean_label` too.
+
 **A multi-column table cannot be 390px wide.** The machines table rendered 1,424px. Rows
 become cards below 700px, ordered by the `c-` classes on each cell. Those classes are the
 contract between the row template and the card CSS, and `tests/test_server.py` asserts it
