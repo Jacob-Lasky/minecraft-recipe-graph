@@ -26,6 +26,7 @@ from . import generators as generators_mod
 from . import machines as machines_mod
 from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES
 from .htmlutil import esc as _esc
+from .htmlutil import item_href, machine_href
 from .model import Graph
 from .names import build_reverse
 from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, kind_chip_json)
@@ -789,7 +790,7 @@ def machines_page(state, message="", query=""):
             "<tr data-state='%s' data-rank='%d' data-name='%s' data-uid='%s' "
             "data-mod='%s' data-recipes='%d' data-hay='%s'>"
             "<td><span class='pill %s'>%s</span></td>"
-            "<td><a class='mname' href='/machine?uid=%s'>%s</a>"
+            "<td><a class='mname' href='%s'>%s</a>"
             "%s<br><code>%s</code></td>"
             "<td class='n'>%s</td>"
             "<td class='hint2' style='margin:0'>%s</td>"
@@ -797,7 +798,7 @@ def machines_page(state, message="", query=""):
             % (st, STATE_RANK.get(st, UNRANKED), _esc(name.lower()), _esc(uid.lower()),
                _esc(info["mod"]), info["recipes"], _esc(hay),
                STATE_PILL.get(st, "mut"), STATE_LABEL.get(st, st),
-               urllib.parse.quote(uid), _esc(name),
+               machine_href(uid), _esc(name),
                " <b>(manual)</b>" if info["manual"] else "",
                _esc(uid), "{:,}".format(info["recipes"]), _esc(evidence),
                _toggles(uid, st)))
@@ -891,9 +892,9 @@ def machine_page(state, uid):
             return "<div class='hint2' style='margin:0'>Nothing.</div>"
         items = "".join(
             "<li><span class='c'>%s</span>"
-            "<a class='grow' href='/plan?item=%s&qty=1'>%s</a>"
+            "<a class='grow' href='%s'>%s</a>"
             "%s</li>"
-            % ("{:,}".format(n), urllib.parse.quote(k), _item(state.graph, k),
+            % ("{:,}".format(n), item_href(k), _item(state.graph, k),
                ("<span class='pill ok'>%s</span>" % "{:,}".format(state.have[k]))
                if state.have.get(k) else "")
             for k, n in pairs)
@@ -904,9 +905,9 @@ def machine_page(state, uid):
     cands = info["candidates"]
     if cands:
         cand_html = "<ul class='klist'>%s</ul>" % "".join(
-            "<li><a href='/plan?item=%s&qty=1'>%s</a><code>%s</code>"
+            "<li><a href='%s'>%s</a><code>%s</code>"
             "<span class='grow'></span></li>"
-            % (urllib.parse.quote(c), _item(state.graph, c), _esc(c))
+            % (item_href(c), _item(state.graph, c), _esc(c))
             for c in cands[:8])
     else:
         cand_html = ("<div class='hint2' style='margin:0'>None found. The category title "
@@ -948,7 +949,7 @@ def machine_page(state, uid):
         " &mdash; matched by name, which is a guess. JEI's exact mapping needs a "
         "<code>/recipedump</code> with mod v0.4.0.",
         cand_html,
-        _toggles(uid, st, back="/machine?uid=%s" % urllib.parse.quote(uid)),
+        _toggles(uid, st, back=machine_href(uid)),
         "{:,}".format(detail["makes_total"]),
         klist(detail["makes"], detail["makes_total"], "made here"),
         "{:,}".format(detail["uses_total"]),
@@ -1005,10 +1006,10 @@ def sources_page(state, message=""):
     """What the planner treats as free, on what evidence, and how to change it."""
     ov = state.source_overrides
     rows = "".join(
-        "<tr><td><a class='mname' href='/plan?item=%s&qty=1'>%s</a><br><code>%s</code></td>"
+        "<tr><td><a class='mname' href='%s'>%s</a><br><code>%s</code></td>"
         "<td class='hint2' style='margin:0'>%s</td>"
         "<td><div class='acts'>%s</div></td></tr>"
-        % (urllib.parse.quote(key), _item(state.graph, key), _esc(key), _esc(why),
+        % (item_href(key), _item(state.graph, key), _esc(key), _esc(why),
            _source_button("disable", "not free", "stop treating this as free", key=key))
         for key, why in sorted(state.free_sources.items()))
 

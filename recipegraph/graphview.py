@@ -15,6 +15,7 @@ meaningful direction, and a force layout would throw both away in exchange for w
 """
 
 from .htmlutil import esc as _esc
+from .htmlutil import item_href
 from .present import STATUS_STYLE
 from .solve import STATUS_CRAFT
 
@@ -158,7 +159,7 @@ def render_svg(tree, max_nodes=400):
             qty += " mB"
         boxes.append(
             '<g class="nd"><title>%s</title>'
-            '<a href="/plan?item=%s&amp;qty=1">'
+            '<a href="%s">'
             '<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s"'
             ' stroke="%s" stroke-opacity=".35"/>'
             '<rect x="%.1f" y="%.1f" width="17" height="17" rx="4"'
@@ -167,7 +168,7 @@ def render_svg(tree, max_nodes=400):
             '<text x="%.1f" y="%.1f" class="lb" fill="%s">%s</text>'
             '<text x="%.1f" y="%.1f" class="qt" fill="%s">%s</text>'
             '</a></g>'
-            % (_esc(title), _esc(n["key"]).replace(":", "%3A"),
+            % (_esc(title), item_href(n["key"]),
                nx, ny, BOX_W, BOX_H, fill, ink,
                nx + 4, ny + 3.5, _hue(n["key"]),
                nx + 12.5, ny + 15.5, _esc(_mark(n)),

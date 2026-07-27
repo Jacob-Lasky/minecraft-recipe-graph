@@ -94,4 +94,11 @@ def discriminated_graph():
                  [Ingredient(["mod:plate"], 4)],
                  category="crafting"))
 
+    # Something the arc furnace makes, so `mod.arc_furnace` is a real category with a
+    # detail page rather than a catalyst pointing at nothing. Without this the machines
+    # page has no row to render and #28's shape cannot be observed end to end.
+    g.add(Recipe("arc_plate", "t", [("mod:plate", 2)],
+                 [Ingredient(["mod:salt"], 1)],
+                 category="mod.arc_furnace", machine="Arc Furnace"))
+
     return g
