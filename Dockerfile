@@ -54,7 +54,12 @@ CMD ["python", "-m", "recipegraph.cli", \
      "--host", "0.0.0.0", "--port", "8765", \
      "--have", "/data/ae2_have.json", \
      "--machines", "/data/machines.json", \
-     "--sources", "/data/sources.json"]
+     "--sources", "/data/sources.json", \
+     # Every override path is absolute under /data, which is the only writable mount. The
+     # argparse defaults are RELATIVE ("data/tokens.json"), so an omitted flag here resolves
+     # against the image's workdir, silently ignores the file the user put in the volume,
+     # and looks like the override simply did not work.
+     "--tokens", "/data/tokens.json"]
 
 # `serve` reads and indexes a 115 MB graph before it answers anything, which takes 40 to 90
 # seconds on the real pack. start-period covers that, or the container is killed and
