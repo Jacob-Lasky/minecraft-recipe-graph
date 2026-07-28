@@ -657,3 +657,67 @@ class CatalystMetaVariantTest(unittest.TestCase):
                      [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
         self.assertIsNone(g.meta_sibling_made("fluid:water"))
         self.assertIsNone(g.meta_sibling_made("ore:plankWood"))
+
+
+class ModCrossTabTest(unittest.TestCase):
+    """The machines page's two filters narrow each other off a SERVER-computed cross-tab.
+
+    `MACHINES_JS` used to walk all 503 rendered rows and build this itself on every
+    keystroke, which put a domain fact where this suite could not reach it: #16 and #32
+    were both reported by a human rather than caught by a test, and #32 shipped covered
+    only by a checked-in browser audit.
+    """
+
+    @staticmethod
+    def _info():
+        return {
+            "a.one":   {"mod": "Alpha", "state": machines.HAVE},
+            "a.two":   {"mod": "Alpha", "state": machines.HAVE},
+            "a.three": {"mod": "Alpha", "state": machines.UNAVAILABLE},
+            "b.one":   {"mod": "beta_mod", "state": machines.BUILDABLE},
+            "c.one":   {"mod": "Gamma", "state": machines.HAVE},
+            "c.two":   {"mod": "Gamma", "state": machines.BUILDABLE},
+        }
+
+    def test_the_cross_tab_counts_categories_per_mod_per_state(self):
+        self.assertEqual(machines.mod_state_counts(self._info()), {
+            "Alpha": {machines.HAVE: 2, machines.UNAVAILABLE: 1},
+            "beta_mod": {machines.BUILDABLE: 1},
+            "Gamma": {machines.HAVE: 1, machines.BUILDABLE: 1},
+        })
+
+    def test_a_state_a_mod_has_none_of_is_absent_rather_than_zero(self):
+        # 77 mods x 4 states with explicit zeroes is a third bigger for no information;
+        # the client already treats a missing entry as none.
+        self.assertNotIn(machines.UNKNOWN,
+                         machines.mod_state_counts(self._info())["Alpha"])
+
+    def test_the_totals_agree_with_the_input(self):
+        counts = machines.mod_state_counts(self._info())
+        self.assertEqual(sum(sum(v.values()) for v in counts.values()), len(self._info()))
+
+    def test_mods_are_ordered_by_category_count_then_by_name(self):
+        counts = machines.mod_state_counts(self._info())
+        self.assertEqual(machines.mod_order(counts), ["Alpha", "Gamma", "beta_mod"])
+
+    def test_the_order_is_case_insensitive(self):
+        """`aether_legacy` belongs next to `Advent of Ascension`, not after `Woot`.
+
+        Python's `sorted` is codepoint order, which puts every lowercase modid below every
+        capitalised display name. Measured on the reference pack, that disagrees with the
+        browser's `localeCompare` at every one of the 77 names, which is why collation
+        happens here and the client sorts on the rank this assigns.
+        """
+        counts = {"Zebra": {machines.HAVE: 1}, "apple": {machines.HAVE: 1},
+                  "Banana": {machines.HAVE: 1}}
+        self.assertEqual(machines.mod_order(counts), ["apple", "Banana", "Zebra"])
+
+    def test_the_order_is_stable_for_equal_counts(self):
+        # Two mods with the same count must not swap between requests, or the dropdown
+        # reshuffles on reload for no reason the reader can see.
+        counts = {"One": {machines.HAVE: 3}, "Two": {machines.BUILDABLE: 3}}
+        self.assertEqual(machines.mod_order(counts), machines.mod_order(dict(counts)))
+
+    def test_an_empty_graph_produces_an_empty_cross_tab(self):
+        self.assertEqual(machines.mod_state_counts({}), {})
+        self.assertEqual(machines.mod_order({}), [])

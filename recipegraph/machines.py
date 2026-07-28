@@ -569,3 +569,48 @@ def available_categories(states, include_buildable=True):
     """
     ok = {HAVE} | ({BUILDABLE, UNKNOWN} if include_buildable else set())
     return {uid for uid, (state, _why) in states.items() if state in ok}
+
+
+def mod_state_counts(info):
+    """{mod display name: {state: how many of its categories are in that state}}.
+
+    THE CROSS-TAB THE MACHINES PAGE FILTERS ON, computed here rather than in the browser.
+    `MACHINES_JS` used to walk all 503 rendered rows and build this itself on every
+    keystroke, which put a domain fact in a place the Python suite cannot reach: #16 and
+    #32 were both found by hand after shipping, and #32 had to be covered by a checked-in
+    browser audit because there was nothing here to unit-test.
+
+    A cross-tab and not a list of orderings: the page's state chips are a multi-select, so
+    the count a mod shows is the sum over whichever states are switched on, and 77 mods by
+    4 states is 2,609 bytes of JSON -- 0.37% of the 713 KB page -- against 16 orderings for
+    every subset of the states.
+    """
+    counts = {}
+    for rec in info.values():
+        counts.setdefault(rec["mod"], {})
+        by_state = counts[rec["mod"]]
+        by_state[rec["state"]] = by_state.get(rec["state"], 0) + 1
+    return counts
+
+
+def mod_order(counts):
+    """Mods in the order the dropdown lists them: most categories first, then by name.
+
+    THE ONE PLACE ALPHABETICAL ORDER IS DECIDED, and it has to be one place because the
+    two languages do not agree about it. Measured on the reference pack: Python's `sorted`
+    is codepoint order and JavaScript's `localeCompare` is locale-aware, and applied to the
+    77 mod names they disagree at every position -- `AE2 Unofficial Extended Life` leads in
+    one and `AbyssalCraft` in the other, and every lowercase modid (`aether_legacy`,
+    `agricraft`) sinks to the bottom in Python and sorts inline in JS.
+
+    WHERE THAT SHOWED, precisely: the count term dominates, so the two only diverged inside
+    a TIE -- and once a state filter narrows, most of the list is one tie. Filtering to
+    `no route` leaves 74 of 77 mods at zero, and the browser re-alphabetised all 74 by a
+    rule written down nowhere in Python. They now keep this order, which is the same rule
+    the live group above them follows.
+
+    `casefold`, not the raw string: `aether_legacy` belongs next to `Advent of Ascension`,
+    not after `Woot`. The client sorts by the RANK this order assigns and never compares a
+    name, so there is nothing left to disagree about. See `server.machines_page`.
+    """
+    return sorted(counts, key=lambda mod: (-sum(counts[mod].values()), mod.casefold()))

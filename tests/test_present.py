@@ -6,6 +6,7 @@ back, so a new solver status would draw as "craft" and a new machine state as an
 grey pill. These tests are the thing that turns that into a failure.
 """
 
+import json
 import os
 import re
 import sys
@@ -192,8 +193,11 @@ class KindChipTest(unittest.TestCase):
         # restated. If the placeholder ever stops being substituted the JS would throw.
         js = server.HOME_JS.replace("%%CHIPS%%", present.kind_chip_json())
         self.assertNotIn("%%CHIPS%%", js)
-        for kind, label in present.KIND_CHIP.items():
-            self.assertIn('"%s": "%s"' % (kind, label), js)
+        # Asserted by PARSING the emitted literal, not by matching its spacing. This used
+        # to look for `"fluid": "FLUID"` and so failed when the payload was compacted,
+        # which is a fact about json.dumps and not about the contract being tested.
+        emitted = re.search(r"var CHIPS=(\{.*?\});", js).group(1)
+        self.assertEqual(json.loads(emitted), present.KIND_CHIP)
 
     def test_the_placeholder_is_actually_substituted_on_the_page(self):
         self.assertIn("%%CHIPS%%", server.HOME_JS)

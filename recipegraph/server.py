@@ -30,6 +30,7 @@ from . import version as version_mod
 from .defaults import (DEFAULT_HOST, DEFAULT_MAX_NODES, DEFAULT_PINS, DEFAULT_PORT,
                        DEFAULT_SOURCES, DEFAULT_TOKENS, MAX_NODES_CEILING)
 from .htmlutil import esc as _esc
+from .htmlutil import script_json
 from .htmlutil import deeper_href, item_href, machine_href, plan_url
 from .model import Graph, path_of
 from .names import build_reverse
@@ -935,6 +936,8 @@ def home_page(state, query="", qty=1):
 
 MACHINES_JS = """
 (function(){
+ // {mod: {state: count}} from the server. See machines.mod_state_counts.
+ var MODS=%%MODS%%;
  var q=document.getElementById('mq'), sel=document.getElementById('mmod'),
      rows=Array.prototype.slice.call(document.querySelectorAll('#mbody tr[data-state]')),
      body=document.getElementById('mbody'), shown=document.getElementById('mshown'),
@@ -955,18 +958,24 @@ MACHINES_JS = """
  // listing every mod at its full count, including mods with nothing in that state, so
  // choosing one produced an empty table with no hint why.
  //
+ // THE CROSS-TAB IS SERVER-COMPUTED (`machines.mod_state_counts`), and this reads it
+ // rather than walking 503 rows on every keystroke. It used to build the whole thing
+ // here, which put a domain fact where the Python suite could not reach it -- #16 and
+ // #32 were both reported by a human rather than caught by a test.
+ //
  // Counts come from the OTHER axis only and deliberately ignore the text box: counting
  // against everything is more truthful but makes every number move while you type, and a
- // moving target is harder to read than a slightly generous one.
+ // moving target is harder to read than a slightly generous one. With a cross-tab that
+ // holds by construction, since the table has no text axis to consult.
  function tally(){
    var mod=sel.value, states=Object.keys(active), byMod={}, byState={};
-   rows.forEach(function(r){
-     if(!states.length||active[r.dataset.state]){
-       byMod[r.dataset.mod]=(byMod[r.dataset.mod]||0)+1;
-     }
-     if(!mod||r.dataset.mod===mod){
-       byState[r.dataset.state]=(byState[r.dataset.state]||0)+1;
-     }
+   Object.keys(MODS).forEach(function(m){
+     var row=MODS[m], n=0;
+     Object.keys(row).forEach(function(st){
+       if(!states.length||active[st])n+=row[st];
+       if(!mod||m===mod)byState[st]=(byState[st]||0)+row[st];
+     });
+     if(n)byMod[m]=n;
    });
    return {mod:byMod, state:byState};
  }
@@ -990,7 +999,12 @@ MACHINES_JS = """
      var ca=t.mod[a.value]||0, cb=t.mod[b.value]||0;
      if(!ca!==!cb)return ca?-1:1;      // live above empty, whatever the counts are
      if(ca!==cb)return cb-ca;          // then biggest first, as the server first ordered
-     return a.dataset.label.localeCompare(b.dataset.label);
+     // The server's own position, NOT a name comparison. A locale-aware compare here
+     // disagrees with Python's `sorted` at every one of the 77 names, which showed up
+     // inside ties: filtering to `no route` puts 74 of 77 mods at zero and the whole
+     // group got re-alphabetised by a rule that exists only in this file. Collation is
+     // decided once, in `machines.mod_order`.
+     return (+a.dataset.rank) - (+b.dataset.rank);
    });
    // Bail when nothing moved. `appendChild` on a live <select> closes an open native
    // dropdown in several browsers, so reordering on every keystroke regardless would
@@ -1076,7 +1090,11 @@ def _toggles(uid, current, back="/machines"):
 def machines_page(state, message="", query=""):
     counts = machines_mod.summarise(state.states)
     recipes_by_state = dict.fromkeys(machines_mod.STATES, 0)
-    mods = {}
+    # The mod x state cross-tab and the one canonical mod order, both from `machines`.
+    # The page used to count mods in this loop AND recount them in JavaScript on every
+    # keystroke; see `machines.mod_state_counts` for why that moved.
+    mod_counts = machines_mod.mod_state_counts(state.machine_info)
+    mod_rank = {mod: i for i, mod in enumerate(machines_mod.mod_order(mod_counts))}
     rows = []
     for uid, info in sorted(state.machine_info.items(),
                             key=lambda kv: (STATE_RANK.get(kv[1]["state"], UNRANKED),
@@ -1084,7 +1102,6 @@ def machines_page(state, message="", query=""):
         st = info["state"]
         recipes_by_state[st] = recipes_by_state.get(st, 0) + info["recipes"]
         name = info["title"] or uid
-        mods[info["mod"]] = mods.get(info["mod"], 0) + 1
         cands = info["candidates"]
         # The evidence column answers "why does it think that", which is the only reason
         # anyone opens this page after the first time.
@@ -1119,10 +1136,18 @@ def machines_page(state, message="", query=""):
         for s in machines_mod.STATES)
     # `data-label` so the client can rewrite the count as the state filter narrows without
     # having to parse the existing "(28)" back out of the text.
+    #
+    # `data-rank` is this list's own position, and it exists so the client never compares
+    # two mod NAMES. Python's `sorted` is codepoint order and JavaScript's `localeCompare`
+    # is locale-aware, and over these 77 names they disagree at every position. The count
+    # term dominates, so that only showed inside a TIE -- but filtering to `no route`
+    # leaves 74 of 77 mods tied at zero, and the browser re-alphabetised all 74 by a rule
+    # written down nowhere here. Collation is decided once, in `machines.mod_order`.
     options = "".join(
-        "<option value='%s' data-label='%s'>%s (%d)</option>"
-        % (_esc(m), _esc(m or "?"), _esc(m or "?"), n)
-        for m, n in sorted(mods.items(), key=lambda kv: (-kv[1], kv[0])))
+        "<option value='%s' data-label='%s' data-rank='%d'>%s (%d)</option>"
+        % (_esc(m), _esc(m or "?"), mod_rank[m], _esc(m or "?"),
+           sum(mod_counts[m].values()))
+        for m in machines_mod.mod_order(mod_counts))
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Machines</div>
@@ -1180,7 +1205,7 @@ def machines_page(state, message="", query=""):
          if getattr(state.graph, "catalysts", None) else
          "Run <code>/recipedump</code> with the current mod and rebuild to fix most of "
          "these: JEI knows the exact mapping and this graph was built without it."),
-        MACHINES_JS,
+        MACHINES_JS.replace("%%MODS%%", script_json(mod_counts)),
     )
     return _page("Machines", body, state)
 
