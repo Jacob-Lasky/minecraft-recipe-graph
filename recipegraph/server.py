@@ -967,7 +967,10 @@ MACHINES_JS = """
  // against everything is more truthful but makes every number move while you type, and a
  // moving target is harder to read than a slightly generous one. With a cross-tab that
  // holds by construction, since the table has no text axis to consult.
- function tally(){
+ //
+ // `narrowed`, not `tally`: nothing is counted here any more, the shipped table is summed
+ // over whichever axis the other filter leaves open.
+ function narrowed(){
    var mod=sel.value, states=Object.keys(active), byMod={}, byState={};
    Object.keys(MODS).forEach(function(m){
      var row=MODS[m], n=0;
@@ -982,12 +985,12 @@ MACHINES_JS = """
  function reconcile(){
    // A selection that can no longer match anything is CLEARED rather than left to show an
    // empty table. Dropping a selection only ever widens the result, so one pass converges.
-   var t=tally(), changed=false;
+   var t=narrowed(), changed=false;
    if(sel.value && !t.mod[sel.value]){sel.value=''; changed=true;}
    Object.keys(active).forEach(function(s){
      if(!t.state[s]){delete active[s]; changed=true;}
    });
-   return changed ? tally() : t;
+   return changed ? narrowed() : t;
  }
  // #32: the mods with nothing in the current filter sink BELOW the ones that do.
  // Disabling them in place (#16) answered "why is this mod not here" but left the four
@@ -1003,8 +1006,9 @@ MACHINES_JS = """
      // disagrees with Python's `sorted` at every one of the 77 names, which showed up
      // inside ties: filtering to `no route` puts 74 of 77 mods at zero and the whole
      // group got re-alphabetised by a rule that exists only in this file. Collation is
-     // decided once, in `machines.mod_order`.
-     return (+a.dataset.rank) - (+b.dataset.rank);
+     // decided once, in `machines.mod_order`. `order`, not `rank`: a table row's
+     // `data-rank` is its state's sort position, a different number entirely.
+     return (+a.dataset.order) - (+b.dataset.order);
    });
    // Bail when nothing moved. `appendChild` on a live <select> closes an open native
    // dropdown in several browsers, so reordering on every keystroke regardless would
@@ -1088,13 +1092,19 @@ def _toggles(uid, current, back="/machines"):
 
 
 def machines_page(state, message="", query=""):
-    counts = machines_mod.summarise(state.states)
     recipes_by_state = dict.fromkeys(machines_mod.STATES, 0)
     # The mod x state cross-tab and the one canonical mod order, both from `machines`.
     # The page used to count mods in this loop AND recount them in JavaScript on every
     # keystroke; see `machines.mod_state_counts` for why that moved.
     mod_counts = machines_mod.mod_state_counts(state.machine_info)
-    mod_rank = {mod: i for i, mod in enumerate(machines_mod.mod_order(mod_counts))}
+    mods_ordered = machines_mod.mod_order(mod_counts)
+    mod_order = {mod: i for i, mod in enumerate(mods_ordered)}
+    # The per-state figures come out of the SAME cross-tab the browser reads, rather than
+    # being counted a second time off `state.states`. Two derivations of one number are
+    # free to disagree the instant you touch a chip, which is the bug this change removes.
+    # `machines.summarise` still does the second-time count for the CLI, which holds
+    # `resolve`'s two-tuples; `tests/test_machines` pins the two together.
+    counts = machines_mod.state_totals(mod_counts)
     rows = []
     for uid, info in sorted(state.machine_info.items(),
                             key=lambda kv: (STATE_RANK.get(kv[1]["state"], UNRANKED),
@@ -1137,17 +1147,21 @@ def machines_page(state, message="", query=""):
     # `data-label` so the client can rewrite the count as the state filter narrows without
     # having to parse the existing "(28)" back out of the text.
     #
-    # `data-rank` is this list's own position, and it exists so the client never compares
-    # two mod NAMES. Python's `sorted` is codepoint order and JavaScript's `localeCompare`
-    # is locale-aware, and over these 77 names they disagree at every position. The count
+    # `data-order` is this list's own position, and it exists so the client never compares
+    # two mod NAMES. Python's `sorted` is codepoint order and the browser's locale-aware
+    # compare is not, and over these 77 names they disagree at every position. The count
     # term dominates, so that only showed inside a TIE -- but filtering to `no route`
     # leaves 74 of 77 mods tied at zero, and the browser re-alphabetised all 74 by a rule
     # written down nowhere here. Collation is decided once, in `machines.mod_order`.
+    #
+    # `order` and NOT `rank`: the table ROWS carry a `data-rank`, which is `STATE_RANK` for
+    # the state column's sort. Two meanings behind one attribute name on one page is how
+    # `dataset.<x>` in the script below stops being readable, and the script reads both.
     options = "".join(
-        "<option value='%s' data-label='%s' data-rank='%d'>%s (%d)</option>"
-        % (_esc(m), _esc(m or "?"), mod_rank[m], _esc(m or "?"),
+        "<option value='%s' data-label='%s' data-order='%d'>%s (%d)</option>"
+        % (_esc(m), _esc(m or "?"), mod_order[m], _esc(m or "?"),
            sum(mod_counts[m].values()))
-        for m in machines_mod.mod_order(mod_counts))
+        for m in mods_ordered)
 
     body = """<div class="wrap">%s
   <div class="eyebrow">Machines</div>
