@@ -7,6 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "audit:filters": "node tools/filter-audit.js",
     "audit:mobile": "node tools/mobile-audit.js",
     "browsers": "playwright install chromium"
   },

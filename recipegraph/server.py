@@ -904,7 +904,10 @@ MACHINES_JS = """
      rows=Array.prototype.slice.call(document.querySelectorAll('#mbody tr[data-state]')),
      body=document.getElementById('mbody'), shown=document.getElementById('mshown'),
      none=document.getElementById('mnone'), active={},
-     opts=Array.prototype.slice.call(sel.options);
+     opts=Array.prototype.slice.call(sel.options),
+     // The "every mod" entry, which has no value, is never counted and never reordered:
+     // it is the way OUT of a filter and has to stay where the cursor expects it.
+     modOpts=opts.filter(function(o){return !!o.value;});
  document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
    b.addEventListener('click',function(){
      var on=b.getAttribute('aria-pressed')==='true';
@@ -942,17 +945,44 @@ MACHINES_JS = """
    });
    return changed ? tally() : t;
  }
+ // #32: the mods with nothing in the current filter sink BELOW the ones that do.
+ // Disabling them in place (#16) answered "why is this mod not here" but left the four
+ // mods that DO match scattered among the 71 that do not, so the answer was unreachable.
+ // They stay present and stay disabled -- a visible zero is an answer, and the list must
+ // not change length under the cursor -- they just stop being in the way.
+ function reorder(t){
+   var want=modOpts.slice().sort(function(a,b){
+     var ca=t.mod[a.value]||0, cb=t.mod[b.value]||0;
+     if(!ca!==!cb)return ca?-1:1;      // live above empty, whatever the counts are
+     if(ca!==cb)return cb-ca;          // then biggest first, as the server first ordered
+     return a.dataset.label.localeCompare(b.dataset.label);
+   });
+   // Bail when nothing moved. `appendChild` on a live <select> closes an open native
+   // dropdown in several browsers, so reordering on every keystroke regardless would
+   // make the control unusable while typing.
+   var moved=false;
+   for(var i=0;i<want.length;i++){if(want[i]!==modOpts[i]){moved=true;break;}}
+   if(!moved)return;
+   // No `sel.value` save-and-restore around this. It looks needed -- appendChild MOVES a
+   // node rather than copying it -- and it is not: selectedness lives on the option
+   // element, so it travels with the node. Measured in chromium against the real 77-mod
+   // list before the line was deleted rather than assumed either way, and
+   // `tools/filter-audit.js` asserts the user-visible half so a browser that disagrees
+   // fails loudly instead of being guarded against speculatively.
+   want.forEach(function(o){sel.appendChild(o);});
+   modOpts=want;
+ }
  function apply(){
    var t=reconcile(), mod=sel.value, states=Object.keys(active),
        text=(q.value||'').toLowerCase().trim(), n=0;
-   opts.forEach(function(o){
-     if(!o.value)return;                       // the "every mod" entry has no count
+   modOpts.forEach(function(o){
      var c=t.mod[o.value]||0;
      o.textContent=o.dataset.label+' ('+c+')';
      // Disabled rather than removed: removing makes the list jump under the cursor,
      // and a visible zero is an answer.
      o.disabled=!c;
    });
+   reorder(t);
    document.querySelectorAll('.chip-btn[data-state]').forEach(function(b){
      var c=t.state[b.dataset.state]||0;
      b.querySelector('.n').textContent=c;

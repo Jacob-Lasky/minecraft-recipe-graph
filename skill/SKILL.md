@@ -144,8 +144,16 @@ running server:
 
 ```bash
 corepack enable pnpm && pnpm install && pnpm run browsers   # once
-pnpm run audit:mobile http://host:8765
+pnpm run audit:mobile  http://host:8765
+pnpm run audit:filters http://host:8765
 ```
+
+**The two `/machines` filters are pure client-side JS, so the Python suite cannot reach a
+line of them.** It can assert the markup the page ships and nothing about what happens when
+you click, which is why #16 and #32 were both found by hand after shipping.
+`tools/audit:filters` is the regression check: the counts narrow each other, mods with no
+matches sink below the ones with matches but stay in the list disabled, and the chosen mod
+survives the reorder. **Run it after touching `MACHINES_JS`.**
 
 **pnpm, not npm.** playwright is a pinned devDependency with a committed lockfile, and
 pnpm's own version lives in `packageManager` in `package.json` so corepack reads it. Dev
