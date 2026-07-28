@@ -186,7 +186,7 @@ The UI is worth keeping up when the machine that plays Minecraft is off, so ther
 install step, because the tool is stdlib only.
 
 ```bash
-docker build -t minecraft-recipe-graph:local \
+docker build -t recipegraph:latest \
   --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
   --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
 
@@ -196,7 +196,7 @@ docker run -d --name recipegraph \
   --user 99:100 \
   --memory=4g --memory-swap=4g \
   --restart unless-stopped \
-  minecraft-recipe-graph:local
+  recipegraph:latest
 ```
 
 Everything mutable lives in the one `/data` mount: `graph.json`, `ae2_have.json`, the
