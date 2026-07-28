@@ -511,6 +511,39 @@ class ServerTest(LiveServerCase):
         self.assertGreater(ratio, 1, "the control must be able to do something")
         self.assertLessEqual(ratio, 4, "measured: past 4x one click runs into the hours")
 
+    # ---- diagram orientation (#35) ----
+
+    def test_a_plan_ships_both_orientations_and_shows_one(self):
+        """No round trip, because a round trip re-solves and a plan can take two minutes.
+
+        Both SVGs are in the DOM and CSS picks between them on `data-dir`, so the toggle
+        is an attribute write.
+        """
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        self.assertIn('data-dir="lr"', body)
+        self.assertIn('data-dir="td"', body)
+        self.assertIn('.diagwrap[data-dir="lr"] .diagram[data-dir="td"]', body)
+        self.assertIn("Turn it top to bottom", body)
+
+    def test_the_hidden_orientation_is_display_none_not_hidden(self):
+        """An SVG with a width attribute keeps its box under the UA `[hidden]` rule.
+
+        That is the same trap `tools/mobile-audit.js` exists to catch: the attribute is
+        set, the count is right, and the thing is still on screen.
+        """
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        flat = " ".join(body.split())
+        self.assertIn('.diagwrap[data-dir="lr"] .diagram[data-dir="td"], '
+                      '.diagwrap[data-dir="td"] .diagram[data-dir="lr"]{display:none}',
+                      flat)
+        self.assertNotIn('<svg class="diagram" data-dir="td" hidden', body)
+
+    def test_the_choice_is_remembered(self):
+        # A reading preference. Having to set it again on every plan makes it useless.
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        self.assertIn("rg.diagdir", body)
+        self.assertIn("localStorage.setItem", body)
+
     def test_the_scrim_can_name_the_item_rather_than_the_link_text(self):
         # "Planning Go deeper" is a useless thing for the scrim to say back.
         self.assertIn("a.dataset.planLabel", self.get("/")[2])

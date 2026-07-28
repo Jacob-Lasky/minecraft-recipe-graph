@@ -261,6 +261,22 @@ Machine state feeds the **cost estimate**, which is what actually picks recipes.
 scoring alone fails badly: it once preferred 100,000 items through a machine already owned
 over 2 items through one that needed building.
 
+**The flow diagram draws BOTH orientations and CSS picks one.** Left-to-right and
+top-to-bottom are one `layout` plus two coordinate functions (`graphview._geometry`), so the
+toggle is an attribute write and there is no round trip -- a round trip would re-solve, and
+a plan can take two minutes. Measured: the second SVG is 5 to 16 KB on a 48 to 67 KB page.
+The choice is remembered in `localStorage` under `rg.diagdir`. Top-down is NOT a transpose:
+a box keeps `BOX_W` so the label budget does not move, and siblings space out sideways
+instead. See #35.
+
+**A diagram label is budgeted against the quantity beside it, not capped at a number.** SVG
+text does not wrap, so a label runs straight under the right-aligned quantity, and that
+quantity is anywhere from `64` to `768,000 mB`. The old flat 20 was wrong both ways --
+measured in chromium, `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px while
+`Boron Ore` next to `64` wasted 116px. `graphview._label_limit` spends the interior. The
+per-character advances in it were measured off the rendered SVG; re-measure with
+`getBBox()` if the fonts change.
+
 ## The cost model is load-bearing, and it fails silently
 
 **Never move a constant in `cost.py` without running `tools/cost-probe.py` first.** It
