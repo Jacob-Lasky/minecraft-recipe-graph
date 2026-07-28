@@ -427,7 +427,24 @@ goes on the shopping list) · `loop` (cycle) · `cut off` (hit the node cap).
 The `you still need` list is the answer to most questions. `drawn from your AE2 stock` is
 the audit trail showing what it assumed you have.
 
-If output says `truncated`, raise `--max-nodes` before drawing conclusions.
+If output says `truncated`, raise `--max-nodes` before drawing conclusions. **On the web
+page there is a "Go deeper" control instead**, which doubles the cap; the flag belongs to
+`plan`, not to `serve`, so quoting it on a running server was not merely inconvenient but
+wrong (#25). It stops at `defaults.MAX_NODES_CEILING`, 4x the default, and the notice says
+so rather than offering a dead button.
+
+**`truncated` has TWO causes and they need different words.** The node cap, and the WORK
+budget, which is the monotonic counter below that actually guarantees termination. On a
+graph this cyclic the work budget usually goes first, so the node count lands far below the
+cap: `avaritia:resource:6` reports 1,162 nodes against a cap of 4,000. "Tree hit the node
+cap (1,162)" reads as a bug in the tool, so the notice names the real cause.
+
+**Timings, because the control multiplies them.** A typical plan is 0.4s at the default. The
+worst case is not typical: `avaritia:resource:3` spends its whole budget backtracking and
+takes 26s at 4,000 nodes, ~110s at 16,000, 417s at 32,000, roughly linear in the budget.
+That measurement is why the ceiling is 4x and not the 64x it was first written as, and why
+`/plan` builds its Solver under `State.lock` and **solves outside it** -- holding the lock
+across a two-minute solve froze every other page.
 
 ## Where the data comes from
 

@@ -26,3 +26,25 @@ DEFAULT_PINS = "data/recipes.json"
 DEFAULT_TOKENS = "data/tokens.json"
 DEFAULT_METRICS_DB = "data/metrics.db"
 DEFAULT_COST_CACHE = "data/.cost-cache.json"
+
+# How many tree nodes a plan expands before it stops and says so. The default is the CLI's
+# and the server's alike: two copies of 4000 is how `plan` and `serve` end up truncating at
+# different depths and only one of them being the number a warning quotes.
+DEFAULT_MAX_NODES = 4000
+
+# The ceiling the "go deeper" control cannot pass. `Solver.work_budget` derives from
+# max_nodes and IS the termination guarantee, so an unbounded control would let a reader
+# hang their own server from a link.
+#
+# 4x, AND THAT NUMBER IS MEASURED. A typical plan is 0.4s at the default, but the worst
+# case is not typical: on the reference pack `avaritia:resource:3` spends its whole work
+# budget backtracking and takes 26s at 4,000 nodes, ~110s at 16,000 and 417s at 32,000.
+# Cost is roughly linear in the budget, so the ceiling is not bounding an absolute time --
+# nothing can, when the FIRST page already takes two minutes on the worst item. What it
+# bounds is the MULTIPLE of a wait the reader has already sat through: at most four times
+# the page they just loaded, having watched how long that took. 64x, which this was before
+# anyone timed it, was over two hours for one click.
+#
+# Past the ceiling the notice says so rather than offering a button, and points at the
+# terminal, which is the right place for a search that big.
+MAX_NODES_CEILING = DEFAULT_MAX_NODES * 4

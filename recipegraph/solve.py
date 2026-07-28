@@ -19,6 +19,7 @@ The three things that make this non-trivial, and how each is handled:
 import collections
 
 from .cost import input_cost, recipe_cost
+from .defaults import DEFAULT_MAX_NODES
 from .machines import is_hand_crafting
 from .model import merge_slots, split_key
 
@@ -66,7 +67,8 @@ def _index_pool(pool):
 
 class Solver:
     def __init__(self, graph, have=None, raw=None, pinned=None,
-                 max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
+                 max_depth=24, max_nodes=DEFAULT_MAX_NODES, craftables=None,
+                 branch_tries=4,
                  work_budget=None, machine_states=None, costs=None, free_sources=None,
                  token_kinds=None):
         self.g = graph
@@ -530,5 +532,14 @@ class Solver:
             "nodes": self.nodes,
             "work": self.work,
             "truncated": self.nodes > self.max_nodes or self.exhausted,
+            # TWO CAUSES, and a reader who is about to wait for a bigger one needs to know
+            # which. `exhausted` means the WORK budget went first: the search spent itself
+            # on branches it backtracked out of, so the node count is far below the cap
+            # and quoting the cap at that reader is simply wrong. Raising max_nodes still
+            # helps, because work_budget derives from it.
             "exhausted": self.exhausted,
+            # What the cap WAS, so a notice can say "4,000" rather than quoting the count
+            # it happened to stop at as though that were the limit.
+            "max_nodes": self.max_nodes,
+            "work_budget": self.work_budget,
         }

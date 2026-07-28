@@ -18,8 +18,8 @@ from . import machines
 from . import pins as pins_mod
 from . import tokens as tokens_mod
 from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST,
-                       DEFAULT_PINS, DEFAULT_TOKENS,
-                       DEFAULT_MACHINES, DEFAULT_METRICS_DB, DEFAULT_PORT, DEFAULT_SOURCES)
+                       DEFAULT_MACHINES, DEFAULT_MAX_NODES, DEFAULT_METRICS_DB,
+                       DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES, DEFAULT_TOKENS)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
 
@@ -736,7 +736,7 @@ def main(argv=None):
                    help="skip the cost precompute and choose recipes greedily")
     p.add_argument("--exact", action="store_true")
     p.add_argument("--depth", type=int, default=24)
-    p.add_argument("--max-nodes", type=int, default=4000)
+    p.add_argument("--max-nodes", type=int, default=DEFAULT_MAX_NODES)
     p.add_argument("--limit", type=int, default=40)
     p.add_argument("--json")
     p.add_argument("--html")

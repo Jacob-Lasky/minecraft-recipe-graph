@@ -354,7 +354,9 @@ same code runs inside a server container where `pip` is unavailable.
 - Essentia cells are detected but not yet aggregated.
 - The AE2 reader sees cells in drives and chests. Items parked in ME Interfaces or in
   external inventories behind a storage bus are not counted.
-- The tree is capped (`--max-nodes`, default 4000) and says so when it truncates.
+- The tree is capped (`--max-nodes`, default 4000) and says so when it truncates,
+  naming which of the two budgets ran out. The web page offers a **Go deeper**
+  control instead of the flag, doubling the cap up to 4x.
 
 ## Licence
 
