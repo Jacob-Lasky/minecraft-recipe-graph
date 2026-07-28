@@ -9,12 +9,34 @@ happened to a hand-rolled one. See `item_href`.
 """
 
 import html
+import json
 import urllib.parse
 
 
 def esc(value):
     """Escape for use in HTML text OR in a quoted attribute."""
     return html.escape(str(value), quote=True)
+
+
+def script_json(value):
+    """`value` as JSON safe to drop inside an inline `<script>` block.
+
+    `json.dumps` alone is NOT safe there. An HTML parser looks for the literal `</script`
+    before any JavaScript runs, so a single string containing it closes the block early and
+    the rest of the page becomes markup. Nothing quotes its way out of that -- the escape
+    has to happen at the JSON level.
+
+    Both values shipped into a script today come from the pack rather than from this
+    codebase: `present.KIND_CHIP` is ours, but the machines page ships JEI's own mod DISPLAY
+    names, which are whatever ~410 mod authors typed. That is not a threat model so much as
+    a reason not to have a page whose correctness depends on nobody naming a mod oddly.
+
+    U+2028 and U+2029 too: legal in JSON strings, and a line terminator in JavaScript
+    source, so they end a statement early.
+    """
+    return (json.dumps(value, separators=(",", ":"), sort_keys=True)
+            .replace("<", "\\u003c").replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
 
 
 def _query(path, params, sep="&amp;"):

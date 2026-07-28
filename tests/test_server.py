@@ -544,6 +544,78 @@ class ServerTest(LiveServerCase):
         self.assertIn("rg.diagdir", body)
         self.assertIn("localStorage.setItem", body)
 
+    # ---- the machines cross-tab ships from the server (#32 follow-up) ----
+
+    def test_the_page_ships_the_cross_tab_and_the_js_reads_it(self):
+        body = self.get("/machines")[2]
+        emitted = re.search(r"var MODS=(\{.*?\});", body).group(1)
+        self.assertEqual(json.loads(emitted),
+                         machines.mod_state_counts(self.state.machine_info))
+        self.assertNotIn("%%MODS%%", body, "the placeholder was not substituted")
+
+    def test_the_js_no_longer_counts_rows_itself(self):
+        """The duty that moved. A tally in the browser is a domain fact this suite
+        cannot reach, which is how #16 and #32 both reached a human first."""
+        self.assertNotIn("byMod[r.dataset.mod]", self._code(server.MACHINES_JS))
+        self.assertIn("Object.keys(MODS)", self._code(server.MACHINES_JS))
+
+    @staticmethod
+    def _code(js):
+        """`js` with its `//` comments removed.
+
+        Every source-text assertion in this file has to do this or it tests the comments.
+        Twice now a comment SAYING why something is not used has satisfied a grep for the
+        thing not being used -- once for the go-deeper link's wording, once for
+        `localeCompare` -- and the fix is here rather than in contorted prose, because a
+        comment that cannot name what it is warning against is a worse comment.
+        """
+        return "\n".join(ln.split("//")[0] for ln in js.splitlines())
+
+    def test_the_client_never_compares_two_mod_names(self):
+        """Collation is decided once, in `machines.mod_order`.
+
+        Python's `sorted` and the browser's locale-aware comparison disagree at every one
+        of the 77 mod names. The count term dominates, so it showed inside ties: filtering
+        to `no route` leaves 74 of 77 mods at zero and the browser re-alphabetised all 74.
+        The column sorter below still compares cell text, which is a different job.
+        """
+        filters = self._code(server.MACHINES_JS).split("th.sortable")[0]
+        self.assertNotIn("localeCompare", filters)
+        self.assertIn("dataset.rank", filters)
+
+    def test_every_option_carries_the_rank_the_server_assigned(self):
+        body = self.get("/machines")[2]
+        ranks = [int(r) for r in re.findall(r"<option [^>]*data-rank='(\d+)'", body)]
+        self.assertTrue(ranks)
+        self.assertEqual(ranks, sorted(ranks), "options are emitted out of rank order")
+        self.assertEqual(ranks, list(range(len(ranks))), "ranks are not dense from 0")
+
+    def test_the_option_counts_are_the_cross_tab_totals(self):
+        body = self.get("/machines")[2]
+        counts = machines.mod_state_counts(self.state.machine_info)
+        for mod, shown in re.findall(r"<option value='([^']*)'[^>]*>[^(]*\((\d+)\)</option>",
+                                     body):
+            if not mod:
+                continue
+            self.assertEqual(int(shown), sum(counts[html_mod.unescape(mod)].values()), mod)
+
+    def test_json_in_a_script_block_cannot_close_it(self):
+        """`json.dumps` alone is not safe inside `<script>`.
+
+        An HTML parser looks for the literal `</script` before any JS runs, so one mod
+        display name containing it turns the rest of the page into markup. The mod names
+        shipped here are whatever ~410 mod authors typed.
+        """
+        from recipegraph.htmlutil import script_json
+
+        blob = script_json({"</script><b>x</b>": 1, "line\u2028break": 2})
+        self.assertNotIn("</script", blob)
+        self.assertNotIn("\u2028", blob)
+        self.assertIn("\\u003c", blob)
+        # And it is still the same data once parsed.
+        self.assertEqual(json.loads(blob.replace("\\u003c", "<")),
+                         {"</script><b>x</b>": 1, "line\u2028break": 2})
+
     def test_the_scrim_can_name_the_item_rather_than_the_link_text(self):
         # "Planning Go deeper" is a useless thing for the scrim to say back.
         self.assertIn("a.dataset.planLabel", self.get("/")[2])

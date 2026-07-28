@@ -172,12 +172,34 @@ pnpm run audit:mobile  http://host:8765
 pnpm run audit:filters http://host:8765
 ```
 
-**The two `/machines` filters are pure client-side JS, so the Python suite cannot reach a
-line of them.** It can assert the markup the page ships and nothing about what happens when
-you click, which is why #16 and #32 were both found by hand after shipping.
-`tools/audit:filters` is the regression check: the counts narrow each other, mods with no
-matches sink below the ones with matches but stay in the list disabled, and the chosen mod
-survives the reorder. **Run it after touching `MACHINES_JS`.**
+**The `/machines` filters interact client-side, but the DATA they filter on is computed in
+Python.** `machines.mod_state_counts` ships the mod x state cross-tab into the page (77 x 4
+= 2,609 bytes, 0.37% of the 713 KB page) and `machines.mod_order` decides the one mod
+ordering. The browser used to build that cross-tab itself on every keystroke, which put a
+domain fact where this suite could not reach it -- #16 and #32 were both reported by a human
+rather than caught by a test.
+
+**DO NOT compare two mod NAMES in JavaScript.** Python's `sorted` is codepoint order and
+`localeCompare` is locale-aware, and over the pack's 77 mod names they disagree at every
+position. The count term dominates, so it only showed inside a tie -- and filtering to
+`no route` leaves 74 of 77 mods tied at zero, where the browser re-alphabetised the whole
+group by a rule written down nowhere in Python. The client sorts on the `data-rank` the
+server emits. The column sorter is a different job and legitimately compares cell text.
+
+**Anything shipped into an inline `<script>` goes through `htmlutil.script_json`.** An HTML
+parser finds the literal `</script` before any JS runs, so one mod display name containing
+it turns the rest of the page into markup, and no amount of quoting inside JSON prevents
+that. Mod display names are whatever ~410 mod authors typed.
+
+**`pnpm run audit:filters` is still the regression check** for what a test cannot see: the
+counts narrow each other, mods with no matches sink below the ones with matches but stay in
+the list disabled, and the chosen mod survives the reorder. **Run it after touching
+`MACHINES_JS`.**
+
+**A probe that reads a running server must say WHICH BUILD it hit.** Twice in one session a
+measurement was labelled "before" and "after" while both runs went to a server that had
+never been restarted, so the two numbers matched and looked like proof of no change. Have
+the probe grep the served page for the code under test and print what it found.
 
 **pnpm, not npm.** playwright is a pinned devDependency with a committed lockfile, and
 pnpm's own version lives in `packageManager` in `package.json` so corepack reads it. Dev

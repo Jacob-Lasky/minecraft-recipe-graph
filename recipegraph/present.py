@@ -14,10 +14,10 @@ rendering wrongly.
 DO NOT add a local status->colour dict to a renderer. Add the case here.
 """
 
-import json
-
 from . import pins
-from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
+from .htmlutil import script_json
+from .machines import (BUILDABLE, HAVE, STATES, UNAVAILABLE,
+                       UNKNOWN)
 from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_HAVE, STATUS_PARTIAL,
                     STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
 from .tokens import KIND_BADGE
@@ -164,7 +164,7 @@ def kind_chip_json():
     The home page builds rows in the browser and so needs this mapping there too. Emitting
     it rather than restating it is what keeps one source of truth.
     """
-    return json.dumps(KIND_CHIP)
+    return script_json(KIND_CHIP)
 
 
 # What a pin's resolution state says to the reader. Keyed by the constants themselves, so
