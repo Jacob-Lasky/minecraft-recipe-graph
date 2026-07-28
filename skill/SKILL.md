@@ -405,6 +405,34 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
 | category → machine | dump mod's `catalysts.json` (v0.4.0+) | **authoritative**; without it two thirds of categories read `unknown` |
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
 
+## Pinning a recipe choice
+
+- **A pin is stored by a FINGERPRINT, never by a recipe id.** `hei:<category>:<line>`
+  renumbers on every redump and a jar path carries the mod version, so an id-keyed pin
+  would silently stop applying the first time Jake redumps, which is the exact failure the
+  feature exists to prevent. `pins.fingerprint` is blake2b over category, sorted outputs
+  and sorted input slots. Deliberately NOT the machine name (localised) or the source
+  (which extractor found it). Verified on the real pack: renumbering all 117,685 ids left
+  the pin resolving `exact` to the same recipe.
+- **Do not reuse `nbt_digest.fnv1a` for it.** That hash is a cross-language contract with
+  the mod; tying pin identity to it would mean a change to the dump's NBT format silently
+  lapsed every pin. Two unrelated hashes, two implementations, on purpose.
+- **Three outcomes, and the middle one is why the category is stored too.** `exact`, then
+  `category` when the recipe changed but the pack still makes it that way ("make iron by
+  smelting" is usually what a pin meant), then `dead`. 2,108 fingerprints on the reference
+  pack are shared by more than one recipe, up to 192 identical `thermaldynamics.covers`
+  entries, so `pins.resolve` returns a SET of acceptable ids and the solver ranks within
+  it rather than being handed a choice made by dump order.
+- **The cycle guard outranks a pin, and the plan has to SAY so.** Pinning
+  `Steel Ingot from Block of Steel` produces a plan asking for the item being crafted, so
+  `expand` backtracks out of it. The chooser had already badged the choice as taken, so
+  `Solver.pins_overruled` reports it on the plan and in the CLI. A badge on the wrong
+  recipe is worse than no badge.
+- **`item_href` is for an href attribute and `plan_url` is for everywhere else.** The
+  `&amp;` in the first is correct there and wrong anywhere it gets encoded again:
+  percent-encoding it as a return path produced a parameter called `amp;qty`, so the back
+  link worked and the quantity silently reverted to 1.
+
 ## Gotchas that cost real debugging time
 
 - **AE2 cell counts live in the `Cnt` tag, not `Count`.** `Count` is an ItemStack byte

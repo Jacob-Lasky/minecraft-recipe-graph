@@ -65,7 +65,7 @@ def _index_pool(pool):
 
 
 class Solver:
-    def __init__(self, graph, have=None, raw=None, overrides=None,
+    def __init__(self, graph, have=None, raw=None, pinned=None,
                  max_depth=24, max_nodes=4000, craftables=None, branch_tries=4,
                  work_budget=None, machine_states=None, costs=None, free_sources=None,
                  token_kinds=None):
@@ -80,7 +80,16 @@ class Solver:
         # quantity stays visible. See generators.py.
         self.free_sources = dict(free_sources or {})
         self.from_sources = collections.Counter()
-        self.overrides = dict(overrides or {})
+        # {item key: frozenset of acceptable recipe ids}, from pins.resolve. A SET, not
+        # one id: a pin that lapsed onto its category accepts every recipe in it, and
+        # this class keeps its own ranking among whatever is acceptable rather than being
+        # handed a choice someone else made by dump order.
+        #
+        # Renamed from `overrides` when the value type changed, ON PURPOSE: `overrides`
+        # also names the machine-availability map, and a caller left passing the old
+        # `{key: rid}` shape now fails at the call rather than silently accepting no
+        # recipe (a bare string is iterable, so `rid in "hei:x:1"` is a substring test).
+        self.pinned = {k: frozenset(v) for k, v in (pinned or {}).items()}
         self.max_depth = max_depth
         self.max_nodes = max_nodes
         self.branch_tries = branch_tries
@@ -98,6 +107,9 @@ class Solver:
         # a machine merely because it could not be identified would hide real routes.
         self.machine_states = machine_states or {}
         self.machines_needed = {}
+        # {item key: why} for a pin the cycle guard had to ignore. See
+        # `_note_overruled_pin`; reported on the plan rather than swallowed.
+        self.pins_overruled = {}
         # {key: kind} from tokens.resolve. Empty by default so a bare Solver behaves exactly
         # as before; the CLI and the server supply it. See tokens.py.
         self.token_kinds = dict(token_kinds or {})
@@ -254,15 +266,25 @@ class Solver:
         return {"have": 2, "buildable": 1, "unknown": 1}.get(state[0], 0)
 
     def pick_recipe(self, key, ancestors=frozenset()):
-        override = self.overrides.get(key)
         candidates = self.g.real_producers(key)
         if not candidates:
             return None
-        if override:
-            for r in candidates:
-                if r.rid == override:
-                    return r
-        return max(candidates, key=lambda r: self.score_recipe(r, ancestors))
+        allowed = self.acceptable(key, candidates)
+        return max(allowed or candidates,
+                   key=lambda r: self.score_recipe(r, ancestors))
+
+    def acceptable(self, key, candidates):
+        """The candidates a pin permits, or [] when there is no pin or it matches none.
+
+        Empty rather than the full list when a pin matches nothing, so the caller decides
+        what an unsatisfiable pin means. Falling back silently is the right answer for
+        planning -- a plan is better than an error -- but `pins.resolve` has already
+        reported the lapse, so nothing is being hidden.
+        """
+        wanted = self.pinned.get(key)
+        if not wanted:
+            return []
+        return [r for r in candidates if r.rid in wanted]
 
     # ---- expansion ------------------------------------------------------
 
@@ -350,10 +372,14 @@ class Solver:
             return node
 
         nxt = ancestors | {key}
-        override = self.overrides.get(key)
         ranked = sorted(candidates, key=lambda r: self.score_recipe(r, nxt), reverse=True)
-        if override:
-            ranked.sort(key=lambda r: r.rid != override)
+        # A stable sort, so a pin that accepts several recipes keeps them in score order
+        # among themselves. The pinned ones move to the front rather than replacing the
+        # list: if every one of them cycles, the backtracking below still has somewhere
+        # to go, and a plan beats an error.
+        pinned = self.pinned.get(key)
+        if pinned:
+            ranked.sort(key=lambda r: r.rid not in pinned)
 
         # Try recipes best-first and BACKTRACK out of any whose subtree loops back
         # on an ancestor. Uncrafting recipes (block -> 9 ingots) otherwise get
@@ -367,6 +393,7 @@ class Solver:
             attempt = self._build(node, recipe, key, remainder, from_stock, nxt, depth)
             cycles = _count_cycles(attempt)
             if not cycles:
+                self._note_overruled_pin(key, recipe)
                 return attempt
             # All routes may cycle -- in this dataset smelting recipes are absent, so
             # ore -> ingot chains dead-end and every route eventually loops. Keep the
@@ -383,7 +410,23 @@ class Solver:
             return node
         _score, attempt, restore = best
         self._restore(restore)
+        self._note_overruled_pin(key, attempt.get("recipe"))
         return attempt
+
+    def _note_overruled_pin(self, key, recipe):
+        """Record a pin the backtracking had to ignore.
+
+        The cycle guard outranks a pin, and it has to: a pinned uncrafting recipe
+        (`block -> 9 ingots`) produces a plan that asks for the item being crafted, which
+        is not a plan. But "your choice was not used" is exactly the silence #30 exists to
+        end, and the chooser had already badged the node `pinned`. So the plan says it.
+        """
+        wanted = self.pinned.get(key)
+        rid = getattr(recipe, "rid", recipe)
+        if wanted and rid not in wanted:
+            self.pins_overruled[key] = (
+                "every recipe you pinned for %s loops back on its own ingredients, so "
+                "the plan uses another route" % self.g.bare_name(key))
 
     def _snapshot(self):
         """Everything a discarded branch must not leave behind.
@@ -414,6 +457,10 @@ class Solver:
             "per_run": per_run,
             "alternatives": len(self.g.real_producers(key)),
         })
+        # Rendered as a badge, because a choice you cannot see is a choice you cannot
+        # audit and this one changes every plan that touches the item.
+        if recipe.rid in self.pinned.get(key, ()):
+            node["pinned"] = True
         if recipe.machine:
             node["machine"] = recipe.machine
         state = self.machine_states.get(recipe.category)
@@ -463,6 +510,7 @@ class Solver:
         return {
             "target": key,
             "target_name": self.g.display(key),
+            "pins_overruled": dict(self.pins_overruled),
             "qty": qty,
             "tree": tree,
             "shopping_list": [self._entry(k, n)

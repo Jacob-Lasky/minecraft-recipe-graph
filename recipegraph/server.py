@@ -24,14 +24,16 @@ from . import cost as cost_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
+from . import pins as pins_mod
 from . import tokens as tokens_mod
-from .defaults import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SOURCES, DEFAULT_TOKENS
+from .defaults import (DEFAULT_HOST, DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES,
+                       DEFAULT_TOKENS)
 from .htmlutil import esc as _esc
-from .htmlutil import item_href, machine_href
+from .htmlutil import item_href, machine_href, plan_url
 from .model import Graph, path_of
 from .names import build_reverse
-from .present import (STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED, hidden_note,
-                      kind_chip_json)
+from .present import (STATE_BADGE, STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED,
+                      hidden_note, kind_chip_json, pin_badge)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
 
@@ -468,19 +470,26 @@ WATCHED_FILES = (
 )
 
 
-def _safe_back(form, default="/machines"):
-    """The `back` form field, or `default` if it could navigate off this server.
+def _safe_path(candidate, default=""):
+    """`candidate` if it can only address this server, else `default`.
 
-    ONE implementation on purpose. `back` is attacker-controllable in the general case, and
-    `startswith("/")` alone is NOT sufficient -- `//evil.example/x` satisfies it and is a
-    valid protocol-relative URL. The second handler that needed this check reintroduced the
-    weak version within minutes of the first being fixed.
+    ONE implementation on purpose. A return path is attacker-controllable in the general
+    case, and `startswith("/")` alone is NOT sufficient -- `//evil.example/x` satisfies it
+    and is a valid protocol-relative URL. The second handler that needed this check
+    reintroduced the weak version within minutes of the first being fixed, and a third
+    arrived with the pin chooser, which takes its `back` from the QUERY STRING rather than
+    from a form. Both go through here.
     """
-    back = (form.get("back") or [default])[0]
-    parsed = urllib.parse.urlsplit(back)
-    if not back.startswith("/") or parsed.scheme or parsed.netloc:
+    candidate = candidate or default
+    parsed = urllib.parse.urlsplit(candidate)
+    if not candidate.startswith("/") or parsed.scheme or parsed.netloc:
         return default
-    return back
+    return candidate
+
+
+def _safe_back(form, default="/machines"):
+    """The `back` form field, checked by `_safe_path`."""
+    return _safe_path((form.get("back") or [default])[0], default)
 
 
 def _stale_banner(state, back="/"):
@@ -511,6 +520,9 @@ def _stale_banner(state, back="/"):
 NAV_PARENT = {
     "/plan": "/",
     "/explore": "/",
+    # The recipe chooser is reached only from a craft step in a plan, and a plan is
+    # reached from a search, so it sits under the search tab like the plan it came from.
+    "/recipes": "/",
     "/machine": "/machines",
 }
 
@@ -566,12 +578,13 @@ class State:
     """Loaded once; requests read it. Rebuilt when overrides change or the files do."""
 
     def __init__(self, graph_path, have_path, machines_path, sources_path=None,
-                 tokens_path=None):
+                 tokens_path=None, pins_path=None):
         self.graph_path = graph_path
         self.have_path = have_path
         self.machines_path = machines_path
         self.sources_path = sources_path or DEFAULT_SOURCES
         self.tokens_path = tokens_path or DEFAULT_TOKENS
+        self.pins_path = pins_path or DEFAULT_PINS
         self.lock = threading.Lock()
         self.load_all()
 
@@ -627,6 +640,11 @@ class State:
         # Resolved once per load for the same reason the source overrides are: re-reading
         # per request would let two plans in one session disagree about what a token is.
         self.token_kinds = tokens_mod.for_path(self.tokens_path)
+        # Resolved here rather than per plan for the same reason the sources are: a pin
+        # that has lapsed onto its category must read the same on the chooser page as it
+        # behaves in the tree, and re-reading per request lets those two disagree.
+        self.pins = pins_mod.load(self.pins_path)
+        self.pinned, self.pin_notes = pins_mod.resolve(self.graph, self.pins)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources)
@@ -643,7 +661,8 @@ class State:
     def solver(self):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
                       machine_states=self.states, costs=self.costs,
-                      free_sources=self.free_sources, token_kinds=self.token_kinds)
+                      free_sources=self.free_sources, token_kinds=self.token_kinds,
+                      pinned=self.pinned)
 
 
 HOME_JS = """
@@ -1144,14 +1163,19 @@ def machine_page(state, uid):
     return _page(info["title"] or uid, body), 200
 
 
-def _source_button(action, label, title, **fields):
-    """One POST button on /sources. Same shape as the machine toggle, one implementation."""
+def _post_button(action, label, title, **fields):
+    """One POST button, anywhere. Every editing surface here is POST-then-refresh-then-303
+    and they had begun to grow a form template each."""
     hidden = "".join("<input type='hidden' name='%s' value='%s'>" % (k, _esc(v))
                      for k, v in fields.items())
-    return ("<form method='post' action='/sources'>"
-            "<input type='hidden' name='do' value='%s'>%s"
+    return ("<form method='post' action='%s'>%s"
             "<button type='submit' title='%s'>%s</button></form>"
-            % (action, hidden, _esc(title), _esc(label)))
+            % (_esc(action), hidden, _esc(title), _esc(label)))
+
+
+def _source_button(action, label, title, **fields):
+    """One POST button on /sources."""
+    return _post_button("/sources", label, title, do=action, **fields)
 
 
 SOURCES_JS = """
@@ -1186,6 +1210,136 @@ SOURCES_JS = """
  });
 })();
 """
+
+
+def _pin_button(item, back, fingerprint=""):
+    """One POST button on /recipes. Same shape as the machine toggle and `_source_button`.
+
+    An empty fingerprint is the unpin, rather than a second action name: the two are one
+    decision about one item and splitting them into two verbs is two things to keep in
+    step for no gain.
+    """
+    return _post_button(
+        "/pin",
+        "Unpin" if not fingerprint else "Pin this",
+        "stop pinning and go back to the ranking" if not fingerprint
+        else "always use this recipe for this item",
+        item=item, back=back, fp=fingerprint)
+
+
+# How many candidates the chooser will draw. `techreborn:dynamiccell` has 1,228 recipes
+# and 137 items have more than 60, so an uncapped page is a megabyte of HTML with a form
+# and a cost lookup per row. The list is RANKED, so the cap keeps the ones anyone would
+# plausibly pin, and it is reported rather than applied in silence -- same rule as
+# `explore.MAX_PRODUCERS`.
+MAX_CHOICES = 60
+
+
+def recipes_page(state, key, back, message=""):
+    """Every recipe that makes one item, with the one that is pinned marked.
+
+    A page rather than a panel inside the tree, because the choice needs the same evidence
+    the ranking used -- category, machine availability, estimated cost -- and that is a
+    table, not a tooltip. It is also the only surface on which an UNPIN is discoverable
+    once the tree has stopped showing the recipe you pinned.
+    """
+    if not key:
+        return _page("Pick a recipe", "<div class='wrap'>%s<h1>No item given</h1>"
+                     "<p class='hint2'>Open this from a craft step in a plan.</p></div>"
+                     % _nav("/recipes", state)), 400
+    candidates = state.graph.real_producers(key)
+    if not candidates:
+        return _page("Pick a recipe", "<div class='wrap'>%s<h1>Nothing makes this</h1>"
+                     "<div class='id'>%s</div></div>"
+                     % (_nav("/recipes", state), _esc(key))), 404
+
+    # One lock for all four reads. `_set_pin` rebinds `pins`, `pinned` and `pin_notes`
+    # separately, so a page built across that would show a new pin with a stale note.
+    with state.lock:
+        pin = state.pins.get(key)
+        pinned_rids = state.pinned.get(key, frozenset())
+        pin_note = state.pin_notes.get(key, (pins_mod.EXACT, ""))
+        solver = state.solver()
+    rows = []
+    # Ranked the way the solver ranks, so the order on this page is the order the tool
+    # would have chosen in. A chooser that listed them in dump order would make the
+    # ranking look arbitrary at the exact moment someone is deciding to overrule it.
+    ranked = sorted(candidates, key=lambda r: solver.score_recipe(r), reverse=True)
+    shown = list(ranked[:MAX_CHOICES])
+    # A pinned recipe outside the cap would otherwise be unreachable to UNPIN, which is
+    # the one action you cannot get to any other way.
+    shown += [r for r in ranked[MAX_CHOICES:] if r.rid in pinned_rids]
+    for recipe in shown:
+        fp = pins_mod.fingerprint(recipe)
+        is_pinned = recipe.rid in pinned_rids
+        state_pill = state.states.get(recipe.category)
+        rows.append(
+            "<tr%s><td class='c-name'>%s<br><code>%s</code></td>"
+            "<td class='hint2 c-why' style='margin:0'>%s</td>"
+            "<td class='c-acts'><div class='acts'>%s</div></td></tr>"
+            % (" class='on'" if is_pinned else "",
+               _esc(pins_mod.label(state.graph, recipe)),
+               _esc(recipe.category),
+               _machine_cell(state, recipe, state_pill),
+               _pin_button(key, back, "" if is_pinned else fp)))
+
+    note = ""
+    if pin:
+        pin_state, why = pin_note
+        text, cls = pin_badge(pin_state)
+        note = ("<div class='hint2' style='margin:0 0 12px'>Pinned: <b>%s</b> "
+                "<span class='badge %s'>%s</span>%s</div>"
+                % (_esc(pin["label"] or pin["category"]), cls, _esc(text),
+                   (" &middot; %s" % _esc(why)) if why else ""))
+
+    body = """<div class="wrap">%s
+  <div class="eyebrow">Recipe choice</div>
+  <h1>%s</h1>
+  <div class="id">%s</div>
+  <div class="hint2">The ranking picks one of these every time it plans, and keeps
+   suggesting. A pin outranks it until you take the pin off. Pins survive a redump: they
+   are stored by what the recipe IS, not by its id, which renumbers.%s</div>
+  %s
+  <div class="card"><h2><span>Recipes</span><span class="c">%d</span></h2>
+    %s<table class="mach">%s</table></div>
+  <div class="hint2"><a class="mlink" href="%s">Back to the plan</a></div>
+</div>""" % (
+        _nav("/recipes", state), _item(state.graph, key), _esc(key),
+        (" <b>%s</b>" % _esc(message)) if message else "",
+        note, len(candidates), _choice_cap_note(len(candidates), len(shown)),
+        "".join(rows), _esc(back or plan_url(key)))
+    return _page("Recipes for %s" % state.graph.bare_name(key), body), 200
+
+
+def _choice_cap_note(total, shown):
+    if shown >= total:
+        return ""
+    return ("<div class='hint2' style='margin:0 0 10px'>Showing the %s best-ranked of "
+            "%s. The rest rank below every one of these, so pinning one would be "
+            "choosing a worse route than the tool already rejected.</div>"
+            % ("{:,}".format(shown), "{:,}".format(total)))
+
+
+def _machine_cell(state, recipe, state_pill):
+    """The evidence column: machine, its availability, and what the recipe is priced at."""
+    bits = []
+    if recipe.machine:
+        bits.append("<a class='mlink' href='%s'>%s</a>"
+                    % (machine_href(recipe.category), _esc(recipe.machine)))
+    if state_pill:
+        bits.append("<span class='badge %s'>%s</span>"
+                    % (STATE_BADGE.get(state_pill[0], "need"),
+                       _esc(STATE_LABEL.get(state_pill[0], state_pill[0]))))
+    if state.costs is not None:
+        bits.append("cost %s" % _fmt_cost(cost_mod.recipe_cost(
+            state.costs, recipe, state.graph.ore_members, state.states)))
+    return " &middot; ".join(bits) or "hand crafted"
+
+
+def _fmt_cost(value):
+    if value != value or value in (float("inf"), float("-inf")):
+        return "unreachable"
+    return "{:,.1f}".format(value)
 
 
 def sources_page(state, message=""):
@@ -1380,8 +1534,12 @@ class Handler(BaseHTTPRequestHandler):
                     result = st.solver().solve(key, qty)
                 title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
-                    title, render_html(result, st.graph), st, _crumb(title),
-                    path="/plan"))
+                    title, render_html(result, st.graph, back=plan_url(key, qty)), st,
+                    _crumb(title), path="/plan"))
+            if parts.path == "/recipes":
+                page, status = recipes_page(st, one("item"),
+                                            _safe_path(one("back")), one("m"))
+                return self._send(page, status)
             if parts.path == "/machines":
                 return self._send(machines_page(st, one("m"), one("q")))
             if parts.path == "/machine":
@@ -1418,13 +1576,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = urllib.parse.urlparse(self.path)
-        if parts.path not in ("/machines", "/reload", "/sources"):
+        if parts.path not in ("/machines", "/reload", "/sources", "/pin"):
             return self._send("", 404)
         length = int(self.headers.get("Content-Length") or 0)
         form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
         st = self.state
         if parts.path == "/sources":
             return self._redirect("/sources", self._edit_sources(form))
+        if parts.path == "/pin":
+            item = (form.get("item") or [""])[0]
+            back = _safe_back(form, "/")
+            # Read, modify and write inside the lock, and re-resolve before returning:
+            # the page the redirect lands on must already reflect the pin, or a click
+            # that worked looks like a click that did nothing.
+            with st.lock:
+                msg = self._set_pin(item, (form.get("fp") or [""])[0])
+            return self._redirect(back, msg)
         if parts.path == "/reload":
             # Blocking on purpose: loading a 72 MB graph takes tens of seconds, and doing it
             # in the background while still serving the old one would mean the page you land
@@ -1460,6 +1627,31 @@ class Handler(BaseHTTPRequestHandler):
                 st.refresh_machines()
             msg = "%s set to %s" % (uid, target)
         self._redirect(back, msg)
+
+    def _set_pin(self, item, fingerprint):
+        """Pin `item` to the recipe with this fingerprint, or unpin it. Caller holds the
+        lock. Returns the line to show."""
+        st = self.state
+        stored = dict(st.pins)
+        if not item:
+            return "no item given"
+        if not fingerprint:
+            if stored.pop(item, None) is None:
+                return "%s was not pinned" % st.graph.bare_name(item)
+            msg = "unpinned %s" % st.graph.bare_name(item)
+        else:
+            match = next((r for r in st.graph.real_producers(item)
+                          if pins_mod.fingerprint(r) == fingerprint), None)
+            if match is None:
+                # A stale page: the graph was reloaded under a chooser left open. Saying
+                # so beats writing a pin that resolves to nothing.
+                return "that recipe is no longer in the graph; reload the page"
+            stored[item] = pins_mod.make(st.graph, match)
+            msg = "pinned %s" % stored[item]["label"]
+        pins_mod.save(st.pins_path, stored)
+        st.pins = stored
+        st.pinned, st.pin_notes = pins_mod.resolve(st.graph, stored)
+        return msg
 
     def _edit_sources(self, form):
         """Apply one /sources form action and return the line to show. Never raises.
@@ -1524,8 +1716,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
           port=DEFAULT_PORT,
-          sources_path=None, tokens_path=None):
-    state = State(graph_path, have_path, machines_path, sources_path, tokens_path)
+          sources_path=None, tokens_path=None, pins_path=None):
+    state = State(graph_path, have_path, machines_path, sources_path, tokens_path,
+                  pins_path)
     Handler.state = state
     httpd = ThreadingHTTPServer((host, port), Handler)
     return httpd, state

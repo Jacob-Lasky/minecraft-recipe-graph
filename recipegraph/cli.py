@@ -15,9 +15,10 @@ import sys
 
 from . import index
 from . import machines
+from . import pins as pins_mod
 from . import tokens as tokens_mod
 from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST,
-                       DEFAULT_TOKENS,
+                       DEFAULT_PINS, DEFAULT_TOKENS,
                        DEFAULT_MACHINES, DEFAULT_METRICS_DB, DEFAULT_PORT, DEFAULT_SOURCES)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
@@ -179,14 +180,24 @@ def cmd_plan(args):
         from . import cost as cost_mod
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
                                          free_sources=free)
+    # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
+    # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
+    pinned, pin_notes = ({}, {})
+    if not args.ignore_pins:
+        pinned, pin_notes = pins_mod.resolve(g, pins_mod.load(args.pins))
+    for pin_key, (pstate, why) in sorted(pin_notes.items()):
+        if pstate != pins_mod.EXACT:
+            print("pin on %s: %s" % (g.bare_name(pin_key), why), file=sys.stderr)
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
                     costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
-                    free_sources=free, token_kinds=_token_kinds(args))
+                    free_sources=free, token_kinds=_token_kinds(args), pinned=pinned)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
               "--ignore-craftable to expand them)" % len(craftables), file=sys.stderr)
 
+    for why in sorted((result.get("pins_overruled") or {}).values()):
+        print(why, file=sys.stderr)
     print("== %s x%d ==" % (result["target_name"], result["qty"]))
     print("nodes: %d%s" % (result["nodes"], "  (TRUNCATED)" if result["truncated"] else ""))
     print("\n-- you still need --")
@@ -478,7 +489,8 @@ def cmd_serve(args):
     print("loading graph %s ..." % args.graph, file=sys.stderr)
     httpd, state = server.serve(args.graph, args.have, args.machines,
                                 host=args.host, port=args.port,
-                                sources_path=args.sources, tokens_path=args.tokens)
+                                sources_path=args.sources, tokens_path=args.tokens,
+                                pins_path=args.pins)
     print("recipegraph UI on http://%s:%d  (%s recipes, %s stocked items)"
           % (args.host, args.port, "{:,}".format(len(state.graph.recipes)),
              "{:,}".format(len(state.have))))
@@ -489,6 +501,34 @@ def cmd_serve(args):
         print("\nstopped")
     finally:
         httpd.server_close()
+    return 0
+
+
+def cmd_pins(args):
+    """List the recipe choices made by hand, and say which ones still apply.
+
+    A listing plus a clear, no set: choosing a recipe wants the category, the machine
+    state and the cost side by side, which is the /recipes page. What a terminal is for
+    is the other half, finding out why a plan stopped obeying a pin after a redump.
+    """
+    from . import present
+
+    g = _load_graph(args.graph)
+    stored = pins_mod.load(args.pins)
+    if args.clear:
+        gone = [k for k in args.clear if stored.pop(k, None) is not None]
+        pins_mod.save(args.pins, stored)
+        print("cleared %d of %d; wrote %s" % (len(gone), len(args.clear), args.pins))
+        return 0
+    if not stored:
+        print("no pins in %s" % args.pins)
+        return 0
+    _accepted, notes = pins_mod.resolve(g, stored)
+    for key in sorted(stored):
+        state, why = notes.get(key, (pins_mod.DEAD, ""))
+        text, _cls = present.pin_badge(state)
+        print("%-40s %s" % (g.bare_name(key), stored[key]["label"]))
+        print("%-40s %s" % ("", why or "%s [%s]" % (text, stored[key]["category"])))
     return 0
 
 
@@ -688,6 +728,10 @@ def main(argv=None):
                    help="do not treat infinite generator output as free")
     p.add_argument("--tokens", default=DEFAULT_TOKENS,
                    help="pack placeholder additions and removals")
+    p.add_argument("--pins", default=DEFAULT_PINS,
+                   help="recipe choices made by hand, which outrank the ranking")
+    p.add_argument("--ignore-pins", action="store_true",
+                   help="plan as if nothing were pinned")
     p.add_argument("--no-cost", action="store_true",
                    help="skip the cost precompute and choose recipes greedily")
     p.add_argument("--exact", action="store_true")
@@ -732,12 +776,19 @@ def main(argv=None):
     p.add_argument("--json")
     p.set_defaults(fn=cmd_gaps)
 
+    p = sub.add_parser("pins", help="recipe choices you made by hand")
+    p.add_argument("--pins", default=DEFAULT_PINS)
+    p.add_argument("--clear", nargs="+", metavar="ITEM",
+                   help="stop pinning these item keys")
+    p.set_defaults(fn=cmd_pins)
+
     p = sub.add_parser("serve",
                        help="local web UI; builds the graph first if it is missing or stale")
     p.add_argument("--instance", help="pack's minecraft/ dir, if the graph must be built "
                                       "(remembered from the last build otherwise)")
     p.add_argument("--sources", default=DEFAULT_SOURCES)
     p.add_argument("--tokens", default=DEFAULT_TOKENS)
+    p.add_argument("--pins", default=DEFAULT_PINS)
     p.add_argument("--no-build", action="store_true",
                    help="never build; only warn if the graph is behind the dump")
     p.add_argument("--have", default=DEFAULT_HAVE)

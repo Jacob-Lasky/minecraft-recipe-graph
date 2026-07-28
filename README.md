@@ -104,7 +104,16 @@ The solver handles the three things that make this harder than it looks:
   next-best one, so an uncrafting recipe never gets chosen over a real production route.
 - **Recipe choice.** Items have many recipes, and the best one depends on what you own,
   so choice happens at solve time — ranked by how much of the recipe your stock already
-  covers. Override per item when you disagree.
+  covers. When you disagree, **pin** one: open the recipe count on any craft step, compare
+  the candidates side by side (category, machine availability, estimated cost) and choose.
+  The ranking keeps suggesting; the pin outranks it until you take it off.
+
+  Pins survive a redump. A recipe id is `hei:<category>:<line number>` and a redump
+  renumbers every one of them, so a pin is stored by a fingerprint of what the recipe *is*
+  — its category, outputs and inputs. If the pack changes that recipe the fingerprint stops
+  matching and the pin falls back to the category ("make it in the Alloy Smelter"), saying
+  so rather than reverting in silence. Kept in `data/recipes.json`; `recipegraph pins`
+  lists them.
 - **Stock is consumed, not just checked.** The inventory pool is drawn down as the tree
   is built, so two branches cannot both claim the same 5 redstone.
 

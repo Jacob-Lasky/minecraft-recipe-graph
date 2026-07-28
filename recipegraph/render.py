@@ -10,14 +10,16 @@ strict CSP that blocks every off-host request.
 """
 
 import json
+import urllib.parse
 
 from .graphview import DIAGRAM_CSS, render_diagram
 from .htmlutil import esc as _esc
 from .htmlutil import machine_href
 from . import tokens as tokens_mod
 from .solve import STATUS_RAW, STATUS_TOKEN
+from .pins import EXACT as PIN_EXACT
 from .present import (KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, hidden_note,
-                      is_roadblock, status_badge)
+                      is_roadblock, pin_badge, status_badge)
 
 CSS = """
 /* Palette: warm-paper / slate ground with a certus-quartz teal accent taken from
@@ -339,7 +341,19 @@ def _machine_bit(node, name):
         _esc(STATE_LABEL.get(state, state)))
 
 
-def _node_html(node, depth=0):
+def _recipes_bit(node, back):
+    """`N recipes`, as a link to the chooser when there is a server to click back to."""
+    text = "%d recipes" % node["alternatives"]
+    if not back:
+        return text
+    return ('<a class="mlink" href="/recipes?item=%s&amp;back=%s">%s</a>'
+            % (urllib.parse.quote(node["key"]), urllib.parse.quote(back), text))
+
+
+def _node_html(node, depth=0, back=""):
+    """One tree row. `back` is where a pin control should return to, empty for a static
+    render: `recipegraph plan --html` produces a file that outlives the server, and a
+    button posting to a server that is not there is worse than no button."""
     status = node.get("status", "craft")
     label, cls = status_badge(status, node.get("token_kind"))
     kids = node.get("children") or []
@@ -358,7 +372,7 @@ def _node_html(node, depth=0):
     elif node.get("category") and not str(node["category"]).startswith("crafting"):
         extra.append(_machine_bit(node, node["category"]))
     if node.get("alternatives", 0) > 1:
-        extra.append("%d recipes" % node["alternatives"])
+        extra.append(_recipes_bit(node, back))
     # How many things the SLOT would have accepted, as opposed to how many recipes make
     # what is in it. The solver has always written this and nothing rendered it, so a
     # node standing in for an oredict slot looked like the only option it ever had.
@@ -368,6 +382,9 @@ def _node_html(node, depth=0):
         extra.append(_esc(node["note"]))
     if node.get("resolved_to"):
         extra.append("&rarr; %s" % _esc(node["resolved_to"]))
+    if node.get("pinned"):
+        text, cls = pin_badge(PIN_EXACT)
+        extra.append('<span class="badge %s">%s</span>' % (cls, _esc(text)))
     if extra:
         bits.append(' <span class="meta">%s</span>' % " &middot; ".join(extra))
     bits.append("</span>")
@@ -389,7 +406,7 @@ def _node_html(node, depth=0):
         '<summary><span class="tw">&#9656;</span>%s</summary>'
         '<div class="kids">%s</div></details>'
         % (need_flag, block_flag, open_attr, inner,
-           "".join(_node_html(k, depth + 1) for k in kids))
+           "".join(_node_html(k, depth + 1, back) for k in kids))
     )
 
 
@@ -483,7 +500,7 @@ def _tokens_html(entries):
             '</div>' % (len(entries), "".join(blocks)))
 
 
-def render_html(result, graph=None, coverage_note=None):
+def render_html(result, graph=None, coverage_note=None, back=""):
     tree = result["tree"]
     diagram_svg, diagram_legend = render_diagram(tree)
     # Only offered when there is something to filter TO. A button that empties the tree is
@@ -499,6 +516,11 @@ def render_html(result, graph=None, coverage_note=None):
             "Tree hit the node cap (%d) and was cut off; deeper branches are "
             "incomplete. Raise --max-nodes to see more." % result["nodes"]
         )
+    # A pin the cycle guard had to ignore. The chooser already badged this choice as
+    # taken, so leaving it unsaid would be the silent overwrite the feature exists to
+    # prevent, just wearing a badge that says otherwise.
+    for why in sorted((result.get("pins_overruled") or {}).values()):
+        warn.append(_esc(why))
     if coverage_note:
         warn.append(coverage_note)
     warnbar = (
@@ -572,7 +594,7 @@ def render_html(result, graph=None, coverage_note=None):
         diagram_legend,
         diagram_svg,
         "{:,}".format(result["nodes"]),
-        _node_html(tree),
+        _node_html(tree, back=back),
         len(need),
         _rows(need),
         len(used),

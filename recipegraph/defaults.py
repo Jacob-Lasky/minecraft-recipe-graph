@@ -20,6 +20,9 @@ DEFAULT_GRAPH = "data/graph.json"
 DEFAULT_HAVE = "data/ae2_have.json"
 DEFAULT_MACHINES = "data/machines.json"
 DEFAULT_SOURCES = "data/sources.json"
+# Recipe choices made by hand. Named for what it holds rather than for the
+# feature, matching machines.json and sources.json beside it.
+DEFAULT_PINS = "data/recipes.json"
 DEFAULT_TOKENS = "data/tokens.json"
 DEFAULT_METRICS_DB = "data/metrics.db"
 DEFAULT_COST_CACHE = "data/.cost-cache.json"
