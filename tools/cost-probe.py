@@ -31,6 +31,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import cost as cost_mod                      # noqa: E402
+from recipegraph.defaults import DEFAULT_GRAPH                # noqa: E402
 from recipegraph import machines as machines_mod              # noqa: E402
 from recipegraph.model import Graph                           # noqa: E402
 from recipegraph.solve import Solver                          # noqa: E402
@@ -58,39 +59,64 @@ def load(graph_path):
     return graph, machines_mod.resolve(graph)
 
 
-def route(graph, produced, tree_or_recipe):
-    """`category <- first few inputs`, marking any input NOTHING in the graph makes."""
+def route(graph, solver, tree_or_recipe):
+    """`category <- first few inputs`, marking any input NOTHING in the graph makes.
+
+    THE ALTERNATIVE SHOWN IS THE ONE THE SOLVER WOULD EXPAND, via
+    `Solver.pick_alternative`, not `alternatives[0]`. The dump's first alternative is not
+    the chosen one -- that is issue #29's exact misreading, the one whose fix this tool is
+    supposed to be able to check. Printing element 0 made the default table report Iron
+    Ingot as "Abyssal Iron Ore" and Gold Ingot as "Sandslash", i.e. it misread two of the
+    four probes that exist to be the control group.
+
+    `real_producers`, not `by_output`, for the `*` marker: a key produced only by a
+    wildcard-meta recipe is obtainable and was being starred, and a fluid whose only
+    producer is a container transfer is NOT and was not.
+    """
     if tree_or_recipe is None:
         return "(no route)"
     if hasattr(tree_or_recipe, "inputs"):
         cat = tree_or_recipe.category or "-"
-        keys = [i.alternatives[0] for i in tree_or_recipe.inputs[:3] if i.alternatives]
+        keys = [solver.pick_alternative(i) for i in tree_or_recipe.inputs[:3]
+                if i.alternatives]
         names = [graph.bare_name(k) for k in keys]
+        raw = [not graph.real_producers(k) for k in keys]
     else:
         cat = tree_or_recipe.get("category") or "-"
         kids = tree_or_recipe.get("children", [])[:3]
         keys = [c["key"] for c in kids]
         names = [c.get("label") or c["key"] for c in kids]
-    marked = ["%s%s" % (n, "" if k in produced else "*") for k, n in zip(keys, names)]
+        # The solver already decided; `raw` is its own verdict rather than a re-derivation.
+        raw = [c.get("status") == "raw" for c in kids]
+    marked = ["%s%s" % (n, "*" if r else "") for r, n in zip(raw, names)]
     return "%-28s <- %s" % (cat[:28], ", ".join(marked) or "(nothing)")
 
 
 def sweep(graph, states, values, rank_only, items):
-    produced = graph.by_output
+    """`{raw cost: ({label: route}, seconds)}`.
+
+    Restores `cost.BASE_RAW_COST` on the way out. The tool is a one-shot CLI so the leak
+    was harmless in practice, but a module constant left mutated is a trap for the next
+    caller and there is no reason to leave it set.
+    """
+    was = cost_mod.BASE_RAW_COST
     rows = collections.OrderedDict()
-    for value in values:
-        cost_mod.BASE_RAW_COST = value
-        started = time.time()
-        costs = cost_mod.estimate(graph, machine_states=states)
-        solver = Solver(graph, machine_states=states, costs=costs)
-        answers = {}
-        for key, label in items:
-            if rank_only:
-                answers[label] = route(graph, produced, solver.pick_recipe(key))
-            else:
-                fresh = Solver(graph, machine_states=states, costs=costs)
-                answers[label] = route(graph, produced, fresh.solve(key, 1)["tree"])
-        rows[value] = (answers, time.time() - started)
+    try:
+        for value in values:
+            cost_mod.BASE_RAW_COST = value
+            started = time.time()
+            costs = cost_mod.estimate(graph, machine_states=states)
+            solver = Solver(graph, machine_states=states, costs=costs)
+            answers = {}
+            for key, label in items:
+                if rank_only:
+                    answers[label] = route(graph, solver, solver.pick_recipe(key))
+                else:
+                    fresh = Solver(graph, machine_states=states, costs=costs)
+                    answers[label] = route(graph, fresh, fresh.solve(key, 1)["tree"])
+            rows[value] = (answers, time.time() - started)
+    finally:
+        cost_mod.BASE_RAW_COST = was
     return rows
 
 
@@ -110,26 +136,34 @@ def report(rows, items):
           "and find one.")
 
 
-def explain(graph, states, key, limit):
+def explain(graph, states, key, limit, raw_cost=None):
     """Every real producer of one item, best-ranked first, with the score that decided it.
 
     The view that made #61 legible. Three routes to a diamond TIE on cost at -2.0 -- a
     decorative panel, a loot token and a real ore -- because every recipe-less input is
     priced at BASE_RAW_COST, and a later component of the score picks between them.
     """
-    costs = cost_mod.estimate(graph, machine_states=states)
-    solver = Solver(graph, machine_states=states, costs=costs)
-    produced = graph.by_output
-    candidates = graph.real_producers(key)
-    print("%s: %d real producers\n" % (graph.bare_name(key), len(candidates)))
-    for recipe in sorted(candidates, key=solver.score_recipe, reverse=True)[:limit]:
-        print("  %-40s %s" % (solver.score_recipe(recipe),
-                              route(graph, produced, recipe)))
+    # `--raw` applies here too. It used to be silently ignored, so `--explain --raw 20`
+    # printed the DEFAULT constant's scores under a heading that implied otherwise.
+    was = cost_mod.BASE_RAW_COST
+    if raw_cost is not None:
+        cost_mod.BASE_RAW_COST = raw_cost
+    try:
+        costs = cost_mod.estimate(graph, machine_states=states)
+        solver = Solver(graph, machine_states=states, costs=costs)
+        candidates = graph.real_producers(key)
+        print("%s: %d real producers, BASE_RAW_COST=%s\n"
+              % (graph.bare_name(key), len(candidates), cost_mod.BASE_RAW_COST))
+        for recipe in sorted(candidates, key=solver.score_recipe, reverse=True)[:limit]:
+            print("  %-40s %s" % (solver.score_recipe(recipe),
+                                  route(graph, solver, recipe)))
+    finally:
+        cost_mod.BASE_RAW_COST = was
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--graph", default="data/graph.json")
+    ap.add_argument("--graph", default=DEFAULT_GRAPH)
     ap.add_argument("--raw", nargs="+", type=float, default=[1.0, 2.5, 5.0, 20.0],
                     help="BASE_RAW_COST values to compare; the first is the baseline")
     ap.add_argument("--rank", action="store_true",
@@ -145,12 +179,23 @@ def main():
     if args.explain:
         if not args.item:
             ap.error("--explain needs --item")
+        if len(args.raw) > 1:
+            ap.error("--explain takes one --raw value, got %d" % len(args.raw))
         for key in args.item:
-            explain(graph, states, key, args.limit)
+            explain(graph, states, key, args.limit, args.raw[0])
         return
     items = [(k, graph.bare_name(k)) for k in args.item] or PROBES
-    items = [(k, n) for k, n in items if graph.real_producers(k)]
-    report(sweep(graph, states, args.raw, args.rank, items), items)
+    # SAY what was dropped. A mistyped --item, or a probe whose key a re-dump renamed, used
+    # to vanish and leave the sweep reporting "0 of 0" after a fifteen-minute run -- and a
+    # control-group probe could disappear from the control group without a word.
+    kept, dropped = [], []
+    for k, n in items:
+        (kept if graph.real_producers(k) else dropped).append((k, n))
+    for k, _n in dropped:
+        print("skipping %s: no real producers" % k, file=sys.stderr)
+    if not kept:
+        ap.error("none of the %d requested items has a real producer" % len(items))
+    report(sweep(graph, states, args.raw, args.rank, kept), kept)
 
 
 if __name__ == "__main__":

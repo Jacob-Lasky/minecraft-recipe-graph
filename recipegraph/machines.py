@@ -423,12 +423,16 @@ def _candidate_verdict(graph, key, placed_index, stock_index):
         shown = (key if graph.producers(key)
                  else "%s (as %s)" % (key, graph.variants_of(key)[0]))
         return _CRAFTABLE, BUILDABLE, "craftable: %s" % shown
-    # Last resort: the same registry name at a different metadata value. A tool that
-    # selects its mode with damage gets catalogued by JEI under the mode's meta and
-    # crafted only at meta 0, and reporting "no route" for a toolbox the player can make
-    # is a falsehood, not a caveat. Deliberately below the exact and NBT-variant checks,
-    # and the evidence names the variant, because meta usually means a different item.
-    # See `Graph.meta_sibling_made`.
+    # Last resort: the same registry name at a different metadata value, and ONLY when the
+    # pack registered no name for this meta. A tool that selects its mode with damage gets
+    # catalogued by JEI under the mode's meta and crafted only at meta 0, and reporting
+    # "no route" for a toolbox the player can make is a falsehood, not a caveat.
+    #
+    # DELIBERATELY BELOW the exact and NBT-variant checks, and there is a test for that
+    # order: reordering to exact -> meta -> NBT keeps the suite green while making
+    # `thermalexpansion.pulverizer` name a Redstone Furnace as its route, which is #28.
+    # The evidence names the variant, because meta usually means a different item.
+    # See `Graph.meta_sibling_made` for the unnamed-meta gate and what it measured.
     sibling = graph.meta_sibling_made(key)
     if sibling:
         return _CRAFTABLE, BUILDABLE, "craftable: %s (as %s)" % (key, sibling)

@@ -432,8 +432,6 @@ class RoadblockPredicateTest(unittest.TestCase):
             self.assertFalse(present.is_roadblock(empty), repr(empty))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TruncationNoticeTest(unittest.TestCase):
@@ -472,7 +470,10 @@ class TruncationNoticeTest(unittest.TestCase):
 
         spent = self._page(None, nodes=1162, exhausted=True, work=80001)
         self.assertNotIn("node cap", spent)
-        self.assertIn("80,001 steps", spent)
+        # "attempts", not "steps": the page's own "Steps resolved" tile is `nodes`, and one
+        # word for two numbers that differ by 70x on the same page is worse than no number.
+        self.assertIn("80,001 attempts", spent)
+        self.assertNotIn("80,001 steps", spent)
         self.assertIn("backed out of", spent)
 
     def test_the_cap_is_quoted_not_the_count_it_stopped_at(self):
@@ -515,6 +516,59 @@ class TruncationNoticeTest(unittest.TestCase):
         self.assertNotIn("node cap", page)
 
 
+class SolveResultKeysTest(unittest.TestCase):
+    """The new result keys, against a REAL solve rather than a hand-built dict.
+
+    `TruncationNoticeTest` above feeds `render_html` a literal, so it proves the renderer
+    reads `exhausted`/`max_nodes`/`work` and nothing about the solver writing them. A
+    producer rename would leave every one of those tests green.
+    """
+
+    @staticmethod
+    def _deep():
+        """A tree deep enough to hit a budget: 3-way branching, 6 levels."""
+        from recipegraph.model import Graph, Ingredient, Recipe
+        g = Graph()
+        g.names = {"deep:leaf": "Leaf"}
+        for level in range(6):
+            for i in range(3 ** level):
+                key = "deep:n%d_%d" % (level, i)
+                g.names[key] = "Node %d.%d" % (level, i)
+                kids = (["deep:leaf"] if level == 5 else
+                        ["deep:n%d_%d" % (level + 1, i * 3 + k) for k in range(3)])
+                for kid in kids:
+                    g.names.setdefault(kid, kid)
+                g.add(Recipe("r%d_%d" % (level, i), "Crafting Table", [(key, 1)],
+                             [Ingredient([k], 1) for k in kids],
+                             category="minecraft.crafting"))
+        return g
+
+    def test_a_real_solve_reports_the_budgets_it_ran_under(self):
+        g = self._deep()
+        result = solve.Solver(g, max_nodes=4000, work_budget=200).solve("deep:n0_0", 1)
+        self.assertTrue(result["exhausted"])
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["max_nodes"], 4000)
+        self.assertEqual(result["work_budget"], 200)
+        self.assertGreater(result["work"], result["work_budget"])
+
+    def test_an_untruncated_solve_reports_them_too(self):
+        # The keys are unconditional, so a notice can quote the cap without a guard.
+        result = solve.Solver(self._deep(), max_nodes=4000).solve("deep:n0_0", 1)
+        self.assertFalse(result["truncated"])
+        self.assertFalse(result["exhausted"])
+        self.assertEqual(result["max_nodes"], 4000)
+        self.assertIn("work_budget", result)
+
+    def test_the_node_cap_branch_is_reachable_from_a_real_solve(self):
+        """The other cause. `exhausted` must be False so the notice quotes the cap."""
+        result = solve.Solver(self._deep(), max_nodes=20,
+                              work_budget=10 ** 9).solve("deep:n0_0", 1)
+        self.assertTrue(result["truncated"])
+        self.assertFalse(result["exhausted"])
+        self.assertGreater(result["nodes"], result["max_nodes"])
+
+
 class NodeCapConstantTest(unittest.TestCase):
     def test_one_default_for_the_cli_and_the_solver(self):
         """Two copies of 4000 is how `plan` and `serve` end up truncating at different
@@ -525,3 +579,7 @@ class NodeCapConstantTest(unittest.TestCase):
         sig = inspect.signature(solve.Solver.__init__)
         self.assertEqual(sig.parameters["max_nodes"].default, defaults.DEFAULT_MAX_NODES)
         self.assertGreater(defaults.MAX_NODES_CEILING, defaults.DEFAULT_MAX_NODES)
+
+
+if __name__ == "__main__":
+    unittest.main()

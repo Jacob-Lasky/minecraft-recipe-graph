@@ -100,10 +100,20 @@ class RenderTest(unittest.TestCase):
         self.assertIn(">64<", svg)
 
     def test_a_long_label_is_shortened_so_it_cannot_run_under_the_quantity(self):
-        nodes, _l, _r = graphview.layout(plan())
-        longest = max(len(n["label"]) for n in nodes)
-        self.assertLessEqual(longest, graphview.MAX_LABEL)
-        self.assertIn("…", graphview.render_diagram(plan())[0])
+        """Asserted on what is DRAWN, against the per-box budget.
+
+        This used to measure the layout record's flat `MAX_LABEL` cap, which is not what
+        gets drawn -- the box template shortens against `_label_limit(qty)`. So it could not
+        fail if the label-budget wiring reverted, despite its name claiming that property.
+        The record no longer carries a shortened copy at all.
+        """
+        svg = graphview.render_diagram(plan())[0]
+        pairs = re.findall(r'class="lb"[^>]*>([^<]*)<.*?class="qt"[^>]*>([^<]*)<', svg)
+        self.assertTrue(pairs)
+        for shown, qty in pairs:
+            self.assertLessEqual(len(shown), graphview._label_limit(qty),
+                                 "%r does not fit beside %r" % (shown, qty))
+        self.assertIn("…", svg)
 
     def test_status_colours_come_from_the_shared_tokens(self):
         # The same status must mean the same thing in the tree and the diagram.
@@ -201,8 +211,6 @@ class RenderTest(unittest.TestCase):
         self.assertIn("&lt;script&gt;", svg)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class OrientationTest(unittest.TestCase):
@@ -342,3 +350,140 @@ class LabelBudgetTest(unittest.TestCase):
     def test_a_label_that_fits_is_left_alone(self):
         svg = graphview.render_diagram(node("mod:thing", need=1, label="Granite"))[0]
         self.assertIn(">Granite<", svg)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class CanvasFitsItsContentTest(unittest.TestCase):
+    """The viewBox has to contain every box it draws, in both orientations.
+
+    The top-down width used the row COUNT where left-to-right used the max depth INDEX, so
+    top-down carried a whole empty 238px column; and the "+ more not drawn" note hangs
+    outside its box, so on the deepest column it was clipped away entirely -- which is
+    exactly where a cut node is.
+    """
+
+    @staticmethod
+    def _wide():
+        return node("mod:root", label="Root", children=[
+            node("mod:a", label="A", children=[node("mod:a1", label="A1"),
+                                               node("mod:a2", label="A2")]),
+            node("mod:b", label="B", children=[node("mod:b1", label="B1"),
+                                               node("mod:b2", label="B2")]),
+        ])
+
+    @staticmethod
+    def _extent(svg):
+        box = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
+        rects = [(float(x), float(y)) for x, y in
+                 re.findall(r'<rect x="([\d.]+)" y="([\d.]+)" width="226"', svg)]
+        texts = [(float(x), float(y)) for x, y in
+                 re.findall(r'<text x="([\d.]+)" y="([\d.]+)" class="cut"', svg)]
+        return int(box.group(1)), int(box.group(2)), rects, texts
+
+    def test_every_box_is_inside_the_canvas_in_both_orientations(self):
+        for orientation in graphview.ORIENTATIONS:
+            svg = graphview.render_diagram(self._wide(), orientation=orientation)[0]
+            w, h, rects, _cut = self._extent(svg)
+            self.assertTrue(rects, orientation)
+            right = max(x for x, _y in rects) + graphview.BOX_W
+            bottom = max(y for _x, y in rects) + graphview.BOX_H
+            self.assertLessEqual(right, w, orientation)
+            self.assertLessEqual(bottom, h, orientation)
+
+    def test_the_canvas_is_not_padded_by_a_whole_empty_column(self):
+        # The bug: TD width was PAD*2 + rows*TD_COL + BOX_W, where the last box starts at
+        # index rows - 1. Allow the padding, not a column.
+        for orientation in graphview.ORIENTATIONS:
+            svg = graphview.render_diagram(self._wide(), orientation=orientation)[0]
+            w, h, rects, _cut = self._extent(svg)
+            slack = w - (max(x for x, _y in rects) + graphview.BOX_W)
+            self.assertLess(slack, graphview.TD_COL,
+                            "%s wastes %dpx, about a whole column" % (orientation, slack))
+            self.assertGreaterEqual(slack, 0, orientation)
+
+    def test_the_cut_note_is_inside_the_canvas_in_both_orientations(self):
+        for orientation in graphview.ORIENTATIONS:
+            svg = graphview.render_diagram(self._wide(), max_nodes=3,
+                                           orientation=orientation)[0]
+            w, _h, _rects, cut = self._extent(svg)
+            self.assertTrue(cut,
+                            "%s: nothing was cut, so this proves nothing" % orientation)
+            for x, _y in cut:
+                self.assertLessEqual(x + graphview.CUT_NOTE_W, w,
+                                     "%s clips the cut note" % orientation)
+
+    def test_the_cut_allowance_is_not_reserved_when_nothing_is_cut(self):
+        # Otherwise every untruncated diagram carries 96px of dead canvas.
+        full = graphview.render_diagram(self._wide())[0]
+        trimmed = graphview.render_diagram(self._wide(), max_nodes=3)[0]
+        self.assertLess(int(re.search(r'viewBox="0 0 (\d+)', full).group(1)),
+                        int(re.search(r'viewBox="0 0 (\d+)', trimmed).group(1)))
+
+
+class OneLayoutPassTest(unittest.TestCase):
+    """`render_html` needs both orientations and must lay the tree out ONCE.
+
+    It called `render_diagram` twice, so `layout` and `_render_legend` both ran twice, while
+    three comments promised a single pass. The equality of the two node sets rested on
+    `layout` being deterministic rather than on it being called once.
+    """
+
+    @staticmethod
+    def _tree():
+        return node("mod:root", label="Root", children=[
+            node("mod:a", status="raw", label="A"),
+            node("mod:b", status="have", label="B", children=[node("mod:c", label="C")]),
+        ])
+
+    @staticmethod
+    def _count_layouts(fn):
+        calls = []
+        real = graphview.layout
+        graphview.layout = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+        try:
+            fn()
+        finally:
+            graphview.layout = real
+        return len(calls)
+
+    def test_both_svgs_come_out_of_one_layout(self):
+        svgs = {}
+        n = self._count_layouts(
+            lambda: svgs.update(graphview.render_diagrams(self._tree())[0]))
+        self.assertEqual(n, 1, "layout ran %d times" % n)
+        self.assertEqual(set(svgs), set(graphview.ORIENTATIONS))
+
+    def test_the_PAGE_lays_the_tree_out_once(self):
+        """Through `render_html`, not through the helper.
+
+        Testing `render_diagrams` alone pins nothing: `render_html` called
+        `render_diagram` twice and this class stayed green.
+        """
+        from recipegraph import render
+
+        result = {
+            "target": "mod:root", "target_name": "Root", "qty": 1, "nodes": 4,
+            "tree": self._tree(), "shopping_list": [], "used_from_stock": [],
+            "from_sources": [], "machines_to_build": [], "truncated": False,
+        }
+        n = self._count_layouts(lambda: render.render_html(result))
+        self.assertEqual(n, 1, "the page laid the tree out %d times" % n)
+
+    def test_the_single_orientation_wrapper_still_works(self):
+        svg, legend = graphview.render_diagram(self._tree(), orientation=graphview.TD)
+        self.assertIn('data-dir="td"', svg)
+        self.assertEqual(legend, graphview.render_diagrams(self._tree())[1])
+
+    def test_an_unknown_orientation_is_still_refused(self):
+        with self.assertRaises(ValueError):
+            graphview.render_diagram(self._tree(), orientation="sideways")
+
+    def test_nothing_to_draw_answers_for_every_orientation_asked_for(self):
+        svgs, legend = graphview.render_diagrams(self._tree(), max_nodes=0)
+        self.assertEqual(set(svgs), set(graphview.ORIENTATIONS))
+        for svg in svgs.values():
+            self.assertIn("Nothing to draw", svg)
+        self.assertEqual(legend, "")

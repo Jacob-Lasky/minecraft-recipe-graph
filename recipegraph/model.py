@@ -558,12 +558,18 @@ class Graph:
         if self._meta_index is None:
             idx = {}
             for key in self.by_output:
-                idx.setdefault(item_stem(key), []).append(key)
+                stem = item_stem(key)
+                # Non-items are skipped rather than piling up under a None stem, matching
+                # `variant_index`. `meta_sibling_made` early-returns on None so the bucket
+                # was inert, but it was 1,198 fluid and oredict keys filed under a key this
+                # docstring says holds registry names, waiting for a second caller.
+                if stem is not None:
+                    idx.setdefault(stem, []).append(key)
             self._meta_index = idx
         return self._meta_index
 
     def meta_sibling_made(self, key):
-        """A produced key differing from `key` only in its metadata value, or None.
+        """A produced key that is the same registered item at another meta, or None.
 
         One step wider than `producers_any_variant` and the last one there is: NBT, then
         meta, then nothing.
@@ -573,25 +579,47 @@ class Graph:
         wrong for every other one: a recipe asking for `tconstruct:ingots:3` will not
         accept `:0`.
 
-        The case it exists for, measured on the reference pack, is exactly one category.
-        JEI records the Sign Toolbox catalyst for `moarsigns.exchange` as
-        `moarsigns:sign_toolbox:4`, because the toolbox picks its mode with the damage
-        value, and only the meta-0 form is ever crafted. The old answer was the flat
-        falsehood "no route to moarsigns:sign_toolbox:4" for a tool the player can make.
+        ONLY FOR AN UNNAMED META, and that gate is the whole safety argument. JEI records
+        the Sign Toolbox catalyst for `moarsigns.exchange` as `moarsigns:sign_toolbox:4`
+        because the toolbox picks its mode with the damage value, and the pack registers no
+        name for that value -- an unnamed meta is the dump reporting a stack STATE nobody
+        registered as an item. A meta the pack DID name is its own item, and saying it is
+        craftable "as" a sibling is a falsehood of exactly the shape `base_key`'s DO NOT
+        forbids. Measured on the reference pack, without the gate this fired on four
+        categories and two were false: `bloodmagic:ritual_diviner:2` ("Ritual Diviner
+        [Dawn]") reported craftable via `:1` ("[Dusk]"), and `genetics:geneticdatabase:1`
+        ("Master Gene Database") via the plain "Gene Database". With it, exactly one
+        category changes and it is the intended one, which is what the old docstring
+        claimed before anyone counted.
 
-        One category is not enough evidence to widen a verdict silently, so this returns
-        the variant it found rather than a boolean, and the caller quotes it
-        (`craftable: X (as Y)`) so the reader can judge whether the two metas are the same
-        object. Same bargain as #55: report the thing you can see rather than assert a
-        classification you cannot check.
+        The caller still quotes the variant it found (`craftable: X (as Y)`) rather than
+        widening silently, so a reader can judge the claim. Same bargain as #55: report the
+        thing you can see rather than assert a classification you cannot check.
         """
         stem = item_stem(key)
-        if stem is None:
+        if stem is None or self.names.get(key):
             return None
-        for sibling in self.meta_index.get(stem, ()):
-            if sibling != key and self.producers(sibling):
-                return sibling
+        for sibling in self.siblings_made(stem, key):
+            return sibling
         return None
+
+    def siblings_made(self, stem, exclude=None):
+        """Produced keys under `stem`, plain base first, then ascending meta, NBT last.
+
+        ORDERED, because `meta_sibling_made` returns the head and `by_output` insertion
+        order is the order recipes came out of the dump: unsorted, a re-dump could silently
+        change which sibling the machines page names. Plain base first because it is the
+        least surprising thing to call an item "as", and NBT-discriminated keys last
+        because a meta sibling should never be reported through an NBT state when a plain
+        one exists.
+        """
+        def rank(k):
+            base, disc = split_discriminator(k)
+            _stem, meta = split_key(base)
+            return (disc is not None, meta if isinstance(meta, int) else 1 << 20, k)
+
+        return sorted((k for k in self.meta_index.get(stem, ())
+                       if k != exclude and self.producers(k)), key=rank)
 
     def real_producers(self, key):
         """`producers`, minus container transfers asked to CREATE a fluid.

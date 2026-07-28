@@ -614,6 +614,71 @@ class CatalystMetaVariantTest(unittest.TestCase):
         self.assertEqual(rec["why"],
                          "craftable: %s (as %s)" % (self.MODE, self.TOOLBOX))
 
+    def test_a_meta_the_pack_NAMED_is_never_widened(self):
+        """The whole safety argument, and it was missing when this shipped.
+
+        An unnamed meta is the dump reporting a stack STATE nobody registered as an item.
+        A meta the pack DID name is its own item, and calling it craftable "as" a sibling is
+        the falsehood `model.base_key`'s DO NOT forbids. Measured on the reference pack,
+        without this gate the widening fired on four categories and two were false:
+        `bloodmagic:ritual_diviner:2` ("[Dawn]") via `:1` ("[Dusk]"), and
+        `genetics:geneticdatabase:1` ("Master Gene Database") via "Gene Database".
+        """
+        g = self._graph()
+        g.names[self.MODE] = "Sign Toolbox [Exchange Mode]"
+        self.assertIsNone(g.meta_sibling_made(self.MODE))
+        self.assertEqual(machines.describe(g)["mod.exchange"]["state"],
+                         machines.UNAVAILABLE)
+
+    def test_an_unnamed_meta_is_still_widened(self):
+        # The other direction, so the gate cannot be tightened into doing nothing.
+        g = self._graph()
+        self.assertNotIn(self.MODE, g.names)
+        self.assertEqual(g.meta_sibling_made(self.MODE), self.TOOLBOX)
+
+    def test_an_nbt_variant_beats_a_meta_sibling(self):
+        """The branch order in `_candidate_verdict`, which nothing pinned.
+
+        Splitting the block into exact -> meta -> NBT left all 596 tests green while
+        reintroducing #28 on the real pack: `thermalexpansion.pulverizer` read
+        "craftable: thermalexpansion:machine:1 (as thermalexpansion:machine#...)", naming a
+        Redstone Furnace as the route to a Pulverizer. Asserted on the WHOLE string,
+        because the shared fixture's meta sibling happens to BE its NBT variant.
+        """
+        g = self._graph()
+        variant = self.MODE + "#f56885268ad5"
+        g.add(Recipe("make_variant", "Crafting Table", [(variant, 1)],
+                     [Ingredient(["mod:plank"], 4)], category="minecraft.crafting"))
+        rec = machines.describe(g)["mod.exchange"]
+        self.assertEqual(rec["why"], "craftable: %s (as %s)" % (self.MODE, variant))
+
+    def test_the_sibling_pick_is_ordered_not_insertion_ordered(self):
+        """`by_output` order is the order recipes came out of the dump.
+
+        Taking element 0 meant a re-dump could silently change which sibling the machines
+        page names. Plain base first, then ascending meta, NBT last.
+        """
+        g = self._graph()
+        for key in ("mod:toolbox:9", "mod:toolbox:2"):
+            g.add(Recipe("make_" + key, "Crafting Table", [(key, 1)],
+                         [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
+        g.add(Recipe("make_nbt", "Crafting Table", [("mod:toolbox:2#aaaaaaaaaaaa", 1)],
+                     [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
+        self.assertEqual(g.siblings_made("mod:toolbox"),
+                         ["mod:toolbox", "mod:toolbox:2", "mod:toolbox:9",
+                          "mod:toolbox:2#aaaaaaaaaaaa"])
+        self.assertEqual(g.meta_sibling_made(self.MODE), "mod:toolbox")
+
+    def test_a_non_item_output_is_not_filed_under_a_stem(self):
+        # `item_stem` returns None for fluid/oredict/essentia keys. Filing them anyway put
+        # 1,198 of them under a None key in an index whose docstring says it holds registry
+        # names, waiting for a second caller to trip over.
+        g = self._graph()
+        g.add(Recipe("brine", "t", [("fluid:brine", 1000), ("ore:plankWood", 1)],
+                     [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
+        self.assertNotIn(None, g.meta_index)
+        self.assertNotIn("fluid:brine", sum(g.meta_index.values(), []))
+
     def test_a_registry_name_nothing_makes_is_still_unavailable(self):
         g = self._graph()
         g.catalysts = {"mod.exchange": ["mod:absent:4"]}

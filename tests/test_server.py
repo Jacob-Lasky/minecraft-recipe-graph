@@ -27,7 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import fixtures  # noqa: E402
 from recipegraph import (generators, graphview, index, machines, pins,  # noqa: E402
                          render, server)
+from recipegraph.htmlutil import esc as _esc_  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
+from recipegraph.sources import dump_meta  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
 
@@ -104,14 +106,6 @@ class LiveServerCase(unittest.TestCase):
 
 
 class ServerTest(LiveServerCase):
-    def get(self, path):
-        url = "http://127.0.0.1:%d%s" % (self.port, path)
-        try:
-            with urllib.request.urlopen(url) as resp:
-                return resp.status, resp.headers.get("Content-Type", ""), resp.read().decode()
-        except urllib.error.HTTPError as err:
-            with err:      # drain and close, or the suite warns about the open response
-                return err.status, err.headers.get("Content-Type", ""), err.read().decode()
 
     # ---- routing ----
 
@@ -339,6 +333,9 @@ class ServerTest(LiveServerCase):
         "/sources",
         "/stats",
         "/nope",                                    # the routing 404
+        # The 400 the ValueError/KeyError handler emits. A 13th surface, and it was missing
+        # from this tuple, which is why nothing noticed it had no restart strip either.
+        "/plan?item=mod%3Awidget&qty=not-a-number",
     )
 
     def test_every_surface_names_the_build_that_drew_it(self):
@@ -353,11 +350,20 @@ class ServerTest(LiveServerCase):
             self.assertIn("<footer class='ver'>", body, path)
             self.assertIn(server.version_mod.BUILD.version, body, path)
 
-    def test_a_page_with_a_graph_also_names_the_dump(self):
-        # The half that needs state. The error shells have no graph and legitimately show
-        # only the code version; everything else must answer "which mod wrote this graph".
-        for path in ("/", "/machines", "/stats", "/plan?item=mod%3Awidget&qty=1"):
-            self.assertIn("dump", self.get(path)[2], path)
+    def test_every_surface_names_the_dump_in_its_FOOTER(self):
+        """Scoped to the footer element, because the word alone proves nothing.
+
+        Asserting "dump" appears anywhere in the body passed on `/machines` from the page's
+        own prose, so dropping `state` from just that one call site would have kept passing.
+        Every surface passes state now, including the error shells, so every one of them
+        must carry the sentence.
+        """
+        want = _esc_(dump_meta.describe(dump_meta.of_graph(self.state.graph)))
+        for path in self.ALL_SURFACES:
+            body = self.get(path)[2]
+            footer = re.search(r"<footer class='ver'>.*?</footer>", body, re.S)
+            self.assertIsNotNone(footer, path)
+            self.assertIn(want, footer.group(0), path)
 
     def test_the_footer_does_not_claim_a_dump_the_graph_never_had(self):
         # The fixture graph is built in memory with no dump at all, so the honest line is
@@ -373,7 +379,10 @@ class ServerTest(LiveServerCase):
         real = server.version_mod.BUILD.stamp
         server.version_mod.BUILD.stamp = (0.0, 0, 0)
         try:
-            for path in ("/", "/machines", "/plan?item=mod%3Awidget&qty=1"):
+            # ALL of them, not a hand-picked three. The strip lived in `_nav`, which the
+            # routing 404 and the 400 shell never call, and a three-path loop that happened
+            # to pick three nav-rendering pages is what let that ship.
+            for path in self.ALL_SURFACES:
                 body = self.get(path)[2]
                 self.assertIn("Restart the server", body, path)
                 self.assertIn("<div class='stale'>", body, path)
@@ -537,6 +546,27 @@ class ServerTest(LiveServerCase):
                       '.diagwrap[data-dir="td"] .diagram[data-dir="lr"]{display:none}',
                       flat)
         self.assertNotIn('<svg class="diagram" data-dir="td" hidden', body)
+
+    def test_the_orientation_words_are_injected_not_restated(self):
+        """One source for the caption, the button and the aria-label.
+
+        The JS carried its own `{lr:'left to right',td:'top to bottom'}` literal beside
+        `graphview.ORIENTATION_LABEL`, which is three surfaces naming one thing and two
+        places to change it.
+        """
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        emitted = re.search(r"WORDS=(\{.*?\});", body).group(1)
+        self.assertEqual(json.loads(emitted.replace("\\u003c", "<")),
+                         graphview.ORIENTATION_LABEL)
+        for word in graphview.ORIENTATION_LABEL.values():
+            self.assertIn(word, body)
+        self.assertNotIn("%%DIRS%%", body)
+
+    def test_the_button_starts_by_offering_the_other_orientation(self):
+        # Rendered in Python from ORIENTATION_LABEL[TD], so the server-rendered label and
+        # the one the JS writes on the first click cannot disagree.
+        body = self.get("/plan?item=mod%3Awidget&qty=1")[2]
+        self.assertIn("Turn it %s" % graphview.ORIENTATION_LABEL[graphview.TD], body)
 
     def test_the_choice_is_remembered(self):
         # A reading preference. Having to set it again on every plan makes it useless.
@@ -1074,8 +1104,6 @@ class ServerTest(LiveServerCase):
             self.assertEqual(caught.exception.status, 404)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class EnsureGraphTest(unittest.TestCase):
@@ -1482,10 +1510,17 @@ class DeepPlanTest(LiveServerCase):
         self.assertNotIn("Go deeper", deeper)
 
     def test_the_control_stops_at_the_ceiling_rather_than_going_forever(self):
+        """Unconditional, because the `if` this used to hide behind was never true.
+
+        `deep_graph()` at depth 8 finishes well inside the ceiling, so the guarded body
+        never ran and the test asserted nothing. `DeeperThanTheCeilingTest` below owns this
+        with a graph that really does truncate at 16,000; here we only check the shallow
+        case is NOT wrongly told it has hit the end of the road.
+        """
         body = self.get("%s&max_nodes=%d" % (self.ROOT, server.MAX_NODES_CEILING))[2]
-        if "node cap" in body:
-            self.assertNotIn("Go deeper", body)
-            self.assertIn("deepest this page goes", body)
+        self.assertNotIn("node cap", body)
+        self.assertNotIn("deepest this page goes", body)
+        self.assertNotIn("Go deeper", body)
 
     def test_only_the_go_deeper_link_carries_a_cap(self):
         """One slow page must not make every later page slow with nothing saying why.
@@ -1511,3 +1546,40 @@ class DeepPlanTest(LiveServerCase):
         self.assertTrue(backs, "the plan offers no chooser link to carry a cap on")
         for back in backs:
             self.assertIn("max_nodes%%3D%d" % deep, back)
+
+
+class DeeperThanTheCeilingTest(LiveServerCase):
+    """A plan that is STILL truncated at the ceiling, so the end-of-the-road branch runs.
+
+    `DeepPlanTest`'s depth-8 graph completes at 8,000 nodes, which is why the ceiling test
+    there could only ever assert the negative. 3**9 is ~29,500 expansions against a 16,000
+    cap, so this one is cut off at the ceiling and the control has to disappear.
+    """
+
+    HAVE = {"items": {}}
+
+    @staticmethod
+    def graph():
+        return deep_graph(3, 9)
+
+    ROOT = "/plan?item=deep%3An0_0&qty=1"
+
+    def test_at_the_ceiling_the_control_is_gone_and_the_page_says_why(self):
+        body = self.get("%s&max_nodes=%d" % (self.ROOT, server.MAX_NODES_CEILING))[2]
+        # Keyed off the ceiling sentence, NOT off "node cap": a plan that ran out of work
+        # budget instead carries no such substring, so a guard on it can be false even on a
+        # truncated page.
+        self.assertIn("deepest this page goes", body)
+        self.assertIn("{:,}".format(server.MAX_NODES_CEILING), body)
+        self.assertNotIn("Go deeper", body)
+
+    def test_above_the_ceiling_is_clamped_back_to_it(self):
+        # An editable URL. `work_budget` derives from this, so an unclamped value is a way
+        # to hang the server from the address bar.
+        body = self.get("%s&max_nodes=99999999" % self.ROOT)[2]
+        self.assertIn("deepest this page goes", body)
+        self.assertIn("{:,}".format(server.MAX_NODES_CEILING), body)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -199,7 +199,19 @@ def cmd_plan(args):
     for why in sorted((result.get("pins_overruled") or {}).values()):
         print(why, file=sys.stderr)
     print("== %s x%d ==" % (result["target_name"], result["qty"]))
-    print("nodes: %d%s" % (result["nodes"], "  (TRUNCATED)" if result["truncated"] else ""))
+    # Names WHICH budget ran out, the same distinction the web notice draws. Without it
+    # "(TRUNCATED)" beside a node count far below `--max-nodes` reads as a bug in the tool,
+    # and it is also what gives `work_budget` a consumer rather than leaving it a key only
+    # `--json` ever dumps.
+    if not result["truncated"]:
+        cut = ""
+    elif result["exhausted"]:
+        cut = "  (TRUNCATED: work budget %s spent on %s attempts; raise --max-nodes)" % (
+            "{:,}".format(result["work_budget"]), "{:,}".format(result["work"]))
+    else:
+        cut = "  (TRUNCATED: hit the node cap of %s; raise --max-nodes)" % (
+            "{:,}".format(result["max_nodes"]))
+    print("nodes: %d%s" % (result["nodes"], cut))
     print("\n-- you still need --")
     for row in result["shopping_list"][: args.limit]:
         print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))

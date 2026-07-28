@@ -5,7 +5,7 @@ description: Plan crafting chains in MeatballCraft or other heavy 1.12.2 modpack
 
 # Minecraft recipe graph
 
-Answers "what do I actually need to make X" for a ~410-mod 1.12.2 pack by computing the
+Answers "what do I actually need to make X" for a 366-mod 1.12.2 pack by computing the
 whole recipe tree at once and stopping wherever the player's AE2 network already has the
 ingredient. Replaces clicking through JEI one hop at a time.
 
@@ -22,7 +22,7 @@ registries. There is no on-disk index to search, in JEI or anywhere else.
 
 That is why the answer is a dump-at-runtime mod rather than decompilation. Decompiling is
 only ever the fallback for an isolated hardcoded constant (a search radius, a tick rate),
-never for recipes, because at 366 jars it does not scale and NuclearCraft-style recipe
+never for recipes, because at ~410 jars it does not scale and NuclearCraft-style recipe
 registration is procedural anyway.
 
 Fluids need no special handling: they arrive through the same
@@ -68,11 +68,13 @@ with):
 
 ```bash
 cd /coding/minecraft-recipe-graph
+# FIRST, and that order is the whole point: `latest` loses its old target the moment the
+# build moves it, so a tag applied afterwards names the NEW image and preserves nothing.
+# `|| true` for a first-ever build, where there is no `latest` to preserve.
+docker tag recipegraph:latest recipegraph:rollback-$(git rev-parse --short HEAD) || true
 docker build -t recipegraph:latest \
   --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
   --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
-# Keep a rollback: the old image loses its tag the moment `latest` moves.
-docker tag recipegraph:latest recipegraph:rollback-$(git rev-parse --short HEAD)
 docker rm -f recipegraph
 docker run -d --name recipegraph -p 8765:8765 \
   -v /mnt/user/misc/coding/minecraft-recipe-graph/data:/data \
@@ -100,10 +102,12 @@ directory, and the server exits "no graph at /data/graph.json".
 Give it 40 to 90 seconds before concluding it failed: it loads a 115 MB graph before
 answering anything, which is why the health check has a 180 second start period.
 
-**THE MOD CANNOT BE BUILT ON TOWER, and pocket-dev has no `java` at all** (`./gradlew`
-exits with "JAVA_HOME is not set"). Even with a JDK it would not resolve: the build needs an
-HEI jar that is not in the repo, `maven.dimdev.org` does not resolve and
-`repo.spongepowered.org` 404s. So **every dump-side issue is gated on the gaming machine**,
+**THE MOD CANNOT BE BUILT ON TOWER, and pocket-dev has no `java` at all** -- `mod/gradlew`
+dies with "JAVA_HOME is not set and no 'java' command could be found in your PATH". Even
+with
+a JDK it would not get through: `compileJava dependsOn checkHeiJar` (mod/build.gradle:77),
+which needs `-Phei_jar` pointing at a HadEnoughItems jar inside a pack instance, and no
+instance exists on Tower. So **every dump-side issue is gated on the gaming machine**,
 not merely inconvenient there: #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery
 blueprint names) and #63 (`COSMETIC_TAGS`) all need `/recipedump` from a running game, and
 none of their Java can even be compile-checked from here. Do the offline half, measure what
@@ -189,7 +193,7 @@ server emits. The column sorter is a different job and legitimately compares cel
 **Anything shipped into an inline `<script>` goes through `htmlutil.script_json`.** An HTML
 parser finds the literal `</script` before any JS runs, so one mod display name containing
 it turns the rest of the page into markup, and no amount of quoting inside JSON prevents
-that. Mod display names are whatever ~410 mod authors typed.
+that. Mod display names are whatever 366 mod authors typed.
 
 **`pnpm run audit:filters` is still the regression check** for what a test cannot see: the
 counts narrow each other, mods with no matches sink below the ones with matches but stay in
@@ -294,12 +298,28 @@ name matching and roughly two thirds of it is `unknown`.
 **With catalysts and a schema-3 dump the reference pack has ZERO `unknown` categories**, and
 exactly three `unavailable`: `projectex.alchemy_table`, `divinerpg:arcana_extractor` and
 `thaumicwonders.catalyzationChamber`, all identified and genuinely unreachable. That is the
-number to re-measure after touching identification -- `machines --limit 1000 | awk '{print $1}'
-| sort | uniq -c` -- because a new `unknown` now means a real regression rather than the usual
-background noise. Three widenings got it there and each is deliberately narrow: legacy dotted
-tile-entity ids (#27), NBT variants of a catalyst key (#28, `producers_any_variant`), and the
-metadata value (#33, `Graph.meta_sibling_made`, one category: a Sign Toolbox catalogued under
-the damage value that selects its mode). **DO NOT reach for any of the three from the solver.**
+number to re-measure after touching identification, and the command is
+`recipegraph machines --limit 0 | head -1`, which prints `machines.summarise`'s own line:
+
+```
+categories: 96 have, 404 buildable, 0 unknown, 3 unavailable
+```
+
+**DO NOT re-measure with `machines --limit 1000 | awk '{print $1}' | sort | uniq -c`.** That
+was documented here and it is wrong twice: a manually overridden row starts with `*`, so its
+state lands in a `*` bucket and `have` reads 95 instead of 96; and `uniq -c` emits no row at
+all for a state with no categories, so the `0 unknown` that is the whole point of the
+measurement is indistinguishable from a broken pipeline.
+
+Three widenings got it to zero and each is deliberately narrow: legacy dotted tile-entity
+ids
+(#27), NBT variants of a catalyst key (#28, `producers_any_variant`), and the metadata value
+(#33, `Graph.meta_sibling_made`). The third fires on **one** category, a Sign Toolbox
+catalogued under the damage value that selects its mode, and it is gated on the meta being
+UNNAMED: without that gate it fired on four and two were false, asserting a Ritual Diviner
+[Dusk] as the route to a [Dawn] and a Gene Database as the route to a Master Gene Database.
+
+**DO NOT reach for any of the three from the solver.**
 They answer "does this block exist in the pack", and the solver asks "give me exactly this
 stack", where `tconstruct:ingots:0` standing in for `:3` melts the wrong ingot.
 
