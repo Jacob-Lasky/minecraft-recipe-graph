@@ -91,3 +91,29 @@ def describe(meta):
     return ("dump: written by mod %s at schema %s, NEWER than this reader (%d) -- "
             "update recipegraph, some fields will be ignored"
             % (version, meta["schema"], SCHEMA))
+
+
+# What a GRAPH says when it carries no mod version, which is not the same absence
+# `read` reports. From a dump directory, no `mod_version` field means the mod predated
+# 0.4.2 and did not stamp itself. From a graph.json it means the graph was built before
+# `dump_version` was persisted (#38) and the version is simply not recorded -- the mod may
+# well have been current. Reusing the "pre-0.4.2" wording there would assert an age nobody
+# measured, on every graph on disk today.
+UNRECORDED_VERSION = "(version unrecorded; rebuild to record it)"
+
+
+def of_graph(graph):
+    """`read()`'s shape, recovered from a graph that was built from a dump.
+
+    So `describe` has ONE caller shape. The builder has the dump directory in hand and the
+    server does not -- it has a graph.json that recorded what the builder found -- and
+    without this the UI would grow a second sentence for the same three facts, free to
+    drift from the one `recipegraph build` prints.
+    """
+    schema = getattr(graph, "dump_schema", 0) or None
+    return {"mod_version": getattr(graph, "dump_version", None) or UNRECORDED_VERSION,
+            "schema": schema,
+            # `present` means "a summary.json was read", and a recorded schema is the only
+            # evidence of that a graph carries. A graph built before the dump existed has
+            # neither, which `describe` renders as "provenance: unknown".
+            "present": schema is not None}

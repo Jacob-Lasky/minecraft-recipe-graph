@@ -58,6 +58,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     meta = dump_meta.read(dump_dir)
     say(dump_meta.describe(meta))
     g.dump_schema = meta["schema"] or 0
+    g.dump_version = meta["mod_version"] or None
 
     # After items.csv, and with setdefault, so the pack's own export stays authoritative
     # for anything it covers. This only has to reach the keys items.csv cannot express.
