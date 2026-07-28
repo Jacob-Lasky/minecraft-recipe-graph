@@ -248,6 +248,7 @@ pnpm install             # playwright, from the committed lockfile
 pnpm run browsers        # the chromium build that playwright pins
 pnpm run audit:mobile  http://127.0.0.1:8765   # phone layout
 pnpm run audit:filters http://127.0.0.1:8765   # the /machines filters, which are JS only
+python3 tools/cost-probe.py                    # what a cost-model constant reroutes
 ```
 
 **This is dev tooling only.** The tool itself is Python 3 stdlib with no install step, the
