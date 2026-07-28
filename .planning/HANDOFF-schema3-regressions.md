@@ -37,12 +37,12 @@ docker logs recipegraph
 Rebuild and redeploy after a code change. The running container holds the code it started with, and the `/reload` button re-reads the graph and the stock file but does NOT re-import Python:
 
 ```bash
-cd /coding/minecraft-recipe-graph && docker build -t minecraft-recipe-graph:local .
+cd /coding/minecraft-recipe-graph && docker build -t recipegraph:latest .
 docker rm -f recipegraph
 docker run -d --name recipegraph -p 8765:8765 \
   -v /mnt/user/misc/coding/minecraft-recipe-graph/data:/data \
   --user 99:100 --memory=4g --memory-swap=4g --restart unless-stopped \
-  minecraft-recipe-graph:local
+  recipegraph:latest
 ```
 
 The `-v` source is a HOST path, not this container's `/coding` view. Get it wrong and the mount silently succeeds against an empty directory. Give it 40 to 90 seconds to load the graph before concluding it failed.

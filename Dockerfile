@@ -12,28 +12,6 @@ FROM python:3.14-slim-trixie
 
 WORKDIR /app
 
-# Which build this image IS. The image ships no .git (see .dockerignore), so `version.py`
-# cannot ask git and every container would otherwise print the same fallback string --
-# #38's failure moved from the process to the image, and harder to notice, because two
-# images built a month apart would look identical in the footer.
-#
-# COMPUTED BY THE BUILD, never typed:
-#
-#   docker build -t minecraft-recipe-graph:local \
-#     --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
-#     --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
-#
-# Omitting them is safe and honest: the footer falls back to `version.FALLBACK_VERSION`
-# and says "no build metadata", which reads as unknown rather than as a wrong answer.
-#
-# LAST, after COPY, would be wrong: an ARG line invalidates every layer below it, so
-# putting these above the source copy means a new commit rebuilds only the metadata and
-# reuses the compile. They are declared here for that reason, not for readability.
-ARG RECIPEGRAPH_VERSION=""
-ARG RECIPEGRAPH_BUILD_DATE=""
-ENV RECIPEGRAPH_VERSION=$RECIPEGRAPH_VERSION \
-    RECIPEGRAPH_BUILD_DATE=$RECIPEGRAPH_BUILD_DATE
-
 # Unbuffered, or `docker logs` shows nothing while the server spends its first 40 to 90
 # seconds loading the graph, and the startup line never appears at all. A service whose
 # logs are empty during the one phase you would want to watch is a service you cannot
@@ -48,6 +26,30 @@ COPY recipegraph/ ./recipegraph/
 # against a root-owned /app, so without this every start silently fails to write .pyc and
 # re-parses the whole package. Doubles as the same import check CI runs.
 RUN python -m compileall -q recipegraph
+
+# Which build this image IS. The image ships no .git (see .dockerignore), so `version.py`
+# cannot ask git and every container would otherwise print the same fallback string --
+# #38's failure moved from the process to the image, and harder to notice, because two
+# images built a month apart would look identical in the footer.
+#
+# COMPUTED BY THE BUILD, never typed:
+#
+#   docker build -t recipegraph:latest \
+#     --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
+#     --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
+#
+# Omitting them is safe and honest: the footer falls back to `version.FALLBACK_VERSION`
+# and says "no build metadata", which reads as unknown rather than as a wrong answer.
+#
+# LAST, AFTER THE COMPILE, and this block was above the COPY until someone checked. An
+# ARG/ENV line is part of the cache key of every layer BELOW it, so up there a new commit
+# invalidated `RUN compileall` and re-parsed the whole package for nothing -- on exactly the
+# commits that change no Python at all (a README edit, a mod/ change), which is the common
+# case here. ENV persists into the image whatever line it sits on.
+ARG RECIPEGRAPH_VERSION=""
+ARG RECIPEGRAPH_BUILD_DATE=""
+ENV RECIPEGRAPH_VERSION=$RECIPEGRAPH_VERSION \
+    RECIPEGRAPH_BUILD_DATE=$RECIPEGRAPH_BUILD_DATE
 
 # UnRAID's nobody:users. The array shares this writes into (`/data`) expect this ownership,
 # and a root-owned file dropped in one wedges every other service that touches the share.

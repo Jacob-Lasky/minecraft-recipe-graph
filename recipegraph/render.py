@@ -13,8 +13,9 @@ import json
 import urllib.parse
 
 from .graphview import (DIAGRAM_CSS, LR, ORIENTATION_LABEL, TD,
-                        render_diagram)
+                        render_diagrams)
 from .htmlutil import esc as _esc
+from .htmlutil import script_json
 from .htmlutil import machine_href
 from . import tokens as tokens_mod
 from .solve import STATUS_RAW, STATUS_TOKEN
@@ -274,13 +275,16 @@ document.getElementById('col').onclick=function(){setAll(false)};
 (function(){
   var btn=document.getElementById('dir'), wrap=document.getElementById('diagwrap'),
       name=document.getElementById('dirname'), KEY='rg.diagdir',
-      WORDS={lr:'left to right',td:'top to bottom'};
+      // Injected from graphview.ORIENTATION_LABEL, not restated. The caption, the button
+      // and the SVG's aria-label all name the orientation, and a second copy here is how
+      // three surfaces end up calling one thing two things.
+      WORDS=%%DIRS%%;
   if(!btn||!wrap)return;
   function set(dir){
     if(dir!=='td')dir='lr';                        // a hand-edited localStorage value
     wrap.dataset.dir=dir;
     if(name)name.textContent=WORDS[dir];
-    btn.textContent=dir==='lr'?'Turn it top to bottom':'Turn it left to right';
+    btn.textContent='Turn it '+WORDS[dir==='lr'?'td':'lr'];
     btn.setAttribute('aria-pressed',String(dir==='td'));
     try{localStorage.setItem(KEY,dir);}catch(e){}
   }
@@ -544,13 +548,20 @@ def _truncation_note(result, deeper):
         # out of, so the node count is far below the cap, and "hit the node cap (1,162)"
         # on a plan capped at 4,000 reads as a bug in the tool. Both budgets derive from
         # `max_nodes`, so the control below is still the right thing to offer.
-        head = ("The search used up its budget after %s steps and was cut off, so deeper "
-                "branches are incomplete. Most of that went on routes it tried and "
-                "backed out of." % "{:,}".format(result.get("work") or result["nodes"]))
+        # NOT "steps". The page's own "Steps resolved" tile is `nodes`, and `work` is the
+        # monotonic counter that includes every branch the solver backed out of, so the two
+        # are guaranteed to differ in this branch -- on the reference pack's
+        # `avaritia:resource:6`, 1,162 against 80,000. One word for two numbers on one page
+        # is worse than no number.
+        #
+        # No `or result["nodes"]` fallback either: a producer rename should raise here
+        # rather than quietly print the wrong figure under the right label.
+        head = ("The search used up its budget after %s attempts and was cut off, so "
+                "deeper branches are incomplete. Most of that went on routes it tried "
+                "and backed out of." % "{:,}".format(result["work"]))
     else:
         head = ("Tree hit the node cap (%s) and was cut off, so deeper branches are "
-                "incomplete."
-                % "{:,}".format(result.get("max_nodes") or result["nodes"]))
+                "incomplete." % "{:,}".format(result["max_nodes"]))
     if deeper is None:
         return head + " Raise --max-nodes to see more."
     url, cap = deeper
@@ -571,10 +582,11 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
     # BOTH orientations, shipped together. The alternative is a round trip, and a round
     # trip re-solves: a plan can take two minutes (defaults.MAX_NODES_CEILING), which is an
     # absurd price for turning a picture sideways. Measured, the second SVG is 5 to 16 KB
-    # on a 48 to 67 KB page. The legend is the SAME for both -- one `layout`, one node set
-    # -- so it is taken from the first and not recomputed. See #35.
-    diagram_svg, diagram_legend = render_diagram(tree, orientation=LR)
-    diagram_svg_td, _same_legend = render_diagram(tree, orientation=TD)
+    # on a 48 to 67 KB page. ONE `layout` for both, and one legend, which is what makes the
+    # legend true of both by construction rather than by `layout` happening to be
+    # deterministic. See #35.
+    diagrams, diagram_legend = render_diagrams(tree)
+    diagram_svg, diagram_svg_td = diagrams[LR], diagrams[TD]
     # Only offered when there is something to filter TO. A button that empties the tree is
     # worse than no button: it reads as a broken filter rather than as "nothing is blocked".
     blocked_button = ('\n    <button id="blockedonly" data-on="0" aria-pressed="false">'
@@ -623,7 +635,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
     %s
     <div class="diagwrap" id="diagwrap" data-dir="lr">%s%s</div>
     <div class="meta" style="margin-top:9px"><button id="dir" type="button"
-      aria-pressed="false">Turn it top to bottom</button></div>
+      aria-pressed="false">Turn it %s</button></div>
     <div class="meta" style="margin-top:9px">A box is filled by what the plan does with
       that item, per the key above. The small SWATCH inside each box is a different axis:
       its colour groups items by mod and the letter stands in for the icon, because real
@@ -666,6 +678,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
         diagram_legend,
         diagram_svg,
         diagram_svg_td,
+        _esc(ORIENTATION_LABEL[TD]),
         "{:,}".format(result["nodes"]),
         _node_html(tree, back=back),
         len(need),
@@ -675,7 +688,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
         _sources_html(result.get("from_sources")),
         _tokens_html(result.get("tokens_needed")),
         _machines_html(result.get("machines_to_build")),
-        JS,
+        JS.replace("%%DIRS%%", script_json(ORIENTATION_LABEL)),
     )
 
 

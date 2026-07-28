@@ -410,16 +410,28 @@ def _footer(state=None):
     staring at while they misdiagnose it, and a footer present on three pages out of eight
     is worse than none, because its absence reads as "this page is fine".
 
-    `state` adds the dump's own provenance. Optional because the 400 and 404 shells have
-    no graph, and the code version -- the thing #38 was actually about -- must still show
-    on those. The sentence comes from `dump_meta.describe`, the same one `build` prints,
-    so the page and the terminal cannot describe one dump two ways.
+    `state` adds the dump's own provenance, and EVERY server surface passes it, including
+    the 400 and 404 shells -- so the dump line shows there too. The default survives for one
+    caller only: `tests/test_present` renders a page with no State to check a badge class.
+    The sentence comes from `dump_meta.describe`, the same one `build` prints, so the page
+    and the terminal cannot describe one dump two ways.
     """
     bits = [version_mod.BUILD.describe()]
     if state is not None:
         bits.append(dump_meta.describe(dump_meta.of_graph(state.graph)))
     return ("<footer class='ver'>%s</footer>"
             % "".join("<span>%s</span>" % _esc(b) for b in bits))
+
+
+def _restart_strip():
+    """`_restart_banner` inside the page gutter, for `_shell`.
+
+    The wrap div is not decoration: the strip is styled as a card and a full-bleed one at
+    the top of the viewport reads as a browser chrome warning rather than as part of the
+    page. `padding-bottom:0` matches what `_wrap_fragment` already does for the nav.
+    """
+    note = _restart_banner()
+    return ("<div class='wrap' style='padding-bottom:0'>%s</div>" % note) if note else ""
 
 
 def _shell(title, body, css, state=None):
@@ -433,9 +445,10 @@ def _shell(title, body, css, state=None):
             # SHELL_JS goes in the HEAD, not alongside PENDING_JS at the end of the body:
             # the page scripts are inline and run the moment they are parsed, so a helper
             # defined after them would not exist yet when they first call it.
-            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s%s"
+            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s%s%s"
             "<script>%s</script></body></html>"
-            % (_esc(title), css, SHELL_JS, body, _footer(state), PENDING_JS))
+            % (_esc(title), css, SHELL_JS, _restart_strip(), body, _footer(state),
+               PENDING_JS))
 
 
 def _wrap_fragment(title, fragment, state=None, crumb="", path=""):
@@ -468,8 +481,8 @@ def _crumb(label):
 
 
 def _page(title, body, state=None):
-    """A server-rendered page. Pass `state` wherever there is one: without it the footer
-    can still name the running code but not the dump the graph came from."""
+    """A server-rendered page. Every handler passes `state`, including the error shells;
+    the default exists for `tests/test_present`, which has no State to give."""
     return _shell(title, body, CSS + HOME_CSS, state)
 
 
@@ -564,9 +577,16 @@ def _safe_back(form, default="/machines"):
 def _restart_banner():
     """Warn when the checkout has moved on since this process imported it.
 
+    RENDERED BY `_shell`, not by `_nav`, and that was a real bug: it lived in `_nav`, which
+    the routing 404 and the 400 bad-request shell do not call, so the two surfaces most
+    likely to be reached by a reader whose page is behaving oddly were the two that never
+    said the code was stale. The strip is a fact about the PROCESS, so it belongs in the
+    wrapper every surface goes through, for the same reason `_footer` does.
+
     Above the stale-DATA banner when both are up, because a restart re-reads the data too:
-    acting on the lower one first leaves you back here. Deliberately a `div` and not a
-    `form` -- see `version.restart_note` for why there is no button.
+    acting on the lower one first leaves you back here. `_shell` emits this before `body`
+    and `_nav` emits the data form inside it, which keeps that order. Deliberately a `div`
+    and not a `form` -- see `version.restart_note` for why there is no button.
     """
     note = version_mod.restart_note(version_mod.BUILD)
     return ("<div class='stale'>%s</div>" % _esc(note)) if note else ""
@@ -621,8 +641,11 @@ def _nav(path="", state=None):
     recoverable by looking around. `aria-current='true'` on the child says "this is the
     section you are in" without asserting the page. See #53.
 
-    The banner rides along here because every page renders a nav and none of them should be
-    able to forget it. Pass the state; omit it only where there is none (the 404 shell).
+    The stale-DATA form rides along here because it needs the state and a return path, both
+    of which `_nav` already has. The stale-CODE strip used to as well, and that was wrong:
+    the routing 404 and the 400 shell render no nav, so the two surfaces a confused reader
+    is most likely to land on were the two that never mentioned stale code. It lives in
+    `_shell` now. Every call site passes state.
     """
     section = NAV_PARENT.get(path, path)
     out = []
@@ -639,7 +662,7 @@ def _nav(path="", state=None):
     banner = _stale_banner(state, section or "/") if state is not None else ""
     # NOT gated on `state`: stale code is a fact about the PROCESS, and the shells that
     # render without a state (400, 404) are drawn by the same stale modules as the rest.
-    return "<nav class='top'>%s</nav>%s%s" % ("".join(out), _restart_banner(), banner)
+    return "<nav class='top'>%s</nav>%s" % ("".join(out), banner)
 
 
 def _stamp(path):

@@ -18,10 +18,10 @@ trip that RE-SOLVES the plan, and a plan can take two minutes (see defaults.MAX_
 Measured on the reference pack: a diagram is 5 to 16 KB of a 48 to 67 KB page, so the second
 copy costs about a fifth of the page and the toggle is instant. See #35.
 
-A BOX IS THE SAME SIZE IN BOTH, which is why this is not a true transpose. `MAX_LABEL` is 20
-characters against BOX_W, and swapping the axes literally would give each box `ROW` = 30px of
-width and truncate every label to two characters. Top-down keeps the box and spaces siblings
-out sideways instead, so the label budget never moves.
+A BOX IS THE SAME SIZE IN BOTH, which is why this is not a true transpose. A label is
+budgeted against BOX_W by `_label_limit`, and swapping the axes literally would give each
+box `ROW` = 30px of width and truncate every label to two characters. Top-down keeps the
+box and spaces siblings out sideways instead, so the label budget never moves.
 
 DO NOT reach for a force-directed layout. A plan is a tree with a meaningful root and a
 meaningful direction, and a force layout would throw both away in exchange for wobbling.
@@ -58,7 +58,14 @@ GUTTER = 6
 # The span between where the label starts and where the quantity ends: see the box template.
 LABEL_X = 26
 QTY_RIGHT_PAD = 6
+# The historic flat cap, kept only as the number `_shorten` falls back to when no budget is
+# given. NOT what gets drawn: the box template shortens against `_label_limit`.
 MAX_LABEL = 20
+
+# "+ more not drawn" hangs to the RIGHT of a truncated node's box, outside it, so the
+# canvas has to make room or the note is clipped away on the deepest column -- which is
+# exactly where a cut node is. 8px offset plus the rendered width of the string at 10.5px.
+CUT_NOTE_W = 96
 
 
 def _label_limit(qty_text):
@@ -103,7 +110,10 @@ def _mark(node):
     kind = node.get("kind", "item")
     if kind in KIND_MARK:
         return KIND_MARK[kind]
-    label = (node.get("label") or node.get("name") or node.get("key") or "?").strip()
+    # `full`, not the shortened `label`: only the first character is used, so truncating
+    # first bought nothing, and the record no longer carries a shortened form at all.
+    label = (node.get("full") or node.get("label") or node.get("name")
+             or node.get("key") or "?").strip()
     return label[0].upper() if label else "?"
 
 
@@ -133,7 +143,10 @@ def layout(tree, max_nodes=400):
             "i": index,
             "depth": depth,
             "key": node.get("key", ""),
-            "label": _shorten(node.get("label") or node.get("name") or node.get("key")),
+            # ONE label on the record, unshortened. There used to be a `label` shortened
+            # to a flat MAX_LABEL as well, and nothing drew it: the box template shortens
+            # `full` against `_label_limit`, and `_mark` reads one character. A second
+            # truncated copy with no consumer is a thing a reader has to rule out.
             "full": node.get("label") or node.get("name") or node.get("key"),
             "kind": node.get("kind", "item"),
             "status": node.get("status", STATUS_CRAFT),
@@ -208,8 +221,14 @@ def _geometry(orientation, nodes, rows):
     therefore that the one legend beside them is true of both.
     """
     depth_max = max(n["depth"] for n in nodes)
+    row_max = max(n["row"] for n in nodes)
+    # Room for a "+ more not drawn" note, and only when one is actually drawn.
+    cut = CUT_NOTE_W if any(n["cut"] for n in nodes) else 0
     if orientation == TD:
-        width = PAD_X * 2 + rows * TD_COL + BOX_W
+        # `row_max`, not `rows`: `rows` is a COUNT and the last box starts at index
+        # rows - 1, so using the count left a whole empty 238px column on the right. LR got
+        # this right with `depth_max` and the two formulas were written apart.
+        width = PAD_X * 2 + row_max * TD_COL + BOX_W + cut
         height = PAD_Y * 2 + depth_max * TD_ROW + BOX_H
 
         def place(n):
@@ -225,7 +244,7 @@ def _geometry(orientation, nodes, rows):
 
         return width, height, place, edge
 
-    width = PAD_X * 2 + depth_max * COL + BOX_W
+    width = PAD_X * 2 + depth_max * COL + BOX_W + cut
     height = PAD_Y * 2 + rows * ROW
 
     def place(n):
@@ -240,6 +259,22 @@ def _geometry(orientation, nodes, rows):
     return width, height, place, edge
 
 
+def render_diagrams(tree, max_nodes=400, orientations=ORIENTATIONS):
+    """`({orientation: svg}, legend)` from ONE `layout` pass.
+
+    `render_html` needs both orientations, and calling `render_diagram` twice laid the tree
+    out twice and built the legend twice -- while three comments in this module and in
+    `render.py` promised a single pass. The guarantee that both SVGs draw the same node set
+    rested on `layout` being deterministic rather than on it being called once; now it is
+    structural.
+    """
+    nodes, links, rows = layout(tree, max_nodes)
+    if not nodes:
+        return {o: '<div class="meta">Nothing to draw.</div>' for o in orientations}, ""
+    return ({o: _render_svg(nodes, links, rows, o) for o in orientations},
+            _render_legend(nodes))
+
+
 def render_diagram(tree, max_nodes=400, orientation=LR):
     """`(svg, legend)` for a solved plan tree. No script, no external assets.
 
@@ -247,13 +282,18 @@ def render_diagram(tree, max_nodes=400, orientation=LR):
     were drawn, and a plan gets truncated at `max_nodes`, so building it from a second
     independent walk of the tree could name a colour that is not on the page. Both come out
     of one `layout`.
+
+    The single-orientation wrapper. `render_html` wants both and calls `render_diagrams`,
+    which lays out once.
     """
+    svgs, legend = render_diagrams(tree, max_nodes, (orientation,))
+    return svgs[orientation], legend
+
+
+def _render_svg(nodes, links, rows, orientation):
+    """One orientation's SVG over an already-laid-out tree."""
     if orientation not in ORIENTATIONS:
         raise ValueError("unknown orientation %r" % (orientation,))
-    nodes, links, rows = layout(tree, max_nodes)
-    if not nodes:
-        return '<div class="meta">Nothing to draw.</div>', ""
-
     width, height, place, edge = _geometry(orientation, nodes, rows)
 
     def x(n):
@@ -284,8 +324,8 @@ def render_diagram(tree, max_nodes=400, orientation=LR):
         if n["kind"] == "fluid":
             qty += " mB"
         # Shortened HERE and not in `layout`, because the budget depends on the quantity
-        # beside it and `layout` does not format one. `n["label"]` is the flat-capped
-        # version and stays for anything that wants a stable short form.
+        # beside it and `layout` does not format one. The record carries only `full`; a
+        # second flat-capped copy used to sit beside it with nothing reading it.
         shown = _shorten(n["full"], _label_limit(qty))
         # A DIFFERENT CHANNEL from the fill, deliberately. Fill already carries the plan's
         # status for the item and machine availability is a separate axis, so encoding it as
@@ -315,14 +355,11 @@ def render_diagram(tree, max_nodes=400, orientation=LR):
             boxes.append('<text x="%.1f" y="%.1f" class="cut">+ more not drawn</text>'
                          % (nx + BOX_W + 8, ny + 16))
 
-    return (
-        '<svg class="diagram" data-dir="%s" viewBox="0 0 %d %d" width="%d" height="%d" '
-        'role="img" aria-label="crafting plan diagram, %s">'
-        '<g class="lk">%s</g>%s</svg>'
-        % (orientation, width, height, width, height,
-           _esc(ORIENTATION_LABEL[orientation]), "".join(edges), "".join(boxes)),
-        _render_legend(nodes),
-    )
+    return ('<svg class="diagram" data-dir="%s" viewBox="0 0 %d %d" width="%d" height="%d" '
+            'role="img" aria-label="crafting plan diagram, %s">'
+            '<g class="lk">%s</g>%s</svg>'
+            % (orientation, width, height, width, height,
+               _esc(ORIENTATION_LABEL[orientation]), "".join(edges), "".join(boxes)))
 
 
 DIAGRAM_CSS = """
