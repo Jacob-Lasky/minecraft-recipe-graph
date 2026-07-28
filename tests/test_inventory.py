@@ -10,7 +10,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import ae2_inventory  # noqa: E402
 from recipegraph.ae2_inventory import classify  # noqa: E402
+from recipegraph.anvil_nbt import Int, LongArray  # noqa: E402
 from recipegraph.model import Graph, essentia_key  # noqa: E402
 
 
@@ -34,23 +36,82 @@ class ClassifyTest(unittest.TestCase):
         self.assertIsNone(classify({"Aspect": "aer", "Count": 0, "Amount": 0}))
         self.assertIsNone(classify({"id": "minecraft:stone", "Cnt": 0, "Count": 0}))
 
-    def test_aspect_nbt_is_decoded_into_the_key(self):
+    def test_nbt_becomes_the_digest_the_dump_wrote(self):
+        # GROUND TRUTH: `thaumadditions:vis_pod#531b71e0ba2d` is a real key in the
+        # schema-3 dump and names "Perditio Vis Pod". The reader used to emit
+        # `#perditio`, which is more readable and matched nothing at all -- all 52
+        # vis-pod keys on the reference network were dead. See #21.
         got = classify({"id": "thaumadditions:vis_pod", "Cnt": 42447,
                         "tag": {"Aspect": "perditio"}})
-        self.assertEqual(got, ("item", "thaumadditions:vis_pod#perditio", 42447))
+        self.assertEqual(got, ("item", "thaumadditions:vis_pod#531b71e0ba2d", 42447))
 
     def test_differing_aspects_are_different_keys(self):
         a = classify({"id": "thaumadditions:vis_pod", "Cnt": 1, "tag": {"Aspect": "lux"}})
         b = classify({"id": "thaumadditions:vis_pod", "Cnt": 1, "tag": {"Aspect": "sol"}})
         self.assertNotEqual(a[1], b[1], "aspects must not unify into one ingredient")
 
-    def test_undecodable_nbt_still_kept_distinct_from_base(self):
-        got = classify({"id": "mod:thing", "Cnt": 5, "tag": {"Energy": 100}})
+    def test_a_species_stack_lands_on_the_key_the_recipes_use(self):
+        # The headline of #21: 8,629 drones read as zero against every bee recipe.
+        got = classify({"id": "forestry:bee_drone_ge", "Cnt": 8629,
+                        "tag": {"Genome": {"Chromosomes": [
+                            {"UID0": "forestry.speciesForest",
+                             "UID1": "forestry.speciesForest"}]}}})
+        self.assertEqual(got[1], "forestry:bee_drone_ge#69d9078abf2f")
+
+    def test_a_stack_the_mod_cannot_digest_keeps_the_opaque_marker(self):
+        # TAG_Long_Array is serialised by Java's toString() and cannot be reproduced
+        # here, so the reader admits it rather than inventing a digest. The marker
+        # matches no recipe, which over-reports what you need rather than claiming you
+        # own something you do not.
+        got = classify({"id": "mod:thing", "Cnt": 5,
+                        "tag": {"Ids": LongArray([1, 2])}})
         self.assertEqual(got[1], "mod:thing (+nbt)")
+
+    def test_cosmetic_only_nbt_does_not_split_an_item(self):
+        # A renamed stack is the same ingredient, and the dump strips the same tags.
+        plain = classify({"id": "mod:thing", "Cnt": 1})
+        renamed = classify({"id": "mod:thing", "Cnt": 1,
+                            "tag": {"display": {"Name": "Steve's Thing"},
+                                    "RepairCost": Int(7)}})
+        self.assertEqual(plain[1], renamed[1])
 
     def test_meta_is_preserved(self):
         got = classify({"id": "thermalfoundation:ore", "Damage": 1, "Cnt": 87890})
         self.assertEqual(got[1], "thermalfoundation:ore:1")
+
+
+class OpaqueMarkerTest(unittest.TestCase):
+    """The one string two languages have to agree on.
+
+    `tools/ae2_dump.lua` runs on an OpenComputers computer with no python and no NBT: all
+    it can see is a `hasTag` boolean, so it writes the marker rather than a digest. If the
+    two spellings drift, an OC-sourced stock file silently stops being recognisable as
+    undigested NBT and `gaps` misreports why a plan ignored it.
+    """
+
+    LUA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "ae2_dump.lua")
+
+    def test_the_lua_dumper_writes_the_same_marker(self):
+        with open(self.LUA) as fh:
+            src = fh.read()
+        self.assertIn('k .. "%s"' % ae2_inventory.OPAQUE_MARKER, src)
+
+    def test_the_lua_dumper_never_hands_a_tagged_stack_the_bare_key(self):
+        # The dangerous direction: bare `forestry:bee_drone_ge` is a live ingredient of
+        # real recipes, so unifying a species onto it drops a requirement off the
+        # shopping list rather than adding a spurious one. See #21.
+        with open(self.LUA) as fh:
+            src = fh.read()
+        self.assertIn("local function key(name, damage, hasTag)", src)
+        self.assertNotIn("key(it.name, it.damage)", src)
+        self.assertNotIn("key(st.name, st.damage)", src)
+
+    def test_gaps_recognises_the_marker_it_is_handed(self):
+        self.assertTrue(
+            classify({"id": "mod:thing", "Cnt": 1,
+                      "tag": {"Ids": LongArray([1])}})[1].endswith(
+                          ae2_inventory.OPAQUE_MARKER))
 
 
 class DisplayTest(unittest.TestCase):

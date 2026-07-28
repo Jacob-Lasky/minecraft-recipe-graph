@@ -1,0 +1,534 @@
+{
+ "_": "SHARED CONTRACT. Python asserts this in tests/test_nbt_digest.py; Java asserts the same file in DigestFixtureTest. A disagreement means one side changed the dump's NBT digest format, which is part of schema 3. DO NOT edit an expected value to make a side pass; fix the side that moved. See #21.",
+ "node_encoding": "[type, value]. Compound values are objects of name -> node, list values are arrays of nodes. Types: byte short int long float double string bytearray intarray longarray list compound.",
+ "canonical": "DumpCommand.canonical of the compound AFTER cosmetic tags are stripped, or null when nothing is left to digest.",
+ "cases": [
+  {
+   "name": "potion of healing",
+   "note": "minecraft:potion#84c94462a641 = Potion of Healing, from data/graph.json",
+   "nbt": {
+    "Potion": [
+     "string",
+     "minecraft:healing"
+    ]
+   },
+   "canonical": "{6:Potion=t17:minecraft:healing;}",
+   "digest": "84c94462a641"
+  },
+  {
+   "name": "potion of strong healing",
+   "note": "minecraft:potion#1c1b9a77647d = Potion of Healing (a different stack, same name)",
+   "nbt": {
+    "Potion": [
+     "string",
+     "minecraft:strong_healing"
+    ]
+   },
+   "canonical": "{6:Potion=t24:minecraft:strong_healing;}",
+   "digest": "1c1b9a77647d"
+  },
+  {
+   "name": "spawn egg, nested compound",
+   "note": "minecraft:spawn_egg#7607aba3d959 = Spawn Pig",
+   "nbt": {
+    "EntityTag": [
+     "compound",
+     {
+      "id": [
+       "string",
+       "minecraft:pig"
+      ]
+     }
+    ]
+   },
+   "canonical": "{9:EntityTag={2:id=t13:minecraft:pig;};}",
+   "digest": "7607aba3d959"
+  },
+  {
+   "name": "spawn egg, chicken",
+   "note": "minecraft:spawn_egg#00fe6f1edf1e = Spawn Chicken",
+   "nbt": {
+    "EntityTag": [
+     "compound",
+     {
+      "id": [
+       "string",
+       "minecraft:chicken"
+      ]
+     }
+    ]
+   },
+   "canonical": "{9:EntityTag={2:id=t17:minecraft:chicken;};}",
+   "digest": "00fe6f1edf1e"
+  },
+  {
+   "name": "vis pod, aqua",
+   "note": "thaumadditions:vis_pod#03c878f080d5 = Aqua Vis Pod",
+   "nbt": {
+    "Aspect": [
+     "string",
+     "aqua"
+    ]
+   },
+   "canonical": "{6:Aspect=t4:aqua;}",
+   "digest": "03c878f080d5"
+  },
+  {
+   "name": "vis pod, perditio",
+   "note": "thaumadditions:vis_pod#531b71e0ba2d = Perditio Vis Pod",
+   "nbt": {
+    "Aspect": [
+     "string",
+     "perditio"
+    ]
+   },
+   "canonical": "{6:Aspect=t8:perditio;}",
+   "digest": "531b71e0ba2d"
+  },
+  {
+   "name": "no nbt at all",
+   "note": "DiscriminatorTest.aStackWithNoNbtHasNoDiscriminator",
+   "nbt": {},
+   "canonical": null,
+   "digest": null
+  },
+  {
+   "name": "cosmetic only",
+   "note": "DiscriminatorTest.aStackWhoseOnlyNbtIsCosmeticStaysTheBareKey",
+   "nbt": {
+    "RepairCost": [
+     "int",
+     3
+    ]
+   },
+   "canonical": null,
+   "digest": null
+  },
+  {
+   "name": "species, forest",
+   "note": "DiscriminatorTest.twoSpeciesGetTwoDifferentDigests, half one",
+   "nbt": {
+    "Genome": [
+     "compound",
+     {
+      "Chromosomes": [
+       "list",
+       [
+        [
+         "compound",
+         {
+          "UID0": [
+           "string",
+           "forestry.speciesForest"
+          ],
+          "UID1": [
+           "string",
+           "forestry.speciesForest"
+          ]
+         }
+        ]
+       ]
+      ]
+     }
+    ]
+   },
+   "canonical": "{6:Genome={11:Chromosomes=[{4:UID0=t22:forestry.speciesForest;4:UID1=t22:forestry.speciesForest;};];};}",
+   "digest": "69d9078abf2f"
+  },
+  {
+   "name": "species, meadows",
+   "note": "DiscriminatorTest.twoSpeciesGetTwoDifferentDigests, half two",
+   "nbt": {
+    "Genome": [
+     "compound",
+     {
+      "Chromosomes": [
+       "list",
+       [
+        [
+         "compound",
+         {
+          "UID0": [
+           "string",
+           "forestry.speciesMeadows"
+          ],
+          "UID1": [
+           "string",
+           "forestry.speciesMeadows"
+          ]
+         }
+        ]
+       ]
+      ]
+     }
+    ]
+   },
+   "canonical": "{6:Genome={11:Chromosomes=[{4:UID0=t23:forestry.speciesMeadows;4:UID1=t23:forestry.speciesMeadows;};];};}",
+   "digest": "7c1a0252e2af"
+  },
+  {
+   "name": "species with cosmetic tags added",
+   "note": "DiscriminatorTest.cosmeticTagsAreIgnored: must equal 'species, forest'",
+   "nbt": {
+    "Genome": [
+     "compound",
+     {
+      "Chromosomes": [
+       "list",
+       [
+        [
+         "compound",
+         {
+          "UID0": [
+           "string",
+           "forestry.speciesForest"
+          ],
+          "UID1": [
+           "string",
+           "forestry.speciesForest"
+          ]
+         }
+        ]
+       ]
+      ]
+     }
+    ],
+    "RepairCost": [
+     "int",
+     7
+    ],
+    "HideFlags": [
+     "int",
+     63
+    ],
+    "display": [
+     "compound",
+     {
+      "Name": [
+       "string",
+       "My Favourite Bee"
+      ]
+     }
+    ]
+   },
+   "canonical": "{6:Genome={11:Chromosomes=[{4:UID0=t22:forestry.speciesForest;4:UID1=t22:forestry.speciesForest;};];};}",
+   "digest": "69d9078abf2f"
+  },
+  {
+   "name": "keys in one order",
+   "note": "DiscriminatorTest.keyInsertionOrderDoesNotChangeTheDigest, half one",
+   "nbt": {
+    "alpha": [
+     "string",
+     "1"
+    ],
+    "beta": [
+     "int",
+     2
+    ],
+    "gamma": [
+     "string",
+     "3"
+    ]
+   },
+   "canonical": "{5:alpha=t1:1;4:beta=i2;5:gamma=t1:3;}",
+   "digest": "94e3de085ba7"
+  },
+  {
+   "name": "keys in another order",
+   "note": "DiscriminatorTest.keyInsertionOrderDoesNotChangeTheDigest, half two",
+   "nbt": {
+    "gamma": [
+     "string",
+     "3"
+    ],
+    "beta": [
+     "int",
+     2
+    ],
+    "alpha": [
+     "string",
+     "1"
+    ]
+   },
+   "canonical": "{5:alpha=t1:1;4:beta=i2;5:gamma=t1:3;}",
+   "digest": "94e3de085ba7"
+  },
+  {
+   "name": "five as a string",
+   "note": "DiscriminatorTest.typesAreDistinguishedRatherThanStringified",
+   "nbt": {
+    "v": [
+     "string",
+     "5"
+    ]
+   },
+   "canonical": "{1:v=t1:5;}",
+   "digest": "ab3e4e55eae6"
+  },
+  {
+   "name": "five as a byte",
+   "note": "same",
+   "nbt": {
+    "v": [
+     "byte",
+     5
+    ]
+   },
+   "canonical": "{1:v=b5;}",
+   "digest": "071d4f342739"
+  },
+  {
+   "name": "five as a short",
+   "note": "same",
+   "nbt": {
+    "v": [
+     "short",
+     5
+    ]
+   },
+   "canonical": "{1:v=s5;}",
+   "digest": "cfabc30c82a8"
+  },
+  {
+   "name": "five as an int",
+   "note": "same",
+   "nbt": {
+    "v": [
+     "int",
+     5
+    ]
+   },
+   "canonical": "{1:v=i5;}",
+   "digest": "f6d264ba8ba2"
+  },
+  {
+   "name": "five as a long",
+   "note": "same",
+   "nbt": {
+    "v": [
+     "long",
+     5
+    ]
+   },
+   "canonical": "{1:v=l5;}",
+   "digest": "deeaabfee2a7"
+  },
+  {
+   "name": "separators inside a string",
+   "note": "DiscriminatorTest.structureCannotBeForgedOutOfStringContents, half one",
+   "nbt": {
+    "a": [
+     "string",
+     "x;b=y"
+    ]
+   },
+   "canonical": "{1:a=t5:x;b=y;}",
+   "digest": "9cd4d8477e8d"
+  },
+  {
+   "name": "the structure it imitates",
+   "note": "DiscriminatorTest.structureCannotBeForgedOutOfStringContents, half two",
+   "nbt": {
+    "a": [
+     "string",
+     "x"
+    ],
+    "b": [
+     "string",
+     "y"
+    ]
+   },
+   "canonical": "{1:a=t1:x;1:b=t1:y;}",
+   "digest": "3fa8b01ae7d3"
+  },
+  {
+   "name": "list in order",
+   "note": "DiscriminatorTest.listOrderMatters, half one",
+   "nbt": {
+    "l": [
+     "list",
+     [
+      [
+       "string",
+       "one"
+      ],
+      [
+       "string",
+       "two"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{1:l=[t3:one;t3:two;];}",
+   "digest": "c760ae1c7100"
+  },
+  {
+   "name": "list reversed",
+   "note": "DiscriminatorTest.listOrderMatters, half two",
+   "nbt": {
+    "l": [
+     "list",
+     [
+      [
+       "string",
+       "two"
+      ],
+      [
+       "string",
+       "one"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{1:l=[t3:two;t3:one;];}",
+   "digest": "9b7f30608be8"
+  },
+  {
+   "name": "float 0.1",
+   "note": "DiscriminatorTest.floatsGoInByTheirBitsSoTheyCannotDriftBetweenLanguages",
+   "nbt": {
+    "v": [
+     "float",
+     0.1
+    ]
+   },
+   "canonical": "{1:v=f1036831949;}",
+   "digest": "1502a70286a2"
+  },
+  {
+   "name": "double 0.1",
+   "note": "same",
+   "nbt": {
+    "v": [
+     "double",
+     0.1
+    ]
+   },
+   "canonical": "{1:v=d4591870180066957722;}",
+   "digest": "c0c51e097819"
+  },
+  {
+   "name": "negative primitives",
+   "note": "Java prints signed decimals; an unsigned read differs on every one of these",
+   "nbt": {
+    "b": [
+     "byte",
+     -128
+    ],
+    "s": [
+     "short",
+     -32768
+    ],
+    "i": [
+     "int",
+     -2147483648
+    ],
+    "l": [
+     "long",
+     -9223372036854775808
+    ]
+   },
+   "canonical": "{1:b=b-128;1:i=i-2147483648;1:l=l-9223372036854775808;1:s=s-32768;}",
+   "digest": "81a778649b50"
+  },
+  {
+   "name": "byte array with a high byte",
+   "note": "python bytes are unsigned and Java's are not",
+   "nbt": {
+    "a": [
+     "bytearray",
+     [
+      0,
+      1,
+      -1,
+      127,
+      -128
+     ]
+    ]
+   },
+   "canonical": "{1:a=B0,1,-1,127,-128,;}",
+   "digest": "f31bfb8fc054"
+  },
+  {
+   "name": "int array",
+   "note": "the only other array Java serialises",
+   "nbt": {
+    "a": [
+     "intarray",
+     [
+      1,
+      -2,
+      3
+     ]
+    ]
+   },
+   "canonical": "{1:a=I1,-2,3,;}",
+   "digest": "9faba3ace3cb"
+  },
+  {
+   "name": "empty list",
+   "note": "no element type is emitted, so an empty list is '[]'",
+   "nbt": {
+    "l": [
+     "list",
+     []
+    ]
+   },
+   "canonical": "{1:l=[];}",
+   "digest": "0165ad3a3e5e"
+  },
+  {
+   "name": "empty compound inside a compound",
+   "note": "'{}' rather than nothing",
+   "nbt": {
+    "c": [
+     "compound",
+     {}
+    ]
+   },
+   "canonical": "{1:c={};}",
+   "digest": "eca5c31973a1"
+  },
+  {
+   "name": "non-ascii string",
+   "note": "length is in UTF-16 code units, which for BMP text is the code point count",
+   "nbt": {
+    "n": [
+     "string",
+     "Blütenstaub"
+    ]
+   },
+   "canonical": "{1:n=t11:Blütenstaub;}",
+   "digest": "2dd268aaa14a"
+  },
+  {
+   "name": "float negative zero",
+   "note": "the bits are 0x80000000, not 0; a decimal rendering would lose the sign",
+   "nbt": {
+    "v": [
+     "float",
+     -0.0
+    ]
+   },
+   "canonical": "{1:v=f-2147483648;}",
+   "digest": "a182f583b940"
+  },
+  {
+   "name": "long array",
+   "note": "DumpCommand.canonical has no case for TAG_Long_Array and falls through to Java's toString(). Python declines rather than guessing; see nbt_digest.OpaqueTag.",
+   "nbt": {
+    "a": [
+     "longarray",
+     [
+      1,
+      2
+     ]
+    ]
+   },
+   "canonical": null,
+   "digest": null,
+   "java_diverges": "Java answers here and python declines, so the java suite skips this case rather than asserting a value with no counterpart; test_nbt_digest asserts the refusal."
+  }
+ ]
+}

@@ -7,6 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import gaps  # noqa: E402
+from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 
 SUMMARY = {
     "recipes": 42000,
@@ -69,6 +70,72 @@ class GapsTest(unittest.TestCase):
         a = gaps.analyse({}, [])
         self.assertEqual(a["blind_categories"], [])
         self.assertIn("none", gaps.report(a))
+
+
+def stocked_graph():
+    g = Graph()
+    g.names = {"mod:widget": "Widget", "forestry:bee_drone_ge#69d9078abf2f": "Forest Drone"}
+    g.add(Recipe("r", "t", [("mod:out", 1)],
+                 [Ingredient(["forestry:bee_drone_ge#69d9078abf2f"], 1)], category="c"))
+    return g
+
+
+class StockCoverageTest(unittest.TestCase):
+    """Stock the graph cannot see. The failure this reports is a silence, so it has to be
+    counted rather than noticed: see #21."""
+
+    def cover(self, items, reader=gaps.DIGEST_READER):
+        return gaps.stock_coverage(stocked_graph(), items, reader=reader)
+
+    def test_a_key_the_graph_knows_is_matched(self):
+        cov = self.cover({"mod:widget": 5, "forestry:bee_drone_ge#69d9078abf2f": 8629})
+        self.assertEqual(cov["matched"], 2)
+        self.assertEqual(cov["unmatched"], [])
+        self.assertEqual(gaps.stock_report(cov),
+                         "every stock key matches a key in the graph")
+
+    def test_each_cause_is_counted_apart_because_each_has_its_own_fix(self):
+        cov = self.cover({
+            "mod:thing (+nbt)": 5,                       # the mod cannot digest it
+            "thaumadditions:vis_pod#perditio": 42447,    # a have file older than #21
+            "forestry:bee_drone_ge#ffffffffffff": 3,     # digested, but not in this dump
+            "mod:removed": 1,                            # the pack dropped the item
+        })
+        self.assertEqual(cov["matched"], 0)
+        self.assertEqual(cov["causes"], {
+            gaps.CAUSE_OPAQUE: (1, 5),
+            gaps.CAUSE_STALE: (1, 42447),
+            gaps.CAUSE_UNKNOWN_VARIANT: (1, 3),
+            gaps.CAUSE_UNKNOWN: (1, 1),
+        })
+
+    def test_an_unstamped_file_blames_the_scan_not_the_dump(self):
+        # Reader 1 wrote ` (+nbt)` for every NBT-bearing stack, so on a file with no
+        # stamp the marker means "rescan", not "the mod cannot digest this". Getting
+        # this backwards sends someone hunting a schema bug that does not exist.
+        items = {"mod:thing (+nbt)": 5}
+        self.assertEqual(self.cover(items, reader=1)["causes"],
+                         {gaps.CAUSE_STALE: (1, 5)})
+        self.assertEqual(self.cover(items)["causes"], {gaps.CAUSE_OPAQUE: (1, 5)})
+
+    def test_an_unstamped_file_is_the_default_assumption(self):
+        # Only the pre-digest reader wrote files without a stamp, so a missing stamp is
+        # evidence, not an unknown.
+        cov = gaps.stock_coverage(stocked_graph(), {"mod:thing (+nbt)": 5})
+        self.assertEqual(cov["causes"], {gaps.CAUSE_STALE: (1, 5)})
+
+    def test_the_worst_offenders_are_listed_by_stock_not_by_name(self):
+        cov = self.cover({"a:one": 1, "b:two": 500, "c:three": 20})
+        self.assertEqual([k for k, _n in cov["unmatched"]], ["b:two", "c:three", "a:one"])
+
+    def test_the_report_leads_with_the_number_that_matters(self):
+        text = gaps.stock_report(self.cover({"mod:widget": 1, "mod:gone": 1_473_740}))
+        self.assertIn("1 of 2 stock keys match nothing", text)
+        self.assertIn("1,473,740", text)
+        self.assertIn(gaps.CAUSE_UNKNOWN, text)
+
+    def test_no_stock_is_not_an_error(self):
+        self.assertEqual(gaps.stock_report(self.cover({})), "no stock to reconcile")
 
 
 if __name__ == "__main__":

@@ -545,7 +545,7 @@ public class DumpCommand extends CommandBase {
      * differing only by that tag are interchangeable in a recipe, and a wrong entry
      * silently merges two ingredients that are not the same thing.
      */
-    private static final String[] COSMETIC_TAGS = {
+    static final String[] COSMETIC_TAGS = {
         "RepairCost",     // anvil work penalty
         "display",        // rename and lore
         "HideFlags",      // tooltip presentation
@@ -611,7 +611,7 @@ public class DumpCommand extends CommandBase {
      *
      * THIS FORMAT IS PART OF SCHEMA 3. Changing it changes every discriminated key.
      */
-    private static void canonical(NBTBase node, StringBuilder sb) {
+    static void canonical(NBTBase node, StringBuilder sb) {
         switch (node.getId()) {
             case 1: sb.append('b').append(((NBTPrimitive) node).getByte()); break;
             case 2: sb.append('s').append(((NBTPrimitive) node).getShort()); break;

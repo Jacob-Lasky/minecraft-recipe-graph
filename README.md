@@ -54,8 +54,14 @@ A pure-stdlib Anvil + NBT reader finds every AE2/NAE2/ExtraCells storage cell in
 drives, ME chests, IO ports and cell workbenches, and aggregates the contents. Nothing
 to build in game, no mod required, read-only — safe against a live server.
 
-On the reference network this reads **3,270 distinct items across 467 cells in 67
-drives** in about a minute.
+On the reference network this reads **3,321 distinct items across 467 cells in 195
+holders** in about a minute.
+
+A stack whose NBT decides what it is (a bee's species, a potion's effect, a vis pod's
+aspect) gets the same `#digest` suffix the dump mod puts on it, so it matches the recipes
+that use it. If `data/graph.json` is present, the scan finishes by reporting how much of
+your stock the graph cannot see and why — that number was 320 keys and 1.5 million items
+before the reader learned to compute the digest.
 
 Counts come from the cell's `Cnt` tag, *not* the ItemStack `Count` byte, which is capped
 at 127 and meaningless for cell contents.

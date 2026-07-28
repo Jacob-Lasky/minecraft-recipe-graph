@@ -42,6 +42,7 @@ def cmd_build(args):
 
 
 def cmd_have(args):
+    from . import ae2_inventory
     from .ae2_inventory import scan
 
     paths = []
@@ -51,7 +52,10 @@ def cmd_have(args):
         print("no region files matched", file=sys.stderr)
         return 2
     items, fluids, essentia, stats, _s, placed = scan(paths)
-    payload = {"stats": stats, "items": dict(items),
+    # `reader` stamps WHICH scanner wrote this, because an unmatched NBT key means
+    # "rescan" on a pre-#21 file and "the dump cannot digest this stack" on a current
+    # one. See ae2_inventory.READER and gaps.stock_coverage.
+    payload = {"stats": stats, "reader": ae2_inventory.READER, "items": dict(items),
                "fluids": dict(fluids), "essentia": dict(essentia),
                "placed": dict(placed)}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
@@ -60,6 +64,13 @@ def cmd_have(args):
     print("wrote %s: %d items, %d fluids, %d essentia aspects from %d cells; "
           "%d placed machine types"
           % (args.out, len(items), len(fluids), len(essentia), stats["cells"], len(placed)))
+    # Reconcile against the graph while both are in hand. A scan that writes 3,321 keys
+    # looks like a success even when 320 of them name nothing any recipe uses, and that
+    # silence is what let #21 sit unnoticed: the stock was there, the plans ignored it.
+    if os.path.exists(args.graph):
+        from . import gaps
+        print(gaps.stock_report(gaps.stock_coverage(Graph.load(args.graph), items,
+                                                    reader=ae2_inventory.READER)))
     return 0
 
 

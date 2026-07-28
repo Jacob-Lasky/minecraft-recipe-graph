@@ -60,6 +60,12 @@ dependencies {
     // patched Minecraft on the test classpath, so NBT can be exercised for real without
     // launching the game.
     testImplementation 'junit:junit:4.13.2'
+    // `DigestFixtureTest` reads the shared digest contract at tests/fixtures/. Minecraft
+    // 1.12.2 already ships gson 2.8.0 and pulls it onto the test classpath through the
+    // patched-Minecraft dependency, so this is a pin rather than an addition: it names
+    // the version the game uses, so the test cannot silently compile against a different
+    // one if RFG's transitive graph changes.
+    testImplementation 'com.google.code.gson:gson:2.8.0'
 }
 
 test {

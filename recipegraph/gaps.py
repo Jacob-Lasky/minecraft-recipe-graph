@@ -7,10 +7,24 @@ The most important signal is a category with `dumped == 0`: that is a total blin
 spot, an entire machine type absent from the graph, and any item made only there will
 look uncraftable. A category that dumped 900 of 1000 recipes is a very different
 situation and should not be ranked alongside it.
+
+`stock_coverage` answers the same question from the other end: not what the dump missed,
+but what your AE2 network holds that the graph cannot see. Both are silences, and a
+silence is the one kind of failure a tool has to be told to report.
 """
 
 import json
 import os
+
+from .ae2_inventory import DIGEST_READER, OPAQUE_MARKER
+from .model import is_digest, split_discriminator
+
+# Why a scanned stock key matches nothing in the graph. The cause decides the fix, which
+# is the whole reason they are counted apart rather than as one "unmatched" number.
+CAUSE_OPAQUE = "nbt the dump does not digest"
+CAUSE_STALE = "no digest in this stock file; rescan the save with `have`"
+CAUSE_UNKNOWN_VARIANT = "digest not in this dump"
+CAUSE_UNKNOWN = "item not in this dump"
 
 
 def load(dump_dir):
@@ -37,6 +51,73 @@ def load(dump_dir):
                 except ValueError:
                     continue
     return summary, skips
+
+
+def _cause(key, reader):
+    if key.endswith(OPAQUE_MARKER):
+        # Reader 1 wrote this marker for EVERY NBT-bearing stack, and so does
+        # `tools/ae2_dump.lua`, which can never do better. On either kind of file the
+        # marker says nothing about the mod and everything about the file, and blaming
+        # the dump would send someone chasing a schema bug that a rescan fixes.
+        return CAUSE_OPAQUE if reader >= DIGEST_READER else CAUSE_STALE
+    _stem, suffix = split_discriminator(key)
+    if suffix is None:
+        return CAUSE_UNKNOWN
+    return CAUSE_UNKNOWN_VARIANT if is_digest(suffix) else CAUSE_STALE
+
+
+def stock_coverage(graph, items, reader=1):
+    """How much of a scanned AE2 stock this graph can see, and why the rest is invisible.
+
+    A stock key the graph has never heard of contributes nothing to a plan: the item
+    reads as zero and goes on the shopping list even though it is sitting in a drive.
+    That was the whole of #21 -- 8,629 bee drones and 1,473,740 vis pods filed under keys
+    no recipe uses -- and it went unnoticed because nothing counted it. Counting it here
+    means the next such divergence shows up as a number rather than as a wrong plan.
+
+    Matched means the key is in `graph.labels`, which is the set of things the graph can
+    name at all. A key outside it cannot be an ingredient of anything.
+
+    `reader` is the `ae2_inventory.READER` stamp from the have file, and it changes what
+    an unmatched NBT key MEANS rather than merely how it is worded. Defaults to 1 because
+    only the pre-digest reader wrote files without a stamp.
+    """
+    matched, unmatched, causes = 0, [], {}
+    for key, count in items.items():
+        if key in graph.labels:
+            matched += 1
+            continue
+        unmatched.append((key, count))
+        cause = _cause(key, reader)
+        keys, stock = causes.get(cause, (0, 0))
+        causes[cause] = (keys + 1, stock + count)
+    unmatched.sort(key=lambda kv: (-kv[1], kv[0]))
+    return {
+        "keys": len(items),
+        "matched": matched,
+        "stock": sum(items.values()),
+        "unmatched": unmatched,
+        "unmatched_stock": sum(count for _key, count in unmatched),
+        "causes": causes,
+    }
+
+
+def stock_report(cov, top=8):
+    """One block for the `have` command: the headline, then why, then the worst offenders."""
+    if not cov["keys"]:
+        return "no stock to reconcile"
+    if not cov["unmatched"]:
+        return "every stock key matches a key in the graph"
+    out = ["%s of %s stock keys match nothing in the graph (%s of %s items)"
+           % ("{:,}".format(cov["keys"] - cov["matched"]), "{:,}".format(cov["keys"]),
+              "{:,}".format(cov["unmatched_stock"]), "{:,}".format(cov["stock"]))]
+    for cause, (keys, stock) in sorted(cov["causes"].items(),
+                                       key=lambda kv: (-kv[1][1], kv[0])):
+        out.append("  %5s keys  %14s items  %s"
+                   % ("{:,}".format(keys), "{:,}".format(stock), cause))
+    for key, count in cov["unmatched"][:top]:
+        out.append("    %14s  %s" % ("{:,}".format(count), key))
+    return "\n".join(out)
 
 
 def analyse(summary, skips):
