@@ -20,8 +20,22 @@ import sys
 
 try:
     from .anvil_nbt import iter_region, tile_entities
+    from .nbt_digest import OpaqueTag, digest as nbt_digest
 except ImportError:  # run directly as a script, e.g. inside a server container
     from anvil_nbt import iter_region, tile_entities
+    from nbt_digest import OpaqueTag, digest as nbt_digest
+
+# Which reader produced a have file, stamped into the output so a consumer can tell what
+# an unmatched key means. 1 is everything before #21, which could not digest NBT and so
+# filed every NBT-bearing stack under ` (+nbt)`; 2 computes the dump's own digest. Under
+# reader 1 an unmatched NBT key means "rescan"; under reader 2 it means the mod itself
+# cannot serialise that stack, which is a much rarer and quite different thing.
+# A file with no stamp is reader 1, because that is the only version that wrote none.
+READER = 2
+# The version at which item keys started carrying the dump's digest. `READER` moves on
+# whenever the scan output changes; this one only moves if digests are ever redefined,
+# and it is what `gaps.stock_coverage` compares against.
+DIGEST_READER = 2
 
 # Tile entities that can physically hold a storage cell.
 CELL_HOLDERS = (
@@ -91,18 +105,33 @@ def classify(entry):
         dmg = entry.get("Damage", 0)
         key = entry["id"] if not dmg else "%s:%s" % (entry["id"], dmg)
         # An NBT-bearing stack is a distinct item for crafting purposes, so it must not
-        # unify with the bare item. Where the NBT is a known, meaningful discriminator,
-        # decode it into the key instead of an opaque marker: a Vis Pod of Perditio is a
-        # genuinely different ingredient from one of Lux, and those feed the
-        # item -> essentia multiblocks. Anything undecoded keeps the opaque flag so it
-        # still cannot be mistaken for the base item.
+        # unify with the bare item. The suffix is the DUMP MOD'S DIGEST of the same NBT,
+        # because that is the only key shape the recipe side speaks: schema 3 named a
+        # Forest drone `forestry:bee_drone_ge#a3f19c02b8d1`, and stock that says anything
+        # else matches nothing. See #21 and recipegraph.nbt_digest.
+        #
+        # DO NOT reinstate the old `#perditio` decode of the `Aspect` tag. It was more
+        # readable, and it was measurably wrong: the dump calls that stack
+        # `thaumadditions:vis_pod#03c878f080d5` and names it "Aqua Vis Pod", so all 52
+        # vis-pod keys on the reference network matched nothing at all. Readability comes
+        # from names.json, which is keyed by the discriminated id for exactly this
+        # reason.
+        #
+        # ` (+nbt)` survives as the fallback for NBT the mod itself does not serialise
+        # reproducibly. It matches no recipe, which is the conservative direction: it
+        # over-reports what you need rather than claiming you own something you do not.
+        # A None digest is NOT that case: it means the mod gave this stack no suffix
+        # either, so the bare key is the right answer and a renamed pickaxe stays one
+        # pickaxe. See nbt_digest.digest.
         tag = entry.get("tag")
         if isinstance(tag, dict) and tag:
-            aspect = tag.get("Aspect")
-            if isinstance(aspect, str) and aspect:
-                key += "#" + aspect.lower()
-            else:
+            try:
+                suffix = nbt_digest(tag)
+            except OpaqueTag:
                 key += " (+nbt)"
+            else:
+                if suffix:
+                    key += "#" + suffix
         elif tag:
             key += " (+nbt)"
         return "item", key, count

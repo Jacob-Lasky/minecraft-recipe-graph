@@ -11,6 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph.ae2_inventory import classify  # noqa: E402
+from recipegraph.anvil_nbt import Int, LongArray  # noqa: E402
 from recipegraph.model import Graph, essentia_key  # noqa: E402
 
 
@@ -34,19 +35,44 @@ class ClassifyTest(unittest.TestCase):
         self.assertIsNone(classify({"Aspect": "aer", "Count": 0, "Amount": 0}))
         self.assertIsNone(classify({"id": "minecraft:stone", "Cnt": 0, "Count": 0}))
 
-    def test_aspect_nbt_is_decoded_into_the_key(self):
+    def test_nbt_becomes_the_dump_s_own_digest(self):
+        # GROUND TRUTH: `thaumadditions:vis_pod#531b71e0ba2d` is a real key in the
+        # schema-3 dump and names "Perditio Vis Pod". The reader used to emit
+        # `#perditio`, which is more readable and matched nothing at all -- all 52
+        # vis-pod keys on the reference network were dead. See #21.
         got = classify({"id": "thaumadditions:vis_pod", "Cnt": 42447,
                         "tag": {"Aspect": "perditio"}})
-        self.assertEqual(got, ("item", "thaumadditions:vis_pod#perditio", 42447))
+        self.assertEqual(got, ("item", "thaumadditions:vis_pod#531b71e0ba2d", 42447))
 
     def test_differing_aspects_are_different_keys(self):
         a = classify({"id": "thaumadditions:vis_pod", "Cnt": 1, "tag": {"Aspect": "lux"}})
         b = classify({"id": "thaumadditions:vis_pod", "Cnt": 1, "tag": {"Aspect": "sol"}})
         self.assertNotEqual(a[1], b[1], "aspects must not unify into one ingredient")
 
-    def test_undecodable_nbt_still_kept_distinct_from_base(self):
-        got = classify({"id": "mod:thing", "Cnt": 5, "tag": {"Energy": 100}})
+    def test_a_species_stack_lands_on_the_key_the_recipes_use(self):
+        # The headline of #21: 8,629 drones read as zero against every bee recipe.
+        got = classify({"id": "forestry:bee_drone_ge", "Cnt": 8629,
+                        "tag": {"Genome": {"Chromosomes": [
+                            {"UID0": "forestry.speciesForest",
+                             "UID1": "forestry.speciesForest"}]}}})
+        self.assertEqual(got[1], "forestry:bee_drone_ge#69d9078abf2f")
+
+    def test_a_stack_the_mod_cannot_digest_keeps_the_opaque_marker(self):
+        # TAG_Long_Array is serialised by Java's toString() and cannot be reproduced
+        # here, so the reader admits it rather than inventing a digest. The marker
+        # matches no recipe, which over-reports what you need rather than claiming you
+        # own something you do not.
+        got = classify({"id": "mod:thing", "Cnt": 5,
+                        "tag": {"Ids": LongArray([1, 2])}})
         self.assertEqual(got[1], "mod:thing (+nbt)")
+
+    def test_cosmetic_only_nbt_does_not_split_an_item(self):
+        # A renamed stack is the same ingredient, and the dump strips the same tags.
+        plain = classify({"id": "mod:thing", "Cnt": 1})
+        renamed = classify({"id": "mod:thing", "Cnt": 1,
+                            "tag": {"display": {"Name": "Steve's Thing"},
+                                    "RepairCost": Int(7)}})
+        self.assertEqual(plain[1], renamed[1])
 
     def test_meta_is_preserved(self):
         got = classify({"id": "thermalfoundation:ore", "Damage": 1, "Cnt": 87890})

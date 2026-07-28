@@ -24,6 +24,65 @@ TAG_INT_ARRAY = 11
 TAG_LONG_ARRAY = 12
 
 
+# --- typed values -----------------------------------------------------------------
+#
+# WHY THE PARSER REMEMBERS TAG TYPES. Six NBT tags collapse onto two Python types: byte,
+# short, int and long all arrive as `int`, float and double both as `float`. The dump
+# mod's discriminator writes a stack's NBT with every value TAGGED BY TYPE, on purpose
+# (`DumpCommand.canonical`), so `TAG_Byte 5` and `TAG_Int 5` digest differently. A parser
+# that throws the type away can therefore never reproduce the mod's digest, and the whole
+# point of `nbt_digest` is to reproduce it exactly. See #21.
+#
+# Subclasses of the builtins rather than wrapper objects, because every existing consumer
+# reads the plain form: `classify` does `isinstance(value, int) and value > 0`, the
+# essentia path indexes strings, `json.dump` serialises the scan result. A subclass keeps
+# all of that working unchanged, which is what made this safe to do to a parser three
+# other modules already depend on.
+#
+# TAG_String, TAG_Compound and TAG_List need no subclass: `str`, `dict` and `list` are
+# already unambiguous here. TAG_Byte_Array is `bytes`, likewise unambiguous. The two
+# remaining arrays DO need one, because both would otherwise be a bare `list`.
+
+class Byte(int):
+    __slots__ = ()
+    TAG = TAG_BYTE
+
+
+class Short(int):
+    __slots__ = ()
+    TAG = TAG_SHORT
+
+
+class Int(int):
+    __slots__ = ()
+    TAG = TAG_INT
+
+
+class Long(int):
+    __slots__ = ()
+    TAG = TAG_LONG
+
+
+class Float(float):
+    __slots__ = ()
+    TAG = TAG_FLOAT
+
+
+class Double(float):
+    __slots__ = ()
+    TAG = TAG_DOUBLE
+
+
+class IntArray(list):
+    __slots__ = ()
+    TAG = TAG_INT_ARRAY
+
+
+class LongArray(list):
+    __slots__ = ()
+    TAG = TAG_LONG_ARRAY
+
+
 class Reader:
     __slots__ = ("buf", "pos")
 
@@ -74,18 +133,19 @@ class Reader:
 
 
 def read_payload(r, tag):
+    """One NBT value. Numeric results carry their tag type; see the note above."""
     if tag == TAG_BYTE:
-        return r.i1()
+        return Byte(r.i1())
     if tag == TAG_SHORT:
-        return r.i2()
+        return Short(r.i2())
     if tag == TAG_INT:
-        return r.i4()
+        return Int(r.i4())
     if tag == TAG_LONG:
-        return r.i8()
+        return Long(r.i8())
     if tag == TAG_FLOAT:
-        return r.f4()
+        return Float(r.f4())
     if tag == TAG_DOUBLE:
-        return r.f8()
+        return Double(r.f8())
     if tag == TAG_BYTE_ARRAY:
         return r.raw(r.i4())
     if tag == TAG_STRING:
@@ -106,11 +166,33 @@ def read_payload(r, tag):
             out[name] = read_payload(r, t)
     if tag == TAG_INT_ARRAY:
         n = r.i4()
-        return list(struct.unpack(">%di" % n, r.raw(4 * n)))
+        return IntArray(struct.unpack(">%di" % n, r.raw(4 * n)))
     if tag == TAG_LONG_ARRAY:
         n = r.i4()
-        return list(struct.unpack(">%dq" % n, r.raw(8 * n)))
+        return LongArray(struct.unpack(">%dq" % n, r.raw(8 * n)))
     raise ValueError("unknown NBT tag %d" % tag)
+
+
+def tag_of(node):
+    """The NBT tag id a parsed value came from, or None if it does not carry one.
+
+    None means the value lost its type on the way here -- a plain `int` could be any of
+    four tags and a plain `float` either of two. Callers that need the type must treat
+    that as an error rather than guessing, because guessing produces a digest that is
+    confidently wrong instead of visibly absent.
+    """
+    tag = getattr(type(node), "TAG", None)
+    if tag is not None:
+        return tag
+    if isinstance(node, str):
+        return TAG_STRING
+    if isinstance(node, bytes):
+        return TAG_BYTE_ARRAY
+    if isinstance(node, dict):
+        return TAG_COMPOUND
+    if isinstance(node, list):
+        return TAG_LIST
+    return None
 
 
 def parse_nbt(data):

@@ -413,12 +413,36 @@ If output says `truncated`, raise `--max-nodes` before drawing conclusions.
   per cell type: `Cnt` for item and fluid cells, **`Amount` for essentia cells**. `Count`
   is the ItemStack byte and reads 0 in all of them, so preferring it silently drops whole
   cells instead of erroring.
-- **Aspect NBT is decoded into the item key.** `thaumadditions:vis_pod` with
-  `tag:{Aspect:"perditio"}` becomes `thaumadditions:vis_pod#perditio`, because a Vis Pod
-  of Perditio is a different ingredient from one of Lux and they feed the item→essentia
-  multiblocks. Names for these are format strings in items.csv (`"%s Vis Pod"`), filled in
-  at display time. Undecodable NBT keeps a ` (+nbt)` marker so it never unifies with the
-  bare item.
+- **The world-save reader computes the dump's OWN digest, and readability is not a reason
+  to deviate.** A stack's `#suffix` comes from `nbt_digest.digest`, a Python port of
+  `DumpCommand.discriminator` (canonical NBT string, FNV-1a, low 48 bits). The reader used
+  to decode the `Aspect` tag into `thaumadditions:vis_pod#perditio` instead, which reads
+  far better and matched **nothing**: the dump calls that stack
+  `thaumadditions:vis_pod#03c878f080d5`, so all 52 vis-pod keys (1,473,740 items) were
+  invisible to every plan, alongside 8,629 bee drones. Readability comes from names.json,
+  which is keyed by the discriminated id and holds JEI's own "Aqua Vis Pod". See #21.
+  - **Two languages, one hash, so pin it three ways.** `tests/fixtures/nbt_digest.json` is
+    asserted by both suites; six of its cases are digests read back out of a real dump, so
+    they prove the port rather than proving it self-consistent.
+    `test_nbt_digest.JavaSourceContractTest` greps `DumpCommand.java` for the cosmetic tag
+    list and the FNV constants, catching a one-sided edit with no JVM.
+  - **The parser had to start keeping tag types.** Byte, short, int and long all arrive as
+    Python `int`, and the digest tags every value with its type, so a type-blind parse can
+    never reproduce it. `anvil_nbt` now returns `int`/`float` SUBCLASSES carrying `TAG`,
+    which every existing consumer reads unchanged. An untyped number raises `UntypedNode`
+    rather than being guessed at.
+  - **`None` and "cannot digest" are opposite answers.** `digest()` returns None only where
+    the mod also declines, meaning the BARE key is right (no NBT, or nothing but cosmetic
+    NBT: a renamed pickaxe is one pickaxe). TAG_Long_Array raises `OpaqueTag` instead,
+    because `canonical` has no case for it and falls through to Java's `toString()`; that
+    stack keeps the ` (+nbt)` marker, which matches no recipe and so over-reports rather
+    than claiming you own something you do not.
+- **A have file is stamped with the reader that wrote it** (`ae2_inventory.READER`), and
+  `gaps.stock_coverage` needs the stamp to interpret it: reader 1 wrote ` (+nbt)` for
+  *every* NBT stack, so on an unstamped file that marker means "rescan", while on a current
+  one it means the mod cannot serialise that stack. `recipegraph have` prints the
+  reconciliation, because 320 of 3,321 stock keys matching nothing looked exactly like a
+  successful scan for as long as nobody counted.
 - **Essentia is a plannable node** (`essentia:<aspect>`), not a report-only number -- it is
   an intermediate that recipes both consume and produce.
 - **Forge `_constants.json`**: 38 jars in this pack use `"item": "#name"` references. An

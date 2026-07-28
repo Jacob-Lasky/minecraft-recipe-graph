@@ -110,15 +110,31 @@ def is_unlocalized(label):
 _DIGEST = re.compile(r"^[0-9a-f]{12}$")
 
 
+def is_digest(suffix):
+    """True when a key's `#suffix` is a dump discriminator rather than a readable word.
+
+    The one place that shape is written down. `_variant_label` needs it to decide how to
+    render an unnamed variant, and `gaps.stock_coverage` needs it to tell "this stock key
+    was written by a reader older than #21" from "this digest is not in this dump", which
+    are different problems with different fixes.
+    """
+    return bool(_DIGEST.match(suffix))
+
+
 def _variant_label(suffix):
     """How to read the `#suffix` on a discriminated key when nothing named it.
 
-    Two kinds live here. An aspect (`#perditio`) is a word and reads as one. A dump
-    discriminator is a 12-hex digest of the stack's NBT, which reads as line noise, so it
-    is labelled as what it is and shortened. Never collapse two digests to one label:
-    telling a Forest drone from a Meadows drone is the entire point.
+    A dump discriminator is a 12-hex digest of the stack's NBT, which reads as line noise,
+    so it is labelled as what it is and shortened. Never collapse two digests to one
+    label: telling a Forest drone from a Meadows drone is the entire point.
+
+    The word branch is for a suffix that is not a digest, which today means a HAVE-FILE
+    WRITTEN BEFORE #21: the world-save reader used to decode `Aspect` into the key and
+    emit `thaumadditions:vis_pod#perditio`. It emits the digest now, because that is what
+    the dump speaks, but an `ae2_have.json` on disk still carries the old shape until it
+    is rescanned. Keep this readable rather than rendering "variant perdit".
     """
-    if _DIGEST.match(suffix):
+    if is_digest(suffix):
         return "variant %s" % suffix[:6]
     return suffix.capitalize()
 

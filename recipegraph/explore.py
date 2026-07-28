@@ -77,8 +77,9 @@ def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
         scored.append((rank, len(label), label, key))
 
     # Keys that exist only in the inventory, never in items.csv: NBT-discriminated
-    # stacks like `thaumadditions:vis_pod#perditio`, plus fluids and essentia. Without
-    # this, everything the aspect decoder produces is unsearchable.
+    # stacks like `thaumadditions:vis_pod#03c878f080d5`, plus fluids and essentia.
+    # Without this, a stack whose digest the dump never saw is unsearchable even though
+    # you are holding it.
     for key in have:
         if key in graph.labels:
             continue
