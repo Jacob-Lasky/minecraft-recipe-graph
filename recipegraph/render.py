@@ -12,7 +12,8 @@ strict CSP that blocks every off-host request.
 import json
 import urllib.parse
 
-from .graphview import DIAGRAM_CSS, render_diagram
+from .graphview import (DIAGRAM_CSS, LR, ORIENTATION_LABEL, TD,
+                        render_diagram)
 from .htmlutil import esc as _esc
 from .htmlutil import machine_href
 from . import tokens as tokens_mod
@@ -265,6 +266,29 @@ document.getElementById('col').onclick=function(){setAll(false)};
   Object.keys(FILTERS).forEach(function(id){
     var b=document.getElementById(id);
     if(b)b.onclick=function(){active=(active===id)?null:id;apply();};});
+})();
+// Orientation. Jake: "the tree should be able to go left to right OR top to bottom."
+// Both SVGs are already in the DOM, so this sets one attribute -- no re-render, no round
+// trip, and nothing to re-solve. Remembered next to the favourites, because an orientation
+// is a reading preference and having to set it again on every plan would make it useless.
+(function(){
+  var btn=document.getElementById('dir'), wrap=document.getElementById('diagwrap'),
+      name=document.getElementById('dirname'), KEY='rg.diagdir',
+      WORDS={lr:'left to right',td:'top to bottom'};
+  if(!btn||!wrap)return;
+  function set(dir){
+    if(dir!=='td')dir='lr';                        // a hand-edited localStorage value
+    wrap.dataset.dir=dir;
+    if(name)name.textContent=WORDS[dir];
+    btn.textContent=dir==='lr'?'Turn it top to bottom':'Turn it left to right';
+    btn.setAttribute('aria-pressed',String(dir==='td'));
+    try{localStorage.setItem(KEY,dir);}catch(e){}
+  }
+  var saved=null;
+  try{saved=localStorage.getItem(KEY);}catch(e){}
+  // Only when it differs, so the server-rendered default costs no work on load.
+  if(saved==='td')set('td');
+  btn.onclick=function(){set(wrap.dataset.dir==='lr'?'td':'lr');};
 })();
 (function(){
   var btn=document.getElementById('diag'), tree=document.getElementById('treebox'),
@@ -544,7 +568,13 @@ def _truncation_note(result, deeper):
 
 def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
     tree = result["tree"]
-    diagram_svg, diagram_legend = render_diagram(tree)
+    # BOTH orientations, shipped together. The alternative is a round trip, and a round
+    # trip re-solves: a plan can take two minutes (defaults.MAX_NODES_CEILING), which is an
+    # absurd price for turning a picture sideways. Measured, the second SVG is 5 to 16 KB
+    # on a 48 to 67 KB page. The legend is the SAME for both -- one `layout`, one node set
+    # -- so it is taken from the first and not recomputed. See #35.
+    diagram_svg, diagram_legend = render_diagram(tree, orientation=LR)
+    diagram_svg_td, _same_legend = render_diagram(tree, orientation=TD)
     # Only offered when there is something to filter TO. A button that empties the tree is
     # worse than no button: it reads as a broken filter rather than as "nothing is blocked".
     blocked_button = ('\n    <button id="blockedonly" data-on="0" aria-pressed="false">'
@@ -589,9 +619,11 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
     <button id="needonly" data-on="0" aria-pressed="false">Show only what I need</button>%s
   </div>
   <div class="card" id="diagbox" hidden>
-    <h2><span>Flow</span><span class="c">left to right</span></h2>
+    <h2><span>Flow</span><span class="c" id="dirname">%s</span></h2>
     %s
-    <div class="diagwrap">%s</div>
+    <div class="diagwrap" id="diagwrap" data-dir="lr">%s%s</div>
+    <div class="meta" style="margin-top:9px"><button id="dir" type="button"
+      aria-pressed="false">Turn it top to bottom</button></div>
     <div class="meta" style="margin-top:9px">A box is filled by what the plan does with
       that item, per the key above. The small SWATCH inside each box is a different axis:
       its colour groups items by mod and the letter stands in for the icon, because real
@@ -630,8 +662,10 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
         "{:,}".format(len(need) + len(used)),
         warnbar,
         blocked_button,
+        _esc(ORIENTATION_LABEL[LR]),
         diagram_legend,
         diagram_svg,
+        diagram_svg_td,
         "{:,}".format(result["nodes"]),
         _node_html(tree, back=back),
         len(need),

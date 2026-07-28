@@ -1,6 +1,7 @@
 """Diagram layout for a solved plan."""
 
 import os
+import re
 import sys
 import unittest
 
@@ -202,3 +203,142 @@ class RenderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrientationTest(unittest.TestCase):
+    """The same plan drawn left-to-right and top-to-bottom. #35.
+
+    Jake: *"the tree should be able to go left to right OR top to bottom."*
+    """
+
+    @staticmethod
+    def _tree():
+        return node("mod:root", label="Root", children=[
+            node("mod:a", status="raw", need=2, label="A"),
+            node("mod:b", status="have", need=3, label="B", children=[
+                node("mod:c", status="raw", need=4, label="C")]),
+        ])
+
+    def _svg(self, orientation):
+        return graphview.render_diagram(self._tree(), orientation=orientation)[0]
+
+    def test_both_orientations_draw_the_same_nodes(self):
+        """One `layout`, two coordinate functions.
+
+        A second layout pass could drop or reorder a node, and then the single legend
+        beside the two diagrams would be true of only one of them.
+        """
+        for orientation in graphview.ORIENTATIONS:
+            svg = self._svg(orientation)
+            self.assertEqual(svg.count("<g class=\"nd\">"), 4, orientation)
+            for label in ("Root", "A", "B", "C"):
+                self.assertIn(">%s<" % label, svg, orientation)
+
+    def test_the_legend_is_the_same_for_both(self):
+        # It is taken from the LR call and not recomputed, so this is the guard on that.
+        self.assertEqual(graphview.render_diagram(self._tree(), orientation=graphview.LR)[1],
+                         graphview.render_diagram(self._tree(), orientation=graphview.TD)[1])
+
+    def test_the_axes_really_do_swap(self):
+        """Depth runs across in one and down in the other. The whole feature.
+
+        Compared on the ASPECT of the viewBox rather than on coordinates: this tree is
+        3 deep and 2 wide, so left-to-right must come out wider than tall relative to
+        top-to-bottom, whatever the spacing constants become.
+        """
+        def box(svg):
+            m = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
+            return int(m.group(1)), int(m.group(2))
+        lr_w, lr_h = box(self._svg(graphview.LR))
+        td_w, td_h = box(self._svg(graphview.TD))
+        self.assertGreater(lr_w / lr_h, td_w / td_h)
+
+    def test_a_box_is_the_same_size_in_both(self):
+        """Not a true transpose, and this is why.
+
+        `MAX_LABEL` is 20 characters against BOX_W. Swapping the axes literally would give
+        each box ROW = 30px of width and truncate every label to two characters.
+        """
+        for orientation in graphview.ORIENTATIONS:
+            svg = self._svg(orientation)
+            self.assertIn('width="%d" height="%d"' % (graphview.BOX_W, graphview.BOX_H),
+                          svg, orientation)
+
+    def test_each_svg_says_which_way_it_runs(self):
+        # The CSS picks between them on this attribute, and a screen reader gets the words.
+        for orientation in graphview.ORIENTATIONS:
+            svg = self._svg(orientation)
+            self.assertIn('data-dir="%s"' % orientation, svg)
+            self.assertIn(graphview.ORIENTATION_LABEL[orientation], svg)
+
+    def test_the_words_are_defined_for_every_orientation(self):
+        # Same completeness contract as present.STATUS_LABEL: a new orientation must break
+        # a test rather than render an empty caption.
+        self.assertEqual(set(graphview.ORIENTATION_LABEL), set(graphview.ORIENTATIONS))
+
+    def test_an_unknown_orientation_is_refused(self):
+        # Rather than silently drawing the default, which would make a typo in a caller
+        # look like the toggle not working.
+        with self.assertRaises(ValueError):
+            graphview.render_diagram(self._tree(), orientation="sideways")
+
+    def test_a_tree_with_nothing_laid_out_still_answers_in_both(self):
+        # `max_nodes=0` is the only way `layout` returns nothing, and both orientations
+        # have to survive it: `_geometry` calls `max()` over the node list.
+        for orientation in graphview.ORIENTATIONS:
+            svg, legend = graphview.render_diagram(self._tree(), max_nodes=0,
+                                                   orientation=orientation)
+            self.assertIn("Nothing to draw", svg)
+            self.assertEqual(legend, "")
+
+
+class LabelBudgetTest(unittest.TestCase):
+    """A label must not run under the quantity beside it, and must not stop short either.
+
+    A flat `MAX_LABEL = 20` was wrong in both directions. Measured in chromium on a real
+    Borax plan: `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px, while
+    `Boron Ore` next to `64` left 116px of box unused.
+    """
+
+    def test_a_long_quantity_buys_a_shorter_label(self):
+        self.assertLess(graphview._label_limit("768,000 mB"),
+                        graphview._label_limit("64"))
+
+    def test_the_pair_always_fits_inside_the_box(self):
+        # The property, over every quantity shape the renderer can produce.
+        for qty in ("1", "64", "128", "1,024", "18,432 mB", "85,248 mB", "768,000 mB",
+                    "60,466,176", "1,000,000,000 mB"):
+            limit = graphview._label_limit(qty)
+            used = (graphview.LABEL_X + limit * graphview.LABEL_PX
+                    + len(qty) * graphview.QTY_PX + graphview.QTY_RIGHT_PAD)
+            self.assertLessEqual(used, graphview.BOX_W,
+                                 "%r: label and quantity overflow the box" % qty)
+
+    def test_an_absurd_quantity_still_leaves_a_readable_label(self):
+        # Better a stub than nothing: a box with no label at all is unidentifiable, and
+        # the full name is in the hover title either way.
+        self.assertGreaterEqual(graphview._label_limit("9" * 60), 4)
+
+    def test_the_rendered_label_respects_the_budget(self):
+        """End to end through `render_diagram`, not just the arithmetic.
+
+        The truncation moved out of `layout` and into the box template when it started
+        depending on the quantity, so the wiring is the part that can silently revert.
+        """
+        tree = node("mod:thing", kind="fluid", need=768000,
+                    label="Sodium Fluoride Solution Concentrate")
+        svg = graphview.render_diagram(tree)[0]
+        shown = re.search(r'class="lb"[^>]*>([^<]*)<', svg).group(1)
+        self.assertLessEqual(len(shown), graphview._label_limit("768,000 mB"))
+        self.assertTrue(shown.endswith("…"), shown)
+
+    def test_a_short_quantity_gets_more_than_the_old_flat_cap(self):
+        # The other half: the fix is not "truncate harder".
+        tree = node("mod:thing", need=64, label="Crushed Villiaumite Ore Chunk")
+        svg = graphview.render_diagram(tree)[0]
+        shown = re.search(r'class="lb"[^>]*>([^<]*)<', svg).group(1)
+        self.assertGreater(len(shown), graphview.MAX_LABEL)
+
+    def test_a_label_that_fits_is_left_alone(self):
+        svg = graphview.render_diagram(node("mod:thing", need=1, label="Granite"))[0]
+        self.assertIn(">Granite<", svg)

@@ -8,7 +8,20 @@ several branches" at a glance, which is the question the tree makes you reconstr
 LAYOUT IS COMPUTED HERE, IN PYTHON, not in the browser. It is a pure function of the solved
 tree, so the same plan always draws identically, the SVG is complete on arrival with no
 layout flash, and there is no JS layout engine to ship under the artifact CSP. Depth gives
-x; the order leaves are visited gives y; a parent centres on its children.
+one axis; the order leaves are visited gives the other; a parent centres on its children.
+
+TWO ORIENTATIONS, ONE LAYOUT. Jake: *"the tree should be able to go left to right OR top to
+bottom."* `layout` is orientation-free -- it assigns every node a (depth, row) pair -- and
+only the two coordinate functions and the edge curve differ. Both SVGs are rendered and
+shipped together, with CSS choosing which is visible, because the alternative is a round
+trip that RE-SOLVES the plan, and a plan can take two minutes (see defaults.MAX_NODES_CEILING).
+Measured on the reference pack: a diagram is 5 to 16 KB of a 48 to 67 KB page, so the second
+copy costs about a fifth of the page and the toggle is instant. See #35.
+
+A BOX IS THE SAME SIZE IN BOTH, which is why this is not a true transpose. `MAX_LABEL` is 20
+characters against BOX_W, and swapping the axes literally would give each box `ROW` = 30px of
+width and truncate every label to two characters. Top-down keeps the box and spaces siblings
+out sideways instead, so the label budget never moves.
 
 DO NOT reach for a force-directed layout. A plan is a tree with a meaningful root and a
 meaningful direction, and a force layout would throw both away in exchange for wobbling.
@@ -27,10 +40,44 @@ BOX_H = 24
 BOX_W = 226
 PAD_X = 18
 PAD_Y = 20
-# 20 characters at 12px leaves room for the right-aligned quantity inside BOX_W. A longer
-# label does not wrap in SVG -- it runs straight under the number -- so this is a hard cap,
-# not a preference.
+# A label does not wrap in SVG. It runs straight under the right-aligned quantity, so the
+# cap is a hard limit and not a preference -- and it cannot be one NUMBER, because the
+# quantity it has to stay clear of is anywhere from "64" to "768,000 mB".
+#
+# A flat 20 was wrong in both directions, measured in chromium against the reference pack:
+# `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px, while `Boron Ore` next to `64`
+# had 116px of empty box it could have used. `_label_limit` spends the interior instead.
+#
+# Advances measured from the rendered SVG rather than assumed: the label is 12px var(--sans)
+# at 7.2px per character and the quantity 10.5px var(--mono) at 6.3px, both averaged over
+# the 14 boxes of a real Borax plan. They are estimates by nature -- the exact width depends
+# on which glyphs -- so GUTTER buys back the error.
+LABEL_PX = 7.2
+QTY_PX = 6.3
+GUTTER = 6
+# The span between where the label starts and where the quantity ends: see the box template.
+LABEL_X = 26
+QTY_RIGHT_PAD = 6
 MAX_LABEL = 20
+
+
+def _label_limit(qty_text):
+    """How many characters fit left of a right-aligned `qty_text` inside one box."""
+    room = BOX_W - LABEL_X - QTY_RIGHT_PAD - GUTTER - len(qty_text) * QTY_PX
+    return max(4, int(room // LABEL_PX))
+
+# Which way the tree runs. `lr` is the original dendrogram: depth on x, leaf order on y.
+LR = "lr"
+TD = "td"
+ORIENTATIONS = (LR, TD)
+# What the toggle and the panel heading call each one. ONE map, so the button, the caption
+# and the aria label cannot end up describing different things.
+ORIENTATION_LABEL = {LR: "left to right", TD: "top to bottom"}
+
+# Top-down spacing. The box keeps BOX_W so the label budget does not move, so siblings need
+# a full box plus a gutter between them on the x axis, and depth is a short step down the y.
+TD_COL = BOX_W + 12
+TD_ROW = 78
 
 KIND_MARK = {"fluid": "F", "essentia": "E", "ore": "*"}
 
@@ -152,7 +199,48 @@ def _render_legend(nodes):
     return '<ul class="legend">%s</ul>' % "".join(rows)
 
 
-def render_diagram(tree, max_nodes=400):
+def _geometry(orientation, nodes, rows):
+    """`(width, height, place, edge)` for one orientation over an already-laid-out tree.
+
+    THE ONLY THING THAT DIFFERS between the two views. `layout` assigns (depth, row) and
+    knows nothing about direction, so a second orientation is these four values and not a
+    second layout pass -- which also guarantees both SVGs draw the same node set, and
+    therefore that the one legend beside them is true of both.
+    """
+    depth_max = max(n["depth"] for n in nodes)
+    if orientation == TD:
+        width = PAD_X * 2 + rows * TD_COL + BOX_W
+        height = PAD_Y * 2 + depth_max * TD_ROW + BOX_H
+
+        def place(n):
+            return PAD_X + n["row"] * TD_COL, PAD_Y + n["depth"] * TD_ROW
+
+        def edge(p, c):
+            # Vertical control points, mirroring the horizontal ones below for the same
+            # reason: a parent with many children fans out and straight lines overlap.
+            x1, y1 = place(p)[0] + BOX_W / 2, place(p)[1] + BOX_H
+            x2, y2 = place(c)[0] + BOX_W / 2, place(c)[1]
+            mid = (y1 + y2) / 2
+            return (x1, y1, x1, mid, x2, mid, x2, y2)
+
+        return width, height, place, edge
+
+    width = PAD_X * 2 + depth_max * COL + BOX_W
+    height = PAD_Y * 2 + rows * ROW
+
+    def place(n):
+        return PAD_X + n["depth"] * COL, PAD_Y + n["row"] * ROW
+
+    def edge(p, c):
+        x1, y1 = place(p)[0] + BOX_W, place(p)[1] + BOX_H / 2
+        x2, y2 = place(c)[0], place(c)[1] + BOX_H / 2
+        mid = (x1 + x2) / 2
+        return (x1, y1, mid, y1, mid, y2, x2, y2)
+
+    return width, height, place, edge
+
+
+def render_diagram(tree, max_nodes=400, orientation=LR):
     """`(svg, legend)` for a solved plan tree. No script, no external assets.
 
     ONE entry point returning both, deliberately. The legend has to describe the boxes that
@@ -160,30 +248,25 @@ def render_diagram(tree, max_nodes=400):
     independent walk of the tree could name a colour that is not on the page. Both come out
     of one `layout`.
     """
+    if orientation not in ORIENTATIONS:
+        raise ValueError("unknown orientation %r" % (orientation,))
     nodes, links, rows = layout(tree, max_nodes)
     if not nodes:
         return '<div class="meta">Nothing to draw.</div>', ""
 
-    depth_max = max(n["depth"] for n in nodes)
-    width = PAD_X * 2 + depth_max * COL + BOX_W
-    height = PAD_Y * 2 + rows * ROW
+    width, height, place, edge = _geometry(orientation, nodes, rows)
 
     def x(n):
-        return PAD_X + n["depth"] * COL
+        return place(n)[0]
 
     def y(n):
-        return PAD_Y + n["row"] * ROW
+        return place(n)[1]
 
-    # Links first so boxes sit on top of them. Cubic beziers with horizontal control points
-    # keep every edge readable where many share a parent; straight lines overlap into a fan.
-    edges = []
-    for parent, child in links:
-        p, c = nodes[parent], nodes[child]
-        x1, y1 = x(p) + BOX_W, y(p) + BOX_H / 2
-        x2, y2 = x(c), y(c) + BOX_H / 2
-        mid = (x1 + x2) / 2
-        edges.append('<path d="M%.1f %.1f C%.1f %.1f %.1f %.1f %.1f %.1f"/>'
-                     % (x1, y1, mid, y1, mid, y2, x2, y2))
+    # Links first so boxes sit on top of them. Cubic beziers with control points along the
+    # flow axis keep every edge readable where many share a parent; straight lines overlap
+    # into a fan.
+    edges = ['<path d="M%.1f %.1f C%.1f %.1f %.1f %.1f %.1f %.1f"/>'
+             % edge(nodes[parent], nodes[child]) for parent, child in links]
 
     boxes = []
     for n in nodes:
@@ -200,6 +283,10 @@ def render_diagram(tree, max_nodes=400):
         qty = "{:,}".format(n["need"])
         if n["kind"] == "fluid":
             qty += " mB"
+        # Shortened HERE and not in `layout`, because the budget depends on the quantity
+        # beside it and `layout` does not format one. `n["label"]` is the flat-capped
+        # version and stays for anything that wants a stable short form.
+        shown = _shorten(n["full"], _label_limit(qty))
         # A DIFFERENT CHANNEL from the fill, deliberately. Fill already carries the plan's
         # status for the item and machine availability is a separate axis, so encoding it as
         # another colour would make two facts compete for one signal. A dashed, full-opacity
@@ -222,17 +309,18 @@ def render_diagram(tree, max_nodes=400):
                nx, ny, BOX_W, BOX_H, fill, ink, box_stroke,
                nx + 4, ny + 3.5, _hue(n["key"]),
                nx + 12.5, ny + 15.5, _esc(_mark(n)),
-               nx + 26, ny + 16, ink, _esc(n["label"]),
-               nx + BOX_W - 6, ny + 16, ink, qty))
+               nx + LABEL_X, ny + 16, ink, _esc(shown),
+               nx + BOX_W - QTY_RIGHT_PAD, ny + 16, ink, qty))
         if n["cut"]:
             boxes.append('<text x="%.1f" y="%.1f" class="cut">+ more not drawn</text>'
                          % (nx + BOX_W + 8, ny + 16))
 
     return (
-        '<svg class="diagram" viewBox="0 0 %d %d" width="%d" height="%d" '
-        'role="img" aria-label="crafting plan diagram">'
+        '<svg class="diagram" data-dir="%s" viewBox="0 0 %d %d" width="%d" height="%d" '
+        'role="img" aria-label="crafting plan diagram, %s">'
         '<g class="lk">%s</g>%s</svg>'
-        % (width, height, width, height, "".join(edges), "".join(boxes)),
+        % (orientation, width, height, width, height,
+           _esc(ORIENTATION_LABEL[orientation]), "".join(edges), "".join(boxes)),
         _render_legend(nodes),
     )
 
@@ -257,6 +345,12 @@ stroke-width:2}
    page scroll sideways. */
 .diagwrap{overflow:auto;max-height:74vh;border:1px solid var(--line);border-radius:11px;
 background:var(--card);padding:6px}
+/* Both orientations are in the DOM and CSS picks one. `display:none` rather than the
+   `hidden` attribute: an SVG carrying width/height keeps its box under the UA's
+   `[hidden]{display:none}` if any author `display` rule wins against it, which is the
+   exact trap tools/mobile-audit.js exists to catch. */
+.diagwrap[data-dir="lr"] .diagram[data-dir="td"],
+.diagwrap[data-dir="td"] .diagram[data-dir="lr"]{display:none}
 /* Colour key. Sits ABOVE the diagram: it is what makes the fills readable, so a reader
    should meet it before the boxes, not after scrolling a tall plan. Wraps rather than
    scrolls, because it is short and losing an entry off the right edge would defeat it. */
