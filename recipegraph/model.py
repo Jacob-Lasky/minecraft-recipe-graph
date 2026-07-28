@@ -330,6 +330,13 @@ class Graph:
         # machines.SPECIES_SCHEMA, where "bee breeding needs no machine" has to wait for
         # a dump that can tell one bee from another.
         self.dump_schema = 0
+        # The mod version that wrote the dump, None for a graph built without one (or by
+        # a mod older than 0.4.2, which did not stamp itself). Kept ALONGSIDE the schema
+        # rather than derived from it: the schema says what shape the files were, the
+        # version says which build produced them, and a bug fixed in the mod moves one
+        # and not the other. Shown in the UI footer so "which mod wrote the graph I am
+        # looking at" is answerable without a terminal. See #38.
+        self.dump_version = None
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -730,6 +737,7 @@ class Graph:
             "catalysts": self.catalysts,
             "category_mods": self.category_mods,
             "dump_schema": self.dump_schema,
+            "dump_version": self.dump_version,
             "instance_dir": self.instance_dir,
         }
 
@@ -749,6 +757,7 @@ class Graph:
         g.catalysts = d.get("catalysts") or {}
         g.category_mods = d.get("category_mods") or {}
         g.dump_schema = d.get("dump_schema") or 0
+        g.dump_version = d.get("dump_version") or None
         g.instance_dir = d.get("instance_dir")
         # Here rather than only in `index.build`, so an ALREADY BUILT graph.json is fixed
         # without a rebuild. Rebuilding needs the game running and a fresh dump; the 115 MB

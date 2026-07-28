@@ -186,7 +186,9 @@ The UI is worth keeping up when the machine that plays Minecraft is off, so ther
 install step, because the tool is stdlib only.
 
 ```bash
-docker build -t minecraft-recipe-graph:local .
+docker build -t minecraft-recipe-graph:local \
+  --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
+  --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
 
 docker run -d --name recipegraph \
   -p 8765:8765 \

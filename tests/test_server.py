@@ -293,6 +293,90 @@ class ServerTest(unittest.TestCase):
             self.assertIn("el.className='working'", body, path)
             self.assertIn(".working{", body, "%s: the scrim has no styling" % path)
 
+    # ---- which build drew this page (#38) ----
+
+    # Every surface the handler can return, INCLUDING the error shells. Written out rather
+    # than derived from NAV_ITEMS because the 400 and 404 pages are exactly the ones a
+    # page-by-page reviewer forgets, and they are drawn by the same stale modules.
+    ALL_SURFACES = (
+        "/",
+        "/plan?item=mod%3Awidget&qty=1",
+        "/plan?item=mod%3Anot_a_real_item&qty=1",   # the unknown-item 404
+        "/explore?q=widget",
+        "/machines",
+        "/machine?uid=mod.press",
+        "/machine?uid=nope.nope",                   # the no-such-category 404
+        "/recipes?item=mod%3Agizmo",
+        "/recipes?item=",                           # the no-item-given 400
+        "/sources",
+        "/stats",
+        "/nope",                                    # the routing 404
+    )
+
+    def test_every_surface_names_the_build_that_drew_it(self):
+        """The property that makes the footer worth anything.
+
+        A version line on eight pages out of twelve is worse than none: its absence on the
+        ninth reads as "this page is fine". `_shell` is the one wrapper, so this passes by
+        construction today and fails the moment someone hand-rolls a document.
+        """
+        for path in self.ALL_SURFACES:
+            body = self.get(path)[2]
+            self.assertIn("<footer class='ver'>", body, path)
+            self.assertIn(server.version_mod.BUILD.version, body, path)
+
+    def test_a_page_with_a_graph_also_names_the_dump(self):
+        # The half that needs state. The error shells have no graph and legitimately show
+        # only the code version; everything else must answer "which mod wrote this graph".
+        for path in ("/", "/machines", "/stats", "/plan?item=mod%3Awidget&qty=1"):
+            self.assertIn("dump", self.get(path)[2], path)
+
+    def test_the_footer_does_not_claim_a_dump_the_graph_never_had(self):
+        # The fixture graph is built in memory with no dump at all, so the honest line is
+        # "unknown", not a fabricated schema.
+        self.assertIn("provenance: unknown", self.get("/stats")[2])
+
+    def test_stale_code_is_reported_on_every_surface_and_offers_no_button(self):
+        """Re-reading a file fixes stale data; nothing re-imports a module in place.
+
+        Checked on the fragment shell too (`/plan`), which is the page that carried
+        neither a nav nor a stale-data warning until #53 and is the easiest to miss.
+        """
+        real = server.version_mod.BUILD.stamp
+        server.version_mod.BUILD.stamp = (0.0, 0, 0)
+        try:
+            for path in ("/", "/machines", "/plan?item=mod%3Awidget&qty=1"):
+                body = self.get(path)[2]
+                self.assertIn("Restart the server", body, path)
+                self.assertIn("<div class='stale'>", body, path)
+        finally:
+            server.version_mod.BUILD.stamp = real
+        # And it goes away again, so the banner cannot be a permanent fixture nobody reads.
+        self.assertNotIn("Restart the server", self.get("/")[2])
+
+    def test_the_two_stale_banners_are_distinguishable(self):
+        """Both are up at once when a rebuild and a code change land together.
+
+        The data one is a form with a button; the code one is not, and if they rendered
+        identically the reader would click the button and believe both were handled.
+        """
+        real_stamp = server.version_mod.BUILD.stamp
+        server.version_mod.BUILD.stamp = (0.0, 0, 0)
+        stamps = dict(self.state.stamps)
+        self.state.stamps = {k: None for k in stamps}
+        try:
+            body = self.get("/")[2]
+            self.assertIn("<form method='post' action='/reload' class='stale'>", body)
+            self.assertIn("<div class='stale'>", body)
+            self.assertIn("Reload now", body)
+            self.assertIn("Restart the server", body)
+            # The restart note must come FIRST: a restart re-reads the data too, so acting
+            # on the reload button leaves you back here.
+            self.assertLess(body.index("Restart the server"), body.index("Reload now"))
+        finally:
+            server.version_mod.BUILD.stamp = real_stamp
+            self.state.stamps = stamps
+
     def test_the_infinite_source_reaches_the_rendered_plan(self):
         # End to end: a placed generator in the have file must make water free and be
         # reported on the page.

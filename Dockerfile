@@ -12,6 +12,28 @@ FROM python:3.14-slim-trixie
 
 WORKDIR /app
 
+# Which build this image IS. The image ships no .git (see .dockerignore), so `version.py`
+# cannot ask git and every container would otherwise print the same fallback string --
+# #38's failure moved from the process to the image, and harder to notice, because two
+# images built a month apart would look identical in the footer.
+#
+# COMPUTED BY THE BUILD, never typed:
+#
+#   docker build -t minecraft-recipe-graph:local \
+#     --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
+#     --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
+#
+# Omitting them is safe and honest: the footer falls back to `version.FALLBACK_VERSION`
+# and says "no build metadata", which reads as unknown rather than as a wrong answer.
+#
+# LAST, after COPY, would be wrong: an ARG line invalidates every layer below it, so
+# putting these above the source copy means a new commit rebuilds only the metadata and
+# reuses the compile. They are declared here for that reason, not for readability.
+ARG RECIPEGRAPH_VERSION=""
+ARG RECIPEGRAPH_BUILD_DATE=""
+ENV RECIPEGRAPH_VERSION=$RECIPEGRAPH_VERSION \
+    RECIPEGRAPH_BUILD_DATE=$RECIPEGRAPH_BUILD_DATE
+
 # Unbuffered, or `docker logs` shows nothing while the server spends its first 40 to 90
 # seconds loading the graph, and the startup line never appears at all. A service whose
 # logs are empty during the one phase you would want to watch is a service you cannot

@@ -67,7 +67,10 @@ Rebuild and redeploy after a code change (the running container holds the code i
 with):
 
 ```bash
-cd /coding/minecraft-recipe-graph && docker build -t minecraft-recipe-graph:local .
+cd /coding/minecraft-recipe-graph
+docker build -t minecraft-recipe-graph:local \
+  --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
+  --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
 docker rm -f recipegraph
 docker run -d --name recipegraph -p 8765:8765 \
   -v /mnt/user/misc/coding/minecraft-recipe-graph/data:/data \
@@ -95,6 +98,18 @@ rsync -avz --partial data/graph.json data/ae2_have.json \
 
 That moves ~115 MB rather than several gigabytes of jars. Tower notices the file changed
 and the **Reload** button picks it up with no restart.
+
+**The Reload button re-reads DATA, never code.** That distinction cost an hour once: four
+bugs were re-diagnosed that had all been fixed, because the running `serve` held the new
+graph and the old modules. Every page now ends with a footer naming the build
+(`recipegraph <git describe> (<date>)`) and the dump that produced the graph, and puts up a
+warn strip saying **restart** when `recipegraph/*.py` has changed since the process started
+-- deliberately with no button, because nothing a handler can do re-imports a module. See
+`recipegraph/version.py` and #38. **Read the footer before believing a fix did not work.**
+
+The container has no `.git`, so it takes its version from `--build-arg RECIPEGRAPH_VERSION`
+in the build command above. Drop the args and every image reports the same fallback string,
+which is the same failure one level up.
 
 ### Changing the UI means measuring it at 390px
 

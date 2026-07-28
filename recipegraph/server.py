@@ -26,6 +26,7 @@ from . import generators as generators_mod
 from . import machines as machines_mod
 from . import pins as pins_mod
 from . import tokens as tokens_mod
+from . import version as version_mod
 from .defaults import (DEFAULT_HOST, DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES,
                        DEFAULT_TOKENS)
 from .htmlutil import esc as _esc
@@ -36,6 +37,7 @@ from .present import (STATE_BADGE, STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED
                       hidden_note, kind_chip_json, pin_badge)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
+from .sources import dump_meta
 
 HOME_CSS = """
 form.search{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
@@ -47,14 +49,23 @@ form.search button{font:600 14px var(--sans);padding:11px 18px;border-radius:9px
 border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
 form.search input:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .hint2{color:var(--dim);font-size:13px;margin-bottom:22px}
-/* Stale-data strip. Uses the warn tokens, not the accent: this is a state of the data, not
-   navigation, and it has to survive being scrolled past on a long page. */
-form.stale{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
-background:var(--warnbg);color:var(--warn);border:1px solid currentColor;
-border-radius:9px;padding:11px 14px;font-size:13.5px;margin-bottom:20px}
+/* The two stale strips: your DATA is behind the disk (a form, with a reload button) and
+   your CODE is (a div, deliberately with nothing to click -- see version.restart_note).
+   ONE rule for the look, because they are the same kind of news and two copies of seven
+   properties is how they end up different shades of the same warning. Warn tokens rather
+   than the accent: this is a state of the data, not navigation, and it has to survive
+   being scrolled past on a long page. */
+form.stale,div.stale{background:var(--warnbg);color:var(--warn);
+border:1px solid currentColor;border-radius:9px;padding:11px 14px;font-size:13.5px;
+margin-bottom:20px}
+form.stale{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
 form.stale span{flex:1 1 260px}
 form.stale button{font:600 12.5px var(--sans);padding:7px 14px;border-radius:8px;
 border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}
+/* Build footer. Muted and small: it is a fact you go looking for once an hour of
+   confusion has already started, not something to read on every page. */
+footer.ver{max-width:940px;margin:34px auto 26px;padding:0 22px;color:var(--dim);
+font:12.5px var(--mono);display:flex;gap:6px 14px;flex-wrap:wrap}
 /* HOVER IS GATED ON `hover:hover` THROUGHOUT THIS SHEET, AND MUST STAY THAT WAY.
    A touch browser has no pointer to move away, so it leaves `:hover` applied to the last
    thing tapped until you tap something else. `button:hover` sets exactly the accent
@@ -383,7 +394,27 @@ def _item(graph, key):
     return kind_chip(graph.kind(key)) + _esc(graph.bare_name(key))
 
 
-def _shell(title, body, css):
+def _footer(state=None):
+    """The build line every page ends with.
+
+    Rendered by `_shell` rather than by each page, so no page can forget it. That matters
+    more than it sounds: the whole point is to be readable on WHICHEVER page the reader is
+    staring at while they misdiagnose it, and a footer present on three pages out of eight
+    is worse than none, because its absence reads as "this page is fine".
+
+    `state` adds the dump's own provenance. Optional because the 400 and 404 shells have
+    no graph, and the code version -- the thing #38 was actually about -- must still show
+    on those. The sentence comes from `dump_meta.describe`, the same one `build` prints,
+    so the page and the terminal cannot describe one dump two ways.
+    """
+    bits = [version_mod.BUILD.describe()]
+    if state is not None:
+        bits.append(dump_meta.describe(dump_meta.of_graph(state.graph)))
+    return ("<footer class='ver'>%s</footer>"
+            % "".join("<span>%s</span>" % _esc(b) for b in bits))
+
+
+def _shell(title, body, css, state=None):
     """The one document wrapper. Both page kinds go through it so neither can drift.
 
     `css` differs by caller: a fragment already carries the base CSS inline (that is what
@@ -394,9 +425,9 @@ def _shell(title, body, css):
             # SHELL_JS goes in the HEAD, not alongside PENDING_JS at the end of the body:
             # the page scripts are inline and run the moment they are parsed, so a helper
             # defined after them would not exist yet when they first call it.
-            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s"
+            "<title>%s</title><style>%s</style><script>%s</script></head><body>%s%s"
             "<script>%s</script></body></html>"
-            % (_esc(title), css, SHELL_JS, body, PENDING_JS))
+            % (_esc(title), css, SHELL_JS, body, _footer(state), PENDING_JS))
 
 
 def _wrap_fragment(title, fragment, state=None, crumb="", path=""):
@@ -412,7 +443,7 @@ def _wrap_fragment(title, fragment, state=None, crumb="", path=""):
     """
     nav = ("<div class='wrap' style='padding-bottom:0'>%s%s</div>"
            % (_nav(path, state), crumb)) if state is not None else ""
-    return _shell(title, nav + fragment, HOME_CSS)
+    return _shell(title, nav + fragment, HOME_CSS, state)
 
 
 def _crumb(label):
@@ -428,8 +459,10 @@ def _crumb(label):
             % (_esc(NAV_LABELS["/"]), _esc(label)))
 
 
-def _page(title, body):
-    return _shell(title, body, CSS + HOME_CSS)
+def _page(title, body, state=None):
+    """A server-rendered page. Pass `state` wherever there is one: without it the footer
+    can still name the running code but not the dump the graph came from."""
+    return _shell(title, body, CSS + HOME_CSS, state)
 
 
 # Inline SVG, because the artifact CSP blocks every off-host request and an icon font
@@ -490,6 +523,17 @@ def _safe_path(candidate, default=""):
 def _safe_back(form, default="/machines"):
     """The `back` form field, checked by `_safe_path`."""
     return _safe_path((form.get("back") or [default])[0], default)
+
+
+def _restart_banner():
+    """Warn when the checkout has moved on since this process imported it.
+
+    Above the stale-DATA banner when both are up, because a restart re-reads the data too:
+    acting on the lower one first leaves you back here. Deliberately a `div` and not a
+    `form` -- see `version.restart_note` for why there is no button.
+    """
+    note = version_mod.restart_note(version_mod.BUILD)
+    return ("<div class='stale'>%s</div>" % _esc(note)) if note else ""
 
 
 def _stale_banner(state, back="/"):
@@ -557,7 +601,9 @@ def _nav(path="", state=None):
     # `section`, not `path`: the reload form posts this back as where to return to, and
     # `/plan` stripped of its item query is a 400.
     banner = _stale_banner(state, section or "/") if state is not None else ""
-    return "<nav class='top'>%s</nav>%s" % ("".join(out), banner)
+    # NOT gated on `state`: stale code is a fact about the PROCESS, and the shells that
+    # render without a state (400, 404) are drawn by the same stale modules as the rest.
+    return "<nav class='top'>%s</nav>%s%s" % ("".join(out), _restart_banner(), banner)
 
 
 def _stamp(path):
@@ -849,7 +895,7 @@ def home_page(state, query="", qty=1):
         sum(1 for s, _w in state.states.values() if s == machines_mod.HAVE),
         _esc(query), qty, HOME_JS.replace("%%CHIPS%%", kind_chip_json()),
     )
-    return _page("Recipe graph", body)
+    return _page("Recipe graph", body, state)
 
 
 MACHINES_JS = """
@@ -1071,7 +1117,7 @@ def machines_page(state, message="", query=""):
          "these: JEI knows the exact mapping and this graph was built without it."),
         MACHINES_JS,
     )
-    return _page("Machines", body)
+    return _page("Machines", body, state)
 
 
 def machine_page(state, uid):
@@ -1080,7 +1126,7 @@ def machine_page(state, uid):
     if not info:
         return _page("Not found", "<div class='wrap'>%s<h1>No such category</h1>"
                      "<p class='hint2'><code>%s</code> is not in this graph.</p></div>"
-                     % (_nav("/machine", state), _esc(uid))), 404
+                     % (_nav("/machine", state), _esc(uid)), state), 404
 
     detail = machines_mod.responsibilities(state.graph, uid)
     st = info["state"]
@@ -1160,7 +1206,7 @@ def machine_page(state, uid):
         "{:,}".format(detail["uses_total"]),
         klist(detail["uses"], detail["uses_total"], "consumed here"),
     )
-    return _page(info["title"] or uid, body), 200
+    return _page(info["title"] or uid, body, state), 200
 
 
 def _post_button(action, label, title, **fields):
@@ -1246,12 +1292,12 @@ def recipes_page(state, key, back, message=""):
     if not key:
         return _page("Pick a recipe", "<div class='wrap'>%s<h1>No item given</h1>"
                      "<p class='hint2'>Open this from a craft step in a plan.</p></div>"
-                     % _nav("/recipes", state)), 400
+                     % _nav("/recipes", state), state), 400
     candidates = state.graph.real_producers(key)
     if not candidates:
         return _page("Pick a recipe", "<div class='wrap'>%s<h1>Nothing makes this</h1>"
                      "<div class='id'>%s</div></div>"
-                     % (_nav("/recipes", state), _esc(key))), 404
+                     % (_nav("/recipes", state), _esc(key)), state), 404
 
     # One lock for all four reads. `_set_pin` rebinds `pins`, `pinned` and `pin_notes`
     # separately, so a page built across that would show a new pin with a stale note.
@@ -1308,7 +1354,7 @@ def recipes_page(state, key, back, message=""):
         (" <b>%s</b>" % _esc(message)) if message else "",
         note, len(candidates), _choice_cap_note(len(candidates), len(shown)),
         "".join(rows), _esc(back or plan_url(key)))
-    return _page("Recipes for %s" % state.graph.bare_name(key), body), 200
+    return _page("Recipes for %s" % state.graph.bare_name(key), body, state), 200
 
 
 def _choice_cap_note(total, shown):
@@ -1427,7 +1473,7 @@ def sources_page(state, message=""):
                        "this pack does or does not have infinite water"),
         SOURCES_JS,
     )
-    return _page("Infinite sources", body)
+    return _page("Infinite sources", body, state)
 
 
 def stats_page(state):
@@ -1456,7 +1502,7 @@ def stats_page(state):
                 % (_esc(k), "{:,}".format(v)) for k, v in cov["by_source"].items()),
         rows,
     )
-    return _page("Coverage", body)
+    return _page("Coverage", body, state)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1529,7 +1575,8 @@ class Handler(BaseHTTPRequestHandler):
                         # `st`, and the real path: this 404 sits under /plan exactly as its
                         # sibling below sits under /machines, and it was the one page with
                         # neither a highlighted section nor a stale-data warning.
-                        % (_nav("/plan", st), _esc(key), _esc(path_of(key)))), 404)
+                        % (_nav("/plan", st), _esc(key), _esc(path_of(key))),
+                        st), 404)
                 with st.lock:
                     result = st.solver().solve(key, qty)
                 title = "%s x%d" % (result["target_name"], qty)
@@ -1563,9 +1610,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send("ok", ctype="text/plain; charset=utf-8")
         except (ValueError, KeyError) as exc:
             return self._send(_page("Error", "<div class='wrap'><h1>Bad request</h1>"
-                                    "<p class='hint2'>%s</p></div>" % _esc(exc)), 400)
+                                    "<p class='hint2'>%s</p></div>" % _esc(exc),
+                                    self.state), 400)
         self._send(_page("Not found", "<div class='wrap'><h1>Not found</h1>"
-                         "<p><a href='/'>Back to search</a></p></div>"), 404)
+                         "<p><a href='/'>Back to search</a></p></div>", self.state), 404)
 
     def _redirect(self, back, msg=""):
         """303 back to where the form was submitted from, carrying a one-line result."""
