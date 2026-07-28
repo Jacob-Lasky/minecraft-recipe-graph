@@ -48,7 +48,7 @@ Four pages: **Search** (types-as-you-go, showing stock plus how many recipes mak
 each item, with favourites and recents), **Machines** (filterable and sortable, each row
 linking to a detail view of what that machine makes and consumes), **Sources** (what is
 treated as free and on what evidence), **Coverage**. A plan renders as a nested list or as a
-left-to-right flow diagram.
+flow diagram, which runs left-to-right or top-to-bottom (#35).
 
 Prefer pointing the user at this over running `plan` for them repeatedly. Nothing auto-starts:
 the mod only writes JSON files, and the server is started by hand.
@@ -68,15 +68,30 @@ with):
 
 ```bash
 cd /coding/minecraft-recipe-graph
-docker build -t minecraft-recipe-graph:local \
+docker build -t recipegraph:latest \
   --build-arg RECIPEGRAPH_VERSION="$(git describe --tags --always --dirty)" \
   --build-arg RECIPEGRAPH_BUILD_DATE="$(git log -1 --format=%cd --date=short)" .
+# Keep a rollback: the old image loses its tag the moment `latest` moves.
+docker tag recipegraph:latest recipegraph:rollback-$(git rev-parse --short HEAD)
 docker rm -f recipegraph
 docker run -d --name recipegraph -p 8765:8765 \
   -v /mnt/user/misc/coding/minecraft-recipe-graph/data:/data \
   --user 99:100 --memory=4g --memory-swap=4g --restart unless-stopped \
-  minecraft-recipe-graph:local
+  recipegraph:latest
 ```
+
+**`localhost:8765` DOES NOT REACH IT FROM POCKET-DEV.** The published port is on the
+UnRAID host's loopback, and a curl to `127.0.0.1:8765` from inside pocket-dev fails to
+connect -- it does not return stale HTML, it returns nothing, so a `grep -c` over the reply
+answers 0 and looks exactly like "the deploy did not take". Use the container IP:
+
+```bash
+IP=$(docker inspect recipegraph --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+curl -s "http://$IP:8765/" | grep -o "<footer class='ver'>.*</footer>"
+```
+
+That footer is the fastest way to know what is actually deployed (#38), and it works in the
+container because the build args above stamp the version in. The image has no `.git`.
 
 The bind-mount source is a HOST path (`/mnt/user/misc/coding/...`), not this container's
 `/coding` view. Give it the wrong one and the `-v` still succeeds, mounting an empty
