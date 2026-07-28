@@ -48,12 +48,31 @@ local function esc(s)
 end
 
 -- Canonical key must match recipegraph.model.norm_key: meta 0 is omitted entirely.
-local function key(name, damage)
+--
+-- A STACK WITH NBT MUST NOT GET THE BARE KEY. Since dump schema 3 a stack whose NBT
+-- decides what it is has its own key -- `forestry:bee_drone_ge#a3f19c02b8d1` is a Forest
+-- drone -- and the BARE `forestry:bee_drone_ge` is still a live ingredient of 4 recipes,
+-- `minecraft:potion` of 14, `forestry:sapling` of 25. Handing a tagged stack the bare key
+-- therefore does not merely lose information: it tells the planner you own the generic
+-- item those recipes want, so it drops a real requirement off the shopping list. That is
+-- the dangerous direction of wrong. See #21.
+--
+-- The marker, not the digest, because OpenComputers cannot see the NBT: `hasTag` is a
+-- boolean and the tag itself is not exposed. ` (+nbt)` matches no recipe, so the stack is
+-- counted as something you do not have, which over-reports what you need instead. The
+-- offline world-save reader uses the identical string for the identical reason (see
+-- `ae2_inventory.OPAQUE_MARKER`), and `tests/test_inventory.py` fails if the two drift.
+-- Use `recipegraph have` against the save when you need bees and potions to match.
+local function key(name, damage, hasTag)
   damage = tonumber(damage) or 0
-  if damage == 0 then
-    return name
+  local k = name
+  if damage ~= 0 then
+    k = name .. ":" .. tostring(damage)
   end
-  return name .. ":" .. tostring(damage)
+  if hasTag then
+    k = k .. " (+nbt)"
+  end
+  return k
 end
 
 local function main()
@@ -75,7 +94,7 @@ local function main()
   local counts, labels, n = {}, {}, 0
   for _, it in ipairs(items) do
     if it.name then
-      local k = key(it.name, it.damage)
+      local k = key(it.name, it.damage, it.hasTag)
       local size = tonumber(it.size) or 0
       if size > 0 then
         if not counts[k] then
@@ -109,7 +128,7 @@ local function main()
       for _, c in ipairs(cr) do
         local st = c.getItemStack and select(2, pcall(c.getItemStack)) or nil
         if type(st) == "table" and st.name then
-          craftables[key(st.name, st.damage)] = true
+          craftables[key(st.name, st.damage, st.hasTag)] = true
           cn = cn + 1
         end
       end

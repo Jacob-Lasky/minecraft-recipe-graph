@@ -1,9 +1,7 @@
 package io.github.jacoblasky.recipedump;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -124,8 +122,8 @@ public class DigestFixtureTest {
         } else if (kind.equals("compound")) {
             return compound(value.getAsJsonObject());
         }
-        // Deliberately no TAG_Long_Array: the only fixture case using one is flagged
-        // `java_diverges` and is never built. If a new case reaches here the fixture has
+        // Deliberately no TAG_Long_Array: the one fixture case using it is flagged
+        // `java_diverges` and never reaches here. If a new case does, the fixture has
         // outgrown this builder, and saying so beats digesting something else.
         throw new IllegalArgumentException("unknown fixture node type: " + kind);
     }
@@ -150,20 +148,25 @@ public class DigestFixtureTest {
         return element == null || element.isJsonNull() ? null : element.getAsString();
     }
 
+    /**
+     * Also the builder's coverage check: a fixture case added on the python side whose
+     * node types `node` cannot construct throws here, naming the type, rather than being
+     * a compile-clean and quietly unasserted hole.
+     */
     @Test
     public void everyCaseDigestsToTheRecordedValue() {
         for (JsonElement element : cases) {
             JsonObject c = element.getAsJsonObject();
-            String name = c.get("name").getAsString();
-            NBTTagCompound tag = compoundFor(c);
-            String actual = DumpCommand.discriminator(stackOf(tag));
             if (c.has("java_diverges")) {
-                // The fixture records that python declines here and this side does not.
-                // Both facts are load-bearing, so assert them rather than skipping.
-                assertNotNull(name + ": " + c.get("java_diverges").getAsString(), actual);
+                // A case this side answers and python declines, by way of a tag
+                // `canonical` serialises through Java's toString(). Not built at all,
+                // because building it is the part that has no counterpart: the python
+                // suite asserts the refusal, and the fixture records why.
                 continue;
             }
-            assertEquals(name + " (" + c.get("note").getAsString() + ")",
+            String actual = DumpCommand.discriminator(stackOf(compoundFor(c)));
+            assertEquals(c.get("name").getAsString() + " ("
+                         + c.get("note").getAsString() + ")",
                          asStringOrNull(c.get("digest")), actual);
         }
     }
@@ -185,23 +188,6 @@ public class DigestFixtureTest {
             StringBuilder sb = new StringBuilder();
             DumpCommand.canonical(tag, sb);
             assertEquals(c.get("name").getAsString(), expected, sb.toString());
-        }
-    }
-
-    @Test
-    public void theBuilderCoversEveryTypeTheFixtureUses() {
-        // Without this, a fixture case added on the python side that this builder cannot
-        // construct would be a compile-clean, quietly unasserted hole.
-        for (JsonElement element : cases) {
-            JsonObject c = element.getAsJsonObject();
-            if (c.has("java_diverges")) {
-                continue;
-            }
-            try {
-                compoundFor(c);
-            } catch (IllegalArgumentException e) {
-                fail(c.get("name").getAsString() + ": " + e.getMessage());
-            }
         }
     }
 

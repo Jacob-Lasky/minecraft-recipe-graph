@@ -16,13 +16,13 @@ silence is the one kind of failure a tool has to be told to report.
 import json
 import os
 
-from .ae2_inventory import DIGEST_READER
+from .ae2_inventory import DIGEST_READER, OPAQUE_MARKER
 from .model import is_digest, split_discriminator
 
 # Why a scanned stock key matches nothing in the graph. The cause decides the fix, which
 # is the whole reason they are counted apart rather than as one "unmatched" number.
 CAUSE_OPAQUE = "nbt the dump does not digest"
-CAUSE_STALE = "scanned before the digest port; rescan the save"
+CAUSE_STALE = "no digest in this stock file; rescan the save with `have`"
 CAUSE_UNKNOWN_VARIANT = "digest not in this dump"
 CAUSE_UNKNOWN = "item not in this dump"
 
@@ -54,10 +54,11 @@ def load(dump_dir):
 
 
 def _cause(key, reader):
-    if key.endswith(" (+nbt)"):
-        # Reader 1 wrote this marker for EVERY NBT-bearing stack, so on an old file it
-        # says nothing about the mod and everything about the file. Blaming the dump
-        # there would send someone chasing a schema bug that a rescan fixes.
+    if key.endswith(OPAQUE_MARKER):
+        # Reader 1 wrote this marker for EVERY NBT-bearing stack, and so does
+        # `tools/ae2_dump.lua`, which can never do better. On either kind of file the
+        # marker says nothing about the mod and everything about the file, and blaming
+        # the dump would send someone chasing a schema bug that a rescan fixes.
         return CAUSE_OPAQUE if reader >= DIGEST_READER else CAUSE_STALE
     _stem, suffix = split_discriminator(key)
     if suffix is None:
@@ -105,11 +106,11 @@ def stock_report(cov, top=8):
     """One block for the `have` command: the headline, then why, then the worst offenders."""
     if not cov["keys"]:
         return "no stock to reconcile"
+    if not cov["unmatched"]:
+        return "every stock key matches a key in the graph"
     out = ["%s of %s stock keys match nothing in the graph (%s of %s items)"
            % ("{:,}".format(cov["keys"] - cov["matched"]), "{:,}".format(cov["keys"]),
               "{:,}".format(cov["unmatched_stock"]), "{:,}".format(cov["stock"]))]
-    if not cov["unmatched"]:
-        return "every stock key matches a key in the graph"
     for cause, (keys, stock) in sorted(cov["causes"].items(),
                                        key=lambda kv: (-kv[1][1], kv[0])):
         out.append("  %5s keys  %14s items  %s"

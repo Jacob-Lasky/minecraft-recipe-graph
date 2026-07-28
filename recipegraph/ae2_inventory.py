@@ -31,6 +31,14 @@ except ImportError:  # run directly as a script, e.g. inside a server container
 # reader 1 an unmatched NBT key means "rescan"; under reader 2 it means the mod itself
 # cannot serialise that stack, which is a much rarer and quite different thing.
 # A file with no stamp is reader 1, because that is the only version that wrote none.
+
+# What a key wears when its NBT could not be turned into the dump's digest. It matches no
+# recipe ON PURPOSE, so the stack counts as something you do not have: over-reporting what
+# you need is recoverable, and claiming you own a Forest drone when you own "some bee" is
+# not. Written here, read by `gaps` and mirrored by `tools/ae2_dump.lua`, which can never
+# digest anything because OpenComputers exposes only a `hasTag` boolean.
+OPAQUE_MARKER = " (+nbt)"
+
 READER = 2
 # The version at which item keys started carrying the dump's digest. `READER` moves on
 # whenever the scan output changes; this one only moves if digests are ever redefined,
@@ -128,12 +136,12 @@ def classify(entry):
             try:
                 suffix = nbt_digest(tag)
             except OpaqueTag:
-                key += " (+nbt)"
+                key += OPAQUE_MARKER
             else:
                 if suffix:
                     key += "#" + suffix
         elif tag:
-            key += " (+nbt)"
+            key += OPAQUE_MARKER
         return "item", key, count
     return None
 

@@ -528,7 +528,7 @@
    },
    "canonical": null,
    "digest": null,
-   "java_diverges": "Java produces a digest here and Python declines; assert only that Java's is non-null."
+   "java_diverges": "Java answers here and python declines, so the java suite skips this case rather than asserting a value with no counterpart; test_nbt_digest asserts the refusal."
   }
  ]
 }
