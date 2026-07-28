@@ -13,7 +13,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import graphview, machines, present, render, server, solve  # noqa: E402
+from recipegraph import (graphview, machines, pins, present, render, server,  # noqa: E402
+                         solve)
 
 
 def solver_status_constants():
@@ -142,6 +143,34 @@ class StateCoverageTest(unittest.TestCase):
             self.assertIn("tr[data-state=%s]" % state, server.HOME_CSS, state)
 
 
+class PinStateCoverageTest(unittest.TestCase):
+    """A pin outranks the tool's own judgement, so the reader has to be able to tell which
+    of the three things it is currently doing. A state with no wording renders blank."""
+
+    STATES = (pins.EXACT, pins.CATEGORY, pins.DEAD)
+
+    def test_every_pin_state_has_a_note_and_a_class(self):
+        for state in self.STATES:
+            self.assertIn(state, present.PIN_NOTE, state)
+            self.assertIn(state, present.PIN_CLASS, state)
+
+    def test_every_pin_state_badges_to_words_and_a_class_the_sheet_defines(self):
+        for state in self.STATES:
+            text, cls = present.pin_badge(state)
+            self.assertTrue(text.strip(), state)
+            self.assertIn(".%s{" % cls, render.CSS, cls)
+
+    def test_a_working_pin_reads_as_pinned_and_does_not_narrate(self):
+        # `exact` is the common case and the only one with nothing to explain. A note
+        # there would put a sentence on every pinned node in every tree.
+        self.assertEqual(present.pin_badge(pins.EXACT)[0], "pinned")
+        self.assertEqual(present.PIN_NOTE[pins.EXACT], "")
+
+    def test_a_lapsed_pin_never_reads_as_a_working_one(self):
+        words = {present.pin_badge(s)[0] for s in self.STATES}
+        self.assertEqual(len(words), 3, words)
+
+
 class KindChipTest(unittest.TestCase):
     def test_every_non_item_kind_has_a_chip(self):
         g = __import__("recipegraph.model", fromlist=["Graph"]).Graph()
@@ -209,6 +238,21 @@ class HiddenNoteTest(unittest.TestCase):
                 continue
             with open(os.path.join(root, name)) as fh:
                 if "no recipe makes or uses them" in fh.read():
+                    wrote.append(name)
+        self.assertEqual(wrote, ["present.py"])
+
+    def test_only_one_module_words_a_lapsed_pin(self):
+        # Same rule as above, for the sentence a pin shows when it stops matching. Three
+        # surfaces say it -- the tree, the chooser and the CLI's `pins` listing -- and a
+        # reader who learns it on one has to recognise it on the others.
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        wrote = []
+        for name in sorted(os.listdir(root)):
+            if not name.endswith(".py"):
+                continue
+            with open(os.path.join(root, name)) as fh:
+                if present.PIN_NOTE[pins.CATEGORY] in fh.read():
                     wrote.append(name)
         self.assertEqual(wrote, ["present.py"])
 

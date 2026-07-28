@@ -16,6 +16,7 @@ DO NOT add a local status->colour dict to a renderer. Add the case here.
 
 import json
 
+from . import pins
 from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
 from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_HAVE, STATUS_PARTIAL,
                     STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
@@ -164,6 +165,28 @@ def kind_chip_json():
     it rather than restating it is what keeps one source of truth.
     """
     return json.dumps(KIND_CHIP)
+
+
+# What a pin's resolution state says to the reader. Keyed by the constants themselves, so
+# adding a fourth state to `pins` breaks a test rather than rendering an empty word.
+# `exact` has no note because a pin that is simply working should not narrate itself.
+PIN_NOTE = {
+    pins.EXACT: "",
+    pins.CATEGORY: "pinned recipe is gone; kept the category",
+    pins.DEAD: "pin no longer applies",
+}
+PIN_CLASS = {pins.EXACT: "ok", pins.CATEGORY: "warn", pins.DEAD: "need"}
+
+
+def pin_badge(state):
+    """`(text, css class)` for a pinned node or a pin listing.
+
+    THE ONE WORDING for the tree badge, the recipes page and the CLI's `pins` listing.
+    A pin is a decision that outranks the tool, so all three have to describe it the same
+    way or a reader cannot tell whether the plan they are looking at obeyed one.
+    """
+    return "pinned" if state == pins.EXACT else PIN_NOTE.get(state, state), \
+        PIN_CLASS.get(state, "muted")
 
 
 def hidden_note(hidden):

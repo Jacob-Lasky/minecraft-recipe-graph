@@ -25,7 +25,8 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import fixtures  # noqa: E402
-from recipegraph import generators, graphview, index, machines, render, server  # noqa: E402
+from recipegraph import (generators, graphview, index, machines, pins,  # noqa: E402
+                         render, server)
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
@@ -40,6 +41,14 @@ def build_graph():
     g.add(Recipe("make", "t", [("mod:widget", 2)],
                  [Ingredient(["mod:part"], 3), Ingredient(["fluid:water"], 500, "fluid")],
                  category="mod.press", machine="Press"))
+    # Two ways to make one thing, so there is something to CHOOSE between. Both in
+    # `mod.press` on purpose: a new category would move the machines page's counts and
+    # make an unrelated test's failure look like this one's.
+    g.names["mod:gizmo"] = "Gizmo"
+    g.add(Recipe("gizmo_cheap", "t", [("mod:gizmo", 1)],
+                 [Ingredient(["mod:part"], 2)], category="mod.press", machine="Press"))
+    g.add(Recipe("gizmo_dear", "t", [("mod:gizmo", 1)],
+                 [Ingredient(["mod:part"], 5)], category="mod.press", machine="Press"))
     return g
 
 
@@ -364,6 +373,78 @@ class ServerTest(unittest.TestCase):
         except urllib.error.HTTPError as err:
             with err:
                 return err.status, err.headers.get("Location", "")
+
+    # ---- pinning a recipe choice (#30) ----
+
+    def test_the_chooser_lists_every_recipe_with_a_way_to_pin_it(self):
+        status, ctype, body = self.get("/recipes?item=mod%3Agizmo")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", ctype)
+        self.assertEqual(body.count("Pin this"), 2, "one button per recipe")
+        self.assertIn("Part", body, "the chooser has to say what each recipe consumes")
+
+    def test_the_chooser_refuses_an_item_nothing_makes(self):
+        self.assertEqual(self.get("/recipes?item=mod%3Apart")[0], 404)
+        self.assertEqual(self.get("/recipes")[0], 400)
+
+    def test_a_pin_persists_survives_into_the_plan_and_can_be_taken_off(self):
+        dear = next(pins.fingerprint(r) for r in self.state.graph.real_producers("mod:gizmo")
+                    if r.rid == "gizmo_dear")
+        # Baseline first: without a pin the ranking takes the cheap route, so the
+        # assertion below is about the pin rather than about agreeing with the ranking.
+        self.assertEqual(self.plan_recipe("mod:gizmo"), "gizmo_cheap")
+
+        status, loc = self.post({"item": "mod:gizmo", "fp": dear, "back": "/"}, "/pin")
+        self.assertEqual(status, 303)
+        self.assertTrue(loc.startswith("/?m="), loc)
+        self.assertEqual(self.state.pinned["mod:gizmo"], frozenset(["gizmo_dear"]))
+        self.assertEqual(pins.load(self.state.pins_path)["mod:gizmo"]["category"],
+                         "mod.press")
+        self.assertEqual(self.plan_recipe("mod:gizmo"), "gizmo_dear")
+        self.assertIn("pinned", self.get("/plan?item=mod%3Agizmo")[2])
+
+        self.post({"item": "mod:gizmo", "fp": "", "back": "/"}, "/pin")
+        self.assertNotIn("mod:gizmo", self.state.pinned)
+        self.assertEqual(self.plan_recipe("mod:gizmo"), "gizmo_cheap")
+
+    def plan_recipe(self, key):
+        with self.state.lock:
+            return self.state.solver().solve(key, 1)["tree"]["recipe"]
+
+    def test_a_fingerprint_for_no_recipe_here_is_refused_rather_than_stored(self):
+        # A chooser left open across a graph reload. Writing the pin anyway would store
+        # something that resolves to nothing and reads as the feature being broken.
+        _status, loc = self.post({"item": "mod:gizmo", "fp": "0" * 12, "back": "/"},
+                                 "/pin")
+        self.assertIn("no%20longer%20in%20the%20graph", loc)
+        self.assertNotIn("mod:gizmo", self.state.pins)
+
+    def test_the_chooser_link_carries_the_quantity_back_intact(self):
+        # `item_href` emits `&amp;` for an href attribute, and percent-encoding THAT as a
+        # return path produced a parameter called `amp;qty`: the back link worked and the
+        # quantity silently reverted to 1. Asserted on the rendered page rather than on
+        # the helper, because the helper was right and the caller picked the wrong one.
+        body = self.get("/plan?item=mod%3Agizmo&qty=7")[2]
+        href = re.search(r'href="(/recipes\?[^"]+)"', body)
+        self.assertIsNotNone(href, "no chooser link on a craft node")
+        query = urllib.parse.parse_qs(
+            urllib.parse.urlsplit(html_mod.unescape(href.group(1))).query)
+        back = urllib.parse.parse_qs(urllib.parse.urlsplit(query["back"][0]).query)
+        self.assertEqual(back.get("qty"), ["7"], back)
+        self.assertEqual(back.get("item"), ["mod:gizmo"], back)
+
+    def test_the_chooser_cannot_be_used_to_redirect_you_off_site(self):
+        # `back` reaches /recipes through the QUERY STRING rather than a form, which is a
+        # second door into the same open-redirect hole `_safe_path` exists to close.
+        for hostile in ("https://evil.example/x", "//evil.example/x", "javascript:alert(1)"):
+            body = self.get("/recipes?item=mod%3Agizmo&back="
+                            + urllib.parse.quote(hostile))[2]
+            self.assertNotIn("evil.example", body, hostile)
+            self.assertNotIn("javascript:", body, hostile)
+            _status, loc = self.post({"item": "mod:gizmo", "fp": "", "back": hostile},
+                                     "/pin")
+            self.assertTrue(loc.startswith("/"), loc)
+            self.assertFalse(loc.startswith("//"), loc)
 
     def test_a_toggle_persists_and_changes_the_state(self):
         status, _loc = self.post({"uid": "mod.press", "state": machines.BUILDABLE})

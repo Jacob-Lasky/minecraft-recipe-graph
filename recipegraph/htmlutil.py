@@ -17,14 +17,14 @@ def esc(value):
     return html.escape(str(value), quote=True)
 
 
-def _query(path, params):
+def _query(path, params, sep="&amp;"):
     """`path?a=1&amp;b=2`, every value percent-encoded, ready for an href attribute.
 
-    Emits `&amp;` rather than a bare `&` because every caller drops the result straight
+    Emits `&amp;` rather than a bare `&` because most callers drop the result straight
     into an HTML attribute, where a bare `&` opens an entity reference. The browser
     decodes it back before the request goes out, so the server sees ordinary separators.
     """
-    parts = "&amp;".join(
+    parts = sep.join(
         "%s=%s" % (k, urllib.parse.quote(str(v), safe="")) for k, v in params)
     return "%s?%s" % (path, parts)
 
@@ -49,6 +49,19 @@ def item_href(key, qty=1):
     character in a key needs thinking about.
     """
     return _query("/plan", (("item", key), ("qty", int(qty))))
+
+
+def plan_url(key, qty=1):
+    """`item_href` as a plain URL, for somewhere that is not an href attribute.
+
+    The `&amp;` in an href is correct there and WRONG anywhere it will be encoded again.
+    Handing `item_href` to `urllib.parse.quote` as a return path produced
+    `...%26amp%3Bqty%3D64`, which the server then read as a parameter called `amp;qty`:
+    the link worked, the quantity silently reverted to 1. Two functions rather than one
+    with a flag, because the caller always knows which of the two places it is writing
+    into and a wrong flag is invisible until someone checks a query string.
+    """
+    return _query("/plan", (("item", key), ("qty", int(qty))), sep="&")
 
 
 def machine_href(uid):
