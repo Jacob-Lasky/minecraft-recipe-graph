@@ -1227,6 +1227,14 @@ def _pin_button(item, back, fingerprint=""):
         item=item, back=back, fp=fingerprint)
 
 
+# How many candidates the chooser will draw. `techreborn:dynamiccell` has 1,228 recipes
+# and 137 items have more than 60, so an uncapped page is a megabyte of HTML with a form
+# and a cost lookup per row. The list is RANKED, so the cap keeps the ones anyone would
+# plausibly pin, and it is reported rather than applied in silence -- same rule as
+# `explore.MAX_PRODUCERS`.
+MAX_CHOICES = 60
+
+
 def recipes_page(state, key, back, message=""):
     """Every recipe that makes one item, with the one that is pinned marked.
 
@@ -1245,14 +1253,23 @@ def recipes_page(state, key, back, message=""):
                      "<div class='id'>%s</div></div>"
                      % (_nav("/recipes", state), _esc(key))), 404
 
-    pin = state.pins.get(key)
-    pinned_rids = state.pinned.get(key, frozenset())
-    solver = state.solver()
+    # One lock for all four reads. `_set_pin` rebinds `pins`, `pinned` and `pin_notes`
+    # separately, so a page built across that would show a new pin with a stale note.
+    with state.lock:
+        pin = state.pins.get(key)
+        pinned_rids = state.pinned.get(key, frozenset())
+        pin_note = state.pin_notes.get(key, (pins_mod.EXACT, ""))
+        solver = state.solver()
     rows = []
     # Ranked the way the solver ranks, so the order on this page is the order the tool
     # would have chosen in. A chooser that listed them in dump order would make the
     # ranking look arbitrary at the exact moment someone is deciding to overrule it.
-    for recipe in sorted(candidates, key=lambda r: solver.score_recipe(r), reverse=True):
+    ranked = sorted(candidates, key=lambda r: solver.score_recipe(r), reverse=True)
+    shown = list(ranked[:MAX_CHOICES])
+    # A pinned recipe outside the cap would otherwise be unreachable to UNPIN, which is
+    # the one action you cannot get to any other way.
+    shown += [r for r in ranked[MAX_CHOICES:] if r.rid in pinned_rids]
+    for recipe in shown:
         fp = pins_mod.fingerprint(recipe)
         is_pinned = recipe.rid in pinned_rids
         state_pill = state.states.get(recipe.category)
@@ -1268,7 +1285,7 @@ def recipes_page(state, key, back, message=""):
 
     note = ""
     if pin:
-        pin_state, why = state.pin_notes.get(key, (pins_mod.EXACT, ""))
+        pin_state, why = pin_note
         text, cls = pin_badge(pin_state)
         note = ("<div class='hint2' style='margin:0 0 12px'>Pinned: <b>%s</b> "
                 "<span class='badge %s'>%s</span>%s</div>"
@@ -1284,13 +1301,23 @@ def recipes_page(state, key, back, message=""):
    are stored by what the recipe IS, not by its id, which renumbers.%s</div>
   %s
   <div class="card"><h2><span>Recipes</span><span class="c">%d</span></h2>
-    <table class="mach">%s</table></div>
+    %s<table class="mach">%s</table></div>
   <div class="hint2"><a class="mlink" href="%s">Back to the plan</a></div>
 </div>""" % (
         _nav("/recipes", state), _item(state.graph, key), _esc(key),
         (" <b>%s</b>" % _esc(message)) if message else "",
-        note, len(candidates), "".join(rows), _esc(back or plan_url(key)))
+        note, len(candidates), _choice_cap_note(len(candidates), len(shown)),
+        "".join(rows), _esc(back or plan_url(key)))
     return _page("Recipes for %s" % state.graph.bare_name(key), body), 200
+
+
+def _choice_cap_note(total, shown):
+    if shown >= total:
+        return ""
+    return ("<div class='hint2' style='margin:0 0 10px'>Showing the %s best-ranked of "
+            "%s. The rest rank below every one of these, so pinning one would be "
+            "choosing a worse route than the tool already rejected.</div>"
+            % ("{:,}".format(shown), "{:,}".format(total)))
 
 
 def _machine_cell(state, recipe, state_pill):

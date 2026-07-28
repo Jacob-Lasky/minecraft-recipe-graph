@@ -433,6 +433,50 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(back.get("qty"), ["7"], back)
         self.assertEqual(back.get("item"), ["mod:gizmo"], back)
 
+    def test_the_chooser_caps_a_huge_list_and_says_that_it_did(self):
+        # `techreborn:dynamiccell` has 1,228 recipes on the real pack and 137 items have
+        # more than 60. Uncapped, that page is a megabyte with a form per row.
+        g = self.state.graph
+        keep = list(g.recipes)
+        try:
+            for i in range(server.MAX_CHOICES + 5):
+                g.add(Recipe("bulk%d" % i, "t", [("mod:gizmo", 1)],
+                             [Ingredient(["mod:part"], 3 + i)], category="mod.press"))
+            body = self.get("/recipes?item=mod%3Agizmo")[2]
+            self.assertEqual(body.count("Pin this"), server.MAX_CHOICES)
+            self.assertIn("Showing the 60 best-ranked of 67", body)
+        finally:
+            g.recipes = keep
+            g._invalidate()
+
+    def test_a_pin_below_the_cap_is_still_reachable_to_unpin(self):
+        # Otherwise the one action you cannot reach any other way becomes unreachable
+        # exactly when the list is long enough to want it.
+        g = self.state.graph
+        keep = list(g.recipes)
+        try:
+            # Its one ingredient is neither stocked nor craftable, so the ranking puts it
+            # DEAD LAST -- 68th of 68, comfortably past the cap. Ranking it there by
+            # sheer count would not work: with nothing to separate them the sort is
+            # stable and a recipe added early stays near the top however many follow it.
+            g.add(Recipe("gizmo_exotic", "t", [("mod:gizmo", 1)],
+                         [Ingredient(["mod:unobtainium"], 4)], category="mod.press"))
+            for i in range(server.MAX_CHOICES + 5):
+                g.add(Recipe("bulk%d" % i, "t", [("mod:gizmo", 1)],
+                             [Ingredient(["mod:part"], 1)], category="mod.press"))
+            exotic = next(pins.fingerprint(r) for r in g.real_producers("mod:gizmo")
+                          if r.rid == "gizmo_exotic")
+            self.post({"item": "mod:gizmo", "fp": exotic, "back": "/"}, "/pin")
+            body = self.get("/recipes?item=mod%3Agizmo")[2]
+            self.assertEqual(body.count("Pin this"), server.MAX_CHOICES, "cap not applied")
+            self.assertEqual(body.count("Unpin"), 1, "the pinned row was capped away")
+        finally:
+            self.post({"item": "mod:gizmo", "fp": "", "back": "/"}, "/pin")
+            g.recipes = keep
+            g._invalidate()
+            with self.state.lock:
+                self.state.pinned, self.state.pin_notes = pins.resolve(g, self.state.pins)
+
     def test_the_chooser_cannot_be_used_to_redirect_you_off_site(self):
         # `back` reaches /recipes through the QUERY STRING rather than a form, which is a
         # second door into the same open-redirect hole `_safe_path` exists to close.

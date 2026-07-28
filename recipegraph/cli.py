@@ -527,8 +527,8 @@ def cmd_pins(args):
     for key in sorted(stored):
         state, why = notes.get(key, (pins_mod.DEAD, ""))
         text, _cls = present.pin_badge(state)
-        print("%-46s %-12s %s" % (g.bare_name(key), text, stored[key]["label"]))
-        print("%-46s %-12s %s" % ("", "", why or stored[key]["category"]))
+        print("%-40s %s" % (g.bare_name(key), stored[key]["label"]))
+        print("%-40s %s" % ("", why or "%s [%s]" % (text, stored[key]["category"])))
     return 0
 
 

@@ -185,8 +185,8 @@ def pin_badge(state):
     A pin is a decision that outranks the tool, so all three have to describe it the same
     way or a reader cannot tell whether the plan they are looking at obeyed one.
     """
-    return "pinned" if state == pins.EXACT else PIN_NOTE.get(state, state), \
-        PIN_CLASS.get(state, "muted")
+    text = "pinned" if state == pins.EXACT else PIN_NOTE.get(state, state)
+    return text, PIN_CLASS.get(state, "muted")
 
 
 def hidden_note(hidden):

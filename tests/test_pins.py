@@ -6,6 +6,9 @@ renumbers every one of them, and Jake redumps often. So most of this file is abo
 pin is stored AS.
 """
 
+import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -14,7 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import pins  # noqa: E402
+from recipegraph import cli, pins, render  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
@@ -288,6 +291,114 @@ class SolverTest(unittest.TestCase):
 
     def test_no_pin_at_all_reports_nothing(self):
         self.assertEqual(Solver(iron_graph()).solve("mod:ingot", 1)["pins_overruled"], {})
+
+
+class StaticRenderTest(unittest.TestCase):
+    """`recipegraph plan --html` writes a file that outlives the server."""
+
+    def page(self, **kw):
+        g = iron_graph()
+        accepted, _n = pins.resolve(g, {"mod:ingot": pins.make(g, crush())})
+        return render.render_html(Solver(g, pinned=accepted).solve("mod:ingot", 1), g, **kw)
+
+    def test_a_file_with_no_server_behind_it_offers_no_pin_control(self):
+        # A button posting to a server that is not there is worse than no button.
+        page = self.page()
+        self.assertNotIn("/recipes?item=", page)
+        self.assertIn("3 recipes", page, "the count is still shown, just not as a link")
+
+    def test_a_page_served_by_the_server_links_to_the_chooser(self):
+        page = self.page(back="/plan?item=mod:ingot&qty=1")
+        self.assertIn('href="/recipes?item=mod%3Aingot', page)
+
+    def test_the_pinned_badge_renders_either_way(self):
+        # The badge is a fact about the plan, not about whether it is interactive.
+        for page in (self.page(), self.page(back="/plan?item=mod:ingot&qty=1")):
+            self.assertIn(">pinned<", page)
+
+
+class CliTest(unittest.TestCase):
+    """The terminal half. `plan` has to obey a pin or the CLI and the UI disagree about
+    what a plan is, and the listing is the only place a lapsed pin can be diagnosed
+    without a browser."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.graph_path = os.path.join(self.dir, "graph.json")
+        iron_graph().save(self.graph_path)
+        self.pins_path = os.path.join(self.dir, "recipes.json")
+
+    def args(self, **kw):
+        base = dict(graph=self.graph_path, pins=self.pins_path, clear=None,
+                    item="mod:ingot", qty=1, have=None, ignore_stock=False,
+                    ignore_craftable=False, machines=os.path.join(self.dir, "m.json"),
+                    ignore_machines=True, sources=os.path.join(self.dir, "s.json"),
+                    ignore_sources=True, tokens=os.path.join(self.dir, "t.json"),
+                    ignore_pins=False, no_cost=True, exact=True, depth=8,
+                    max_nodes=200, limit=10, json=False, html=None, flat=False)
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def plan_route(self, **kw):
+        """The route `plan` actually took, read off its own --json output rather than the
+        summary: the text view lists the shopping list, not which recipe made each step."""
+        out = os.path.join(self.dir, "plan.json")
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            cli.cmd_plan(self.args(json=out, **kw))
+        with open(out) as fh:
+            return json.load(fh)["tree"]
+
+    def test_plan_obeys_a_pin_from_the_file(self):
+        self.assertEqual(self.plan_route()["category"], "smelting")
+        pins.save(self.pins_path, {"mod:ingot": pins.make(iron_graph(), crush())})
+        route = self.plan_route()
+        self.assertEqual(route["category"], "crusher")
+        self.assertTrue(route["pinned"])
+
+    def test_ignore_pins_plans_as_if_nothing_were_pinned(self):
+        pins.save(self.pins_path, {"mod:ingot": pins.make(iron_graph(), crush())})
+        self.assertEqual(self.plan_route(ignore_pins=True)["category"], "smelting")
+
+    def test_plan_says_on_stderr_when_a_pin_has_lapsed(self):
+        # Silence here would be the redump case going unnoticed, which is the one thing
+        # the fingerprint exists to make visible.
+        stale = pins.make(iron_graph(), crush())
+        stale["fingerprint"] = "0" * 12
+        pins.save(self.pins_path, {"mod:ingot": stale})
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            cli.cmd_plan(self.args())
+        self.assertIn("pin on Ingot", err.getvalue())
+        self.assertIn("crusher", err.getvalue())
+
+    def listing(self, **kw):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.cmd_pins(self.args(**kw)), 0)
+        return out.getvalue()
+
+    def test_the_listing_says_when_there_is_nothing_to_list(self):
+        self.assertIn("no pins", self.listing())
+
+    def test_the_listing_names_the_item_and_the_recipe(self):
+        pins.save(self.pins_path, {"mod:ingot": pins.make(iron_graph(), crush())})
+        text = self.listing()
+        self.assertIn("Ingot", text)
+        self.assertIn("Ore", text)
+        self.assertIn("crusher", text)
+
+    def test_the_listing_marks_a_dead_pin_as_dead(self):
+        dead = pins.make(iron_graph(), crush())
+        dead["fingerprint"], dead["category"] = "0" * 12, "gone.category"
+        pins.save(self.pins_path, {"mod:ingot": dead})
+        self.assertIn("nothing here makes this gone.category any more", self.listing())
+
+    def test_clear_removes_the_pin_and_leaves_the_rest(self):
+        pins.save(self.pins_path, {"mod:ingot": pins.make(iron_graph(), crush()),
+                                   "mod:block": pins.make(iron_graph(), smelt())})
+        self.listing(clear=["mod:ingot"])
+        self.assertEqual(sorted(pins.load(self.pins_path)), ["mod:block"])
 
 
 def _keys_below(node):
