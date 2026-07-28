@@ -52,16 +52,33 @@ def build_graph():
     return g
 
 
-class ServerTest(unittest.TestCase):
+class LiveServerCase(unittest.TestCase):
+    """A real server on a real port, holding whatever `graph()` returns.
+
+    Extracted so a second suite can run against a DIFFERENT graph without copying the
+    setup. It has to be a different graph rather than an addition to `build_graph`: the
+    deep one below is 8 levels of 3-way branching, and dropping 24 recipes into the shared
+    fixture would move the machines page's counts and make an unrelated test's failure
+    look like this one's.
+    """
+
+    HAVE = {"items": {"mod:part": 40},
+            "placed": {"nuclearcraft:water_source": 1}}
+
+    @staticmethod
+    def graph():
+        return build_graph()
+
     @classmethod
     def setUpClass(cls):
+        if cls is LiveServerCase:
+            raise unittest.SkipTest("base class")
         cls.dir = tempfile.mkdtemp()
         graph_path = os.path.join(cls.dir, "graph.json")
-        build_graph().save(graph_path)
+        cls.graph().save(graph_path)
         have_path = os.path.join(cls.dir, "have.json")
         with open(have_path, "w") as fh:
-            json.dump({"items": {"mod:part": 40},
-                       "placed": {"nuclearcraft:water_source": 1}}, fh)
+            json.dump(cls.HAVE, fh)
         cls.machines_path = os.path.join(cls.dir, "machines.json")
         cls.httpd, cls.state = server.serve(
             graph_path, have_path, cls.machines_path, host="127.0.0.1", port=0,
@@ -76,6 +93,17 @@ class ServerTest(unittest.TestCase):
         cls.httpd.server_close()
         cls.thread.join(timeout=5)
 
+    def get(self, path):
+        url = "http://127.0.0.1:%d%s" % (self.port, path)
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return resp.status, resp.headers.get("Content-Type", ""), resp.read().decode()
+        except urllib.error.HTTPError as err:
+            with err:      # drain and close, or the suite warns about the open response
+                return err.status, err.headers.get("Content-Type", ""), err.read().decode()
+
+
+class ServerTest(LiveServerCase):
     def get(self, path):
         url = "http://127.0.0.1:%d%s" % (self.port, path)
         try:
@@ -376,6 +404,116 @@ class ServerTest(unittest.TestCase):
         finally:
             server.version_mod.BUILD.stamp = real_stamp
             self.state.stamps = stamps
+
+    # ---- going deeper from the page (#25) ----
+
+    def test_the_cap_is_clamped_into_a_range_the_page_will_serve(self):
+        """It arrives on an editable URL and `work_budget` derives from it.
+
+        `work_budget` IS the solver's termination guarantee, so an unbounded value is a
+        way to hang the server from the address bar. Below the default is refused too:
+        nothing offers it, so a small number can only be a typo.
+        """
+        for raw, want in (("", server.DEFAULT_MAX_NODES),
+                          ("banana", server.DEFAULT_MAX_NODES),
+                          ("1", server.DEFAULT_MAX_NODES),
+                          ("-5", server.DEFAULT_MAX_NODES),
+                          ("0", server.DEFAULT_MAX_NODES),
+                          (None, server.DEFAULT_MAX_NODES),
+                          ("99999999999", server.MAX_NODES_CEILING),
+                          (str(server.DEFAULT_MAX_NODES * 2),
+                           server.DEFAULT_MAX_NODES * 2)):
+            self.assertEqual(server._node_cap(raw), want, repr(raw))
+
+    def test_the_control_doubles_until_the_ceiling_then_stops_offering(self):
+        base = server.DEFAULT_MAX_NODES
+        url, nxt = server._deeper("mod:widget", 3, base)
+        self.assertEqual(nxt, base * 2)
+        self.assertIn("max_nodes=%d" % (base * 2), html_mod.unescape(url))
+        self.assertIn("qty=3", html_mod.unescape(url))
+        # Never past the ceiling, even from a cap that would double straight over it.
+        _url, nxt = server._deeper("mod:widget", 1, server.MAX_NODES_CEILING // 2 + 1)
+        self.assertEqual(nxt, server.MAX_NODES_CEILING)
+        # And at the ceiling there is no link at all: a control that cannot raise the cap
+        # any further reads as broken.
+        url, nxt = server._deeper("mod:widget", 1, server.MAX_NODES_CEILING)
+        self.assertEqual((url, nxt), ("", server.MAX_NODES_CEILING))
+
+    def test_the_cap_reaches_the_solver(self):
+        # The whole point. A parameter the handler accepts and drops would present as the
+        # button doing nothing, which is worse than the flag it replaced.
+        body = self.get("/plan?item=mod%%3Awidget&qty=1&max_nodes=%d"
+                        % (server.DEFAULT_MAX_NODES * 2))[2]
+        self.assertEqual(self.state.solver(server.DEFAULT_MAX_NODES * 2).max_nodes,
+                         server.DEFAULT_MAX_NODES * 2)
+        self.assertEqual(self.state.solver().max_nodes, server.DEFAULT_MAX_NODES)
+        self.assertEqual(200, self.get("/plan?item=mod%3Awidget&qty=1")[0])
+        self.assertIn("Widget", body)
+
+    def test_a_deep_plan_carries_its_cap_into_the_recipe_chooser_and_back(self):
+        """The return path, which is where a raised cap is easiest to lose.
+
+        Go deeper, pin a recipe, and you have to land back on the plan you were reading
+        rather than on a shallower one that truncates again.
+        """
+        deep = server.DEFAULT_MAX_NODES * 2
+        body = self.get("/plan?item=mod%%3Agizmo&qty=1&max_nodes=%d" % deep)[2]
+        backs = re.findall(r"""/recipes\?item=[^'"]*back=([^'"&]+)""", body)
+        self.assertTrue(backs, "the plan offers no chooser link to carry a cap on")
+        for back in backs:
+            self.assertIn("max_nodes%%3D%d" % deep, back)
+
+    def test_a_slow_plan_does_not_freeze_every_other_page(self):
+        """The solve runs OUTSIDE the state lock, holding references taken inside it.
+
+        Measured on the reference pack, one plan can spend two minutes in the solver, and
+        #25's control is an invitation to make that longer. Holding the lock across it
+        meant the machines page, the sources page and every other plan waited behind it.
+        """
+        served = []
+
+        def hog():
+            with self.state.lock:
+                served.append(self.get("/machines")[0])
+
+        # The lock held by another thread must not stop an unrelated page from rendering.
+        t = threading.Thread(target=hog)
+        t.start()
+        t.join(timeout=20)
+        self.assertFalse(t.is_alive(), "a page blocked on the state lock")
+        self.assertEqual(served, [200])
+
+    def test_the_plan_handler_does_not_solve_under_the_lock(self):
+        """Asserted on the INDENTATION, because the fixture solves instantly.
+
+        The timing test above cannot fail on a three-recipe graph however the lock is
+        held, and "the two lines are in this order" passes with the solve moved back
+        inside the `with`. What actually distinguishes the two is that the solve sits one
+        level shallower than the construction it follows.
+        """
+        lines = inspect.getsource(server.Handler.do_GET).splitlines()
+        take = next(i for i, ln in enumerate(lines) if "solver = st.solver(cap)" in ln)
+        solve = next(i for i, ln in enumerate(lines) if "result = solver.solve(" in ln)
+        indent = lambda i: len(lines[i]) - len(lines[i].lstrip())
+        self.assertGreater(solve, take)
+        self.assertLess(indent(solve), indent(take),
+                        "the solve is still inside the `with st.lock` block")
+
+    def test_the_ceiling_is_a_multiple_someone_measured(self):
+        """A ceiling nobody timed is a way to hang the server politely.
+
+        `avaritia:resource:3` on the reference pack: 26s at 4,000 nodes, ~110s at 16,000,
+        417s at 32,000. Cost is roughly linear in the work budget, so what the ceiling
+        bounds is the MULTIPLE of a wait the reader has already sat through -- and the 64x
+        this started at was over two hours for one click.
+        """
+        ratio = server.MAX_NODES_CEILING / server.DEFAULT_MAX_NODES
+        self.assertGreater(ratio, 1, "the control must be able to do something")
+        self.assertLessEqual(ratio, 4, "measured: past 4x one click runs into the hours")
+
+    def test_the_scrim_can_name_the_item_rather_than_the_link_text(self):
+        # "Planning Go deeper" is a useless thing for the scrim to say back.
+        self.assertIn("a.dataset.planLabel", self.get("/")[2])
 
     def test_the_infinite_source_reaches_the_rendered_plan(self):
         # End to end: a placed generator in the have file must make water free and be
@@ -1085,3 +1223,113 @@ class TouchAffordanceTest(unittest.TestCase):
         result read as a nameless row of pills."""
         self.assertIn(".hits .nm2{flex:1 1 100%", server.HOME_CSS)
         self.assertIn(".hits a{flex-wrap:wrap", server.HOME_CSS)
+
+
+def deep_graph(fanout=3, depth=8):
+    """A tree big enough to truncate at the default node cap.
+
+    3**8 is 6,561 expansions against a 4,000 cap, so the plan is genuinely cut off and
+    genuinely completable by raising it -- which is what makes the go-deeper control
+    testable rather than merely present in the markup.
+
+    Every recipe is hand crafting, so machine availability plays no part and the only
+    thing limiting the tree is the cap.
+    """
+    g = Graph()
+    g.names = {"deep:leaf": "Leaf"}
+    for level in range(depth):
+        for i in range(fanout ** level):
+            key = "deep:n%d_%d" % (level, i)
+            g.names[key] = "Node %d.%d" % (level, i)
+            kids = ["deep:n%d_%d" % (level + 1, i * fanout + k) for k in range(fanout)]
+            if level == depth - 1:
+                kids = ["deep:leaf"]
+            for kid in kids:
+                g.names.setdefault(kid, kid)
+            g.add(Recipe("r%d_%d" % (level, i), "Crafting Table", [(key, 1)],
+                         [Ingredient([k], 1) for k in kids],
+                         category="minecraft.crafting"))
+    # One node with a SECOND recipe, so the tree offers a "pick a recipe" link: the
+    # chooser is only linked where there is a choice, and the return path it carries is
+    # where a raised cap is easiest to lose.
+    #
+    # DEEP IN THE TREE, not at the root. A second route to the root is a SHORTCUT, and the
+    # ranker would take it -- the plan collapses to two nodes and stops being the deep one
+    # this fixture exists to be.
+    g.add(Recipe("deepest_alt", "Crafting Table", [("deep:n%d_0" % (depth - 1), 1)],
+                 [Ingredient(["deep:leaf"], 2)], category="minecraft.crafting"))
+    return g
+
+
+class DeepPlanTest(LiveServerCase):
+    """Going deeper, end to end, on a plan that is really truncated. #25.
+
+    The shared fixture has 3 recipes and can never hit a cap, so every assertion about the
+    control there is about markup rather than behaviour. This one measures: the node count
+    has to actually rise and the truncation has to actually clear.
+    """
+
+    HAVE = {"items": {}}
+
+    @staticmethod
+    def graph():
+        return deep_graph()
+
+    ROOT = "/plan?item=deep%3An0_0&qty=1"
+
+    @staticmethod
+    def _nodes(body):
+        m = re.search(r"node cap \(([\d,]+)\)", body)
+        return int(m.group(1).replace(",", "")) if m else None
+
+    def test_the_default_plan_is_truncated_and_offers_the_control(self):
+        body = self.get(self.ROOT)[2]
+        self.assertIn("node cap", body)
+        self.assertIn("Go deeper", body)
+        self.assertNotIn("--max-nodes", body,
+                         "the running server has no such argument to raise")
+        self.assertGreaterEqual(self._nodes(body), server.DEFAULT_MAX_NODES)
+
+    def test_following_the_control_actually_expands_the_tree(self):
+        """The measurement that makes this a feature rather than a link.
+
+        A handler that accepted `max_nodes` and dropped it would present as the button
+        doing nothing, which is worse than the CLI flag it replaced.
+        """
+        body = self.get(self.ROOT)[2]
+        href = re.search(r'href="(/plan\?[^"]+max_nodes[^"]*)"', body).group(1)
+        deeper = self.get(html_mod.unescape(href))[2]
+        # 3**8 = 6,561 expansions, so doubling 4,000 to 8,000 finishes the tree.
+        self.assertNotIn("node cap", deeper)
+        self.assertNotIn("Go deeper", deeper)
+
+    def test_the_control_stops_at_the_ceiling_rather_than_going_forever(self):
+        body = self.get("%s&max_nodes=%d" % (self.ROOT, server.MAX_NODES_CEILING))[2]
+        if "node cap" in body:
+            self.assertNotIn("Go deeper", body)
+            self.assertIn("deepest this page goes", body)
+
+    def test_only_the_go_deeper_link_carries_a_cap(self):
+        """One slow page must not make every later page slow with nothing saying why.
+
+        Every OTHER link into a plan is a fresh question and starts at the default.
+        """
+        deep = server.DEFAULT_MAX_NODES * 2
+        body = self.get("%s&max_nodes=%d" % (self.ROOT, deep))[2]
+        carrying = [html_mod.unescape(h)
+                    for h in re.findall(r"""href=['"](/plan\?[^'"]+)['"]""", body)
+                    if "max_nodes" in html_mod.unescape(h)]
+        self.assertLessEqual(len(carrying), 1,
+                             "more than one link carries a cap: %s" % carrying)
+        for raw in carrying:
+            self.assertIn("max_nodes=%d" % (deep * 2), raw)
+
+    def test_the_deep_plan_carries_its_cap_into_the_recipe_chooser(self):
+        # The return path. Go deeper, pin a recipe, and you must land back on the plan you
+        # were reading rather than on a shallower one that truncates again.
+        deep = server.DEFAULT_MAX_NODES * 2
+        body = self.get("%s&max_nodes=%d" % (self.ROOT, deep))[2]
+        backs = re.findall(r"""/recipes\?item=[^'"]*back=([^'"&]+)""", body)
+        self.assertTrue(backs, "the plan offers no chooser link to carry a cap on")
+        for back in backs:
+            self.assertIn("max_nodes%%3D%d" % deep, back)

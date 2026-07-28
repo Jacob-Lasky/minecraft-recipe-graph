@@ -430,3 +430,94 @@ class RoadblockPredicateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TruncationNoticeTest(unittest.TestCase):
+    """What a cut-off plan tells you to do next, which depends on where you are reading it.
+
+    #25. The notice said "Raise --max-nodes to see more" on every surface. On the web page
+    that is not merely inconvenient, it is WRONG: the server is already running and
+    `--max-nodes` is an argument to `plan`, not to `serve`. Jake: *"there should be a
+    button to click in this UI that will let me go deeper on this particular recipe"*.
+    """
+
+    @staticmethod
+    def _page(deeper, nodes=4001, exhausted=False, **extra):
+        result = {
+            "target": "mod:x", "target_name": "Widget", "qty": 1, "nodes": nodes,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [], "truncated": True,
+            "exhausted": exhausted, "max_nodes": 4000, "work": 80001,
+        }
+        result.update(extra)
+        return render.render_html(result, deeper=deeper)
+
+    def test_the_two_reasons_a_tree_stops_are_not_described_the_same_way(self):
+        """`truncated` covers the node cap AND the work budget, and they are different news.
+
+        The work budget goes first on a graph full of cycles: the search spends itself on
+        routes it backtracks out of, so the node count lands far BELOW the cap. Real
+        example, `avaritia:resource:6` on the reference pack -- "Tree hit the node cap
+        (1,162)" on a plan capped at 4,000 reads as a bug in the tool.
+        """
+        capped = self._page(None)
+        self.assertIn("node cap (4,000)", capped)
+        self.assertNotIn("1,162", capped)
+
+        spent = self._page(None, nodes=1162, exhausted=True, work=80001)
+        self.assertNotIn("node cap", spent)
+        self.assertIn("80,001 steps", spent)
+        self.assertIn("backed out of", spent)
+
+    def test_the_cap_is_quoted_not_the_count_it_stopped_at(self):
+        # "hit the node cap (4,001)" names a limit that is not the limit.
+        self.assertIn("node cap (4,000)", self._page(None, nodes=4001))
+
+    def test_off_the_server_the_flag_is_still_the_answer(self):
+        # The CLI writes an html file too, and there the flag is exactly right.
+        page = self._page(None)
+        self.assertIn("--max-nodes", page)
+        self.assertNotIn("Go deeper", page)
+
+    def test_on_the_page_it_offers_the_control_and_never_the_flag(self):
+        page = self._page(("/plan?item=mod%3Ax&qty=1&max_nodes=8000", 8000))
+        self.assertIn("Go deeper", page)
+        self.assertIn("8,000 nodes", page)
+        self.assertNotIn("--max-nodes", page,
+                         "the running server has no such argument to raise")
+
+    def test_at_the_ceiling_it_says_so_instead_of_offering_a_dead_button(self):
+        page = self._page(("", 256000), nodes=256000)
+        self.assertNotIn("Go deeper", page)
+        self.assertIn("deepest this page goes", page)
+        self.assertIn("256,000", page)
+
+    def test_the_scrim_is_told_the_item_name(self):
+        # `data-plan-label`, because "Planning Go deeper" is a useless thing to say back.
+        page = self._page(("/plan?item=mod%3Ax&qty=1&max_nodes=8000", 8000))
+        self.assertIn('data-plan-label="Widget"', page)
+
+    def test_an_untruncated_plan_says_nothing_at_all(self):
+        page = render.render_html({
+            "target": "mod:x", "target_name": "Widget", "qty": 1, "nodes": 3,
+            "tree": {"key": "mod:x", "label": "X", "kind": "item", "need": 1,
+                     "status": solve.STATUS_RAW},
+            "shopping_list": [], "used_from_stock": [], "from_sources": [],
+            "machines_to_build": [], "truncated": False,
+        }, deeper=("/plan?item=mod%3Ax&qty=1&max_nodes=8000", 8000))
+        self.assertNotIn("Go deeper", page)
+        self.assertNotIn("node cap", page)
+
+
+class NodeCapConstantTest(unittest.TestCase):
+    def test_one_default_for_the_cli_and_the_solver(self):
+        """Two copies of 4000 is how `plan` and `serve` end up truncating at different
+        depths while the warning quotes one of the numbers."""
+        import inspect
+
+        from recipegraph import defaults
+        sig = inspect.signature(solve.Solver.__init__)
+        self.assertEqual(sig.parameters["max_nodes"].default, defaults.DEFAULT_MAX_NODES)
+        self.assertGreater(defaults.MAX_NODES_CEILING, defaults.DEFAULT_MAX_NODES)

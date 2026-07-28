@@ -27,10 +27,10 @@ from . import machines as machines_mod
 from . import pins as pins_mod
 from . import tokens as tokens_mod
 from . import version as version_mod
-from .defaults import (DEFAULT_HOST, DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES,
-                       DEFAULT_TOKENS)
+from .defaults import (DEFAULT_HOST, DEFAULT_MAX_NODES, DEFAULT_PINS, DEFAULT_PORT,
+                       DEFAULT_SOURCES, DEFAULT_TOKENS, MAX_NODES_CEILING)
 from .htmlutil import esc as _esc
-from .htmlutil import item_href, machine_href, plan_url
+from .htmlutil import deeper_href, item_href, machine_href, plan_url
 from .model import Graph, path_of
 from .names import build_reverse
 from .present import (STATE_BADGE, STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED,
@@ -367,6 +367,13 @@ PENDING_JS = """
  // pills and the raw id, which ran together into "Planning Widgetnone2 recipes". Strip the
  // decorations rather than special-casing each page's markup.
  function label(a){
+   // An explicit label wins. The truncation notice's control is a correct thing for a
+   // link to SAY and a useless thing for a scrim to repeat back at you, so that one link
+   // names the item it is re-planning instead. See render._truncation_note.
+   // DO NOT quote the link's own wording in this comment: it is inlined into every page,
+   // so a test grepping the page for that phrase would match the comment on a plan that
+   // was never truncated.
+   if(a.dataset && a.dataset.planLabel)return a.dataset.planLabel.slice(0,58);
    var c=a.cloneNode(true);
    c.querySelectorAll('.pill,.id2,.t,code').forEach(function(x){x.remove();});
    return (c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,58);
@@ -518,6 +525,34 @@ def _safe_path(candidate, default=""):
     if not candidate.startswith("/") or parsed.scheme or parsed.netloc:
         return default
     return candidate
+
+
+def _node_cap(raw):
+    """The `max_nodes` query parameter, clamped into the range the page will serve.
+
+    CLAMPED, NOT VALIDATED. This arrives on a URL a reader can edit, and `work_budget`
+    derives from it and IS the solver's termination guarantee, so an unbounded value is a
+    way to hang the server from the address bar. Below the default is refused for the
+    opposite reason: nothing on the page offers it, so a small number here can only be a
+    typo or a truncation nobody asked for.
+    """
+    try:
+        want = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_NODES
+    return max(DEFAULT_MAX_NODES, min(MAX_NODES_CEILING, want))
+
+
+def _deeper(key, qty, cap):
+    """`(url, next cap)` for the go-deeper control, or `("", cap)` at the ceiling.
+
+    Doubling, because the reader does not know what 8,000 nodes means and the honest
+    interaction is "more" until the plan stops saying truncated.
+    """
+    if cap >= MAX_NODES_CEILING:
+        return ("", MAX_NODES_CEILING)
+    nxt = min(MAX_NODES_CEILING, cap * 2)
+    return (deeper_href(key, qty, nxt), nxt)
 
 
 def _safe_back(form, default="/machines"):
@@ -704,11 +739,11 @@ class State:
         self.named = len(self.graph.labels)
         self.searchable = len(self.graph.live_keys)
 
-    def solver(self):
+    def solver(self, max_nodes=DEFAULT_MAX_NODES):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
                       machine_states=self.states, costs=self.costs,
                       free_sources=self.free_sources, token_kinds=self.token_kinds,
-                      pinned=self.pinned)
+                      pinned=self.pinned, max_nodes=max_nodes)
 
 
 HOME_JS = """
@@ -1607,12 +1642,26 @@ class Handler(BaseHTTPRequestHandler):
                         # neither a highlighted section nor a stale-data warning.
                         % (_nav("/plan", st), _esc(key), _esc(path_of(key))),
                         st), 404)
+                cap = _node_cap(one("max_nodes"))
+                # BUILD under the lock, SOLVE outside it. Everything the Solver reads --
+                # graph, stock, costs, machine states, pins -- is REBOUND wholesale by
+                # `load_all` rather than mutated, so a solver constructed under the lock
+                # keeps a consistent set of references even if a reload lands mid-solve.
+                #
+                # Holding the lock across the solve made a slow plan freeze the whole UI,
+                # which #25's go-deeper control turns from a curiosity into a real hazard:
+                # measured on the reference pack, `avaritia:resource:6` spends its whole
+                # budget and takes 119s at the default cap and 202s at twice that, and
+                # every other page waited behind it.
                 with st.lock:
-                    result = st.solver().solve(key, qty)
+                    solver = st.solver(cap)
+                result = solver.solve(key, qty)
                 title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
-                    title, render_html(result, st.graph, back=plan_url(key, qty)), st,
-                    _crumb(title), path="/plan"))
+                    title,
+                    render_html(result, st.graph, back=plan_url(key, qty, cap),
+                                deeper=_deeper(key, qty, cap)),
+                    st, _crumb(title), path="/plan"))
             if parts.path == "/recipes":
                 page, status = recipes_page(st, one("item"),
                                             _safe_path(one("back")), one("m"))

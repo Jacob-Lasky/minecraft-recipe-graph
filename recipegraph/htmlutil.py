@@ -48,10 +48,39 @@ def item_href(key, qty=1):
     `urllib.parse.quote` with `safe=""` encodes `#`, `:`, `&`, `/` and `?` alike, so no
     character in a key needs thinking about.
     """
-    return _query("/plan", (("item", key), ("qty", int(qty))))
+    return _query("/plan", _plan_params(key, qty))
 
 
-def plan_url(key, qty=1):
+def _plan_params(key, qty, max_nodes=None):
+    """The `/plan` query, in ONE place, in a fixed order.
+
+    Three callers build this link -- an href, a plain return URL, and the go-deeper
+    control -- and they differ only in the separator and whether the cap rides along. Left
+    as three literals, `max_nodes` would be the parameter one of them forgets, which
+    presents as a plan silently reverting to the default depth rather than as a broken
+    link. The `qty` lost to `&amp;` encoding was exactly that bug once already.
+    """
+    params = [("item", key), ("qty", int(qty))]
+    if max_nodes is not None:
+        params.append(("max_nodes", int(max_nodes)))
+    return tuple(params)
+
+
+def deeper_href(key, qty, max_nodes):
+    """Link to the same plan with a larger node cap. See #25.
+
+    `max_nodes` is on the href rather than in a form, so the browser's back button walks
+    back down through the caps a reader stepped up through, and a truncated plan can be
+    bookmarked or shared at the depth it was read at.
+
+    Absent from `item_href` on purpose: every OTHER link into a plan is a fresh question
+    and should start at the default. Carrying a raised cap sideways into an unrelated item
+    would make one slow page make every later page slow, with nothing on screen saying why.
+    """
+    return _query("/plan", _plan_params(key, qty, max_nodes))
+
+
+def plan_url(key, qty=1, max_nodes=None):
     """`item_href` as a plain URL, for somewhere that is not an href attribute.
 
     The `&amp;` in an href is correct there and WRONG anywhere it will be encoded again.
@@ -60,8 +89,12 @@ def plan_url(key, qty=1):
     the link worked, the quantity silently reverted to 1. Two functions rather than one
     with a flag, because the caller always knows which of the two places it is writing
     into and a wrong flag is invisible until someone checks a query string.
+
+    Carries the cap when the caller has one, unlike `item_href`: this is the RETURN path,
+    so a reader who went deeper and then pinned a recipe has to land back on the plan they
+    were reading rather than on a shallower one that truncates again.
     """
-    return _query("/plan", (("item", key), ("qty", int(qty))), sep="&")
+    return _query("/plan", _plan_params(key, qty, max_nodes), sep="&")
 
 
 def machine_href(uid):

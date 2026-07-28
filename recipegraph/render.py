@@ -500,7 +500,49 @@ def _tokens_html(entries):
             '</div>' % (len(entries), "".join(blocks)))
 
 
-def render_html(result, graph=None, coverage_note=None, back=""):
+def _truncation_note(result, deeper):
+    """Why the tree stops, and the one thing worth doing about it from where you stand.
+
+    `deeper` is `(url, next cap)` when there is somewhere to go, `("", cap)` when the
+    ceiling has been reached, and None off the server entirely.
+
+    THE ADVICE HAS TO MATCH THE SURFACE. This used to read "Raise --max-nodes to see more"
+    on every plan, which on the web page is not merely inconvenient but WRONG: the server
+    is already running, and `--max-nodes` is an argument to `plan`, not to `serve`. Jake:
+    *"I fully believe that there should be a button to click in this UI that will let me
+    go deeper on this particular recipe if I want."* See #25.
+
+    Doubling rather than a number box, because the reader does not know what 8,000 means;
+    the honest interaction is "more" until it stops saying truncated.
+    """
+    if result.get("exhausted"):
+        # NOT the node cap. The search spent its WORK budget on branches it backtracked
+        # out of, so the node count is far below the cap, and "hit the node cap (1,162)"
+        # on a plan capped at 4,000 reads as a bug in the tool. Both budgets derive from
+        # `max_nodes`, so the control below is still the right thing to offer.
+        head = ("The search used up its budget after %s steps and was cut off, so deeper "
+                "branches are incomplete. Most of that went on routes it tried and "
+                "backed out of." % "{:,}".format(result.get("work") or result["nodes"]))
+    else:
+        head = ("Tree hit the node cap (%s) and was cut off, so deeper branches are "
+                "incomplete."
+                % "{:,}".format(result.get("max_nodes") or result["nodes"]))
+    if deeper is None:
+        return head + " Raise --max-nodes to see more."
+    url, cap = deeper
+    if not url:
+        # No control at the ceiling. A button that cannot raise the cap any further reads
+        # as broken, and the reader deserves to know they are at the end of the road
+        # rather than clicking one more time.
+        return (head + " This is the deepest this page goes (%s nodes); plan it from the "
+                "terminal with a larger --max-nodes if you need more."
+                % "{:,}".format(cap))
+    return (head + ' <a class="mlink" data-plan-label="%s" href="%s">Go deeper</a>'
+            ' to try again with %s nodes.'
+            % (_esc(result.get("target_name") or ""), url, "{:,}".format(cap)))
+
+
+def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
     tree = result["tree"]
     diagram_svg, diagram_legend = render_diagram(tree)
     # Only offered when there is something to filter TO. A button that empties the tree is
@@ -512,10 +554,7 @@ def render_html(result, graph=None, coverage_note=None, back=""):
 
     warn = []
     if result.get("truncated"):
-        warn.append(
-            "Tree hit the node cap (%d) and was cut off; deeper branches are "
-            "incomplete. Raise --max-nodes to see more." % result["nodes"]
-        )
+        warn.append(_truncation_note(result, deeper))
     # A pin the cycle guard had to ignore. The chooser already badged this choice as
     # taken, so leaving it unsaid would be the silent overwrite the feature exists to
     # prevent, just wearing a badge that says otherwise.
