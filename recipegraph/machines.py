@@ -68,10 +68,19 @@ ALWAYS_AVAILABLE = {
 # driven by a living thing, or by a structure JEI does not catalyse -- rather than a
 # per-pack lookup, and a pack that needs another entry adds it to `machines.json` under
 # `no_machine` instead of editing this. Substrings, matched case-insensitively.
+#
+# DO NOT collapse the three `chickens.` entries into a bare `chickens.` prefix. That mod
+# also registers `chickens.drops` and `chickens.throws`, which are display categories
+# rather than production; they are dropped by `index.NON_RECIPE_CATEGORY_PATTERNS` today,
+# so a prefix would look harmless, but it would silently grant "no machine needed" to
+# whatever the mod registers next. Each entry here is a claim about one category.
 NO_MACHINE_PATTERNS = (
     "jeibees.mutation", "jeibees.produce",     # Forestry bees, trees, butterflies
     "beetree",                                 # Bee Better At Bees, same production
-    "chickens.laying", "chickens.henhousing",  # the chicken is the machine
+    # The chicken is the machine: it lays where it stands, breeds where it stands, and
+    # the henhouse byproduct falls out of the same bird. All three of the Chickens mod's
+    # production categories, so a fourth appearing as `unknown` is real news. See #33.
+    "chickens.laying", "chickens.henhousing", "chickens.breeding",
 )
 
 # Every pattern above describes production by a CREATURE, and a creature's identity lives
@@ -414,6 +423,15 @@ def _candidate_verdict(graph, key, placed_index, stock_index):
         shown = (key if graph.producers(key)
                  else "%s (as %s)" % (key, graph.variants_of(key)[0]))
         return _CRAFTABLE, BUILDABLE, "craftable: %s" % shown
+    # Last resort: the same registry name at a different metadata value. A tool that
+    # selects its mode with damage gets catalogued by JEI under the mode's meta and
+    # crafted only at meta 0, and reporting "no route" for a toolbox the player can make
+    # is a falsehood, not a caveat. Deliberately below the exact and NBT-variant checks,
+    # and the evidence names the variant, because meta usually means a different item.
+    # See `Graph.meta_sibling_made`.
+    sibling = graph.meta_sibling_made(key)
+    if sibling:
+        return _CRAFTABLE, BUILDABLE, "craftable: %s (as %s)" % (key, sibling)
     return _NO_ROUTE, UNAVAILABLE, "no route to %s" % key
 
 

@@ -183,6 +183,21 @@ def base_key(key):
     return split_discriminator(key)[0]
 
 
+def item_stem(key):
+    """The registry name behind an item key, with NBT and metadata both dropped.
+
+    `forestry:can:1#48a337d94489` -> `forestry:can`. None for a fluid, oredict or essentia
+    key, whose `:` separates a PREFIX from a name rather than a name from a meta: stemming
+    `fluid:water` to `fluid` would make every fluid a metadata sibling of every other.
+
+    Answers exactly one question -- "is this the same registered object" -- and `base_key`
+    records why that is a narrower licence than it looks. See `Graph.meta_sibling_made`.
+    """
+    if not is_item_key(key):
+        return None
+    return split_key(base_key(key))[0]
+
+
 def split_key(key):
     """Return (base_key_without_meta, meta_or_None) for concrete item keys."""
     if not is_item_key(key):
@@ -335,6 +350,7 @@ class Graph:
         self._labels = None
         self._live_keys = None
         self._variant_index = None
+        self._meta_index = None
         self._producer_cache = {}
 
     def add(self, recipe):
@@ -522,6 +538,53 @@ class Graph:
             for variant in self.variants_of(key):
                 out.extend(self.producers(variant))
         return out
+
+    @property
+    def meta_index(self):
+        """item stem -> [produced keys at any metadata value of it].
+
+        NOT a general-purpose index, and `base_key` says why: metadata usually separates
+        genuinely different items, and `tconstruct:ingots:0` melting into every molten
+        metal `tconstruct:ingots:3` does would be a fabricated route. The one question it
+        may answer is `meta_sibling_made`'s; see the DO NOT there.
+        """
+        if self._meta_index is None:
+            idx = {}
+            for key in self.by_output:
+                idx.setdefault(item_stem(key), []).append(key)
+            self._meta_index = idx
+        return self._meta_index
+
+    def meta_sibling_made(self, key):
+        """A produced key differing from `key` only in its metadata value, or None.
+
+        One step wider than `producers_any_variant` and the last one there is: NBT, then
+        meta, then nothing.
+
+        DO NOT call this from the solver or the cost model. It answers only "does this
+        BLOCK exist in the pack at all", which is the machines page's question, and it is
+        wrong for every other one: a recipe asking for `tconstruct:ingots:3` will not
+        accept `:0`.
+
+        The case it exists for, measured on the reference pack, is exactly one category.
+        JEI records the Sign Toolbox catalyst for `moarsigns.exchange` as
+        `moarsigns:sign_toolbox:4`, because the toolbox picks its mode with the damage
+        value, and only the meta-0 form is ever crafted. The old answer was the flat
+        falsehood "no route to moarsigns:sign_toolbox:4" for a tool the player can make.
+
+        One category is not enough evidence to widen a verdict silently, so this returns
+        the variant it found rather than a boolean, and the caller quotes it
+        (`craftable: X (as Y)`) so the reader can judge whether the two metas are the same
+        object. Same bargain as #55: report the thing you can see rather than assert a
+        classification you cannot check.
+        """
+        stem = item_stem(key)
+        if stem is None:
+            return None
+        for sibling in self.meta_index.get(stem, ()):
+            if sibling != key and self.producers(sibling):
+                return sibling
+        return None
 
     def real_producers(self, key):
         """`producers`, minus container transfers asked to CREATE a fluid.

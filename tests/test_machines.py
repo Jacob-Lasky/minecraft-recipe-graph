@@ -208,12 +208,33 @@ class NoMachineNeededTest(unittest.TestCase):
 
     def test_husbandry_categories_are_ungated_with_an_honest_reason(self):
         for uid in ("bdew.jeibees.mutation.rootBees", "bdew.jeibees.produce.rootTrees",
-                    "chickens.Laying", "chickens.Henhousing", "beebetteratbees.beetree"):
+                    "chickens.Laying", "chickens.Henhousing", "chickens.Breeding",
+                    "beebetteratbees.beetree"):
             state, why = machines.resolve(self._graph(uid))[uid]
             self.assertEqual(state, machines.HAVE, uid)
             self.assertIn("no machine needed", why, uid)
             self.assertIn("bred, grown or laid", why,
                           "%s: distinguishable from hand-crafting in the evidence" % uid)
+
+    def test_every_chickens_production_category_is_covered(self):
+        """#33: `laying` and `henhousing` were listed and `breeding` was not.
+
+        The list was written from the categories that were visibly wrong rather than from
+        the categories that are wrong, which is how one of three from the same mod, run
+        the same way, got left reading as a tool failure. Asserting on the SET rather than
+        on `breeding` alone is what stops the next one being found by a user report.
+        """
+        chickens = {p for p in machines.NO_MACHINE_PATTERNS if p.startswith("chickens.")}
+        self.assertEqual(chickens,
+                         {"chickens.laying", "chickens.henhousing", "chickens.breeding"})
+
+    def test_a_chickens_display_category_is_not_granted_no_machine_needed(self):
+        # The guard on writing `chickens.` as one prefix. `drops` and `throws` are shown,
+        # not made, and `index.is_non_recipe` dropping them today is not a reason for this
+        # list to claim them too.
+        for uid in ("chickens.Drops", "chickens.Throws"):
+            self.assertFalse(machines.needs_no_machine(uid, schema=machines.SPECIES_SCHEMA),
+                             uid)
 
     def test_the_verdict_waits_for_a_dump_that_can_tell_bees_apart(self):
         """Measured: ungating these at schema 2 rerouted Americium-242 through bee larvae.
@@ -520,8 +541,8 @@ class CatalystVariantTest(unittest.TestCase):
         self.assertIn(fixtures.MACHINE_VARIANT, rec["why"])
 
     def test_a_catalyst_with_no_variants_anywhere_is_still_unavailable(self):
-        # The widening must not turn "genuinely unreachable" into "buildable"; five real
-        # categories on the reference pack are correctly unavailable.
+        # The widening must not turn "genuinely unreachable" into "buildable"; three real
+        # categories on the reference pack are correctly unavailable, and stay so.
         g = fixtures.discriminated_graph()
         g.catalysts = {"mod.arc_furnace": ["mod:nonexistent_machine"]}
         rec = machines.describe(g)["mod.arc_furnace"]
@@ -554,3 +575,85 @@ class CatalystVariantTest(unittest.TestCase):
         g.add(Recipe("late", "t", [("mod:later#abcdef123456", 1)],
                      [Ingredient(["mod:plate"], 1)], category="crafting"))
         self.assertEqual(list(g.variants_of("mod:later")), ["mod:later#abcdef123456"])
+
+
+class CatalystMetaVariantTest(unittest.TestCase):
+    """A catalyst that names a metadata state the pack never crafts.
+
+    Found auditing #33. `moarsigns.exchange` read `no route to moarsigns:sign_toolbox:4`
+    while `moarsigns:sign_toolbox` has two recipes: the Sign Toolbox selects its mode with
+    the damage value, so JEI catalogues the exchange mode and only meta 0 is ever made.
+    One category on the reference pack, which is why the evidence names the variant
+    instead of the verdict quietly widening. See `Graph.meta_sibling_made`.
+    """
+
+    TOOLBOX = "mod:toolbox"
+    MODE = "mod:toolbox:4"
+
+    def _graph(self):
+        g = Graph()
+        g.names = {self.TOOLBOX: "Sign Toolbox", "mod:plank": "Plank"}
+        g.add(Recipe("make_toolbox", "Crafting Table", [(self.TOOLBOX, 1)],
+                     [Ingredient(["mod:plank"], 4)], category="minecraft.crafting"))
+        g.add(Recipe("exchange", "Sign Toolbox", [("mod:sign_b", 1)],
+                     [Ingredient(["mod:sign_a"], 1)], category="mod.exchange"))
+        g.catalysts = {"mod.exchange": [self.MODE]}
+        return g
+
+    def test_a_mode_meta_no_recipe_makes_reads_buildable(self):
+        rec = machines.describe(self._graph())["mod.exchange"]
+        self.assertEqual(rec["state"], machines.BUILDABLE)
+
+    def test_the_evidence_names_both_the_catalyst_and_what_is_craftable(self):
+        # The whole reason this widening is allowed to ship on one measured case: the
+        # reader can see the two metas and judge whether they are the same object.
+        # On the WHOLE string, not two assertIns: `mod:toolbox` is a substring of
+        # `mod:toolbox:4`, so "the evidence mentions the craftable variant" passes against
+        # the old "no route to mod:toolbox:4" and proves nothing.
+        rec = machines.describe(self._graph())["mod.exchange"]
+        self.assertEqual(rec["why"],
+                         "craftable: %s (as %s)" % (self.MODE, self.TOOLBOX))
+
+    def test_a_registry_name_nothing_makes_is_still_unavailable(self):
+        g = self._graph()
+        g.catalysts = {"mod.exchange": ["mod:absent:4"]}
+        rec = machines.describe(g)["mod.exchange"]
+        self.assertEqual(rec["state"], machines.UNAVAILABLE)
+
+    def test_the_exact_key_wins_when_it_has_its_own_recipe(self):
+        # Only a LAST resort. A meta that is genuinely made must not be reported through
+        # a sibling, or the evidence would name the wrong item.
+        g = self._graph()
+        g.add(Recipe("make_mode", "Crafting Table", [(self.MODE, 1)],
+                     [Ingredient(["mod:plank"], 4)], category="minecraft.crafting"))
+        rec = machines.describe(g)["mod.exchange"]
+        self.assertEqual(rec["why"], "craftable: %s" % self.MODE)
+
+    def test_the_solver_is_not_widened_across_metadata(self):
+        """The constraint `model.base_key` records: meta separates different items.
+
+        `tconstruct:ingots:0` is not `tconstruct:ingots:3`, and a plan allowed to
+        substitute one for the other melts the wrong ingot into every molten metal.
+        """
+        g = self._graph()
+        self.assertEqual(g.producers(self.MODE), [])
+        self.assertEqual(g.producers_any_variant(self.MODE), [])
+        self.assertEqual(Solver(g).solve(self.MODE, 1)["tree"]["status"], "raw")
+
+    def test_the_meta_index_survives_a_recipe_being_added(self):
+        # Same `_invalidate` contract as the variant index; a stale one reports a machine
+        # unbuildable until the process restarts.
+        g = self._graph()
+        self.assertIsNone(g.meta_sibling_made("mod:later:2"))
+        g.add(Recipe("late", "t", [("mod:later", 1)],
+                     [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
+        self.assertEqual(g.meta_sibling_made("mod:later:2"), "mod:later")
+
+    def test_a_fluid_or_oredict_key_is_never_stemmed(self):
+        # `fluid:x` and `ore:x` split on `:` too, and treating the prefix as a registry
+        # name would make every fluid a metadata sibling of every other.
+        g = self._graph()
+        g.add(Recipe("brine", "t", [("fluid:brine", 1000)],
+                     [Ingredient(["mod:plank"], 1)], category="minecraft.crafting"))
+        self.assertIsNone(g.meta_sibling_made("fluid:water"))
+        self.assertIsNone(g.meta_sibling_made("ore:plankWood"))

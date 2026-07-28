@@ -222,6 +222,18 @@ list, so it is the authoritative category to machine mapping and beats every heu
 `recipegraph build` prints "catalysts.json not present", the machines page is working from
 name matching and roughly two thirds of it is `unknown`.
 
+**With catalysts and a schema-3 dump the reference pack has ZERO `unknown` categories**, and
+exactly three `unavailable`: `projectex.alchemy_table`, `divinerpg:arcana_extractor` and
+`thaumicwonders.catalyzationChamber`, all identified and genuinely unreachable. That is the
+number to re-measure after touching identification -- `machines --limit 1000 | awk '{print $1}'
+| sort | uniq -c` -- because a new `unknown` now means a real regression rather than the usual
+background noise. Three widenings got it there and each is deliberately narrow: legacy dotted
+tile-entity ids (#27), NBT variants of a catalyst key (#28, `producers_any_variant`), and the
+metadata value (#33, `Graph.meta_sibling_made`, one category: a Sign Toolbox catalogued under
+the damage value that selects its mode). **DO NOT reach for any of the three from the solver.**
+They answer "does this block exist in the pack", and the solver asks "give me exactly this
+stack", where `tconstruct:ingots:0` standing in for `:3` melts the wrong ingot.
+
 Machine state feeds the **cost estimate**, which is what actually picks recipes. Local
 scoring alone fails badly: it once preferred 100,000 items through a machine already owned
 over 2 items through one that needed building.
