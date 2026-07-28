@@ -263,6 +263,37 @@ over 2 items through one that needed building.
 
 ## The cost model is load-bearing, and it fails silently
 
+**Never move a constant in `cost.py` without running `tools/cost-probe.py` first.** It
+sweeps a tuning value across 18 items whose right answer a human can judge at a glance,
+four of them a control group that is correct today, and prints what each one reroutes to.
+Before it existed there was no way to see the damage or the benefit of moving a number, so
+constants were either argued about or left alone.
+
+```bash
+python3 tools/cost-probe.py                                  # the default sweep, ~15 min
+python3 tools/cost-probe.py --rank                           # ~50x faster, and it LIES
+python3 tools/cost-probe.py --item minecraft:diamond --explain
+```
+
+**`--rank` and the real solve disagree, and BOTH lie in their own direction.** The ranking
+skips the cycle guard, so `9 nuggets -> ingot` looks like the best route in the world; at
+`BASE_RAW_COST=20` it reorders 1,962 of 21,468 items. But do NOT assume the guard saves
+you: measured in real solves at that value, Diamond, Iron Ingot, Gold Ingot, Emerald and
+Redstone all really do end up on nugget assembly, which is #29's regression coming back.
+Use the slow mode for conclusions.
+
+**`BASE_RAW_COST` prices EVERY recipe-less input at the same 1.0**, so a decorative
+microblock, a loot token and a real ore tie exactly and a later tiebreak picks between
+them. `--explain minecraft:diamond` shows three routes at `-2.0` and the panel winning on
+the `plain` bonus that hand crafting gets and smelting does not. Two heuristics have been
+measured and REJECTED, so do not re-propose either without new evidence (#61):
+
+- **Demand** (prefer a leaf many recipes consume). Does not separate: Witch Hat 41 uses,
+  Sand 310, the microblock 2, and a genuine Deep Mob Learning data model also 2.
+- **Raising the constant.** It is global, so it cannot reorder raw leaves against each
+  OTHER, only against produced ones. 2.5 and 5.0 fix Stick (Witch Hat to Oak Wood Planks)
+  and leave Diamond exactly where it was; 20 breaks the control group.
+
 **If every fluid prices near 0.0, the cost model is inert and recipe choice is back to being
 greedy.** `FLUID_SCALE` must be applied to recipe OUTPUT quantities as well as inputs: scaling
 one side made every fluid-to-fluid hop divide the cost by 1000, so a ten-hop chain priced at
