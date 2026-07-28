@@ -721,3 +721,50 @@ class ModCrossTabTest(unittest.TestCase):
     def test_an_empty_graph_produces_an_empty_cross_tab(self):
         self.assertEqual(machines.mod_state_counts({}), {})
         self.assertEqual(machines.mod_order({}), [])
+
+
+class StateTotalsTest(unittest.TestCase):
+    """The per-state figures the machines page shows come out of the cross-tab.
+
+    They used to come from `summarise` while the browser recomputed the same numbers off
+    the cross-tab: two derivations of one figure, free to disagree the instant a chip was
+    clicked. `summarise` survives for the CLI, which holds `resolve`'s two-tuples rather
+    than `describe`'s records, so this pins the two together.
+    """
+
+    @staticmethod
+    def _graph():
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:part": "Part",
+                   "mod:press": "Press", "mod:absent": "Absent Machine"}
+        for uid, title, machine in (
+                ("minecraft.crafting", None, None),        # have, no machine needed
+                ("mod.press", "Press", "mod:press"),       # unavailable, no route
+                ("somemod.mystery", "Mystery Process", None),   # unknown
+        ):
+            g.add(Recipe("r_" + uid, "t", [("mod:widget", 1)],
+                         [Ingredient(["mod:part"], 1)], category=uid, machine=title))
+        return g
+
+    def test_the_totals_match_summarise_on_the_same_graph(self):
+        g = self._graph()
+        info = machines.describe(g)
+        states = {uid: (rec["state"], rec["why"]) for uid, rec in info.items()}
+        self.assertEqual(machines.state_totals(machines.mod_state_counts(info)),
+                         machines.summarise(states))
+
+    def test_every_state_is_present_even_at_zero(self):
+        # The chip row renders all four whatever the graph holds, so a missing key would be
+        # a KeyError on the page rather than a zero.
+        totals = machines.state_totals({"Alpha": {machines.HAVE: 2}})
+        self.assertEqual(set(totals), set(machines.STATES))
+        self.assertEqual(totals[machines.UNAVAILABLE], 0)
+
+    def test_an_empty_cross_tab_totals_to_zeroes(self):
+        self.assertEqual(machines.state_totals({}),
+                         dict.fromkeys(machines.STATES, 0))
+
+    def test_the_totals_agree_with_the_cross_tab_grand_total(self):
+        counts = {"A": {machines.HAVE: 3, machines.BUILDABLE: 1},
+                  "B": {machines.BUILDABLE: 2}}
+        self.assertEqual(sum(machines.state_totals(counts).values()), 6)

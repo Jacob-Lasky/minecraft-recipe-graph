@@ -593,6 +593,24 @@ def mod_state_counts(info):
     return counts
 
 
+def state_totals(counts):
+    """`{state: how many categories}` summed out of a `mod_state_counts` cross-tab.
+
+    So the machines page has ONE source for its per-state numbers. The chip labels were
+    rendered from `summarise` while the browser recomputed the same figures off the
+    cross-tab, which is the shape of bug this whole change exists to remove: two
+    derivations of one number, free to disagree the moment you interact with the page.
+
+    `summarise` still exists for the CLI, which holds `resolve`'s two-tuples rather than
+    `describe`'s records. `tests/test_machines` asserts the two agree on a real graph.
+    """
+    totals = dict.fromkeys(STATES, 0)
+    for by_state in counts.values():
+        for state, n in by_state.items():
+            totals[state] = totals.get(state, 0) + n
+    return totals
+
+
 def mod_order(counts):
     """Mods in the order the dropdown lists them: most categories first, then by name.
 

@@ -16,8 +16,7 @@ DO NOT add a local status->colour dict to a renderer. Add the case here.
 
 from . import pins
 from .htmlutil import script_json
-from .machines import (BUILDABLE, HAVE, STATES, UNAVAILABLE,
-                       UNKNOWN)
+from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
 from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_HAVE, STATUS_PARTIAL,
                     STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
 from .tokens import KIND_BADGE

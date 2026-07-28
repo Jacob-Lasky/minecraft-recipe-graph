@@ -560,16 +560,19 @@ class ServerTest(LiveServerCase):
         self.assertIn("Object.keys(MODS)", self._code(server.MACHINES_JS))
 
     @staticmethod
-    def _code(js):
-        """`js` with its `//` comments removed.
+    def _code(text, marker="//"):
+        """`text` with its line comments removed, so a source assertion tests the CODE.
 
-        Every source-text assertion in this file has to do this or it tests the comments.
-        Twice now a comment SAYING why something is not used has satisfied a grep for the
-        thing not being used -- once for the go-deeper link's wording, once for
-        `localeCompare` -- and the fix is here rather than in contorted prose, because a
-        comment that cannot name what it is warning against is a worse comment.
+        Every source-text assertion in this file has to go through here. THREE times now a
+        comment saying why something is not used has satisfied a grep for it not being
+        used -- the go-deeper link's wording, then `localeCompare`, then `summarise` -- and
+        each time the tempting fix was to contort the prose. A comment that cannot name
+        what it warns against is a worse comment, so the stripping lives here.
+
+        `marker` because the same trap exists on both sides: `//` for the inline JS,
+        `#` for the Python this file also greps.
         """
-        return "\n".join(ln.split("//")[0] for ln in js.splitlines())
+        return "\n".join(ln.split(marker)[0] for ln in text.splitlines())
 
     def test_the_client_never_compares_two_mod_names(self):
         """Collation is decided once, in `machines.mod_order`.
@@ -581,14 +584,25 @@ class ServerTest(LiveServerCase):
         """
         filters = self._code(server.MACHINES_JS).split("th.sortable")[0]
         self.assertNotIn("localeCompare", filters)
-        self.assertIn("dataset.rank", filters)
+        self.assertIn("dataset.order", filters)
 
-    def test_every_option_carries_the_rank_the_server_assigned(self):
+    def test_every_option_carries_the_order_the_server_assigned(self):
         body = self.get("/machines")[2]
-        ranks = [int(r) for r in re.findall(r"<option [^>]*data-rank='(\d+)'", body)]
-        self.assertTrue(ranks)
-        self.assertEqual(ranks, sorted(ranks), "options are emitted out of rank order")
-        self.assertEqual(ranks, list(range(len(ranks))), "ranks are not dense from 0")
+        order = [int(r) for r in re.findall(r"<option [^>]*data-order='(\d+)'", body)]
+        self.assertTrue(order)
+        self.assertEqual(order, sorted(order), "options are emitted out of order")
+        self.assertEqual(order, list(range(len(order))), "positions are not dense from 0")
+
+    def test_the_option_position_is_not_called_rank(self):
+        """A table ROW's `data-rank` is its state's sort position, a different number.
+
+        Two meanings behind one attribute name on one page is how `dataset.<x>` in the
+        script stops being readable, and the script uses both.
+        """
+        body = self.get("/machines")[2]
+        self.assertNotIn("data-rank", re.search(r"<select id=\"mmod\".*?</select>",
+                                                body, re.S).group(0))
+        self.assertIn("data-rank=", body, "rows still carry the state sort position")
 
     def test_the_option_counts_are_the_cross_tab_totals(self):
         body = self.get("/machines")[2]
@@ -598,6 +612,65 @@ class ServerTest(LiveServerCase):
             if not mod:
                 continue
             self.assertEqual(int(shown), sum(counts[html_mod.unescape(mod)].values()), mod)
+
+    def test_every_row_belongs_to_a_mod_the_cross_tab_knows(self):
+        """THE producer/consumer contract, and nothing guarded it.
+
+        `reconcile()` clears the mod selection when the cross-tab reports no matches for
+        it. A row whose `data-mod` is absent from `MODS` would therefore be filterable in
+        the table and invisible to the counts, so choosing that mod would clear itself and
+        silently widen the result. The two are escaped differently on the way out -- the
+        attribute through `esc`, the key through `script_json` -- so equality is a claim
+        about the round trip, not about one function.
+        """
+        body = self.get("/machines")[2]
+        known = set(json.loads(re.search(r"var MODS=(\{.*?\});",
+                                         body).group(1).replace("\\u003c", "<")))
+        seen = {html_mod.unescape(m)
+                for m in re.findall(r"<tr [^>]*data-mod='([^']*)'", body)}
+        self.assertTrue(seen)
+        self.assertEqual(seen - known, set(),
+                         "rows reference mods the cross-tab has no entry for")
+
+    def test_the_cross_tab_totals_the_rows_that_were_rendered(self):
+        # The cross-tab is built from `machine_info` and the rows are rendered from it, so
+        # a filter that trusts one and a table that shows the other must agree on the
+        # total. They are two walks of the same dict today; this is what says so.
+        body = self.get("/machines")[2]
+        tab = json.loads(re.search(r"var MODS=(\{.*?\});",
+                                   body).group(1).replace("\\u003c", "<"))
+        rendered = len(re.findall(r"<tr data-state='", body))
+        self.assertEqual(sum(sum(v.values()) for v in tab.values()), rendered)
+
+    def test_the_page_derives_its_state_counts_from_the_cross_tab(self):
+        """Asserted on the SOURCE, because the numbers cannot tell you.
+
+        `summarise` and `state_totals` agree on every consistent graph -- that is the point
+        of pinning them in `test_machines.StateTotalsTest` -- so swapping one for the other
+        changes no figure on the page and no page-level assertion can see it. What the
+        change buys is one derivation instead of two, and only the source says which.
+        """
+        src = self._code(inspect.getsource(server.machines_page), "#")
+        self.assertIn("machines_mod.state_totals(mod_counts)", src)
+        self.assertNotIn("summarise", src)
+
+    def test_the_chips_show_the_counts_the_cross_tab_holds(self):
+        # Not a test of WHICH source (see above); a test that the rendered number matches
+        # the table the browser will recompute against, so the figure does not jump on the
+        # first click.
+        body = self.get("/machines")[2]
+        tab = json.loads(re.search(r"var MODS=(\{.*?\});",
+                                   body).group(1).replace("\\u003c", "<"))
+        totals = machines.state_totals(tab)
+        for state, n in re.findall(
+                r"data-state='([a-z]+)' aria-pressed='false'>[^<]*<span class='n'>(\d+)<",
+                body):
+            self.assertEqual(int(n), totals[state], state)
+
+    def test_the_mods_placeholder_is_actually_in_the_template(self):
+        # Mirror of the substitution test. Without this, asserting the placeholder is
+        # ABSENT from the rendered page passes just as well when the line is deleted.
+        self.assertIn("%%MODS%%", server.MACHINES_JS)
 
     def test_json_in_a_script_block_cannot_close_it(self):
         """`json.dumps` alone is not safe inside `<script>`.
