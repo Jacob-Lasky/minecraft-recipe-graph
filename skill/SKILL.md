@@ -85,6 +85,15 @@ directory, and the server exits "no graph at /data/graph.json".
 Give it 40 to 90 seconds before concluding it failed: it loads a 115 MB graph before
 answering anything, which is why the health check has a 180 second start period.
 
+**THE MOD CANNOT BE BUILT ON TOWER, and pocket-dev has no `java` at all** (`./gradlew`
+exits with "JAVA_HOME is not set"). Even with a JDK it would not resolve: the build needs an
+HEI jar that is not in the repo, `maven.dimdev.org` does not resolve and
+`repo.spongepowered.org` 404s. So **every dump-side issue is gated on the gaming machine**,
+not merely inconvenient there: #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery
+blueprint names) and #63 (`COSMETIC_TAGS`) all need `/recipedump` from a running game, and
+none of their Java can even be compile-checked from here. Do the offline half, measure what
+the shipped graph can answer, and say plainly which half is waiting.
+
 **THE DESKTOP BUILDS, TOWER ONLY SERVES.** `build` needs the ~410 mod jars and a 165 MB
 `recipes.ndjson`, none of which live on Tower and none of which should. The gaming machine
 runs `/recipedump`, builds, and rsyncs the finished artifacts over:
@@ -553,6 +562,11 @@ across a two-minute solve froze every other page.
     they prove the port rather than proving it self-consistent.
     `test_nbt_digest.JavaSourceContractTest` greps `DumpCommand.java` for the cosmetic tag
     list and the FNV constants, catching a one-sided edit with no JVM.
+  - **DO NOT change `COSMETIC_TAGS` on one side, or ahead of a dump.** The list decides the
+    digest, so the two copies must move together AND the graph must be rebuilt from a fresh
+    `/recipedump` in the same change. Shipping the Python half early is not a partial fix,
+    it is a regression: `recipegraph have` starts computing digests that match nothing in
+    the graph.json on disk, which is the exact failure #21 existed to fix.
   - **The parser had to start keeping tag types.** Byte, short, int and long all arrive as
     Python `int`, and the digest tags every value with its type, so a type-blind parse can
     never reproduce it. `anvil_nbt` now returns `int`/`float` SUBCLASSES carrying `TAG`,
