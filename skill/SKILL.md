@@ -13,6 +13,61 @@ Pure Python 3 stdlib, no install step. The checkout path is machine-specific: ta
 from the path map in `MACHINE.md` rather than assuming, since it is `/coding/...` on
 the server and `~/Coding/...` elsewhere.
 
+## READ THIS BEFORE SAYING ANYTHING IS BLOCKED
+
+Two Claudes work on this repo, on two machines with different powers, and Jake talks to
+both. If either of us reports "blocked" without saying **which machine** and **which
+capability**, he ends up relaying the question between us to find out who can actually do
+the thing. That is the failure this section exists to prevent, and avoiding it is worth more
+than brevity.
+
+**Every blocked claim is one line, in this shape, or it is not a blocked claim:**
+
+```
+BLOCKED: <machine> cannot <capability>. <other machine> can. Unblocks when: <one thing>.
+```
+
+Worked examples:
+
+```
+BLOCKED: nobody. pocket-dev can compile this. Unblocks when: nothing, doing it now.
+BLOCKED: pocket-dev cannot run the game. desktop can. Unblocks when: Jake runs /recipedump.
+BLOCKED: pocket-dev cannot compile the mod (<exact error>). desktop can. Unblocks when:
+         desktop builds it, or that error is fixed here.
+```
+
+**"Blocked" is legal for a build you genuinely cannot do.** It is NOT legal for work you
+have not started. Before writing the word:
+
+- **Is it unwritten rather than blocked?** "Needs new mod Java" means go and write it.
+- **Is it a missing tool rather than a wall?** pocket-dev has no `java`. That is a container
+  you have not started, not a blocker.
+- **Are you sure it is still true?** Re-check, do not inherit. This section replaced a
+  paragraph asserting the mod could not be built on Tower because no pack instance existed
+  there, which was false for months: the AMP server on the same host holds 364 jars,
+  `HadEnoughItems_1.12.2-4.28.1.jar` among them. Four issues sat behind it.
+
+### Who can do what
+
+Verify a row before relying on it; that is the whole lesson above. Commands are in
+[Building the dump mod from pocket-dev](#building-the-dump-mod-from-pocket-dev) and
+[It runs as a container on Tower](#it-runs-as-a-container-on-tower).
+
+| Capability | pocket-dev (Tower) | desktop |
+| --- | --- | --- |
+| Run the Python tool, tests, the UI | yes | yes |
+| Read the AE2 network from the world save | yes, server world is on the same host | yes |
+| Serve the UI as a container | yes, this is where it runs | not where it lives |
+| Get the HEI jar `checkHeiJar` demands | yes, from the AMP server instance | yes |
+| Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
+| `recipegraph build` into a graph | prerequisites are present, jar parity is not | yes, authoritative |
+| **Run the game and `/recipedump`** | **no, and never** | **yes, and only here** |
+
+The last row is the only permanent asymmetry, and it is Jake's hands on a keyboard rather
+than either machine's. Anything that needs a fresh dump ends there no matter who wrote the
+Java: #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery blueprint names) and #63
+(`COSMETIC_TAGS`) all do.
+
 ## Why you cannot just grep JEI
 
 **JEI is a viewer, not a database: it ships zero recipe data.** `HadEnoughItems.jar`
@@ -102,20 +157,74 @@ directory, and the server exits "no graph at /data/graph.json".
 Give it 40 to 90 seconds before concluding it failed: it loads a 115 MB graph before
 answering anything, which is why the health check has a 180 second start period.
 
-**THE MOD CANNOT BE BUILT ON TOWER, and pocket-dev has no `java` at all** -- `mod/gradlew`
-dies with "JAVA_HOME is not set and no 'java' command could be found in your PATH". Even
-with
-a JDK it would not get through: `compileJava dependsOn checkHeiJar` (mod/build.gradle:77),
-which needs `-Phei_jar` pointing at a HadEnoughItems jar inside a pack instance, and no
-instance exists on Tower. So **every dump-side issue is gated on the gaming machine**,
-not merely inconvenient there: #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery
-blueprint names) and #63 (`COSMETIC_TAGS`) all need `/recipedump` from a running game, and
-none of their Java can even be compile-checked from here. Do the offline half, measure what
-the shipped graph can answer, and say plainly which half is waiting.
+### Building the dump mod from pocket-dev
 
-**THE DESKTOP BUILDS, TOWER ONLY SERVES.** `build` needs the ~410 mod jars and a 165 MB
-`recipes.ndjson`, none of which live on Tower and none of which should. The gaming machine
-runs `/recipedump`, builds, and rsyncs the finished artifacts over:
+Whether this works decides one row of the capability table above, so it is the row to
+re-verify rather than inherit. The wording that used to live here claimed it was impossible
+because no pack instance existed on Tower; see
+[the blocked section](#read-this-before-saying-anything-is-blocked) for why that was wrong
+and what it cost.
+
+`compileJava dependsOn checkHeiJar` (mod/build.gradle:77) needs `-Phei_jar` pointing at a
+HadEnoughItems jar inside a pack instance, and the AMP server on this host has one:
+`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` holds 364 jars including
+`HadEnoughItems_1.12.2-4.28.1.jar`. pocket-dev has no `java`, which is a container rather
+than a wall. The instance directory is mode 0700 uid 1000, so stage the jar out with a root
+container and `chown 99:100` rather than trying to read it as 99:100.
+
+```bash
+docker run --rm --user 0:0 --memory=1g \
+  -v /mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods:/mods:ro \
+  -v /mnt/user/misc/coding/.recipegraph-build/hei:/out \
+  alpine sh -c 'cp /mods/HadEnoughItems*.jar /out/ && chown -R 99:100 /out'
+
+# MOUNT THE REPOSITORY ROOT, NOT `mod/`. See below.
+docker run --rm --user 99:100 --memory=4g \
+  -v /mnt/user/misc/coding/minecraft-recipe-graph:/repo \
+  -v /mnt/user/misc/coding/.recipegraph-build/hei:/hei:ro \
+  -v /mnt/user/misc/coding/.recipegraph-build/gradle-cache:/gradle \
+  -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
+  ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g \
+    -Phei_jar=/hei/HadEnoughItems_1.12.2-4.28.1.jar build
+```
+
+**Verified 2026-07-29: BUILD SUCCESSFUL, 12 of 12 tests pass, and
+`mod/build/libs/mc-recipe-dump-0.5.0.jar` comes out reobfuscated.** About 9m20s cold, since
+RFG decompiles and patches Minecraft through fernflower on first run, then about 4m45s with
+`/coding/.recipegraph-build/gradle-cache` warm. Keep that cache directory.
+
+**It must be JDK 25, not 21.** RetroFuturaGradle 2.0.2 ships class file version 69, so
+`eclipse-temurin:21-jdk` dies on `UnsupportedClassVersionError` loading
+`com.gtnewhorizons.retrofuturagradle.UserDevPlugin` before any of the mod's own Java is
+looked at, and produces 0 class files. The error names the plugin, not your code, which
+reads like a broken build script rather than a wrong JDK.
+
+**Mounting only `mod/` compiles fine and then fails the tests**, which is the confusing
+shape: `:jar`, `:reobfJar` and `:assemble` all succeed, a usable jar appears in
+`build/libs`, and then `DigestFixtureTest > classMethod` fails with a bare
+`java.io.IOException at DigestFixtureTest.java:80`. That test loads
+`tests/fixtures/nbt_digest.json`, the cross-language digest fixture, by trying `../` and
+then `./` relative to the working directory, so with only `mod/` mounted the repository root
+is not there to find. Nothing in the message says so. Mount `/repo` and it passes.
+
+So the true gate on #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery blueprint
+names) and #63 (`COSMETIC_TAGS`) is the in-game `/recipedump`, and everything up to that is
+ours to do: write the Java, compile it here, hand Jake a jar.
+
+**THE DESKTOP BUILDS AND TOWER SERVES, but not because Tower cannot build.** That was the
+standing claim and it is wrong: the AMP server instance has both prerequisites, 364 jars in
+`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` and a 2.5 MB
+`config/AppliedEnergistics2/items.csv`, and `data/mc-recipe-dump/` is already synced here.
+
+The real reason to keep building on the desktop is **jar parity, not availability**. The
+server pack carries 364 jars; #36 records the client instance at roughly 410, so a
+Tower-built graph would silently miss whatever client-only mods make up the difference, and
+a graph missing recipes is worse than no graph because nothing in the UI says so. Nobody has
+run the comparison, so treat the exact gap as unmeasured. If you ever want Tower to build,
+diff the two jar lists first and write down what is absent.
+
+`build` also needs a 165 MB `recipes.ndjson`, which only `/recipedump` produces. The gaming
+machine runs it, builds, and rsyncs the finished artifacts over:
 
 ```bash
 recipegraph build --instance '<instance>/minecraft' --out data/graph.json
