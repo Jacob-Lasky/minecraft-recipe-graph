@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -168,6 +169,37 @@ class Churn(unittest.TestCase):
         result = digest_churn.churn(old, new)
         self.assertEqual(result["unpaired"], 1)
 
+    def test_an_oversized_group_is_excluded_and_counted_not_paired_quadratically(self):
+        # _pair is quadratic and a group is one (base key, display name); #80 measured 11,328
+        # keys sharing a name, so an unbounded group is the expected shape, not a freak.
+        old_trace, old_names, new_trace, new_names = {}, {}, {}, {}
+        for i in range(6):
+            old_trace["a:b#o%d" % i] = tags(T=("o%d" % i, "s"))
+            old_names["a:b#o%d" % i] = "Shared Name"
+            new_trace["a:b#n%d" % i] = tags(T=("n%d" % i, "s"))
+            new_names["a:b#n%d" % i] = "Shared Name"
+        result = digest_churn.churn((old_trace, old_names), (new_trace, new_names),
+                                    max_pairs=4)
+        self.assertEqual(result["changed_items"], 0, "the group must not be paired at all")
+        self.assertEqual(result["oversized"], 6)
+        self.assertEqual(result["tags"], {})
+
+    def test_a_group_within_the_bound_is_still_paired(self):
+        # The bound must not quietly swallow ordinary groups.
+        old = ({"a:b#o1": tags(T=("x", "s"))}, {"a:b#o1": "N"})
+        new = ({"a:b#n1": tags(T=("y", "s"))}, {"a:b#n1": "N"})
+        result = digest_churn.churn(old, new, max_pairs=4)
+        self.assertEqual(result["changed_items"], 1)
+        self.assertEqual(result["oversized"], 0)
+
+    def test_groups_only_in_the_new_dump_are_counted_rather_than_ignored_silently(self):
+        old = ({"a:b#1": tags(T=("o", "u"))}, {"a:b#1": "Kept"})
+        new = ({"a:b#1": tags(T=("o", "u")), "c:d#9": tags(T=("o", "u"))},
+               {"a:b#1": "Kept", "c:d#9": "Brand New"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["new_only_groups"], 1)
+        self.assertEqual(result["changed_items"], 0)
+
     def test_a_tag_added_or_removed_between_dumps_is_counted_apart(self):
         old = ({"a:b#1": tags(T=("o", "u"), Gone=("g", "g"))}, {"a:b#1": "N"})
         new = ({"a:b#2": tags(T=("o2", "u2"), Fresh=("f", "f"))}, {"a:b#2": "N"})
@@ -283,6 +315,53 @@ class TheJavaWriterContract(unittest.TestCase):
             self.assertEqual(digest_churn.mod_of(key), "tconstruct")
 
 
+class TheJavaSourceContract(unittest.TestCase):
+    """The two literals this tool shares with the mod, pinned by reading the Java source.
+
+    Same idea as `test_nbt_digest.JavaSourceContractTest`, and it needs no JVM. Both strings
+    are load-bearing across the language boundary and neither is otherwise covered:
+
+      * the FILENAME the mod writes. Rename it in Java and this tool looks for a file that
+        is never produced, reporting "no nbt_trace.json ... run as `/recipedump nbttrace`"
+        against a dump that DID ask for the trace. The reader would be blaming the user.
+      * the ARGUMENT that turns it on, which this tool prints in that error message. If the
+        Java flag is renamed, the tool instructs the player to run a command that does
+        nothing, and the cost of believing it is a launch of the game.
+
+    The committed fixture cannot catch either one: it is read from a fixed test path, so it
+    exercises the SHAPE of the file and never its name or how it came to exist.
+    """
+
+    JAVA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "mod", "src", "main", "java", "io", "github", "jacoblasky",
+                        "recipedump", "DumpCommand.java")
+
+    @classmethod
+    def setUpClass(cls):
+        with open(cls.JAVA) as fh:
+            cls.src = fh.read()
+
+    def test_the_mod_writes_the_filename_this_tool_reads(self):
+        self.assertIn('"%s"' % digest_churn.TRACE_FILE, self.src,
+                      "the mod does not write %s" % digest_churn.TRACE_FILE)
+
+    def test_the_mod_reads_the_names_file_this_tool_joins_against(self):
+        # The pairing across two dumps is (base key, display name); without names.json
+        # there is nothing to pair on.
+        self.assertIn('"%s"' % digest_churn.NAMES_FILE, self.src)
+
+    def test_the_flag_this_tool_tells_the_player_to_use_is_the_flag_the_mod_accepts(self):
+        found = re.search(r'TRACE_ARG\s*=\s*"([^"]+)"', self.src)
+        self.assertIsNotNone(found, "TRACE_ARG not found in %s" % self.JAVA)
+        message = digest_churn.load_dump.__doc__ or ""
+        with tempfile.TemporaryDirectory() as empty:
+            with self.assertRaises(SystemExit) as caught:
+                digest_churn.load_dump(empty)
+            message += str(caught.exception)
+        self.assertIn(found.group(1), message,
+                      "the tool tells the player to run a flag the mod does not accept")
+
+
 class Cli(unittest.TestCase):
     """The output IS the product: its verdict is what decides the fix."""
 
@@ -337,6 +416,21 @@ class Cli(unittest.TestCase):
                              {"a:b#o1": "N", "a:b#o2": "N"})
             new = self._dump(root, "new", {"a:b#n1": tags(T=("z", "s"))}, {"a:b#n1": "N"})
             out = self._run([old, new])
+            self.assertIn("EXCLUDED", out)
+
+    def test_an_oversized_exclusion_is_visible_in_the_report(self):
+        # The exclusion has to be readable in the output, or the aggregate looks complete.
+        with tempfile.TemporaryDirectory() as root:
+            ot, on, nt, nn = {}, {}, {}, {}
+            for i in range(6):
+                ot["a:b#o%d" % i] = tags(T=("o%d" % i, "s"))
+                on["a:b#o%d" % i] = "Shared"
+                nt["a:b#n%d" % i] = tags(T=("n%d" % i, "s"))
+                nn["a:b#n%d" % i] = "Shared"
+            old = self._dump(root, "old", ot, on)
+            new = self._dump(root, "new", nt, nn)
+            out = self._run([old, new, "--max-pairs", "4"])
+            self.assertIn("too large to pair", out)
             self.assertIn("EXCLUDED", out)
 
     def test_json_mode_is_machine_readable(self):

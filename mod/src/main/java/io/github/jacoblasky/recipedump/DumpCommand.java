@@ -612,9 +612,15 @@ public class DumpCommand extends CommandBase {
                     // a few modded items throw on getDisplayName outside a render pass
                 }
             }
-            if (trace != null && !trace.containsKey(key)) {
-                // null for a stack with no identifying NBT, which is most of them: those
-                // have nothing to explain and would only pad the file.
+            // GATED ON THE '#', not on tagDigests returning null, and the difference is
+            // work rather than output. `stack` appends `#<digest>` if and only if the stack
+            // has identifying NBT, so the hash IS the predicate. Testing it by calling
+            // tagDigests and discarding a null instead means every stack WITHOUT identity
+            // -- the majority -- is recomputed on each of its occurrences across ~117k
+            // recipes, because nothing ever lands in the map to short-circuit the next one.
+            // The dump runs on a 15ms per-tick budget, so that is frames.
+            // `theTraceOnlyLooksAtKeysCarryingADigest` pins the coupling to the key format.
+            if (trace != null && key.indexOf('#') >= 0 && !trace.containsKey(key)) {
                 String digests = tagDigests(stack);
                 if (digests != null) {
                     trace.put(key, digests);
@@ -911,6 +917,23 @@ public class DumpCommand extends CommandBase {
      * silence. 1 = recipes.ndjson + oredict + names + skipped + summary; 2 adds
      * catalysts.json; 3 adds the NBT discriminator `n` on stacks, and names.json keys
      * by the discriminated id.
+     *
+     * `nbt_trace.json` DELIBERATELY DID NOT BUMP THIS, and the "2 adds catalysts.json" entry
+     * above is why that needs saying: adding a file has bumped the schema before, so the
+     * next person adding one will reasonably reach for it.
+     *
+     * The distinction is whether the PIPELINE reads it. catalysts.json changes what
+     * `recipegraph build` produces -- it is the authoritative category-to-machine mapping, so
+     * its absence silently costs machine identification, and a reader is entitled to know.
+     * nbt_trace.json is read by `tools/digest-churn.py` and by nothing else; `build`, `have`
+     * and `serve` never open it, no existing file's shape moved, and the discriminated keys
+     * are byte-identical.
+     *
+     * So bumping would be an active lie: the number's whole job is to tell a reader whether
+     * it can parse this dump, and a reader of a schema-4 dump would conclude the keys had
+     * moved. If a future change makes any of that untrue -- the trace becoming mandatory,
+     * or `build` learning to read it -- bump it then. Use `mod_version` for a capability the
+     * pipeline does not depend on; that is what `summary.json` stamps it for.
      */
     static final int SCHEMA = 3;
 

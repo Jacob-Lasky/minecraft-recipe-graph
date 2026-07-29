@@ -68,6 +68,50 @@ dependencies {
     testImplementation 'com.google.code.gson:gson:2.8.0'
 }
 
+// Stamp a hash of the Java sources INTO the jar, so `tests/test_dist_jar.py` can tell a
+// current dist jar from a stale one without a JDK.
+//
+// The hole this closes, demonstrated rather than imagined: that test compares the jar's
+// SCHEMA int and a few capability markers against the source. A jar rebuilt three commits
+// ago passes every one of those -- the schema deliberately does not move for most changes --
+// so `dist/` could silently ship behaviour that no longer matches `mod/`, which is exactly
+// the rot #81 exists to prevent, one level subtler.
+//
+// Sorted by relative path with String's natural ordering, which is UTF-16 code-unit order
+// and locale-INDEPENDENT. Python's sorted() agrees on ASCII filenames. A locale-collated
+// sort would make two byte-identical trees hash differently on different hosts and read as
+// code drift; the skill records that trap.
+def sourceHashFile = layout.buildDirectory.file('generated/sourceHash/mcrecipedump-source.sha256')
+tasks.register('stampSourceHash') {
+    def srcDir = file('src/main/java')
+    inputs.dir srcDir
+    outputs.file sourceHashFile
+    doLast {
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        srcDir.traverse(type: groovy.io.FileType.FILES, nameFilter: ~/.*\.java/) { }
+        def files = []
+        srcDir.eachFileRecurse(groovy.io.FileType.FILES) { f ->
+            if (f.name.endsWith('.java')) {
+                files << f
+            }
+        }
+        files.sort { srcDir.toPath().relativize(it.toPath()).toString() }
+        files.each { f ->
+            // Path AND content: a renamed file with identical bytes is still a change.
+            digest.update(srcDir.toPath().relativize(f.toPath()).toString()
+                    .replace('\\', '/').getBytes('UTF-8'))
+            digest.update(f.readBytes())
+        }
+        def out = sourceHashFile.get().asFile
+        out.parentFile.mkdirs()
+        out.text = digest.digest().encodeHex().toString() + '\n'
+    }
+}
+processResources {
+    from(sourceHashFile) { into '.' }
+    dependsOn 'stampSourceHash'
+}
+
 test {
     testLogging { events 'passed', 'failed', 'skipped' }
     // Forwarded so `NbtTraceTest`'s documented regeneration path actually works. A `-D` on

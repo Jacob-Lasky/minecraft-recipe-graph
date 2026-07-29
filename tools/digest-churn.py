@@ -111,6 +111,18 @@ def suspects(trace, mod=None):
     return dict(out)
 
 
+# Largest old x new group `_pair` will evaluate before giving up on it. A comment rather
+# than a string literal, which would just be a discarded expression here.
+#
+# `_pair` is quadratic in the group size, and a group is one (base key, display name). #80
+# measured 11,328 churned keys carrying an identical display name, so a big group is the
+# expected shape rather than a pathological one, and an unbounded pairing can spend minutes
+# inside a single one. Groups over this are counted into `oversized` and REPORTED, never
+# dropped quietly: the whole argument in #80 is an aggregate, so an unreported exclusion
+# would change the conclusion while the output still looked complete.
+MAX_GROUP_PAIRS = 10000
+
+
 def _pair(old_entries, new_entries):
     """Pair (key, tags) across two dumps by MAXIMUM per-tag agreement.
 
@@ -142,7 +154,7 @@ def _pair(old_entries, new_entries):
     return pairs
 
 
-def churn(old, new, mod=None):
+def churn(old, new, mod=None, max_pairs=MAX_GROUP_PAIRS):
     """The answer to #80: which tags actually moved between two dumps.
 
     Only items whose DIGEST changed while the display name stayed identical are considered,
@@ -171,9 +183,20 @@ def churn(old, new, mod=None):
     changed_items = 0
     unchanged_items = 0
     unpaired = 0
+    oversized = 0
+    new_only_groups = 0
+    for ident in new_groups:
+        if ident not in old_groups:
+            # Present only in the new dump. Not churn by #80's own filter -- a churned item
+            # keeps its display name -- but counted so the report can say what it set aside
+            # rather than implying the two dumps held the same population.
+            new_only_groups += 1
     for ident, old_entries in old_groups.items():
         new_entries = new_groups.get(ident)
         if not new_entries:
+            continue
+        if len(old_entries) * len(new_entries) > max_pairs:
+            oversized += min(len(old_entries), len(new_entries))
             continue
         for ok, ot, nk, nt in _pair(old_entries, new_entries):
             if ok == nk:
@@ -203,6 +226,8 @@ def churn(old, new, mod=None):
         "changed_items": changed_items,
         "unchanged_items": unchanged_items,
         "unpaired": unpaired,
+        "oversized": oversized,
+        "new_only_groups": new_only_groups,
     }
 
 
@@ -235,6 +260,14 @@ def _report_churn(result, limit):
     if result["unpaired"]:
         print("%d entries could not be paired 1:1 within their (item, name) group and are "
               "EXCLUDED from the tag counts below." % result["unpaired"])
+    if result.get("oversized"):
+        print("%d entries sat in (item, name) groups too large to pair (over %d "
+              "combinations) and are EXCLUDED. Narrow with --mod, or raise --max-pairs."
+              % (result["oversized"], MAX_GROUP_PAIRS))
+    if result.get("new_only_groups"):
+        print("%d (item, name) groups exist only in the NEW dump, so they had nothing to "
+              "pair against; a churned item keeps its name, so these are not churn."
+              % result["new_only_groups"])
     print()
     print("%-34s %9s %11s %8s %8s" % ("tag", "changed", "order_only", "added", "removed"))
     ranked = sorted(result["tags"].items(), key=lambda kv: -kv[1].get("changed", 0))
@@ -273,6 +306,10 @@ def main(argv=None):
                          "for the churn report")
     ap.add_argument("--mod", help="restrict to one registry namespace, e.g. tconstruct")
     ap.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
+    ap.add_argument("--max-pairs", type=int, default=MAX_GROUP_PAIRS,
+                    help="largest (item, name) group to pair; bigger ones are reported as "
+                         "excluded rather than pairing quadratically (default %d)"
+                         % MAX_GROUP_PAIRS)
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args(argv)
 
@@ -292,12 +329,15 @@ def main(argv=None):
 
     old = load_dump(args.dumps[0])
     new = load_dump(args.dumps[1])
-    result = churn(old, new, args.mod)
+    result = churn(old, new, args.mod, args.max_pairs)
     if args.json:
         print(json.dumps({"tags": result["tags"], "mods": dict(result["mods"]),
                           "changed_items": result["changed_items"],
                           "unchanged_items": result["unchanged_items"],
-                          "unpaired": result["unpaired"]}, indent=1, sort_keys=True))
+                          "unpaired": result["unpaired"],
+                          "oversized": result["oversized"],
+                          "new_only_groups": result["new_only_groups"]},
+                         indent=1, sort_keys=True))
     else:
         _report_churn(result, args.limit)
     return 0

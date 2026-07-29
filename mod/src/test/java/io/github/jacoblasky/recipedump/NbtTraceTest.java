@@ -242,6 +242,25 @@ public class NbtTraceTest {
     }
 
     @Test
+    public void theTraceOnlyLooksAtKeysCarryingADigest() {
+        // Pins the coupling `KeySink.record` relies on to avoid recomputing a digest for
+        // every occurrence of every plain stack: `stack` appends `#<digest>` if and only if
+        // the stack has identity, so a key with no '#' is skipped WITHOUT calling
+        // tagDigests. If the key format ever stops carrying the hash, this fails here
+        // rather than silently producing an empty trace file after a launch of the game.
+        NBTTagCompound identifying = new NBTTagCompound();
+        identifying.setTag("Traits", strings("a", "b"));
+
+        DumpCommand.KeySink sink = new DumpCommand.KeySink(true);
+        sink.record("minecraft:stick", withTag(identifying));
+        assertTrue("a hash-less key must not be traced even when the stack has NBT",
+                   sink.trace().isEmpty());
+
+        sink.record("minecraft:stick#deadbeef0000", withTag(identifying));
+        assertEquals(1, sink.trace().size());
+    }
+
+    @Test
     public void theSinkSkipsAnUndiscriminatedStackInTheTraceButStillNamesIt() {
         DumpCommand.KeySink sink = new DumpCommand.KeySink(true);
         sink.record("minecraft:stick", new ItemStack(Items.STICK));
