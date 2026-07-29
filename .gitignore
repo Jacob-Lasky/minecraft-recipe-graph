@@ -15,3 +15,9 @@ mod/logs/
 # committing it is most of the point of pnpm, and it is what makes
 # `pnpm install --frozen-lockfile` reproducible.
 node_modules/
+
+# Internal working notes. Kept on disk, never published: this repo is public, and these are
+# a running conversation with Jake plus a session handoff, not documentation anyone else can
+# use. Untracked rather than deleted because they are still the live to-do list.
+ASK-JAKE.md
+.planning/
