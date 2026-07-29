@@ -28,6 +28,38 @@ $ recipegraph plan "Ultimate Crafting Table" --have data/ae2_have.json
 Plus an HTML view: collapsible tree, per-node "in stock / craft / NEED" badges, and a
 "show only what I need" filter.
 
+## Quickstart
+
+There is nothing to install. Clone it and run it with the Python you already have:
+
+```bash
+git clone https://github.com/Jacob-Lasky/minecraft-recipe-graph
+cd minecraft-recipe-graph
+python3 -m recipegraph --help
+```
+
+Every example below is written as `recipegraph <verb>`, which is also the name the tool
+reports in its own `--help` and error messages. To make that real, alias it:
+
+```bash
+alias recipegraph="python3 -m recipegraph"        # add to ~/.bashrc or ~/.zshrc
+```
+
+Without the alias, put `python3 -m` in front of any command in this README.
+
+You cannot do anything useful until you have built a graph from your own instance, because
+no recipe data ships with the repo. Shortest path from a clone to a plan:
+
+```bash
+recipegraph build --instance '/path/to/instance/minecraft' --out data/graph.json
+recipegraph plan "Iron Ingot" --qty 64
+```
+
+`build` alone gives you every recipe the mod jars declare. Machine recipes, NBT variants and
+localized names need a `/recipedump` from a running game first, which is what
+[the dump mod](#the-dump-mod) is for. `have` is optional and only prunes the plan against
+your AE2 network.
+
 ## Why this exists
 
 [Just Enough Calculation](https://www.curseforge.com/minecraft/mc-mods/just-enough-calculation)
