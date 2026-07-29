@@ -225,10 +225,25 @@ class Solver:
     def score_recipe(self, recipe, ancestors=frozenset()):
         """Higher is better: prefer recipes we can mostly satisfy from stock.
 
-        Recipes that feed back into an ancestor are ranked LAST. Without this,
-        `ingot -> block -> 9 ingots` scores well (one simple input) and gets picked
-        over a real production route, producing a plan that asks for the very thing
-        being crafted. The cycle guard still catches it; this stops us choosing it.
+        Recipes that feed back into an ancestor, OR into one of their own outputs, are
+        ranked LAST. Without this, `ingot -> block -> 9 ingots` scores well (one simple
+        input) and gets picked over a real production route, producing a plan that asks for
+        the very thing being crafted. The cycle guard still catches it; this stops us
+        choosing it.
+
+        `own` catches two cases `ancestors` structurally cannot, both found by measuring #61:
+
+          * A BYPRODUCT that feeds back. `_build` passes `ancestors | {key}`, so the key
+            being planned is covered at every depth -- but a recipe emitting (Heart Fruit
+            x12, Heart Fruit Seeds x1) while consuming Heart Fruit Seeds is cyclic through
+            an output that is NOT the one being planned, and no ancestor set ever holds it.
+          * `score_recipe` called with NO ancestors, which is what the recipe-chooser page
+            does (`server.recipes_page`, so the order shown to someone about to pin). There
+            a self-consuming recipe ranked top and was the tool's recommendation.
+
+        A note on where it can bite: `cheap` outranks this, so it only ever settles a cost
+        TIE. In practice that is common, because every candidate for an unreachable item
+        prices at infinity and the whole comparison falls through to these terms.
         """
         satisfied = 0
         cyclic = 0
@@ -237,11 +252,17 @@ class Solver:
         # single clump, and a 3x3 of one thing looked three times less simple than a
         # recipe taking three different things.
         slots = self._merge_slots(recipe)
+        # A recipe's OWN outputs count as ancestors. See the docstring for the two cases
+        # this catches and `ancestors` cannot. On the reference graph it moves 78 routes,
+        # among them Heart Fruit Seeds off `Rich Phyto-Gro + Heart Fruit Seeds + Water` and
+        # onto `Heart Fruit`, and it cuts a Quartz Sliver line in the Aedialite Fragment
+        # plan from 815 to 30.
+        own = {key for key, _qty in recipe.outputs}
         for alt, qty, _options in slots:
             if (self.available(alt) >= qty or alt in self.craftables
                     or alt in self.free_sources):
                 satisfied += 1
-            if alt in ancestors and self.available(alt) < qty:
+            if (alt in ancestors or alt in own) and self.available(alt) < qty:
                 cyclic += 1
         # simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines
         simple = 1.0 / (1 + len(slots))
@@ -257,8 +278,84 @@ class Solver:
         # prefer a million-bucket chain through an owned machine.
         cost = self.estimated_cost(recipe)
         cheap = -cost if cost != float("inf") else float("-inf")
+        # `ore_backed` sits BELOW cost and stock and ABOVE `simple + plain`, and both
+        # halves of that are deliberate. Below cost, because it must never override a
+        # real price difference -- it exists to settle exact ties, which 26.8% of produced
+        # keys have. Above `simple + plain`, because that is the term it has to beat:
+        # `plain` gives hand-crafting +0.1 and so prefers unpacking a decorative block
+        # over smelting an ore. Moved below it, this goes inert. See `ore_backed`.
         return (0 if recipe.transfer else 1, cheap, -cyclic, satisfied,
-                simple + plain, avail)
+                self.ore_backed(recipe, slots), simple + plain, avail)
+
+    def ore_backed(self, recipe, slots=None):
+        """1 when every raw leaf this recipe rests on is something you mine, else 0.
+
+        Issue #61: with nothing in stock, a plan for one Diamond said "go and get a Block
+        of Diamond Panel", a ForgeMultipart microblock consumed by two recipes. It was not
+        mispriced. `cost.BASE_RAW_COST` is 1.0 for EVERY key no recipe produces, so the
+        44 candidate recipes for Diamond all price at exactly the same number and the
+        winner was whichever `max` saw first, which is dump order. Smelting an ore ties
+        with unpacking a decorative panel because both rest on one raw leaf.
+
+        Worse, `simple + plain` below actively prefers the panel: unpacking is
+        hand-crafting and earns the `plain` bonus, while smelting an ore does not.
+
+        It only bites on an item you do NOT have, which is why the reported plans all came
+        from an empty pool. With the reference network's real stock this moves 3 routes;
+        with the pool emptied it moves 14.
+
+        So the tie needs a signal, and this is the only one the current dump carries: see
+        `Graph.world_ores`. Measured against the real ranking on the reference graph with
+        an empty pool, it moves 14 of 46,727 routes and every one of them reads better --
+        Diamond off the microblock and onto Volcanic Diamond Ore, Lapis Lazuli off a Lapis
+        Blue Chicken, Coal and Emerald and Gold Nugget off contenttweaker loot tokens.
+
+        A route resting on NO raw leaf deliberately scores the same 0 as one resting on
+        junk, rather than ranking above ore. DO NOT make this three-way. Returning 2 there
+        was built and measured, and it costs 64 further routes on the reference graph to
+        buy nothing: ranked above `simple + plain` it avoids a raw leaf at ANY price in
+        complexity, so `Cherry Fence <- Cherry Wood Planks + Stick` becomes a nine-slot
+        spelling of itself and `Tape Measure <- Iron Ingot + Tape` becomes `Iron Ingot +
+        Iron Ingot + Tape Measure Reel + Iron Ingot`. Deciding between two routes on how
+        many slots they have is what `simple` is for, and 2 overrides it.
+
+        Not a classifier on the key itself. Demoting all NBT-discriminated raw leaves was
+        rejected in #61 for a measured reason: `deepmoblearning:data_model_experiencedcori`
+        is discriminated, raw, and a genuine item you obtain by playing.
+
+        `slots` is `_merge_slots(recipe)` when the caller already has it. What counts as a
+        dead end has to be what `_build` will ACTUALLY dead-end on, in the same order, or
+        this ranks a route by a shape the expander does not produce -- the mistake issue
+        #29 is about. So: an infinite source, a user-declared `raw` stop, and AE2
+        autocraftability all terminate a branch before any recipe lookup, and stock counts
+        only when it covers the whole slot. Judging stock by "is there any" made a slot
+        needing 64 with 1 on the shelf read as satisfied.
+        """
+        if slots is None:
+            slots = self._merge_slots(recipe)
+        leaves = []
+        for alt, qty, _options in slots:
+            if alt.startswith("ore:"):
+                # An unresolvable oredict slot is itself the dead end; a resolvable one
+                # was already reduced to a concrete member by `pick_alternative`.
+                if not self.g.ore_members.get(alt[4:]):
+                    leaves.append(alt)
+                continue
+            if alt in self.free_sources or alt in self.craftables:
+                continue
+            if alt in self.raw:
+                # Declared "stop here" by the user, so it is a dead end even though the
+                # graph may know a recipe for it.
+                leaves.append(alt)
+                continue
+            if self.available(alt) >= qty:
+                continue
+            if not self.g.real_producers(alt):
+                leaves.append(alt)
+        if not leaves:
+            return 0
+        world = self.g.world_ores
+        return 1 if all(a in world for a in leaves) else 0
 
     def availability_rank(self, recipe):
         """2 = machine on hand, 1 = buildable or unidentified, 0 = proven unavailable."""

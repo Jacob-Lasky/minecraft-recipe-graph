@@ -366,15 +366,44 @@ Use the slow mode for conclusions.
 
 **`BASE_RAW_COST` prices EVERY recipe-less input at the same 1.0**, so a decorative
 microblock, a loot token and a real ore tie exactly and a later tiebreak picks between
-them. `--explain minecraft:diamond` shows three routes at `-2.0` and the panel winning on
-the `plain` bonus that hand crafting gets and smelting does not. Two heuristics have been
-measured and REJECTED, so do not re-propose either without new evidence (#61):
+them. `--explain minecraft:diamond` shows 44 candidates at one price, and before #61's fix
+the panel won on the `plain` bonus that hand crafting gets and smelting does not.
+
+**The tie is broken by the pack's own ore dictionary.** `Solver.ore_backed` prefers a route
+whose dead ends are all members of an `ore*` oredict group, which is what
+`Graph.world_ores` collects. It is pack-declared data rather than a guess at a registry
+name, and the `ore` prefix is load-bearing: `chisel:diamond` is in `blockDiamond`, so
+accepting every group readmits the decorative blocks this exists to demote. Measured with
+the pool emptied it moves 14 of 46,727 routes and no others; the cost-probe control group
+moves one line, Diamond onto Volcanic Diamond Ore.
+
+Three heuristics have been measured and REJECTED, so do not re-propose any of them without
+new evidence (#61):
 
 - **Demand** (prefer a leaf many recipes consume). Does not separate: Witch Hat 41 uses,
-  Sand 310, the microblock 2, and a genuine Deep Mob Learning data model also 2.
+  Sand 310, the microblock 2, and a genuine Deep Mob Learning data model also 2. Worse, on
+  Diamond it elects `chisel:diamond` at 67 uses over `erebus:ore_diamond` at 24, so it
+  picks a decorative block *because* it is popular.
 - **Raising the constant.** It is global, so it cannot reorder raw leaves against each
   OTHER, only against produced ones. 2.5 and 5.0 fix Stick (Witch Hat to Oak Wood Planks)
-  and leave Diamond exactly where it was; 20 breaks the control group.
+  and leave Diamond exactly where it was; 20 breaks the control group. At 40 Diamond and
+  Lapis do move, onto `nuclearcraft_ingot_former <- [fluid] Diamond`, which is #29's molten
+  metal returning.
+- **Ranking "rests on no raw leaf at all" above ore.** Sounds strictly better and is not:
+  it outranks `simple`, so it avoids a leaf at any price in complexity. 64 further routes
+  move, `Cherry Fence <- Cherry Wood Planks + Stick` becomes a nine-slot spelling of
+  itself, and `Tape Measure <- Iron Ingot + Tape` becomes `Iron Ingot + Iron Ingot + Tape
+  Measure Reel + Iron Ingot`.
+
+**A recipe's own outputs count as ancestors in `score_recipe`, not just the path's.** Two
+cyclic shapes an ancestor set cannot see, both found while measuring #61. A BYPRODUCT that
+feeds back is invisible at every depth, because `_build` passes `ancestors | {key}` and the
+cycle is through the *other* output: an insolator emitting 12 Heart Fruit plus 1 Heart Fruit
+Seed while eating a seed. And `score_recipe` called with no ancestors at all is what the
+recipe-chooser page does, so `/recipes?item=aoa3:heart_fruit_seeds` recommended that
+insolator recipe as the top choice to pin. 78 routes move; the Aedialite Fragment plan drops
+a Quartz Sliver line from 815 to 30. Gated on `available(alt) < qty` like the ancestor case,
+so a genuine upgrade or repair recipe you can feed from stock is still usable.
 
 **If every fluid prices near 0.0, the cost model is inert and recipe choice is back to being
 greedy.** `FLUID_SCALE` must be applied to recipe OUTPUT quantities as well as inputs: scaling
