@@ -70,6 +70,13 @@ dependencies {
 
 test {
     testLogging { events 'passed', 'failed', 'skipped' }
+    // Forwarded so `NbtTraceTest`'s documented regeneration path actually works. A `-D` on
+    // the gradlew command line reaches the GRADLE daemon's JVM, not the forked test JVM,
+    // so without this the instruction in that test's javadoc is a lie that fails with
+    // "the shared fixture is missing" and no way to produce it.
+    if (System.getProperty('nbttrace.fixture')) {
+        systemProperty 'nbttrace.fixture', System.getProperty('nbttrace.fixture')
+    }
 }
 
 // Fail with an actionable message rather than 40 "package mezz.jei.api does not exist"

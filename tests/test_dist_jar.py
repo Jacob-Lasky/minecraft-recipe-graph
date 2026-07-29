@@ -118,6 +118,18 @@ class DistJarMatchesSourceTest(unittest.TestCase):
         for marker in (b"nbt", b"discriminator"):
             self.assertIn(marker, blob)
 
+    def test_it_carries_the_nbt_trace_diagnostic(self):
+        # Same rot class as the schema check above, one capability later. A jar predating
+        # the issue #80 trace passes every other assertion here -- the schema did NOT move
+        # for it, deliberately -- so nothing else in this file would notice. Someone who
+        # clones the repo, installs a pre-0.6.0 jar and runs `/recipedump nbttrace` gets a
+        # normal dump with no nbt_trace.json and no complaint, and only finds out after
+        # spending a launch of the game on it.
+        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+            blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
+        for marker in (b"nbttrace", b"nbt_trace.json"):
+            self.assertIn(marker, blob, "this jar cannot write the #80 trace")
+
     def test_it_targets_java_8(self):
         with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
             name = [n for n in z.namelist() if n.endswith("DumpCommand.class")][0]

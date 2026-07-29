@@ -212,8 +212,15 @@ then `./` relative to the working directory, so with only `mod/` mounted the rep
 is not there to find. Nothing in the message says so. Mount `/repo` and it passes.
 
 So the true gate on #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery blueprint
-names) and #63 (`COSMETIC_TAGS`) is the in-game `/recipedump`, and everything up to that is
-ours to do: write the Java, compile it here, hand Jake a jar.
+names), #63 (`COSMETIC_TAGS`) and #80 (digest churn) is the in-game `/recipedump`, and
+everything up to that is ours to do: write the Java, compile it here, hand Jake a jar.
+
+**A DUMP FROM AN UNCHANGED JAR BUYS NOTHING, AND COSTS THE CHURN.** Before asking for a
+launch, check that the installed jar emits something the last one did not. Re-running
+`/recipedump` on the same mod version against the same pack re-rolls #80's ~11,353 digests
+for no new data, which re-strands AE2 stock and forces a `have` re-run: strictly negative.
+`mod_version` is stamped into `summary.json` and shown in the UI footer, so it is the thing
+to compare. v0.6.0 is the first jar that can write `nbt_trace.json`.
 
 **THE DESKTOP BUILDS AND TOWER SERVES, but not because Tower cannot build.** That was the
 standing claim and it is wrong: the AMP server instance has both prerequisites, 364 jars in
@@ -711,6 +718,7 @@ across a two-minute solve froze every other page.
 | ore dictionary | dump mod's `oredict.json`, or `/ct oredict` → `crafttweaker.log` | otherwise inferred from names (labelled heuristic, ~43% recovery) |
 | category → machine | dump mod's `catalysts.json` (v0.4.0+) | **authoritative**; without it two thirds of categories read `unknown` |
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
+| why a digest churned | `/recipedump nbttrace` → `nbt_trace.json` (v0.6.0+) | #80 diagnostic; opt-in, read by `tools/digest-churn.py`, not by `build` |
 
 ## Pinning a recipe choice
 

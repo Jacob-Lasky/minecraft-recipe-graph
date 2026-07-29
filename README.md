@@ -306,6 +306,23 @@ draws on the next frame. It walks
 JEI's `IRecipeRegistry` and writes `recipes.ndjson`, `oredict.json` and `names.json`
 into `<gamedir>/mc-recipe-dump/`.
 
+Run as `/recipedump nbttrace` it also writes `nbt_trace.json`: a per-top-level-tag digest of
+every key that carries identifying NBT, in two flavours per tag — lists in order, and lists
+sorted. That is a diagnostic for [#80](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/80),
+where the digest moves between two dumps of an unchanged pack for ~11,353 keys, so one item
+ends up wearing two keys and a Tinkers tool in the ME system stops matching the recipe that
+consumes it. Nothing in `recipegraph build` reads the file, which is why it is opt-in, and it
+cannot be reconstructed after the fact — a dump that did not ask for it simply does not have
+it. Read it with:
+
+```bash
+python3 tools/digest-churn.py <dump-dir>                # suspect tags, from ONE dump
+python3 tools/digest-churn.py <old-dump> <new-dump>      # which tag actually moved
+```
+
+Churn is a between-JVM-run effect, so *proving* it needs two dumps from two separate launches;
+the one-dump mode names the tags that are even capable of it, which needs only one.
+
 It uses **only the public `mezz.jei.api` surface** — `getRecipeCategories()`,
 `getRecipeWrappers()`, `IRecipeWrapper.getIngredients()` — every signature verified
 against `HadEnoughItems_1.12.2-4.28.1.jar`. That is deliberate: the older
@@ -316,7 +333,7 @@ and rendered recipe GUIs to scrape them, which is both slow and broken across th
 **A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
 
 ```bash
-cp dist/mc-recipe-dump-0.5.0.jar '/path/to/instance/minecraft/mods/'
+cp dist/mc-recipe-dump-0.6.0.jar '/path/to/instance/minecraft/mods/'
 ```
 
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
