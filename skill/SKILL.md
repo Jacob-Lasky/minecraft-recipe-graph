@@ -113,10 +113,14 @@ the mod only writes JSON files, and the server is started by hand.
 The UI is worth having up when the gaming PC is off, so it is containerised and running:
 
 ```
-http://192.168.86.183:8765        # Tower, LAN only, no auth
+http://<tower-lan-ip>:8765        # LAN only, no auth
 docker logs recipegraph
 docker restart recipegraph        # after a new image; /reload does NOT re-import Python
 ```
+
+The literal address is deliberately not written down here, because this file is public and
+the server has no auth. It is in the private machine notes; from a sibling container on the
+same host, reach it through the docker gateway and the published port instead.
 
 Rebuild and redeploy after a code change (the running container holds the code it started
 with):

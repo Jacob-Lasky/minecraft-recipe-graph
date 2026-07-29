@@ -313,6 +313,17 @@ against `HadEnoughItems_1.12.2-4.28.1.jar`. That is deliberate: the older
 and rendered recipe GUIs to scrape them, which is both slow and broken across the JEI
 4.8 → HEI 4.28 gap.
 
+**A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
+
+```bash
+cp dist/mc-recipe-dump-0.5.0.jar '/path/to/instance/minecraft/mods/'
+```
+
+It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
+source in `mod/` on both the dump schema and the version, so it cannot quietly fall behind
+the Python side that reads its output. If that test fails, rebuild and re-commit the jar
+rather than editing the expected numbers.
+
 **Status: builds clean**, and you do NOT need a system JDK 8 — Gradle provisions its own
 Java 8 toolchain while running on a modern JDK:
 
