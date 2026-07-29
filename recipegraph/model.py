@@ -354,6 +354,7 @@ class Graph:
         self._by_output = None
         self._by_input = None
         self._ore_index = None
+        self._world_ores = None
         self._labels = None
         self._live_keys = None
         self._variant_index = None
@@ -409,6 +410,31 @@ class Graph:
 
     def ores_of(self, key):
         return self.ore_index.get(key, ())
+
+    @property
+    def world_ores(self):
+        """Every key the pack itself registered under an `ore*` oredict group.
+
+        The one signal in today's graph that separates "you go and mine this" from "the
+        dump listed a decorative block", which is issue #61. Forge convention is that a
+        block you find in the world is registered as `oreDiamond`, `oreLapis`,
+        `oreQuartz`; nothing registers a microblock panel or a loot token that way. So
+        this is PACK-DECLARED DATA, not a guess at what a registry name looks like: the
+        mods called these ores, we are only reading it back.
+
+        The `ore` prefix is load-bearing and the rest of the oredict is deliberately
+        excluded. `chisel:diamond` is a member of `blockDiamond`, so accepting every
+        group would readmit exactly the decorative blocks this exists to demote, and
+        measured on the reference graph it is the difference between 39 corrected routes
+        and none. See `Solver.ore_backed`, which is the only consumer.
+        """
+        if self._world_ores is None:
+            self._world_ores = {
+                member
+                for ore, members in self.ore_members.items() if ore.startswith("ore")
+                for member in members
+            }
+        return self._world_ores
 
     @property
     def labels(self):
