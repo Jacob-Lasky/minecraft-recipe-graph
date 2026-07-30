@@ -36,6 +36,8 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from recipegraph.sources import dump_meta  # noqa: E402
+
 DIST = os.path.join(ROOT, "dist")
 JAVA_SRC = os.path.join(ROOT, "mod", "src", "main", "java", "io", "github",
                         "jacoblasky", "recipedump", "DumpCommand.java")
@@ -49,6 +51,11 @@ def _jars():
     if not os.path.isdir(DIST):
         return []
     return sorted(n for n in os.listdir(DIST) if n.endswith(".jar"))
+
+
+def _readme():
+    with open(os.path.join(ROOT, "README.md")) as fh:
+        return fh.read()
 
 
 def _source_schema():
@@ -205,11 +212,26 @@ class DistJarMatchesSourceTest(unittest.TestCase):
     def test_the_readme_points_at_the_jar_that_exists(self):
         # A README naming a filename that is no longer there sends people to a 404, and a
         # README naming the OLD filename is how the stale jar stayed discoverable.
-        with open(os.path.join(ROOT, "README.md")) as fh:
-            readme = fh.read()
+        readme = _readme()
         for stale in re.findall(r"mc-recipe-dump-[\d.]+\.jar", readme):
             self.assertEqual(stale, _jars()[0],
                              "README references %s but dist/ holds %s" % (stale, _jars()[0]))
+
+    def test_the_readme_states_the_schema_this_jar_actually_writes(self):
+        """The version literal has a guard; the schema literal did not, and it is worse.
+
+        A wrong filename is a 404 and the reader retries. A wrong schema number is the one
+        claim this repo makes about when a graph must be rebuilt, and a reader who trusts a
+        stale "writes dump schema 4" after a bump to 5 concludes their schema-4 graph is
+        current -- which is exactly the silent AE2-reads-as-zero failure the sentence exists
+        to prevent. The neighbouring "a schema-N graph is not compatible" is deliberately NOT
+        matched: that one names the PREVIOUS schema and is correct as history.
+        """
+        claim = re.search(r"writes dump schema (\d+)", _readme())
+        self.assertIsNotNone(claim, "README no longer states which schema the jar writes")
+        self.assertEqual(int(claim.group(1)), dump_meta.SCHEMA,
+                         "README says the jar writes schema %s, source says %s"
+                         % (claim.group(1), dump_meta.SCHEMA))
 
 
 if __name__ == "__main__":
