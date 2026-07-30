@@ -335,7 +335,10 @@ search result was rendering with its name squeezed to zero width.
 
 ## The dump mod
 
-`mod/` is a client-side Forge mod adding one command, `/recipedump`. The dump is spread
+`mod/` is a client-side Forge mod adding one command, `/recipedump`. It replies
+`JEI runtime not available yet — open the recipe GUI once, then retry` if JEI has not handed
+its runtime over, which happens on a fresh launch and reads as the mod being broken; open a
+recipe GUI once and run it again. The dump is spread
 across client ticks with a ~15 ms per-tick budget, so the game stays playable and progress
 messages actually appear while it runs — a second of work inside a command handler is a
 second the render loop never gets, and printing a warning first does not help because chat
@@ -362,6 +365,13 @@ Churn is a between-JVM-run effect, so it takes two dumps from two separate launc
 one-dump mode only narrows the field, and it is weak in both directions — measured, a tag can
 read as "cleared" and still churn (5,003 such keys), and the tag it ranked first did not churn
 at all. Draw conclusions from the two-dump run.
+
+**Both dumps must come from the same dump schema.** Pairing a schema-4 dump with a schema-3
+one shows churn on essentially everything, because the digest format itself changed between
+them — so that comparison cannot answer whether a fix worked, in either direction. And since
+the dump rewrites each file in `<gamedir>/mc-recipe-dump/` in place, move the first run's
+directory aside before launching again or it is overwritten; `nbt_trace.json` in particular
+cannot be reconstructed afterwards, because the NBT it describes only exists in a running JVM.
 
 On the reference pack that run answered #80: `Special` churned on 10,010 items and was
 **order-only every time**, so sorting that one tag fixes it, while `ench` churned on 2,423 with
@@ -471,6 +481,17 @@ disables it. `/ct oredict` in game is the other exact source.
 
 Python 3.8+, standard library only. No pip install, no third-party packages — so the
 same code runs inside a server container where `pip` is unavailable.
+
+That extends to the tests, which is worth knowing before reaching for the usual runner:
+
+```bash
+python3 -m unittest discover -s tests -q      # what CI runs; takes about 4 seconds
+```
+
+There is deliberately no pytest, so `pytest` fails with `No module named pytest`, which reads
+as a broken environment rather than the wrong command. Run the suite through discovery rather
+than by naming a file: a stray `unittest.main()` mid-file once made a direct run of
+`tests/test_machines.py` execute 31 of its 77 tests and skip six classes without complaint.
 
 ## Status / known limits
 
