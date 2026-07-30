@@ -29,6 +29,27 @@ except ImportError:  # run directly as a script; see ae2_inventory's module docs
 
 SCHEMA = 4
 
+#: The directory `/recipedump` writes into, relative to the pack's `minecraft/` dir.
+#:
+#: ONE definition on purpose. Five call sites used to spell this literal themselves --
+#: `index.build` three times, `catalysts.find`, `dump_names.find` -- which made pointing a
+#: build at a differently-named dump directory impossible, and that is not hypothetical: the
+#: churn proof for #80 REQUIRES preserving a dump under another name, because a second
+#: `/recipedump` rewrites this directory in place. With the literal scattered, `--hei` could
+#: redirect `recipes.ndjson` while `names.json`, `oredict.json` and `catalysts.json` still
+#: came from whatever sat at the canonical path, silently mixing two dumps in one graph.
+DIR_NAME = "mc-recipe-dump"
+
+
+def dir_for(instance_dir, dump_dir=None):
+    """The dump directory to read, as a path.
+
+    `dump_dir` is an explicit path and wins outright, so a caller can point at a preserved
+    dump (`mc-recipe-dump.s4-run1`) or one outside the instance entirely. Absent, it is
+    `DIR_NAME` under the instance, which is where the mod actually writes.
+    """
+    return dump_dir if dump_dir else os.path.join(instance_dir, DIR_NAME)
+
 
 def _document(dump_dir):
     """summary.json as a dict, or {} if it is absent or unreadable.

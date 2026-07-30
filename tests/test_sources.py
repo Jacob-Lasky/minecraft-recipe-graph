@@ -4,6 +4,7 @@ All three came out of one plan for 64 Borax that drew its water from 71 Snowball
 Wet Sponges, then -- once water was free -- from a nuclear fission chain.
 """
 
+import json
 import math
 import os
 import sys
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
 from recipegraph import cost, generators, index  # noqa: E402
+from recipegraph.sources import dump_meta  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import STATUS_SOURCE, Solver  # noqa: E402
 
@@ -328,6 +330,119 @@ class CacheTest(unittest.TestCase):
         cost.estimate_cached(g, "x.json", cache_path=path)
         reloaded = cost.estimate_cached(g, "x.json", cache_path=path)
         self.assertTrue(math.isinf(reloaded.get("fluid:uranium_fluoride", math.inf)))
+
+
+class DumpDirOverrideTest(unittest.TestCase):
+    """`build --dump-dir` must move EVERY dump file, not just recipes.ndjson.
+
+    #80's churn proof requires keeping a dump under another name, because a second
+    `/recipedump` rewrites the directory in place. Before this existed the only redirect was
+    `--hei`, which moves recipes.ndjson alone -- so names, oredict, catalysts and the schema
+    stamp kept coming from whatever sat at the canonical path, and a graph could hold recipes
+    from one dump and names from another with nothing saying so. That is the failure this
+    class exists to prevent, so the assertions are about the canonical directory NOT leaking
+    rather than only about the override being read.
+    """
+
+    @staticmethod
+    def _write_dump(path, tag, version):
+        os.makedirs(path, exist_ok=True)
+        def put(name, doc):
+            with open(os.path.join(path, name), "w") as fh:
+                json.dump(doc, fh)
+        put("names.json", {"mod:%s_item" % tag: "%s Item" % tag.upper()})
+        put("oredict.json", {"ore%s" % tag.capitalize(): ["mod:%s_item" % tag]})
+        put("catalysts.json", {"mod.%s_machine" % tag: ["mod:%s_machine" % tag]})
+        put("summary.json", {"mod_version": version, "schema": 4, "recipes": 1,
+                             "skipped": 0, "categories": {"mod.%s_machine" % tag:
+                                                          {"dumped": 1, "threw": 0,
+                                                           "empty": 0, "mod": tag}}})
+        with open(os.path.join(path, "recipes.ndjson"), "w") as fh:
+            fh.write(json.dumps({"cat": "mod.%s_machine" % tag,
+                                 "in": [[{"i": "mod:%s_in" % tag, "c": 1}]],
+                                 "out": [{"i": "mod:%s_out" % tag, "c": 1}]}) + "\n")
+
+    def setUp(self):
+        self.inst = tempfile.mkdtemp()
+        self.canon = os.path.join(self.inst, "mc-recipe-dump")
+        self.preserved = os.path.join(self.inst, "mc-recipe-dump.run1")
+        self._write_dump(self.canon, "canon", "0.1.0")
+        self._write_dump(self.preserved, "run1", "0.8.0")
+
+    def test_default_reads_the_canonical_directory(self):
+        g = index.build(self.inst, quiet=True)
+        self.assertEqual(g.dump_version, "0.1.0")
+        self.assertIn("mod:canon_item", g.names)
+
+    def test_override_moves_every_file_off_the_canonical_directory(self):
+        g = index.build(self.inst, quiet=True, dump_dir=self.preserved)
+        # Provenance, names, oredict, catalysts and recipes -- all five readers.
+        self.assertEqual(g.dump_version, "0.8.0")
+        self.assertIn("mod:run1_item", g.names)
+        self.assertIn("oreRun1", g.ore_members)
+        self.assertIn("mod.run1_machine", g.catalysts)
+        self.assertIn("mod:run1_out", g.by_output)
+
+    def test_nothing_leaks_from_the_canonical_directory(self):
+        """The regression itself: this is what silently mixing two dumps looks like."""
+        g = index.build(self.inst, quiet=True, dump_dir=self.preserved)
+        self.assertNotIn("mod:canon_item", g.names)
+        self.assertNotIn("oreCanon", g.ore_members)
+        self.assertNotIn("mod.canon_machine", g.catalysts)
+        self.assertNotIn("mod:canon_out", g.by_output)
+        self.assertNotEqual(g.dump_version, "0.1.0")
+
+    def test_category_mods_follow_the_override_too(self):
+        """`category_mods` read the resolved path via a local that was easy to drop.
+
+        It is the one reader whose argument is the directory rather than a file found under
+        it, so a refactor can leave it pointing at the parameter instead of the resolved
+        path and it fails silently -- every category simply loses JEI's mod name and the
+        machines page falls back to guessing from the uid.
+        """
+        g = index.build(self.inst, quiet=True, dump_dir=self.preserved)
+        self.assertEqual(g.category_mods.get("mod.run1_machine"), "run1")
+        self.assertNotIn("mod.canon_machine", g.category_mods)
+
+    def test_an_absent_override_directory_does_not_silently_fall_back(self):
+        missing = os.path.join(self.inst, "no-such-dump")
+        g = index.build(self.inst, quiet=True, dump_dir=missing)
+        # Empty rather than the canonical dump's contents: falling back would resurrect the
+        # mixing bug in its worst form, where the graph looks complete and is wrong.
+        self.assertNotIn("mod:canon_item", g.names)
+        self.assertNotIn("mod:canon_out", g.by_output)
+        self.assertEqual(g.catalysts, {})
+
+    def test_dir_for_is_the_single_definition_of_the_name(self):
+        self.assertEqual(dump_meta.dir_for("/i"), os.path.join("/i", dump_meta.DIR_NAME))
+        self.assertEqual(dump_meta.dir_for("/i", "/elsewhere"), "/elsewhere")
+
+
+class NoHardcodedDumpDirTest(unittest.TestCase):
+    """The literal belongs in `dump_meta.DIR_NAME` and nowhere else under `recipegraph/`.
+
+    A property rather than a list of call sites, so it also covers readers added later --
+    which is the point, since every one of them is a chance to reintroduce the mix.
+    """
+
+    def test_only_dump_meta_spells_the_directory_name(self):
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        offenders = []
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, name)
+                if os.path.basename(path) == "dump_meta.py":
+                    continue
+                with open(path, encoding="utf-8") as fh:
+                    for lineno, line in enumerate(fh, 1):
+                        if '"mc-recipe-dump"' in line or "'mc-recipe-dump'" in line:
+                            offenders.append("%s:%d" % (os.path.relpath(path, root), lineno))
+        self.assertEqual(offenders, [],
+                         "hardcoded dump dir name outside dump_meta.DIR_NAME: %s"
+                         % ", ".join(offenders))
 
 
 if __name__ == "__main__":

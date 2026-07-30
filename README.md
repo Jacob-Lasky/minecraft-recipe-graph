@@ -373,6 +373,17 @@ the dump rewrites each file in `<gamedir>/mc-recipe-dump/` in place, move the fi
 directory aside before launching again or it is overwritten; `nbt_trace.json` in particular
 cannot be reconstructed afterwards, because the NBT it describes only exists in a running JVM.
 
+To then build from a dump you preserved under another name, use `--dump-dir`, **not `--hei`**:
+
+```bash
+recipegraph build --instance '<instance>/minecraft' \
+                  --dump-dir '<instance>/minecraft/mc-recipe-dump.run1' --out data/graph.json
+```
+
+`--hei` redirects `recipes.ndjson` alone, so `names.json`, `oredict.json`, `catalysts.json`
+and the schema stamp would still be read from the canonical directory — mixing two dumps into
+one graph, with nothing in the output saying so. `--dump-dir` moves all five together.
+
 On the reference pack that run answered #80: `Special` churned on 10,010 items and was
 **order-only every time**, so sorting that one tag fixes it, while `ench` churned on 2,423 with
 no order component at all — which is [#63](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/63)'s

@@ -19,6 +19,7 @@ import json
 import os
 
 from ..model import norm_key
+from . import dump_meta
 
 
 def load(path):
@@ -65,6 +66,6 @@ def _to_key(raw):
     return norm_key(raw)
 
 
-def find(instance_dir):
-    path = os.path.join(instance_dir, "mc-recipe-dump", "catalysts.json")
+def find(instance_dir, dump_dir=None):
+    path = os.path.join(dump_meta.dir_for(instance_dir, dump_dir), "catalysts.json")
     return path if os.path.exists(path) else None

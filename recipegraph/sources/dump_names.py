@@ -19,10 +19,11 @@ import json
 import os
 
 from ..names import clean_label
+from . import dump_meta
 
 
-def find(instance_dir):
-    path = os.path.join(instance_dir, "mc-recipe-dump", "names.json")
+def find(instance_dir, dump_dir=None):
+    path = os.path.join(dump_meta.dir_for(instance_dir, dump_dir), "names.json")
     return path if os.path.exists(path) else None
 
 
