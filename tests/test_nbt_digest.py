@@ -136,7 +136,19 @@ class DiscriminationTest(unittest.TestCase):
         cls.cases = by_name(load_cases())
 
     def digest(self, name):
-        return self.cases[name]["digest"]
+        """RECOMPUTED from the case's NBT, not read back out of the fixture.
+
+        Reading the recorded digest made every test in this class pass on code with the #80
+        and #63 fixes reverted: the fixture says two cases share a digest, and comparing two
+        recorded strings to each other cannot notice that the implementation no longer
+        produces either of them. `FixtureTest` would still have failed, so the pair was sound
+        in composition -- but a test that holds only because a different test also runs is
+        one deletion away from being decorative, and these are the claims the change is FOR.
+
+        `FixtureTest` keeps pinning recorded == recomputed, which is what stops a careless
+        regeneration from moving the ground truth and taking these relationships with it.
+        """
+        return nbt_digest.digest(_tree(self.cases[name]))
 
     def test_two_species_get_two_digests(self):
         self.assertNotEqual(self.digest("species, forest"),
@@ -169,6 +181,64 @@ class DiscriminationTest(unittest.TestCase):
 
     def test_list_order_matters(self):
         self.assertNotEqual(self.digest("list in order"), self.digest("list reversed"))
+
+    def test_the_order_of_a_special_list_does_not_matter(self):
+        """#80's fix. The pair that churned 9,359 times, reduced to one key."""
+        self.assertEqual(self.digest("special list in one order"),
+                         self.digest("special list in another order"))
+
+    def test_a_special_list_is_sorted_at_any_depth(self):
+        self.assertEqual(self.digest("special list nested one level down"),
+                         self.digest("special list nested one level down, permuted"))
+
+    def test_sorting_does_not_leak_from_special_to_a_sibling(self):
+        """The narrowness IS the fix, so it needs a test that fails if the sort spreads.
+
+        `canonical` threads one flag down the tree, and the flag turning on for `Special`
+        must not turn on for the compound that CONTAINS it. If it leaked, the sibling `l`
+        would sort too and the last assertion here would collapse into the first -- which is
+        the global sort that `canonical`'s javadoc rejects, arrived at by accident.
+        """
+        self.assertEqual(self.digest("special beside an ordinary list"),
+                         self.digest("special beside an ordinary list, special permuted"))
+        self.assertNotEqual(self.digest("special beside an ordinary list"),
+                            self.digest("special beside an ordinary list, sibling permuted"))
+
+    def test_the_sort_uses_java_string_order_not_python_string_order(self):
+        """The one place `sorted(parts)` and `sorted(parts, key=_utf16)` disagree.
+
+        Java's `Collections.sort` on Strings compares UTF-16 code units; Python's default
+        compares code points. The two agree on everything until a string holds an astral
+        character, and then they invert. The fixture pair here is built so the length prefix
+        cannot decide the order, which forces the comparison onto the characters themselves --
+        without it the case would pass under either sort and prove nothing.
+
+        `DigestFixtureTest` checks the same two cases in a real JVM, which is what makes this
+        a cross-language claim rather than python agreeing with itself.
+        """
+        self.assertEqual(self.digest("special list sorted across a surrogate pair"),
+                         self.digest("special list sorted across a surrogate pair, permuted"))
+        # And the sort must have landed on the CODE UNIT order, not merely on some order.
+        case = self.cases["special list sorted across a surrogate pair"]
+        self.assertEqual(nbt_digest.canonical(_tree(case)),
+                         "{7:Special=[t2:\U00010000;t2:￿￿;];}")
+
+    def test_a_list_inside_a_special_list_is_sorted_too(self):
+        # The trace's "u" field sorts the whole subtree, and "u" is what measured `Special`
+        # as order-only. A fix that sorted only the outermost list would not be the thing
+        # the measurement licensed.
+        self.assertEqual(self.digest("special holding a nested list"),
+                         self.digest("special holding a nested list, inner permuted"))
+
+    def test_enchantments_do_not_change_what_an_item_is(self):
+        """#63. An enchanted item is the same crafting ingredient as a plain one."""
+        self.assertEqual(self.digest("species, forest"),
+                         self.digest("enchanted, with a species"))
+        self.assertEqual(self.digest("species, forest"),
+                         self.digest("enchanted differently, same species"))
+
+    def test_a_stack_whose_only_nbt_is_enchantments_is_the_bare_key(self):
+        self.assertIsNone(self.digest("enchantments only"))
 
     def test_a_float_and_a_double_of_the_same_number_differ(self):
         self.assertNotEqual(self.digest("float 0.1"), self.digest("double 0.1"))
@@ -289,12 +359,42 @@ class JavaSourceContractTest(unittest.TestCase):
             cls.src = fh.read()
 
     def test_the_cosmetic_tag_lists_are_the_same_list(self):
-        # See #63, which wants `ench` on this list. That is a change to BOTH languages
+        # `ench` joined this list in schema 4 (#63). The list is a change to BOTH languages
         # plus a re-dump, and this test is what makes forgetting the second one loud.
         block = re.search(r"COSMETIC_TAGS\s*=\s*\{(.*?)\};", self.src, re.S)
         self.assertIsNotNone(block, "COSMETIC_TAGS not found in %s" % JAVA)
         java = tuple(re.findall(r'"([^"]+)"', block.group(1)))
         self.assertEqual(java, nbt_digest.COSMETIC_TAGS)
+
+    def test_the_sorted_list_tags_are_the_same_list(self):
+        """#80's other half, and it drifts exactly the way COSMETIC_TAGS would.
+
+        A name in one language only means the reader sorts a list the dump left alone (or the
+        reverse), so every stack carrying that tag gets a digest the other side never
+        computes. Same silent symptom as a COSMETIC_TAGS mismatch: stock that reads as zero.
+        """
+        block = re.search(r"SORTED_LIST_TAGS\s*=\s*\{(.*?)\};", self.src, re.S)
+        self.assertIsNotNone(block, "SORTED_LIST_TAGS not found in %s" % JAVA)
+        java = tuple(re.findall(r'"([^"]+)"', block.group(1)))
+        self.assertEqual(java, nbt_digest.SORTED_LIST_TAGS)
+
+    def test_no_tag_is_both_stripped_and_sorted(self):
+        # The two lists would not error if they overlapped, they would just make the sort
+        # dead code on a tag nothing digests -- which reads in review as a live claim about
+        # order and is not one.
+        self.assertEqual(set(nbt_digest.COSMETIC_TAGS) & set(nbt_digest.SORTED_LIST_TAGS),
+                         set())
+
+    def test_the_schema_the_digest_format_belongs_to_is_the_dump_schema(self):
+        """`DIGEST_FORMAT_SCHEMA` has to name a schema the mod actually stamps.
+
+        It exists to be compared against a graph's recorded schema, so a value above what any
+        dump can carry would flag every graph forever, and a value below the schema in which
+        the format last changed would flag none of them.
+        """
+        found = re.search(r"static final int SCHEMA\s*=\s*(\d+)", self.src)
+        self.assertIsNotNone(found, "SCHEMA constant not found in %s" % JAVA)
+        self.assertLessEqual(nbt_digest.DIGEST_FORMAT_SCHEMA, int(found.group(1)))
 
     def test_the_fnv_seed_and_prime_are_the_same_numbers(self):
         seed = re.search(r"long h = 0x([0-9a-fA-F]+)L;", self.src)

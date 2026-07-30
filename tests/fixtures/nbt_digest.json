@@ -1,5 +1,5 @@
 {
- "_": "SHARED CONTRACT. Python asserts this in tests/test_nbt_digest.py; Java asserts the same file in DigestFixtureTest. A disagreement means one side changed the dump's NBT digest format, which is part of schema 3. DO NOT edit an expected value to make a side pass; fix the side that moved. See #21.",
+ "_": "SHARED CONTRACT. Python asserts this in tests/test_nbt_digest.py; Java asserts the same file in DigestFixtureTest. A disagreement means one side changed the dump's NBT digest format, which is part of schema 4. DO NOT edit an expected value to make a side pass; fix the side that moved. See #21, and #80/#63 for the schema-4 change (SORTED_LIST_TAGS and ench).",
  "node_encoding": "[type, value]. Compound values are objects of name -> node, list values are arrays of nodes. Types: byte short int long float double string bytearray intarray longarray list compound.",
  "canonical": "DumpCommand.canonical of the compound AFTER cosmetic tags are stripped, or null when nothing is left to digest.",
  "cases": [
@@ -496,10 +496,10 @@
    "nbt": {
     "n": [
      "string",
-     "Blütenstaub"
+     "Bl\u00fctenstaub"
     ]
    },
-   "canonical": "{1:n=t11:Blütenstaub;}",
+   "canonical": "{1:n=t11:Bl\u00fctenstaub;}",
    "digest": "2dd268aaa14a"
   },
   {
@@ -529,6 +529,438 @@
    "canonical": null,
    "digest": null,
    "java_diverges": "Java answers here and python declines, so the java suite skips this case rather than asserting a value with no counterpart; test_nbt_digest asserts the refusal."
+  },
+  {
+   "name": "special list in one order",
+   "note": "#80: `Special` list order is noise, so both orders are one key",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "alpha"
+      ],
+      [
+       "string",
+       "beta"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t4:beta;t5:alpha;];}",
+   "digest": "aaaff677b0fa"
+  },
+  {
+   "name": "special list in another order",
+   "note": "#80: the same multiset, permuted, as a second JVM run produces it",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "beta"
+      ],
+      [
+       "string",
+       "alpha"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t4:beta;t5:alpha;];}",
+   "digest": "aaaff677b0fa"
+  },
+  {
+   "name": "special list nested one level down",
+   "note": "#80: the sort follows the NAME, at any depth, not just the top level",
+   "nbt": {
+    "Outer": [
+     "compound",
+     {
+      "Special": [
+       "list",
+       [
+        [
+         "string",
+         "alpha"
+        ],
+        [
+         "string",
+         "beta"
+        ]
+       ]
+      ]
+     }
+    ]
+   },
+   "canonical": "{5:Outer={7:Special=[t4:beta;t5:alpha;];};}",
+   "digest": "47952685028c"
+  },
+  {
+   "name": "special list nested one level down, permuted",
+   "note": "#80: same, permuted, so the nested pair must agree too",
+   "nbt": {
+    "Outer": [
+     "compound",
+     {
+      "Special": [
+       "list",
+       [
+        [
+         "string",
+         "beta"
+        ],
+        [
+         "string",
+         "alpha"
+        ]
+       ]
+      ]
+     }
+    ]
+   },
+   "canonical": "{5:Outer={7:Special=[t4:beta;t5:alpha;];};}",
+   "digest": "47952685028c"
+  },
+  {
+   "name": "special beside an ordinary list",
+   "note": "#80: the sort must not leak from `Special` to a sibling whose order IS semantic",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "alpha"
+      ],
+      [
+       "string",
+       "beta"
+      ]
+     ]
+    ],
+    "l": [
+     "list",
+     [
+      [
+       "string",
+       "one"
+      ],
+      [
+       "string",
+       "two"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t4:beta;t5:alpha;];1:l=[t3:one;t3:two;];}",
+   "digest": "71ee29251429"
+  },
+  {
+   "name": "special beside an ordinary list, special permuted",
+   "note": "#80: only `Special` moved, so this is the SAME key as the case above",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "beta"
+      ],
+      [
+       "string",
+       "alpha"
+      ]
+     ]
+    ],
+    "l": [
+     "list",
+     [
+      [
+       "string",
+       "one"
+      ],
+      [
+       "string",
+       "two"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t4:beta;t5:alpha;];1:l=[t3:one;t3:two;];}",
+   "digest": "71ee29251429"
+  },
+  {
+   "name": "special beside an ordinary list, sibling permuted",
+   "note": "#80: the SIBLING moved, so this is a DIFFERENT key; order still means something",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "alpha"
+      ],
+      [
+       "string",
+       "beta"
+      ]
+     ]
+    ],
+    "l": [
+     "list",
+     [
+      [
+       "string",
+       "two"
+      ],
+      [
+       "string",
+       "one"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t4:beta;t5:alpha;];1:l=[t3:two;t3:one;];}",
+   "digest": "d7d2baa3f9a1"
+  },
+  {
+   "name": "special holding a nested list",
+   "note": "#80: sorting reaches all the way down a `Special` subtree, matching the trace's u",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "list",
+       [
+        [
+         "string",
+         "a"
+        ],
+        [
+         "string",
+         "b"
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        [
+         "string",
+         "c"
+        ]
+       ]
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[[t1:a;t1:b;];[t1:c;];];}",
+   "digest": "f9756ffd43f3"
+  },
+  {
+   "name": "special holding a nested list, inner permuted",
+   "note": "#80: the inner list is inside `Special`, so its order is noise too",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "list",
+       [
+        [
+         "string",
+         "b"
+        ],
+        [
+         "string",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        [
+         "string",
+         "c"
+        ]
+       ]
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[[t1:a;t1:b;];[t1:c;];];}",
+   "digest": "f9756ffd43f3"
+  },
+  {
+   "name": "enchanted, with a species",
+   "note": "#63: enchantments are cosmetic, so this is the same key as `species, forest`",
+   "nbt": {
+    "Genome": [
+     "compound",
+     {
+      "Chromosomes": [
+       "list",
+       [
+        [
+         "compound",
+         {
+          "UID0": [
+           "string",
+           "forestry.speciesForest"
+          ],
+          "UID1": [
+           "string",
+           "forestry.speciesForest"
+          ]
+         }
+        ]
+       ]
+      ]
+     }
+    ],
+    "ench": [
+     "list",
+     [
+      [
+       "compound",
+       {
+        "id": [
+         "short",
+         16
+        ],
+        "lvl": [
+         "short",
+         3
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   "canonical": "{6:Genome={11:Chromosomes=[{4:UID0=t22:forestry.speciesForest;4:UID1=t22:forestry.speciesForest;};];};}",
+   "digest": "69d9078abf2f"
+  },
+  {
+   "name": "enchantments only",
+   "note": "#63: nothing identifying is left once `ench` is stripped, so the bare key is right",
+   "nbt": {
+    "ench": [
+     "list",
+     [
+      [
+       "compound",
+       {
+        "id": [
+         "short",
+         16
+        ],
+        "lvl": [
+         "short",
+         3
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   "canonical": null,
+   "digest": null
+  },
+  {
+   "name": "enchanted differently, same species",
+   "note": "#63/#80: a different enchantment, and per-launch ids, must not change the key",
+   "nbt": {
+    "Genome": [
+     "compound",
+     {
+      "Chromosomes": [
+       "list",
+       [
+        [
+         "compound",
+         {
+          "UID0": [
+           "string",
+           "forestry.speciesForest"
+          ],
+          "UID1": [
+           "string",
+           "forestry.speciesForest"
+          ]
+         }
+        ]
+       ]
+      ]
+     }
+    ],
+    "ench": [
+     "list",
+     [
+      [
+       "compound",
+       {
+        "id": [
+         "short",
+         99
+        ],
+        "lvl": [
+         "short",
+         1
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   "canonical": "{6:Genome={11:Chromosomes=[{4:UID0=t22:forestry.speciesForest;4:UID1=t22:forestry.speciesForest;};];};}",
+   "digest": "69d9078abf2f"
+  },
+  {
+   "name": "special list sorted across a surrogate pair",
+   "note": "#80: Java sorts Strings by UTF-16 CODE UNIT, so python must sort the rendered elements with the same key or the two disagree here and nowhere else",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "\uffff\uffff"
+      ],
+      [
+       "string",
+       "\ud800\udc00"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t2:\ud800\udc00;t2:\uffff\uffff;];}",
+   "digest": "8f64ccfee61b"
+  },
+  {
+   "name": "special list sorted across a surrogate pair, permuted",
+   "note": "#80: same multiset, and the sort must land on the same order from either input",
+   "nbt": {
+    "Special": [
+     "list",
+     [
+      [
+       "string",
+       "\ud800\udc00"
+      ],
+      [
+       "string",
+       "\uffff\uffff"
+      ]
+     ]
+    ]
+   },
+   "canonical": "{7:Special=[t2:\ud800\udc00;t2:\uffff\uffff;];}",
+   "digest": "8f64ccfee61b"
   }
  ]
 }

@@ -658,7 +658,91 @@ public class DumpCommand extends CommandBase {
         "display",        // rename and lore
         "HideFlags",      // tooltip presentation
         "Damage",         // durability; the meta already carries the variant
+        "ench",           // enchantments; see below, #63 and #80
     };
+
+    /**
+     * WHY `ench` IS ON THAT LIST, AND WHY `StoredEnchantments` IS NOT.
+     *
+     * #63 wanted `ench` stripped on the planning argument: an enchanted sword is not a
+     * different crafting ingredient from a plain one, and six Pluton Scythes that differ
+     * only by enchantment are six unplannable variants of one item. That argument was
+     * sound but unmeasured, and #63 says so plainly -- it could not even be sized offline,
+     * because a dump keeps the digest and discards the NBT behind it.
+     *
+     * #80's trace measured it, and found a second and stronger reason: `ench` DOES NOT HOLD
+     * STILL. On the 10,694 churned pairs whose pairing is forced (one candidate each side,
+     * so the pair is certain), `ench` moved on 1,335 -- and those 1,335 items carry just
+     * FIVE distinct digest transitions between them, one of which covers 1,330 items. A
+     * handful of values moved and every item carrying them moved along. That is what a
+     * per-launch numeric enchantment id looks like: 1.12.2 stores `ench` as {id, lvl} with
+     * `id` a registry-allocated short, so the same enchantment serialises differently in the
+     * next JVM and every stack wearing it gets a new key. Sorting cannot fix it -- the
+     * measurement agrees, `order_only` was 0 of 2,423 -- and stripping it fixes it exactly.
+     *
+     * `StoredEnchantments` is the same shape of data (an enchanted BOOK's payload) and is
+     * deliberately NOT stripped:
+     *
+     *   * There is no evidence it churns. It changed on 4 pairs, and all 4 sat in ambiguous
+     *     groups where the pairing is a guess; on forced pairs it moved ZERO times. Four
+     *     unverified observations do not carry a COSMETIC_TAGS entry.
+     *   * The planning argument INVERTS for it. An enchanted book's identity IS its
+     *     enchantment: a Sharpness V book and a Fortune III book are different ingredients,
+     *     and merging them is precisely the "wrong entry" this list's javadoc warns about.
+     *
+     * If books are ever seen churning on forced pairs, the fix is not to strip the tag but
+     * to make the id stable -- which the dump cannot do from outside the registry, and which
+     * is a new issue rather than a line here.
+     */
+
+    /**
+     * Tags whose LIST ORDER carries no information, so the digest is taken over them sorted.
+     *
+     * MEASURED, NOT GUESSED, and that distinction is the whole licence for this list.
+     * Issue #80: two `/recipedump` runs against an unchanged pack gave 12,443 items two
+     * different keys each. `nbt_trace.json` from both runs, compared by
+     * `tools/digest-churn.py`, splits that into two disjoint populations. On the 10,694 pairs
+     * where the pairing is forced (one candidate on each side, so the pair is certain, not
+     * inferred from tag agreement):
+     *
+     *   `Special`   9,359 items, order-only EVERY time, and only tconstruct + plustic
+     *   `ench`      1,335 items, never order-related -- stripped instead, see COSMETIC_TAGS
+     *
+     * The two never moved on the same item. Two independent causes, not one with a spread.
+     *
+     * "Order-only" is a measurement: for all 9,359, serialising `Special` with list order
+     * made irrelevant produced the SAME digest in both dumps. The two runs therefore held
+     * the same multiset of elements in a different sequence, and a sort cannot discard
+     * information that was never there.
+     *
+     * DO NOT ADD A TAG HERE WITHOUT THAT MEASUREMENT. Sorting a list whose order IS
+     * semantic -- an inventory, a page order, a slot layout -- merges two stacks that are
+     * not the same stack, and nothing reports it: the key looks fine and matches the wrong
+     * thing. `canonical`'s javadoc records why the GLOBAL sort was rejected for that exact
+     * reason. This list is the narrow version of it and it stays narrow.
+     *
+     * Applied wherever the name appears, at any depth, because the reason `Special` permutes
+     * is a property of the code that builds it (an unordered collection serialised in
+     * iteration order) rather than of where it sits. The trace measures the top-level
+     * occurrence, which is where the Tinkers family puts it.
+     *
+     * MUST MATCH `nbt_digest.SORTED_LIST_TAGS` on the python side.
+     * `tests/test_nbt_digest.JavaSourceContractTest` asserts that by reading this source, so
+     * editing one language and not the other fails with no JVM needed.
+     */
+    static final String[] SORTED_LIST_TAGS = {
+        "Special",        // tconstruct + plustic, permutes per JVM run; #80
+    };
+
+    /** Whether a compound key's value is serialised with list order made irrelevant. */
+    static boolean sortedListTag(String key) {
+        for (String name : SORTED_LIST_TAGS) {
+            if (name.equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * A short, stable id for the part of an ItemStack's NBT that decides WHAT IT IS,
@@ -717,7 +801,8 @@ public class DumpCommand extends CommandBase {
      *
      * Two digests per tag:
      *
-     *   "o"  the tag serialised the way the real digest serialises it, lists IN ORDER.
+     *   "o"  the tag serialised the way the real digest serialises it -- lists in order,
+     *        unless the tag is in `SORTED_LIST_TAGS`, because then the digest sorts it too.
      *        Comparing this field for one item across TWO dumps names the tag that
      *        churned, which is the thing no dump on disk can currently answer.
      *   "u"  the same tag with list order made irrelevant. Comparing "o" against "u"
@@ -753,8 +838,12 @@ public class DumpCommand extends CommandBase {
             if (sub == null) {
                 continue;
             }
+            // `sortedListTag(k)` rather than a bare `false`, so "o" keeps meaning "the way
+            // the real digest serialises this tag". Without it the trace would go on
+            // reporting `Special` as churning after the fix stopped that churn from reaching
+            // a key, which is a diagnostic contradicting the thing it exists to explain.
             StringBuilder ordered = new StringBuilder();
-            canonical(sub, ordered, false);
+            canonical(sub, ordered, sortedListTag(k));
             StringBuilder sorted = new StringBuilder();
             canonical(sub, sorted, true);
             if (!first) {
@@ -789,8 +878,8 @@ public class DumpCommand extends CommandBase {
     }
 
     /**
-     * NBT as a deterministic, LANGUAGE-NEUTRAL string. Compound keys sorted, lists in
-     * order, every value tagged with its type.
+     * NBT as a deterministic, LANGUAGE-NEUTRAL string. Compound keys sorted, lists in order
+     * EXCEPT under a `SORTED_LIST_TAGS` name, every value tagged with its type.
      *
      * Deliberately not `NBTBase.toString()`, which is a Java implementation detail:
      * a byte renders "5b", a string comes back quoted and escaped, a float carries an
@@ -800,13 +889,15 @@ public class DumpCommand extends CommandBase {
      * the same reason: decimal float formatting differs between the two languages and
      * would silently split one item into two keys.
      *
-     * THIS FORMAT IS PART OF SCHEMA 3. Changing it changes every discriminated key.
+     * THIS FORMAT IS PART OF SCHEMA 4. Changing it changes every discriminated key, which
+     * costs a whole-pack redump plus a re-run of `have`, so it is a schema bump every time.
      *
-     * The two-argument form IS that frozen format and is what `discriminator` calls. The
-     * `sortLists` overload below is additive and OFF on this path: it exists only for the
-     * issue #80 trace, never for a key that ships in a dump. `DigestFixtureTest` pins the
-     * two-argument output against the cross-language fixture, so a change that reached the
-     * digest could not pass.
+     * The two-argument form IS that frozen format and is what `discriminator` calls. It
+     * enters the `sortLists` overload with sorting OFF, and the only thing that ever turns
+     * it on for a shipped key is a `SORTED_LIST_TAGS` name -- see that list for the
+     * measurement licensing each entry, and the overload below for why the global version
+     * stays rejected. `DigestFixtureTest` pins this output against the cross-language
+     * fixture, so any other change reaching the digest could not pass.
      */
     static void canonical(NBTBase node, StringBuilder sb) {
         canonical(node, sb, false);
@@ -815,19 +906,23 @@ public class DumpCommand extends CommandBase {
     /**
      * As above, but with `sortLists` optionally making LIST order irrelevant.
      *
-     * WHY THIS EXISTS, AND WHY IT IS NOT THE FIX. Issue #80: the digest moves between two
-     * dumps of an unchanged pack for ~11,353 keys, concentrated in tconstruct and plustic
-     * (69%), and the leading hypothesis is a trait/modifier list populated from a
-     * hash-ordered collection, so its order permutes per JVM run. Comparing a tag's
-     * ordered digest against its sorted one says whether that tag COULD churn that way:
-     * equal means it holds no non-trivially-ordered list and is innocent, different means
-     * it is a candidate.
+     * WHY THIS EXISTS. Issue #80: the digest moved between two dumps of an unchanged pack.
+     * Comparing a tag's ordered rendering against its sorted one is what identifies a
+     * permuting list, and it is what `tagDigests` publishes as "u" so two dumps can be
+     * compared after the fact.
      *
-     * DO NOT promote sorting onto the digest path to "fix" the churn. List order is
-     * genuinely semantic for other NBT (an inventory, a page order), so sorting globally
-     * would merge items that are not the same item -- trading a split key for a wrong one,
-     * which is worse because nothing reports it. #80 records this: the narrow fix sorts
-     * only the specific named tags, and it cannot be written until the trace names them.
+     * TWO CALLERS, AND ONLY ONE OF THEM SHIPS A KEY. The trace passes `true` to render the
+     * order-irrelevant comparison. The digest path passes `false` and gets sorting only for
+     * a `SORTED_LIST_TAGS` name, which the compound case turns on per key. `Special` earned
+     * its place there by measurement: 9,359 forced pairs, order-only every one.
+     *
+     * DO NOT PROMOTE SORTING GLOBALLY ONTO THE DIGEST PATH. That prohibition survives the
+     * #80 fix intact and is the reason the fix is a NAMED LIST rather than a flag flip. List
+     * order is genuinely semantic for other NBT (an inventory, a page order, a slot layout),
+     * so a global sort merges items that are not the same item -- trading a split key, which
+     * is visible as a duplicate, for a WRONG key, which nothing reports at all. Adding a name
+     * to `SORTED_LIST_TAGS` requires the same two-dump order-only measurement that `Special`
+     * has; `tools/digest-churn.py` is the thing that produces it.
      */
     static void canonical(NBTBase node, StringBuilder sb, boolean sortLists) {
         switch (node.getId()) {
@@ -887,7 +982,11 @@ public class DumpCommand extends CommandBase {
                 sb.append('{');
                 for (String k : keys) {
                     sb.append(k.length()).append(':').append(k).append('=');
-                    canonical(c.getTag(k), sb, sortLists);
+                    // `|| sortedListTag(k)` is the narrow #80 fix and the ONLY place it
+                    // applies. Once inside a sorted subtree it stays on, so a named tag
+                    // sorts its own nested lists too -- which is exactly what the trace
+                    // measured as order-only, since its "u" field sorts the whole subtree.
+                    canonical(c.getTag(k), sb, sortLists || sortedListTag(k));
                     sb.append(';');
                 }
                 sb.append('}');
@@ -931,30 +1030,43 @@ public class DumpCommand extends CommandBase {
     }
 
     /**
-     * Bumped whenever the SHAPE of any dumped file changes, not when the mod version does.
-     * The reader compares it and says so rather than misparsing a newer or older dump in
-     * silence. 1 = recipes.ndjson + oredict + names + skipped + summary; 2 adds
-     * catalysts.json; 3 adds the NBT discriminator `n` on stacks, and names.json keys
-     * by the discriminated id.
+     * Bumped when the SHAPE of any dumped file changes, OR the MEANING of a value a reader
+     * recomputes -- never merely because the mod version moved. The reader compares it and
+     * says so rather than misparsing a dump in silence.
+     *
+     *   1  recipes.ndjson + oredict + names + skipped + summary
+     *   2  adds catalysts.json, and summary.json gains mod_version and schema
+     *   3  adds the NBT discriminator `n` on stacks; names.json keys by the discriminated id
+     *   4  CHANGES HOW `n` IS COMPUTED: `SORTED_LIST_TAGS` sorts named lists, and `ench`
+     *      joins `COSMETIC_TAGS`. Every discriminated key in the pack moves. See #80, #63.
+     *
+     * THE SECOND CLAUSE IS WHY 4 EXISTS, and it is the subtler half of the rule. Schema 4
+     * moves no file's shape and adds no field: recipes.ndjson still carries `n`, spelled the
+     * same way, in the same place. What changed is the FUNCTION behind it -- and `n` is
+     * recomputed independently by `recipegraph/nbt_digest.py` from the world save, so a
+     * python side at schema 4 reading a schema-3 graph computes a different digest for the
+     * same stack and every discriminated key silently fails to match. Stock reads as zero
+     * and plans buy things you already own, which is #21 exactly. A field only this mod
+     * writes and reads could change without a bump. `n` cannot, because someone else
+     * recomputes it, and the version is their only way to notice.
      *
      * `nbt_trace.json` DELIBERATELY DID NOT BUMP THIS, and the "2 adds catalysts.json" entry
-     * above is why that needs saying: adding a file has bumped the schema before, so the
-     * next person adding one will reasonably reach for it.
+     * is why that needs saying: adding a file has bumped the schema before, so the next
+     * person adding one will reasonably reach for it.
      *
      * The distinction is whether the PIPELINE reads it. catalysts.json changes what
      * `recipegraph build` produces -- it is the authoritative category-to-machine mapping, so
      * its absence silently costs machine identification, and a reader is entitled to know.
      * nbt_trace.json is read by `tools/digest-churn.py` and by nothing else; `build`, `have`
-     * and `serve` never open it, no existing file's shape moved, and the discriminated keys
-     * are byte-identical.
+     * and `serve` never open it, no existing file's shape moved, and at the time it shipped
+     * the discriminated keys were byte-identical. Bumping for it would have been an active
+     * lie, because the number's job is to tell a reader whether its own recomputation still
+     * agrees -- and back then it did.
      *
-     * So bumping would be an active lie: the number's whole job is to tell a reader whether
-     * it can parse this dump, and a reader of a schema-4 dump would conclude the keys had
-     * moved. If a future change makes any of that untrue -- the trace becoming mandatory,
-     * or `build` learning to read it -- bump it then. Use `mod_version` for a capability the
-     * pipeline does not depend on; that is what `summary.json` stamps it for.
+     * Use `mod_version` for a capability the pipeline does not depend on; that is what
+     * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 3;
+    static final int SCHEMA = 4;
 
     private static void writeSummary(File file, Map<String, int[]> perCategory,
                                      Map<String, String> categoryMod,

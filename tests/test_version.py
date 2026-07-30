@@ -13,7 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import version  # noqa: E402
+from recipegraph import nbt_digest, version  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.sources import dump_meta  # noqa: E402
 
@@ -178,7 +178,10 @@ class DumpProvenanceTest(unittest.TestCase):
     """`summary.json`'s three facts have to reach the UI, which has no dump directory."""
 
     @staticmethod
-    def _graph(schema=3, mod_version="0.5.1"):
+    def _graph(schema=dump_meta.SCHEMA, mod_version="0.5.1"):
+        # Defaulted to the CURRENT schema rather than a literal, so "a graph from a current
+        # dump" keeps meaning that after a bump. Pinning 3 here made the schema-4 change
+        # fail as a warning-about-a-stale-graph rather than as the constant moving.
         g = Graph()
         g.names = {"mod:widget": "Widget", "mod:part": "Part"}
         g.add(Recipe("r", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
@@ -192,7 +195,7 @@ class DumpProvenanceTest(unittest.TestCase):
         self._graph().save(path)
         loaded = Graph.load(path)
         self.assertEqual(loaded.dump_version, "0.5.1")
-        self.assertEqual(loaded.dump_schema, 3)
+        self.assertEqual(loaded.dump_schema, dump_meta.SCHEMA)
 
     def test_a_graph_built_before_this_field_loads_as_unknown(self):
         # graph.json on disk is 115 MB and rebuilding needs the game running, so the
@@ -213,6 +216,27 @@ class DumpProvenanceTest(unittest.TestCase):
     def test_an_older_schema_still_says_re_run_the_dump(self):
         line = dump_meta.describe(dump_meta.of_graph(self._graph(schema=2)))
         self.assertIn("re-run /recipedump", line)
+
+    def test_a_graph_older_than_the_digest_format_says_stock_cannot_match(self):
+        """Two severities must not wear one sentence.
+
+        A dump missing a newer FIELD costs a feature and the graph is still correct. A dump
+        older than the digest format means every discriminated key in it is one the current
+        reader never computes, so AE2 stock silently reads as zero. Telling someone to
+        "pick up newer fields" for the second case understates it into a chore.
+        """
+        line = dump_meta.describe(dump_meta.of_graph(
+            self._graph(schema=nbt_digest.DIGEST_FORMAT_SCHEMA - 1)))
+        self.assertIn("DIGEST FORMAT", line)
+        self.assertIn("stock cannot match", line)
+        self.assertIn("re-run /recipedump", line)
+
+    def test_a_graph_at_the_digest_format_does_not_get_that_warning(self):
+        # The warning has to be believed the once it matters, so it must not fire on a graph
+        # whose digests are current.
+        line = dump_meta.describe(dump_meta.of_graph(
+            self._graph(schema=nbt_digest.DIGEST_FORMAT_SCHEMA)))
+        self.assertNotIn("DIGEST FORMAT", line)
 
     def test_a_graph_with_no_dump_at_all_reports_unknown_provenance(self):
         line = dump_meta.describe(dump_meta.of_graph(self._graph(schema=0,

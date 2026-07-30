@@ -217,6 +217,94 @@ class Churn(unittest.TestCase):
         self.assertEqual(result["mods"]["plustic"], 1)
 
 
+class ForcedPairing(unittest.TestCase):
+    """Whether a pairing was certain or guessed, which decides if a row is evidence.
+
+    A group holding one candidate per side pairs one way and one way only, so every tag
+    difference in it is real. A group holding several can be paired wrongly, and a wrong
+    pairing compares two genuinely different variants -- reporting CONTENT differences that
+    never happened to any single item.
+
+    This is not a hypothetical refinement. On the reference pack it is the whole difference
+    between #80's two answers: `ench` moved on 2,423 pairs of which 1,335 were forced, and
+    `StoredEnchantments` moved on 4 of which none were. Read together they look like one
+    family of findings; read apart, only the first exists.
+    """
+
+    def test_a_lone_pair_in_a_group_is_forced(self):
+        old = ({"a:b#1": tags(T=("o1", "s"))}, {"a:b#1": "N"})
+        new = ({"a:b#2": tags(T=("o2", "s"))}, {"a:b#2": "N"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["forced_changed_items"], 1)
+        self.assertEqual(result["tags"]["T"]["forced"], 1)
+        self.assertEqual(result["tags"]["T"]["forced_order_only"], 1)
+
+    def test_a_pairing_chosen_out_of_several_candidates_is_not_forced(self):
+        # Two variants each side: the greedy choice may be right, but nothing here proves it.
+        old = ({"a:b#o1": tags(T=("x1", "s")), "a:b#o2": tags(T=("y1", "s"))},
+               {"a:b#o1": "N", "a:b#o2": "N"})
+        new = ({"a:b#n1": tags(T=("x2", "s")), "a:b#n2": tags(T=("y2", "s"))},
+               {"a:b#n1": "N", "a:b#n2": "N"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["changed_items"], 2)
+        self.assertEqual(result["forced_changed_items"], 0)
+        self.assertEqual(result["tags"]["T"]["changed"], 2)
+        self.assertEqual(result["tags"]["T"].get("forced", 0), 0)
+
+    def test_forced_order_only_tracks_the_sorted_digest_too(self):
+        # A forced pair whose sorted digest ALSO moved is a content change, and the forced
+        # order-only count must not claim sorting would have fixed it.
+        old = ({"a:b#1": tags(T=("o1", "u1"))}, {"a:b#1": "N"})
+        new = ({"a:b#2": tags(T=("o2", "u2"))}, {"a:b#2": "N"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["tags"]["T"]["forced"], 1)
+        self.assertEqual(result["tags"]["T"].get("forced_order_only", 0), 0)
+
+    def test_forced_counts_are_broken_down_by_mod_as_well(self):
+        # #80's two causes turned out to be mod-disjoint, and that was only visible once the
+        # per-mod split was taken over forced pairs.
+        old = ({"tconstruct:a#1": tags(T=("o", "u"))}, {"tconstruct:a#1": "N1"})
+        new = ({"tconstruct:a#2": tags(T=("p", "v"))}, {"tconstruct:a#2": "N1"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["forced_mods"]["tconstruct"], 1)
+
+    def test_an_unchanged_item_is_never_counted_as_a_forced_change(self):
+        same = ({"a:b#1": tags(T=("o", "u"))}, {"a:b#1": "N"})
+        result = digest_churn.churn(same, same)
+        self.assertEqual(result["forced_changed_items"], 0)
+
+    def test_a_key_change_no_tag_explains_is_counted_apart(self):
+        """The residue that made the header disagree with its own rows.
+
+        The key digests the whole identity compound, so identical per-tag digests over an
+        identical tag set ought to mean an identical key. On the reference pack it does not,
+        6 times -- and not because of pairing: two entries in ONE dump were found sharing a
+        signature under different keys. Attributing these to a tag is impossible, and folding
+        them into the forced total made it exceed the sum of the per-tag rows by exactly 6
+        with nothing in the output naming the gap.
+        """
+        old = ({"a:b#1": tags(T=("same", "same"))}, {"a:b#1": "N"})
+        new = ({"a:b#2": tags(T=("same", "same"))}, {"a:b#2": "N"})
+        result = digest_churn.churn(old, new)
+        self.assertEqual(result["changed_items"], 1, "the key did change")
+        self.assertEqual(result["unexplained"], 1)
+        self.assertEqual(result["forced_changed_items"], 0)
+        self.assertEqual(result["tags"].get("T", {}).get("changed", 0), 0)
+
+    def test_the_forced_total_equals_the_sum_of_what_the_tags_explain(self):
+        # The invariant the `unexplained` bucket exists to preserve: every forced change is
+        # attributed to at least one tag, so a reader can add the rows up and get the header.
+        old_trace, old_names, new_trace, new_names = {}, {}, {}, {}
+        for i, (o, n) in enumerate([("x", "y"), ("p", "q"), ("same", "same")]):
+            old_trace["a:b%d#o" % i] = tags(T=(o, "s"))
+            old_names["a:b%d#o" % i] = "N%d" % i
+            new_trace["a:b%d#n" % i] = tags(T=(n, "s"))
+            new_names["a:b%d#n" % i] = "N%d" % i
+        result = digest_churn.churn((old_trace, old_names), (new_trace, new_names))
+        self.assertEqual(result["unexplained"], 1)
+        self.assertEqual(result["forced_changed_items"], result["tags"]["T"]["forced"])
+
+
 class Loading(unittest.TestCase):
 
     def _dump(self, root, name, trace, names):

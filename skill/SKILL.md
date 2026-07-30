@@ -193,7 +193,7 @@ docker run --rm --user 99:100 --memory=4g \
 ```
 
 **Verified 2026-07-29: BUILD SUCCESSFUL, 12 of 12 tests pass, and
-`mod/build/libs/mc-recipe-dump-0.5.0.jar` comes out reobfuscated.** About 9m20s cold, since
+`mod/build/libs/mc-recipe-dump-0.8.0.jar` comes out reobfuscated.** About 9m20s cold, since
 RFG decompiles and patches Minecraft through fernflower on first run, then about 4m45s with
 `/coding/.recipegraph-build/gradle-cache` warm. Keep that cache directory.
 
@@ -215,12 +215,20 @@ So the true gate on #36 (item icons), #50 (ProjectE EMC), #55 (Modular Machinery
 names), #63 (`COSMETIC_TAGS`) and #80 (digest churn) is the in-game `/recipedump`, and
 everything up to that is ours to do: write the Java, compile it here, hand Jake a jar.
 
+**#63 and #80 are written and compiled as of v0.8.0 (dump schema 4).** Both were one jar
+because each re-keys every discriminated item, so they cost one redump between them rather
+than two. After installing it the order is `/recipedump`, then `recipegraph build`, then
+`recipegraph have` -- skipping the last strands every discriminated key, and `have` now says
+so rather than leaving it to be noticed.
+
 **A DUMP FROM AN UNCHANGED JAR BUYS NOTHING, AND COSTS THE CHURN.** Before asking for a
 launch, check that the installed jar emits something the last one did not. Re-running
 `/recipedump` on the same mod version against the same pack re-rolls #80's ~11,353 digests
 for no new data, which re-strands AE2 stock and forces a `have` re-run: strictly negative.
 `mod_version` is stamped into `summary.json` and shown in the UI footer, so it is the thing
-to compare. v0.6.0 is the first jar that can write `nbt_trace.json`; v0.7.0 writes it by default.
+to compare. v0.6.0 is the first jar that can write `nbt_trace.json`; v0.7.0 writes it by
+default; v0.8.0 changes the digest itself, so it is the one jar whose redump is worth a
+launch right now.
 
 **THE DESKTOP BUILDS AND TOWER SERVES, but not because Tower cannot build.** That was the
 standing claim and it is wrong: the AMP server instance has both prerequisites, 364 jars in
@@ -718,7 +726,7 @@ across a two-minute solve froze every other page.
 | ore dictionary | dump mod's `oredict.json`, or `/ct oredict` → `crafttweaker.log` | otherwise inferred from names (labelled heuristic, ~43% recovery) |
 | category → machine | dump mod's `catalysts.json` (v0.4.0+) | **authoritative**; without it two thirds of categories read `unknown` |
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
-| why a digest churned | `nbt_trace.json`, written by every dump (v0.7.0+) | #80 diagnostic; `notrace` skips it. Read by `tools/digest-churn.py`, not by `build` |
+| why a digest churned | `nbt_trace.json`, written by every dump (v0.7.0+) | #80 diagnostic; `notrace` skips it. Read by `tools/digest-churn.py`, not by `build`. READ ITS `forced` COLUMN, never `changed` |
 
 ## Pinning a recipe choice
 
