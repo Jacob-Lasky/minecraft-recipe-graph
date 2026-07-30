@@ -23,6 +23,9 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# tests/ itself, so `import fixtures` works under `-m unittest tests.<mod>` and
+# not only under `discover -s tests`, which inserts this directory for us.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
 from recipegraph import (generators, graphview, index, machines, pins,  # noqa: E402
@@ -1104,6 +1107,59 @@ class ServerTest(LiveServerCase):
             self.assertEqual(caught.exception.status, 404)
 
 
+
+
+class MachineBuildCostIsWiredIntoTheServerTest(unittest.TestCase):
+    """The served cost table has to carry the entry costs, or #86 is fixed only in the CLI.
+
+    `refresh_machines` passes `machines.build_targets(...)` into `estimate_cached`. Deleting
+    that one argument breaks nothing, raises nothing, and silently returns the whole ranking
+    to the flat constant on the deployed surface -- which is the surface Jake uses. Nothing
+    else in this suite would notice.
+
+    Uses its OWN graph rather than `build_graph`, because a buildable machine needs a recipe
+    producing the machine item and that would move the machines page's category counts, which
+    the shared fixture warns about by name.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:part": "Part", "mod:press": "Press"}
+        g.add(Recipe("make", "t", [("mod:widget", 1)], [Ingredient(["mod:part"], 1)],
+                     category="mod.press", machine="Press"))
+        # What makes `mod.press` BUILDABLE rather than unavailable: the machine is craftable.
+        g.add(Recipe("mk_press", "t", [("mod:press", 1)], [Ingredient(["mod:part"], 4)],
+                     category="minecraft.crafting"))
+        cls.dir = tempfile.mkdtemp()
+        path = os.path.join(cls.dir, "graph.json")
+        g.save(path)
+        have = os.path.join(cls.dir, "have.json")
+        with open(have, "w") as fh:
+            json.dump({"items": {"mod:part": 8}, "placed": {}}, fh)
+        cls.state = server.State(
+            path, have, os.path.join(cls.dir, "machines.json"),
+            sources_path=os.path.join(cls.dir, "sources.json"),
+            tokens_path=os.path.join(cls.dir, "tokens.json"),
+            pins_path=os.path.join(cls.dir, "pins.json"))
+
+    def test_the_category_is_buildable_so_there_is_something_to_price(self):
+        # Guards the fixture itself: if the machine stopped being buildable, the assertion
+        # below would pass on an empty dict and prove nothing.
+        self.assertEqual(self.state.states["mod.press"][0], machines.BUILDABLE)
+
+    def test_the_served_cost_table_carries_the_machine_entry_costs(self):
+        self.assertTrue(getattr(self.state.costs, "machine_entry", None),
+                        "the server's cost table lost the #86 entry costs, so every "
+                        "buildable machine is back to the flat constant")
+        self.assertIn("mod.press", self.state.costs.machine_entry)
+
+    def test_the_entry_cost_is_derived_from_the_machine_not_the_constant(self):
+        from recipegraph import cost as cost_mod
+        entry = self.state.costs.machine_entry["mod.press"]
+        self.assertGreater(entry, cost_mod.MACHINE_COST["buildable"],
+                           "a machine costing 4 parts must price above the bare floor")
+        self.assertLess(entry, cost_mod.MACHINE_COST["unknown"])
 
 
 class EnsureGraphTest(unittest.TestCase):

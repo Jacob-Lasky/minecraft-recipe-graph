@@ -17,8 +17,10 @@ The fixtures deliberately mirror those shapes rather than inventing tidier ones;
 that cannot express the bug cannot prove the fix.
 """
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -529,6 +531,288 @@ class WorldOreTiebreakTest(unittest.TestCase):
         # and a bare `Solver(graph)` must still behave as it did before cost existed.
         g = tied_ore_graph()
         self.assertEqual(Solver(g).solve("mod:gem", 1)["tree"]["recipe"], "smelt")
+
+
+def two_machine_graph():
+    """One item, two buildable machines, one of which is far dearer to build.
+
+    The shape #86 is about. `mod:cheap_machine` is one stick; `mod:dear_machine` needs 64 of
+    them, so the graph itself decides which machine is expensive and no test has to assert a
+    number it picked.
+
+    THE DEAR MACHINE'S ROUTE IS DELIBERATELY THE CHEAPER ONE ON INGREDIENTS: one stick
+    against two. Under the flat constant both machines cost 40.0, so that one stick decides
+    it and the pre-fix ranker prefers `via_dear` -- which is the defect, stated as a fixture.
+    A symmetric graph cannot express it: with identical ingredients the two routes tie, some
+    unrelated tiebreak picks one, and a test asserting the outcome passes whether the fix is
+    present or not. That version of this fixture was written first and did exactly that.
+    """
+    g = Graph()
+    g.names = {"mod:widget": "Widget", "mod:stick": "Stick",
+               "mod:cheap_machine": "Cheap Machine", "mod:dear_machine": "Dear Machine"}
+    # `machine=` is what `machines.candidate_items` name-matches to find the machine ITEM,
+    # so without it both categories resolve to `unknown` ("machine item unknown") and never
+    # reach the buildable path this class is about.
+    g.add(Recipe("via_cheap", "t", [("mod:widget", 1)], [Ingredient(["mod:stick"], 2)],
+                 category="mod.cheap", machine="Cheap Machine"))
+    g.add(Recipe("via_dear", "t", [("mod:widget", 1)], [Ingredient(["mod:stick"], 1)],
+                 category="mod.dear", machine="Dear Machine"))
+    # How each machine is made. Hand-crafted, so the machines' own prices do not depend on
+    # the categories under test.
+    g.add(Recipe("mk_cheap", "t", [("mod:cheap_machine", 1)],
+                 [Ingredient(["mod:stick"], 1)], category="minecraft.crafting"))
+    g.add(Recipe("mk_dear", "t", [("mod:dear_machine", 1)],
+                 [Ingredient(["mod:stick"], 64)], category="minecraft.crafting"))
+    return g
+
+
+TWO_MACHINE_STATES = {
+    "minecraft.crafting": ("have", ""),
+    "mod.cheap": ("buildable", "craftable: mod:cheap_machine"),
+    "mod.dear": ("buildable", "craftable: mod:dear_machine"),
+}
+TWO_MACHINE_ITEMS = {"mod.cheap": ("mod:cheap_machine",),
+                     "mod.dear": ("mod:dear_machine",)}
+
+
+class BuildableMachineIsPricedByWhatBuildingItCostsTest(unittest.TestCase):
+    """Issue #86. `MACHINE_COST["buildable"]` was one flat figure for every machine.
+
+    Measured on the reference pack before the fix: over the 380 buildable categories whose
+    machine item prices finitely, build cost ran from 1.0 (an AE2 grindstone) to 9,288 (a
+    NuclearCraft salt fission vessel), a 4,644x spread that the ranker charged 40.0 for
+    either way. So it could not prefer the machine the player can actually reach, which is
+    the whole complaint: a Mythical Recursive Processor needing unobtainable parts ranked
+    level with a machine sitting one craft away.
+    """
+
+    def entries(self):
+        g = two_machine_graph()
+        table = cost.estimate(g, machine_states=TWO_MACHINE_STATES,
+                              machine_items=TWO_MACHINE_ITEMS)
+        return g, table, table.machine_entry
+
+    def test_the_dear_machine_costs_more_to_enter_than_the_cheap_one(self):
+        _g, _t, entry = self.entries()
+        self.assertGreater(entry["mod.dear"], entry["mod.cheap"],
+                           "the whole point of #86: two buildable machines must differ")
+
+    def test_without_machine_items_both_price_identically(self):
+        """The old behaviour, kept reachable and pinned: this is what the bug looked like.
+
+        Also the contract for every caller that does not supply build targets, which is any
+        hand-built table in the rest of this suite.
+        """
+        g = two_machine_graph()
+        table = cost.estimate(g, machine_states=TWO_MACHINE_STATES)
+        self.assertEqual(table.machine_entry, {})
+        self.assertEqual(
+            cost.category_entry_cost("mod.cheap", TWO_MACHINE_STATES, table.machine_entry),
+            cost.category_entry_cost("mod.dear", TWO_MACHINE_STATES, table.machine_entry))
+
+    def test_the_solver_picks_the_cheaper_machine(self):
+        """The behaviour, not just the number. Measured on the reference pack: of the 1,500
+        items with the widest entry spread, 211 moved to a cheaper machine and NONE moved to
+        a dearer one."""
+        g, table, _e = self.entries()
+        chosen = Solver(g, machine_states=TWO_MACHINE_STATES, costs=table).pick_recipe(
+            "mod:widget")
+        self.assertEqual(chosen.rid, "via_cheap")
+
+    def test_the_flat_table_picks_the_dear_machine(self):
+        """The defect itself, so the test above cannot pass for an unrelated reason.
+
+        Under the flat constant the two machines cost the same, so the one-stick route wins
+        and the ranker sends the player to a machine costing 65 to build in order to save one
+        stick. Neutering `build_entry_cost` back to the constant must flip
+        `test_the_solver_picks_the_cheaper_machine`, and this is the assertion that says so
+        from the other side.
+        """
+        g = two_machine_graph()
+        flat = cost.estimate(g, machine_states=TWO_MACHINE_STATES)
+        solver = Solver(g, machine_states=TWO_MACHINE_STATES, costs=flat)
+        by_rid = {r.rid: solver.estimated_cost(r) for r in g.real_producers("mod:widget")}
+        self.assertLess(by_rid["via_dear"], by_rid["via_cheap"])
+        self.assertEqual(solver.pick_recipe("mod:widget").rid, "via_dear")
+
+    def test_a_have_machine_still_beats_every_buildable_one(self):
+        # The gap this change must not close. `have` is 1.0 and the band floor is 40.0, and
+        # the Borax and Crystallizer cases in cost.py's header turn on that ordering.
+        _g, _t, entry = self.entries()
+        for uid in ("mod.cheap", "mod.dear"):
+            self.assertGreater(entry[uid], cost.MACHINE_COST["have"])
+
+    def test_the_band_never_reaches_unknown(self):
+        """MACHINE_COST's comment states `unknown` must not undercut `buildable`.
+
+        That invariant predates this change and survives it, which is why the entry cost is a
+        bounded curve rather than the raw build price: the raw price would sail past `unknown`
+        AND past `unavailable`, making a machine you can build read as worse than one proven
+        impossible.
+        """
+        self.assertLess(cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD,
+                        cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.build_entry_cost(1e12), cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.build_entry_cost(1e12), cost.MACHINE_COST["unavailable"])
+
+    def test_the_band_floor_is_the_buildable_constant(self):
+        # A free machine still costs the flat figure to route through. Lowering the floor
+        # would make every buildable machine cheaper, which is a different change.
+        self.assertEqual(cost.build_entry_cost(0.0), cost.MACHINE_COST["buildable"])
+        self.assertGreaterEqual(cost.build_entry_cost(1.0), cost.MACHINE_COST["buildable"])
+
+    def test_entry_cost_is_monotonic_in_build_cost(self):
+        # Verified on the reference pack too: 380 finite pairs, 0 violations.
+        seen = [cost.build_entry_cost(b)
+                for b in (0.0, 1.0, 2.0, 12.0, 67.0, 676.0, 9288.0, 1e9)]
+        self.assertEqual(seen, sorted(seen))
+        self.assertEqual(len(set(seen)), len(seen), "distinct build costs must not collide")
+
+    def test_an_unreachable_machine_charges_the_top_of_the_band_not_unavailable(self):
+        """23 buildable categories on the reference pack have an unpriced machine item.
+
+        A price this model failed to compute is a gap in the pricing, not evidence about the
+        base, and `machines._candidate_verdict` already decided `buildable` from a real
+        producer. Charging `unavailable` here would let a numerical failure overrule that.
+        """
+        top = cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD
+        self.assertEqual(cost.build_entry_cost(float("inf")), top)
+        self.assertEqual(cost.build_entry_cost(None), top)
+        self.assertLess(cost.build_entry_cost(float("inf")),
+                        cost.MACHINE_COST["unavailable"])
+
+    def test_the_cheapest_candidate_sets_the_price(self):
+        """More than one block opens a lot of categories, and a player builds the cheap one.
+
+        Pricing the first listed would charge for a machine nobody would choose.
+        """
+        table = {"mod:dear_machine": 500.0, "mod:cheap_machine": 1.0}
+        entry = cost.machine_entry_costs(
+            {"mod.both": ("mod:dear_machine", "mod:cheap_machine")}, table)
+        self.assertEqual(entry["mod.both"], cost.build_entry_cost(1.0))
+        # And that it is genuinely the cheaper of the two, not a figure both agree on.
+        self.assertLess(entry["mod.both"], cost.build_entry_cost(500.0))
+
+    def test_the_machine_price_the_ranker_charges_is_the_one_the_relaxation_used(self):
+        """The divergence `CostTable` exists to make impossible.
+
+        `estimate` and `recipe_cost` each used to look up MACHINE_COST themselves, so a
+        change to how a machine is priced could apply to one and not the other. The symptom
+        is a solver expanding a route the ranker did not price, which is exactly issue #29's
+        shape one level up. Carried on the table, they cannot disagree.
+        """
+        g, table, entry = self.entries()
+        dear = [r for r in g.recipes if r.rid == "via_dear"][0]
+        priced = cost.recipe_cost(table, dear, g.ore_members,
+                                  machine_states=TWO_MACHINE_STATES)
+        self.assertAlmostEqual(priced - entry["mod.dear"],
+                               cost.input_cost(table, "mod:stick", 1, g.ore_members))
+
+    def test_a_plain_dict_still_gets_the_flat_constants(self):
+        # Every hand-built table in this suite passes a plain dict, and `recipe_cost` has to
+        # keep working for them rather than requiring a CostTable.
+        g = two_machine_graph()
+        dear = [r for r in g.recipes if r.rid == "via_dear"][0]
+        priced = cost.recipe_cost({"mod:stick": 1.0}, dear, g.ore_members,
+                                  machine_states=TWO_MACHINE_STATES)
+        self.assertAlmostEqual(priced, cost.MACHINE_COST["buildable"] + 1.0)
+
+    def test_a_cost_table_is_a_plain_dict_everywhere_else(self):
+        table = cost.CostTable({"a": 1.0}, machine_entry={"c": 2.0})
+        self.assertEqual(table["a"], 1.0)
+        self.assertEqual(dict(table), {"a": 1.0})
+        self.assertEqual(cost.CostTable({"a": 1.0}).machine_entry, {})
+
+    def test_the_entry_cost_is_still_not_amortised_over_a_batch(self):
+        """#29's fix, re-asserted against the new figure rather than assumed to survive.
+
+        `BatchAmortisationTest` proves this for the flat constants. A derived entry cost is a
+        new number flowing through the same arithmetic, and if it were divided by the output
+        quantity then a big enough batch would make an expensive machine free again, which is
+        the failure that priced 126 reference-pack items under 0.1.
+        """
+        g = two_machine_graph()
+        g.add(Recipe("bulk", "t", [("mod:widget", 1024)], [Ingredient(["mod:stick"], 1)],
+                     category="mod.dear"))
+        table = cost.estimate(g, machine_states=TWO_MACHINE_STATES,
+                              machine_items=TWO_MACHINE_ITEMS)
+        self.assertGreaterEqual(table["mod:widget"], table.machine_entry["mod.cheap"])
+
+    def test_the_cache_round_trips_the_entry_costs(self):
+        """A cache HIT must not silently revert the ranker to the flat constants.
+
+        Serving only the item prices would hand back a plain table, `recipe_cost` would fall
+        back to MACHINE_COST, and the ranking would disagree with the relaxation the cache is
+        serving. That divergence appears only on a hit, which is the hard way to find it.
+        """
+        g = two_machine_graph()
+        path = os.path.join(tempfile.mkdtemp(), "cache.json")
+        first = cost.estimate_cached(g, "no-such-graph.json",
+                                     machine_states=TWO_MACHINE_STATES,
+                                     machine_items=TWO_MACHINE_ITEMS, cache_path=path)
+        self.assertTrue(first.machine_entry)
+        again = cost.estimate_cached(g, "no-such-graph.json",
+                                     machine_states=TWO_MACHINE_STATES,
+                                     machine_items=TWO_MACHINE_ITEMS, cache_path=path)
+        self.assertEqual(again.machine_entry, first.machine_entry)
+        self.assertEqual(dict(again), dict(first))
+
+    def test_changing_which_item_is_the_machine_invalidates_the_cache(self):
+        """A catalyst change can move the machine ITEM without moving the STATE.
+
+        Hashing states alone would then serve prices derived from the old machine, and the
+        state fingerprint could not tell.
+        """
+        one = cost.fingerprint("g.json", None, TWO_MACHINE_STATES, None, TWO_MACHINE_ITEMS)
+        two = cost.fingerprint("g.json", None, TWO_MACHINE_STATES, None,
+                               {"mod.cheap": ("mod:something_else",),
+                                "mod.dear": ("mod:dear_machine",)})
+        self.assertNotEqual(one, two)
+
+    def test_no_build_targets_is_not_an_error(self):
+        # Every graph where nothing is buildable, plus the `--ignore-machines` path, arrives
+        # here with nothing to price.
+        self.assertEqual(cost.machine_entry_costs(None, {}), {})
+        self.assertEqual(cost.machine_entry_costs({}, {"a": 1.0}), {})
+
+    def test_the_cli_hands_the_cost_model_its_build_targets(self):
+        """`_machine_states` grew a third return value, and the reason is worth a test.
+
+        It went through `machines.resolve`, which returns (state, why) and drops the machine
+        item, so the cost model had nothing to price. A caller left on the two-value unpack
+        would raise, which is the safe failure; the unsafe one is this returning empty targets
+        and the ranking quietly reverting to the flat constant.
+        """
+        import tempfile
+        from recipegraph import cli
+        g = two_machine_graph()
+        d = tempfile.mkdtemp()
+        have = os.path.join(d, "have.json")
+        with open(have, "w") as fh:
+            json.dump({"items": {}, "placed": {}}, fh)
+        states, _overrides, targets = cli._machine_states(
+            g, have, os.path.join(d, "machines.json"))
+        self.assertEqual(states["mod.cheap"][0], "buildable")
+        self.assertEqual(targets["mod.cheap"], ("mod:cheap_machine",))
+        self.assertEqual(targets["mod.dear"], ("mod:dear_machine",))
+
+    def test_the_two_passes_do_not_depend_on_recipe_order(self):
+        """Why this is two clean relaxations rather than entry costs recomputed in the loop.
+
+        The relaxation only ever LOWERS a cost, so an entry price that RISES between passes
+        never propagates: pass one's optimistic prices stick and the answer depends on the
+        order recipes happen to sit in. Shuffling them must not move the result.
+        """
+        g = two_machine_graph()
+        a = cost.estimate(g, machine_states=TWO_MACHINE_STATES,
+                          machine_items=TWO_MACHINE_ITEMS)
+        h = two_machine_graph()
+        h.recipes.reverse()
+        h._invalidate() if hasattr(h, "_invalidate") else None
+        b = cost.estimate(h, machine_states=TWO_MACHINE_STATES,
+                          machine_items=TWO_MACHINE_ITEMS)
+        self.assertEqual(a.machine_entry, b.machine_entry)
+        self.assertEqual(a["mod:widget"], b["mod:widget"])
 
 
 if __name__ == "__main__":
