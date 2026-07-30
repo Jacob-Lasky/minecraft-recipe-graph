@@ -22,6 +22,7 @@ from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_
                        DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES, DEFAULT_TOKENS)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
+from .sources import dump_meta
 
 
 
@@ -35,7 +36,8 @@ def _duration(text):
 
 
 def cmd_build(args):
-    g = index.build(args.instance, hei_path=args.hei, no_guess=args.no_guess)
+    g = index.build(args.instance, hei_path=args.hei, no_guess=args.no_guess,
+                    dump_dir=args.dump_dir)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     g.save(args.out)
     print("wrote %s (%.1f MB)" % (args.out, os.path.getsize(args.out) / 1e6))
@@ -454,7 +456,7 @@ def _dump_newer_than_graph(graph_path, instance_dir):
     """True when a `/recipedump` has happened since this graph was built."""
     if not instance_dir:
         return False
-    dump = os.path.join(instance_dir, "mc-recipe-dump", "recipes.ndjson")
+    dump = os.path.join(dump_meta.dir_for(instance_dir), "recipes.ndjson")
     if not (os.path.exists(dump) and os.path.exists(graph_path)):
         return False
     return os.path.getmtime(dump) > os.path.getmtime(graph_path)
@@ -717,6 +719,12 @@ def main(argv=None):
     p = sub.add_parser("build", help="extract recipes into a graph")
     p.add_argument("--instance", required=True, help="the pack's minecraft/ dir")
     p.add_argument("--hei", help="path to recipes.ndjson from the dump mod")
+    # `--hei` alone is a TRAP for a preserved dump: it redirects recipes.ndjson while
+    # names/oredict/catalysts keep coming from the canonical directory, mixing two dumps
+    # into one graph without saying so. Preserving a dump is required by #80's churn proof,
+    # since a second /recipedump rewrites the directory in place, so this has to exist.
+    p.add_argument("--dump-dir", help="the mc-recipe-dump/ dir to read, if not the one "
+                                      "inside --instance (e.g. a preserved mc-recipe-dump.run1)")
     p.add_argument("--out", default=DEFAULT_GRAPH)
     p.add_argument("--no-guess", action="store_true",
                    help="disable heuristic oredict inference")
@@ -792,8 +800,8 @@ def main(argv=None):
     p.set_defaults(fn=cmd_metrics)
 
     p = sub.add_parser("gaps", help="what the graph is blind to, from the dump skip log")
-    p.add_argument("--dump-dir", default="mc-recipe-dump",
-                   help="the mc-recipe-dump/ dir written by /recipedump")
+    p.add_argument("--dump-dir", default=dump_meta.DIR_NAME,
+                   help="the %s/ dir written by /recipedump" % dump_meta.DIR_NAME)
     p.add_argument("--json")
     p.set_defaults(fn=cmd_gaps)
 

@@ -11,13 +11,17 @@ from .sources import hei_dump, jar_json, oredict
 
 
 def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
-          keep_categories=None):
+          keep_categories=None, dump_dir=None):
     def say(msg):
         if not quiet:
             print(msg, file=sys.stderr)
 
     g = Graph()
     g.instance_dir = os.path.abspath(instance_dir)
+
+    # Resolved ONCE and used for every file read out of the dump, so a graph cannot end up
+    # holding recipes from one dump and names from another. See dump_meta.DIR_NAME.
+    dump_root = dump_meta.dir_for(instance_dir, dump_dir)
 
     csv_path = find_items_csv(instance_dir)
     if csv_path:
@@ -27,7 +31,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("names: items.csv NOT FOUND -- output will show raw ids")
 
     # Ore dictionary: the mod's dump wins, /ct oredict log is the fallback.
-    od_json = os.path.join(instance_dir, "mc-recipe-dump", "oredict.json")
+    od_json = os.path.join(dump_root, "oredict.json")
     ct_log = os.path.join(instance_dir, "crafttweaker.log")
     if os.path.exists(od_json):
         g.ore_members = oredict.from_json(od_json)
@@ -54,15 +58,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 
     # Provenance first: everything else read from this directory is only as current as the
     # dump that produced it, so say which mod wrote it before reporting what it contained.
-    dump_dir = os.path.join(instance_dir, "mc-recipe-dump")
-    meta = dump_meta.read(dump_dir)
+    meta = dump_meta.read(dump_root)
     say(dump_meta.describe(meta))
     g.dump_schema = meta["schema"] or 0
     g.dump_version = meta["mod_version"] or None
 
     # After items.csv, and with setdefault, so the pack's own export stays authoritative
     # for anything it covers. This only has to reach the keys items.csv cannot express.
-    dumped_names = dump_names.load(dump_names.find(instance_dir))
+    dumped_names = dump_names.load(dump_names.find(instance_dir, dump_dir))
     if dumped_names:
         added = 0
         for key, label in dumped_names.items():
@@ -80,14 +83,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("names: %d were an unlocalized lang key ('tile.null.name'), relabelled from "
             "the registry path" % relabelled)
 
-    g.category_mods = dump_meta.category_mods(dump_dir)
+    g.category_mods = dump_meta.category_mods(dump_root)
     if g.category_mods:
         say("category mods: %d categories carry JEI's own mod name" % len(g.category_mods))
     else:
         say("category mods: summary.json has none -- the machines page will group by the "
             "first token of each category uid, which is a guess")
 
-    cat_path = catalysts_src.find(instance_dir)
+    cat_path = catalysts_src.find(instance_dir, dump_dir)
     if cat_path:
         g.catalysts = catalysts_src.load(cat_path)
         say("catalysts: %d categories have a known machine item (JEI's own \"made in\")"
@@ -96,7 +99,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("catalysts: catalysts.json not present -- machine identity falls back to "
             "matching category titles against item names, which misses ~2 in 3")
 
-    hei_path = hei_path or os.path.join(instance_dir, "mc-recipe-dump", "recipes.ndjson")
+    hei_path = hei_path or os.path.join(dump_root, "recipes.ndjson")
     if os.path.exists(hei_path):
         n = 0
         for recipe in hei_dump.extract(hei_path):
