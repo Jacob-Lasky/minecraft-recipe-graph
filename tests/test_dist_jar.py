@@ -13,11 +13,19 @@ claims to have built it, which is what this does, by reading the `SCHEMA` int co
 straight out of the compiled `DumpCommand.class` constant pool and the version out of
 `mcmod.info`.
 
+Those two catch a jar from an older SCHEMA or an older version, and NOT a jar from the same
+version built several commits ago -- most changes move neither number. That second, subtler
+staleness happened while adding the #80 trace: the jar was rebuilt, DumpCommand.java was then
+edited again, and every assertion here still passed. So the decisive check is
+`test_it_was_built_from_the_source_that_is_checked_in_now`, which compares a SHA-256 over
+`mod/src/main/java` against the copy `stampSourceHash` embeds in the jar at build time.
+
 Nothing here rebuilds the jar. That needs a JDK and about five minutes, so this asserts the
 committed artifact agrees with the committed source and fails loudly when it stops doing so.
 If it fails, rebuild and re-commit the jar; do not edit the numbers to match.
 """
 
+import hashlib
 import os
 import re
 import struct
@@ -53,6 +61,31 @@ def _source_version():
     with open(GRADLE_PROPS) as fh:
         m = re.search(r"^\s*mod_version\s*=\s*(\S+)", fh.read(), re.M)
     return m.group(1) if m else None
+
+
+def _source_hash():
+    """SHA-256 over the mod's main Java sources, matching `stampSourceHash` in build.gradle.
+
+    Sorted by relative path using Python's own string ordering, which is code-point order and
+    locale-INDEPENDENT, the same guarantee Java's String ordering gives on the Gradle side. A
+    locale-collated sort would make two byte-identical trees hash differently between hosts
+    and read as code drift -- the failure the skill records for exactly this shape of check.
+
+    Path AND content go in, so a rename with identical bytes still counts as a change.
+    """
+    src = os.path.join(ROOT, "mod", "src", "main", "java")
+    rels = []
+    for dirpath, _dirs, files in os.walk(src):
+        for name in files:
+            if name.endswith(".java"):
+                full = os.path.join(dirpath, name)
+                rels.append((os.path.relpath(full, src).replace(os.sep, "/"), full))
+    digest = hashlib.sha256()
+    for rel, full in sorted(rels):
+        digest.update(rel.encode("utf-8"))
+        with open(full, "rb") as fh:
+            digest.update(fh.read())
+    return digest.hexdigest()
 
 
 def _jar_schema(path):
@@ -117,6 +150,51 @@ class DistJarMatchesSourceTest(unittest.TestCase):
             blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
         for marker in (b"nbt", b"discriminator"):
             self.assertIn(marker, blob)
+
+    def test_it_was_built_from_the_source_that_is_checked_in_now(self):
+        """The gap every other assertion in this file leaves open.
+
+        SCHEMA and the capability markers only move when a change happens to touch them, so a
+        jar rebuilt several commits ago passes all of them while shipping behaviour that no
+        longer matches `mod/`. That is #81's rot one level subtler, and it happened during
+        this very change: DumpCommand.java was edited after the jar was built, and nothing
+        here noticed until the hashes were compared by hand.
+
+        `mod/build.gradle`'s `stampSourceHash` writes a SHA-256 over the main Java sources
+        into the jar, so the comparison needs no JDK and no rebuild. If this fails: rebuild
+        and re-commit the jar. Do NOT edit the expected value -- there isn't one to edit, it
+        is recomputed from the tree.
+        """
+        want = _source_hash()
+        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+            names = [n for n in z.namelist() if n.endswith("mcrecipedump-source.sha256")]
+            self.assertEqual(len(names), 1,
+                             "no source stamp in the jar: it predates stampSourceHash, so "
+                             "it is certainly stale. Rebuild and re-commit.")
+            got = z.read(names[0]).decode("utf-8").strip()
+        self.assertEqual(got, want,
+                         "dist/ was built from different source than mod/ holds now; "
+                         "rebuild and re-commit the jar")
+
+    def test_it_carries_the_nbt_trace_diagnostic(self):
+        # Same rot class as the schema check above, one capability later. A jar predating
+        # the issue #80 trace passes every other assertion here -- the schema did NOT move
+        # for it, deliberately -- so nothing else in this file would notice. Someone who
+        # clones the repo, installs a pre-0.6.0 jar and runs `/recipedump nbttrace` gets a
+        # normal dump with no nbt_trace.json and no complaint, and only finds out after
+        # spending a launch of the game on it.
+        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+            blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
+        # The suppress-arg literal is READ FROM THE SOURCE rather than written here. The
+        # assertion is "this jar carries the capability", not "the flag is spelled X" -- so a
+        # deliberate rename should follow along, while a jar that lost the capability still
+        # fails. Hardcoding it meant renaming `nbttrace` to `notrace` failed this test for
+        # the wrong reason and said nothing about the jar.
+        with open(JAVA_SRC) as fh:
+            arg = re.search(r'NO_TRACE_ARG\s*=\s*"([^"]+)"', fh.read())
+        self.assertIsNotNone(arg, "NO_TRACE_ARG not found in DumpCommand.java")
+        for marker in (arg.group(1).encode(), b"nbt_trace.json"):
+            self.assertIn(marker, blob, "this jar cannot write the #80 trace")
 
     def test_it_targets_java_8(self):
         with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:

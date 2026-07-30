@@ -39,7 +39,8 @@ import net.minecraftforge.oredict.OreDictionary;
 
 /**
  * `/recipedump` -- writes recipes.ndjson, catalysts.json, oredict.json, names.json,
- * skipped.ndjson and summary.json into &lt;gamedir&gt;/mc-recipe-dump/.
+ * skipped.ndjson, summary.json and nbt_trace.json into &lt;gamedir&gt;/mc-recipe-dump/.
+ * `/recipedump notrace` skips the last of those.
  *
  * The dump is SPREAD ACROSS CLIENT TICKS rather than run inline. It is only about a
  * second of work, but a second spent inside a command handler is a second the render
@@ -71,7 +72,44 @@ public class DumpCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/recipedump -- dump all JEI recipes for offline crafting-tree tools";
+        return "/recipedump [" + NO_TRACE_ARG + "] -- dump all JEI recipes for offline "
+                + "crafting-tree tools; " + NO_TRACE_ARG + " skips nbt_trace.json (#80)";
+    }
+
+    /**
+     * Argument that SUPPRESSES `nbt_trace.json`. Issue #80's diagnostic is ON by default.
+     *
+     * IT SHIPPED OPT-IN AND THAT WAS WRONG. The reasoning was that no part of
+     * `recipegraph build` reads the file, so a normal dump has no reason to carry it. That
+     * weighs the wrong cost. Measured on the reference pack the trace is 34.3 MB against a
+     * 245 MB dump -- 14% -- and the expensive part of producing one is not the bytes, it is
+     * a launch of the game.
+     *
+     * The asymmetry is what decides it. The file CANNOT be reconstructed afterwards: the
+     * NBT it describes exists only in a running JVM, which is the whole reason #80 could not
+     * be investigated for months. And proving churn needs TWO dumps carrying it, because the
+     * effect only appears BETWEEN JVM runs -- so opt-in means every dump is a coin flip and
+     * two in a row is the unlikely case. Default-on makes any two consecutive dumps
+     * comparable, which is the only state in which the question is answerable at all.
+     *
+     * Fails SAFE in the right direction too: a mistyped `notrace` writes the trace anyway,
+     * where a mistyped opt-in silently produced a dump that could not answer the question it
+     * was run for. Compared as lower case, and a leftover `nbttrace` from the older docs is
+     * simply ignored and still gets what it asked for.
+     */
+    static final String NO_TRACE_ARG = "notrace";
+
+    /** True unless `args` asks to suppress the trace. Unknown args are ignored, as before. */
+    static boolean wantsTrace(String[] args) {
+        if (args == null) {
+            return true;
+        }
+        for (String a : args) {
+            if (a != null && NO_TRACE_ARG.equalsIgnoreCase(a.trim())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -107,9 +145,10 @@ public class DumpCommand extends CommandBase {
             return;
         }
 
+        boolean traceNbt = wantsTrace(args);
         Runner runner;
         try {
-            runner = new Runner(sender, dir, registry, categories);
+            runner = new Runner(sender, dir, registry, categories, traceNbt);
         } catch (IOException e) {
             reply(sender, "cannot open output file: " + e);
             return;
@@ -117,6 +156,15 @@ public class DumpCommand extends CommandBase {
         active = runner;
         MinecraftForge.EVENT_BUS.register(runner);
         reply(sender, String.format("dumping %d recipe categories...", categories.size()));
+        if (traceNbt) {
+            // Say it up front either way. The trace being DEFAULT is the surprising half
+            // now, and a player who does not know it is being written cannot choose to
+            // skip it; a player who asked to skip needs to see that it took.
+            reply(sender, "  also writing nbt_trace.json (per-tag NBT digests)");
+        } else {
+            reply(sender, "  skipping nbt_trace.json -- this dump cannot be compared "
+                    + "against another for #80 digest churn");
+        }
     }
 
     /**
@@ -136,7 +184,7 @@ public class DumpCommand extends CommandBase {
         private final List<IRecipeCategory> categories;
         private final Writer writer;
 
-        private final Map<String, String> names = new LinkedHashMap<String, String>();
+        private final KeySink sink;
         private final Map<String, int[]> perCategory = new LinkedHashMap<String, int[]>();
         private final Map<String, String> categoryMod = new LinkedHashMap<String, String>();
         private final List<String> skips = new ArrayList<String>();
@@ -168,11 +216,12 @@ public class DumpCommand extends CommandBase {
         private final long startedAt = System.nanoTime();
 
         Runner(ICommandSender sender, File dir, IRecipeRegistry registry,
-               List<IRecipeCategory> categories) throws IOException {
+               List<IRecipeCategory> categories, boolean traceNbt) throws IOException {
             this.sender = sender;
             this.dir = dir;
             this.registry = registry;
             this.categories = categories;
+            this.sink = new KeySink(traceNbt);
             this.writer = new BufferedWriter(new OutputStreamWriter(
                     Files.newOutputStream(new File(dir, "recipes.ndjson").toPath()),
                     StandardCharsets.UTF_8));
@@ -283,7 +332,7 @@ public class DumpCommand extends CommandBase {
                 return;
             }
             try {
-                String line = encode((IRecipeWrapper) obj, uid, title, names);
+                String line = encode((IRecipeWrapper) obj, uid, title, sink);
                 if (line != null) {
                     writer.write(line);
                     writer.write('\n');
@@ -332,18 +381,27 @@ public class DumpCommand extends CommandBase {
             writeSummary(new File(dir, "summary.json"), perCategory, categoryMod,
                          recipes, failed);
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
-            int ores = writeOreDict(new File(dir, "oredict.json"), names);
-            writeNames(new File(dir, "names.json"), names);
+            int ores = writeOreDict(new File(dir, "oredict.json"), sink.names());
+            writeNames(new File(dir, "names.json"), sink.names());
+            // Diagnostic, so it is written LAST and its absence is normal: every dump
+            // that did not ask for it simply has no such file, exactly like a
+            // pre-0.4.0 dump has no catalysts.json.
+            int traced = sink.tracing()
+                    ? writeNbtTrace(new File(dir, "nbt_trace.json"), sink.trace()) : 0;
 
             long ms = (System.nanoTime() - startedAt) / 1_000_000L;
             reply(sender, String.format(
                     "done in %.1fs: %s recipes from %d categories, %d with a known machine, "
                             + "%s oredict entries, %s names -> %s",
                     ms / 1000.0, formatCount(recipes), perCategory.size(), catalysts.size(),
-                    formatCount(ores), formatCount(names.size()), dir.getName()));
+                    formatCount(ores), formatCount(sink.names().size()), dir.getName()));
             reply(sender, String.format(
                     "%s skipped, all recorded in skipped.ndjson (per-category counts in summary.json)",
                     formatCount(failed)));
+            if (sink.tracing()) {
+                reply(sender, String.format(
+                        "nbt_trace.json: %s keys with identifying NBT", formatCount(traced)));
+            }
             // The files are useless on their own, and in-game chat is the only place the
             // player is looking at this moment, so name the next step and the URL.
             //
@@ -409,12 +467,12 @@ public class DumpCommand extends CommandBase {
     }
 
     private static String encode(IRecipeWrapper wrapper, String uid, String title,
-                                 Map<String, String> names) throws IOException {
+                                 KeySink sink) throws IOException {
         CollectingIngredients collected = new CollectingIngredients();
         wrapper.getIngredients(collected);
 
-        String itemIn = stackSlots(collected.rawInputs(ItemStack.class), names);
-        String itemOut = flatStacks(collected.rawOutputs(ItemStack.class), names);
+        String itemIn = stackSlots(collected.rawInputs(ItemStack.class), sink);
+        String itemOut = flatStacks(collected.rawOutputs(ItemStack.class), sink);
         String fluidIn = fluidSlots(collected.rawInputs(FluidStack.class));
         String fluidOut = flatFluids(collected.rawOutputs(FluidStack.class));
 
@@ -426,13 +484,13 @@ public class DumpCommand extends CommandBase {
     }
 
     /** Nested: list of slots, each slot a list of interchangeable stacks. */
-    private static String stackSlots(List<List<Object>> slots, Map<String, String> names) {
+    private static String stackSlots(List<List<Object>> slots, KeySink sink) {
         StringBuilder sb = new StringBuilder("[");
         boolean firstSlot = true;
         for (List<Object> slot : slots) {
             List<String> alts = new ArrayList<String>();
             for (Object o : slot) {
-                String s = stack(o, names);
+                String s = stack(o, sink);
                 if (s != null) {
                     alts.add(s);
                 }
@@ -450,11 +508,11 @@ public class DumpCommand extends CommandBase {
     }
 
     /** Flat: outputs collapse to one stack per slot; alternatives do not matter. */
-    private static String flatStacks(List<List<Object>> slots, Map<String, String> names) {
+    private static String flatStacks(List<List<Object>> slots, KeySink sink) {
         List<String> out = new ArrayList<String>();
         for (List<Object> slot : slots) {
             for (Object o : slot) {
-                String s = stack(o, names);
+                String s = stack(o, sink);
                 if (s != null) {
                     out.add(s);
                     break;
@@ -501,7 +559,7 @@ public class DumpCommand extends CommandBase {
         return "[" + String.join(",", out) + "]";
     }
 
-    private static String stack(Object o, Map<String, String> names) {
+    private static String stack(Object o, KeySink sink) {
         if (!(o instanceof ItemStack)) {
             return null;
         }
@@ -515,11 +573,50 @@ public class DumpCommand extends CommandBase {
         }
         int meta = stack.getItemDamage();
         String nbt = discriminator(stack);
-        if (names != null) {
+        if (sink != null) {
             String key = meta == 0 ? id.toString() : id + ":" + meta;
             if (nbt != null) {
                 key = key + "#" + nbt;
             }
+            sink.record(key, stack);
+        }
+        return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
+                + ",\"c\":" + stack.getCount()
+                + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"") + "}";
+    }
+
+    /**
+     * The per-unique-key sinks a dump fills as it walks: display names always, and the
+     * issue #80 NBT trace when `/recipedump nbttrace` asked for it.
+     *
+     * ONE object rather than two threaded parameters because they are the same kind of
+     * thing -- write-once-per-discriminated-key -- and because the KEY FORMAT
+     * (`id[:meta][#digest]`) has to be identical in both files or they cannot be joined.
+     * Building that string in one place is what guarantees it.
+     */
+    static final class KeySink {
+
+        private final Map<String, String> names = new LinkedHashMap<String, String>();
+        /** null when not tracing, which is how every normal dump runs. */
+        private final Map<String, String> trace;
+
+        KeySink(boolean traceNbt) {
+            this.trace = traceNbt ? new LinkedHashMap<String, String>() : null;
+        }
+
+        Map<String, String> names() {
+            return names;
+        }
+
+        Map<String, String> trace() {
+            return trace;
+        }
+
+        boolean tracing() {
+            return trace != null;
+        }
+
+        void record(String key, ItemStack stack) {
             if (!names.containsKey(key)) {
                 try {
                     // Keyed by the DISCRIMINATED id, so "Forest Drone" and "Meadows
@@ -531,10 +628,21 @@ public class DumpCommand extends CommandBase {
                     // a few modded items throw on getDisplayName outside a render pass
                 }
             }
+            // GATED ON THE '#', not on tagDigests returning null, and the difference is
+            // work rather than output. `stack` appends `#<digest>` if and only if the stack
+            // has identifying NBT, so the hash IS the predicate. Testing it by calling
+            // tagDigests and discarding a null instead means every stack WITHOUT identity
+            // -- the majority -- is recomputed on each of its occurrences across ~117k
+            // recipes, because nothing ever lands in the map to short-circuit the next one.
+            // The dump runs on a 15ms per-tick budget, so that is frames.
+            // `theTraceOnlyLooksAtKeysCarryingADigest` pins the coupling to the key format.
+            if (trace != null && key.indexOf('#') >= 0 && !trace.containsKey(key)) {
+                String digests = tagDigests(stack);
+                if (digests != null) {
+                    trace.put(key, digests);
+                }
+            }
         }
-        return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
-                + ",\"c\":" + stack.getCount()
-                + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"") + "}";
     }
 
     /**
@@ -574,6 +682,24 @@ public class DumpCommand extends CommandBase {
      * discriminator that changed between dumps would split one item into two keys.
      */
     static String discriminator(ItemStack stack) {
+        NBTTagCompound copy = identityTag(stack);
+        if (copy == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        canonical(copy, sb);
+        return fnv(sb);
+    }
+
+    /**
+     * The part of a stack's NBT that decides what it is: a copy with `COSMETIC_TAGS`
+     * removed, or null when nothing identifying is left.
+     *
+     * EXTRACTED so `discriminator` and `tagDigests` cannot disagree about what "identity"
+     * means. A trace that explained a digest computed over a DIFFERENT set of tags than
+     * the digest itself would point at the wrong tag, and it would do so convincingly.
+     */
+    static NBTTagCompound identityTag(ItemStack stack) {
         NBTTagCompound tag = stack.getTagCompound();
         if (tag == null || tag.isEmpty()) {
             return null;
@@ -582,17 +708,82 @@ public class DumpCommand extends CommandBase {
         for (String cosmetic : COSMETIC_TAGS) {
             copy.removeTag(cosmetic);
         }
-        if (copy.isEmpty()) {
+        return copy.isEmpty() ? null : copy;
+    }
+
+    /**
+     * Per-TOP-LEVEL-TAG digests for one stack, as a JSON object, or null when the stack
+     * carries no identity. The whole diagnostic payload for issue #80.
+     *
+     * Two digests per tag:
+     *
+     *   "o"  the tag serialised the way the real digest serialises it, lists IN ORDER.
+     *        Comparing this field for one item across TWO dumps names the tag that
+     *        churned, which is the thing no dump on disk can currently answer.
+     *   "u"  the same tag with list order made irrelevant. Comparing "o" against "u"
+     *        WITHIN ONE dump hints at whether list order could matter for that tag.
+     *
+     * "u" ALSO CARRIES THE PROOF, and that turned out to be its real value. Comparing "u"
+     * across two dumps separates a permutation from a content change: if "o" moved and "u"
+     * did not, list order is the whole difference and sorting that tag fixes it.
+     *
+     * DO NOT read the one-dump comparison as a verdict. Measured on the reference pack it is
+     * wrong in both directions: `Special` read as "equal" on 5,163 keys and then churned on
+     * 10,010, so a list that happens to be in sorted order in one dump hides there; and
+     * `Traits` led the one-dump table at 7,962 while churning zero times. The equal case is
+     * not a clearance. Two dumps are what answer the question.
+     *
+     * Top level only, deliberately. A deeper walk multiplies the output for a question
+     * nobody has asked yet: the first thing needed is a tag NAME to put in the narrow
+     * sort list, and #80's hypothesis is about a top-level trait or modifier tag. If the
+     * trace comes back pointing at a tag whose own subtree needs splitting, that is a
+     * second, cheaper change made with real data in hand.
+     */
+    static String tagDigests(ItemStack stack) {
+        NBTTagCompound copy = identityTag(stack);
+        if (copy == null) {
             return null;
         }
-        StringBuilder sb = new StringBuilder();
-        canonical(copy, sb);
-        // FNV-1a, 48 bits kept. Not a checksum: it only has to separate the few thousand
-        // NBT variants in one pack, and 48 bits makes a collision there vanishingly
-        // unlikely while staying short enough to read in a key.
+        List<String> keys = new ArrayList<String>(copy.getKeySet());
+        Collections.sort(keys);
+        StringBuilder out = new StringBuilder("{");
+        boolean first = true;
+        for (String k : keys) {
+            NBTBase sub = copy.getTag(k);
+            if (sub == null) {
+                continue;
+            }
+            StringBuilder ordered = new StringBuilder();
+            canonical(sub, ordered, false);
+            StringBuilder sorted = new StringBuilder();
+            canonical(sub, sorted, true);
+            if (!first) {
+                out.append(',');
+            }
+            first = false;
+            out.append('"').append(safe(k)).append("\":{\"o\":\"").append(fnv(ordered))
+               .append("\",\"u\":\"").append(fnv(sorted)).append("\"}");
+        }
+        return out.append('}').toString();
+    }
+
+    /**
+     * FNV-1a over UTF-16 code units, low 48 bits, as twelve hex digits.
+     *
+     * Not a checksum: it only has to separate the few thousand NBT variants in one pack,
+     * and 48 bits makes a collision there vanishingly unlikely while staying short enough
+     * to read in a key.
+     *
+     * EXTRACTED so `discriminator` and the issue #80 trace hash the same way by
+     * construction. A second copy of this loop is exactly the pair that drifts, and the
+     * symptom of drift here would be a diagnostic that disagrees with the digest it is
+     * supposed to explain. `recipegraph/nbt_digest.py` is the third implementation and is
+     * held to it by `tests/fixtures/nbt_digest.json`.
+     */
+    static String fnv(CharSequence s) {
         long h = 0xcbf29ce484222325L;
-        for (int i = 0; i < sb.length(); i++) {
-            h = (h ^ sb.charAt(i)) * 0x100000001b3L;
+        for (int i = 0; i < s.length(); i++) {
+            h = (h ^ s.charAt(i)) * 0x100000001b3L;
         }
         return String.format("%012x", h & 0xffffffffffffL);
     }
@@ -610,8 +801,35 @@ public class DumpCommand extends CommandBase {
      * would silently split one item into two keys.
      *
      * THIS FORMAT IS PART OF SCHEMA 3. Changing it changes every discriminated key.
+     *
+     * The two-argument form IS that frozen format and is what `discriminator` calls. The
+     * `sortLists` overload below is additive and OFF on this path: it exists only for the
+     * issue #80 trace, never for a key that ships in a dump. `DigestFixtureTest` pins the
+     * two-argument output against the cross-language fixture, so a change that reached the
+     * digest could not pass.
      */
     static void canonical(NBTBase node, StringBuilder sb) {
+        canonical(node, sb, false);
+    }
+
+    /**
+     * As above, but with `sortLists` optionally making LIST order irrelevant.
+     *
+     * WHY THIS EXISTS, AND WHY IT IS NOT THE FIX. Issue #80: the digest moves between two
+     * dumps of an unchanged pack for ~11,353 keys, concentrated in tconstruct and plustic
+     * (69%), and the leading hypothesis is a trait/modifier list populated from a
+     * hash-ordered collection, so its order permutes per JVM run. Comparing a tag's
+     * ordered digest against its sorted one says whether that tag COULD churn that way:
+     * equal means it holds no non-trivially-ordered list and is innocent, different means
+     * it is a candidate.
+     *
+     * DO NOT promote sorting onto the digest path to "fix" the churn. List order is
+     * genuinely semantic for other NBT (an inventory, a page order), so sorting globally
+     * would merge items that are not the same item -- trading a split key for a wrong one,
+     * which is worse because nothing reports it. #80 records this: the narrow fix sorts
+     * only the specific named tags, and it cannot be written until the trace names them.
+     */
+    static void canonical(NBTBase node, StringBuilder sb, boolean sortLists) {
         switch (node.getId()) {
             case 1: sb.append('b').append(((NBTPrimitive) node).getByte()); break;
             case 2: sb.append('s').append(((NBTPrimitive) node).getShort()); break;
@@ -639,9 +857,25 @@ public class DumpCommand extends CommandBase {
             case 9: {
                 NBTTagList l = (NBTTagList) node;
                 sb.append('[');
-                for (int i = 0; i < l.tagCount(); i++) {
-                    canonical(l.get(i), sb);
-                    sb.append(';');
+                if (sortLists) {
+                    // Serialise each element on its own, then sort the RENDERED elements.
+                    // Sorting the rendered strings rather than the tags keeps this
+                    // comparable across nesting depths and needs no NBTBase ordering.
+                    List<String> parts = new ArrayList<String>(l.tagCount());
+                    for (int i = 0; i < l.tagCount(); i++) {
+                        StringBuilder one = new StringBuilder();
+                        canonical(l.get(i), one, true);
+                        parts.add(one.toString());
+                    }
+                    Collections.sort(parts);
+                    for (String p : parts) {
+                        sb.append(p).append(';');
+                    }
+                } else {
+                    for (int i = 0; i < l.tagCount(); i++) {
+                        canonical(l.get(i), sb, false);
+                        sb.append(';');
+                    }
                 }
                 sb.append(']');
                 break;
@@ -653,7 +887,7 @@ public class DumpCommand extends CommandBase {
                 sb.append('{');
                 for (String k : keys) {
                     sb.append(k.length()).append(':').append(k).append('=');
-                    canonical(c.getTag(k), sb);
+                    canonical(c.getTag(k), sb, sortLists);
                     sb.append(';');
                 }
                 sb.append('}');
@@ -702,6 +936,23 @@ public class DumpCommand extends CommandBase {
      * silence. 1 = recipes.ndjson + oredict + names + skipped + summary; 2 adds
      * catalysts.json; 3 adds the NBT discriminator `n` on stacks, and names.json keys
      * by the discriminated id.
+     *
+     * `nbt_trace.json` DELIBERATELY DID NOT BUMP THIS, and the "2 adds catalysts.json" entry
+     * above is why that needs saying: adding a file has bumped the schema before, so the
+     * next person adding one will reasonably reach for it.
+     *
+     * The distinction is whether the PIPELINE reads it. catalysts.json changes what
+     * `recipegraph build` produces -- it is the authoritative category-to-machine mapping, so
+     * its absence silently costs machine identification, and a reader is entitled to know.
+     * nbt_trace.json is read by `tools/digest-churn.py` and by nothing else; `build`, `have`
+     * and `serve` never open it, no existing file's shape moved, and the discriminated keys
+     * are byte-identical.
+     *
+     * So bumping would be an active lie: the number's whole job is to tell a reader whether
+     * it can parse this dump, and a reader of a schema-4 dump would conclude the keys had
+     * moved. If a future change makes any of that untrue -- the trace becoming mandatory,
+     * or `build` learning to read it -- bump it then. Use `mod_version` for a capability the
+     * pipeline does not depend on; that is what `summary.json` stamps it for.
      */
     static final int SCHEMA = 3;
 
@@ -810,6 +1061,43 @@ public class DumpCommand extends CommandBase {
         } catch (IOException ignored) {
             // names.csv from AE2 is an adequate fallback on the python side
         }
+    }
+
+    /**
+     * `nbt_trace.json`: {discriminated key: {tag: {"o": digest, "u": sorted digest}}}.
+     *
+     * Keyed IDENTICALLY to names.json so the two join, which is what lets the python side
+     * pair an item across two dumps whose keys no longer match -- the digest is IN the key,
+     * so the key itself churns and cannot be the join column. See `tools/digest-churn.py`.
+     *
+     * The value arrives pre-rendered from `tagDigests`, so this writer stays a writer.
+     *
+     * @return how many keys were written, for the chat summary
+     */
+    // Package-visible, not private: `NbtTraceTest` writes a real file with it and
+    // `tests/fixtures/nbt_trace_sample.json` is the result, so the python reader is
+    // tested against output this writer actually produced rather than a hand-typed
+    // guess at its shape. Two mocks agreeing with each other is the failure mode.
+    static int writeNbtTrace(File file, Map<String, String> trace) {
+        int written = 0;
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n");
+            boolean first = true;
+            for (Map.Entry<String, String> e : trace.entrySet()) {
+                if (!first) {
+                    w.write(",\n");
+                }
+                first = false;
+                w.write(" \"" + safe(e.getKey()) + "\": " + e.getValue());
+                written++;
+            }
+            w.write("\n}\n");
+        } catch (IOException ignored) {
+            // A lost diagnostic must not fail a dump that otherwise succeeded, same as
+            // catalysts.json and summary.json above.
+        }
+        return written;
     }
 
     /** Minimal JSON string escaping; avoids depending on a JSON library. */
