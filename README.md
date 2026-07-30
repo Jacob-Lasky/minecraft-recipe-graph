@@ -60,6 +60,9 @@ localized names need a `/recipedump` from a running game first, which is what
 [the dump mod](#the-dump-mod) is for. `have` is optional and only prunes the plan against
 your AE2 network.
 
+There are three moving pieces in total — this tool, that mod, and the data between them —
+and they update independently. [What ships where](#what-ships-where) is the map.
+
 ## Why this exists
 
 [Just Enough Calculation](https://www.curseforge.com/minecraft/mc-mods/just-enough-calculation)
@@ -208,8 +211,42 @@ there is no authentication, so widening it to `--host 0.0.0.0` has to be an expl
 choice. The graph is loaded once at startup (a few seconds for 121k recipes) and held in
 memory, which is why this is a long-running server rather than a per-request script.
 
-Pages reuse the same renderers as the CLI's `--html` flag, so there is one implementation
-of each view rather than a UI and an API drifting apart.
+## What ships where
+
+Three pieces, and they do not all live on the same machine or update on the same schedule.
+Getting this wrong is the most common way the tool goes quietly wrong rather than loudly
+wrong, so it is worth reading once.
+
+| Piece | What it is | Where it goes | Version |
+| --- | --- | --- | --- |
+| **The tool** | `recipegraph/` — the CLI, the renderers and the web server, one Python package | anywhere with Python 3.8+; on a server, the Docker image below | git commit, printed in the page footer |
+| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.8.0.jar` |
+| **The data** | `mc-recipe-dump/` from the mod, then `graph.json` and `ae2_have.json` built from it | the `/data` mount the tool reads | a `schema` number, recorded in every file and checked on read |
+
+**The web UI is not a separate piece.** Pages are server-rendered by the same renderers the
+CLI's `--html` flag uses, so there is no frontend to deploy and no API contract between the
+two halves to keep in step: one image contains the lot. There *is* client-side JavaScript —
+the collapsible tree, the `/machines` filters, the production chart, the search box — but it
+is emitted inline by the Python module that renders each page, so there is no bundle, no
+asset pipeline and no build step. Where the JS and the server-rendered HTML have to agree on
+something, the value is injected from the one Python constant rather than restated, so they
+cannot drift apart. The single JSON endpoint exists only so a keystroke in the search box
+does not re-render a page.
+
+**The data is what couples the other two, and it is the only piece with a version they both
+agree to check.** The mod stamps the schema it wrote; the tool compares that against the
+schema it understands and against the schema at which the digest format last changed. So
+the failure mode is not a crash, it is a disagreement about identity: upgrade the jar
+without rebuilding, and every NBT-bearing key in the graph is one the current reader never
+computes, which makes AE2 stock read as zero rather than as an error. Both severities are
+reported on the page footer and by `have`; the current upgrade order is in
+[the dump mod](#the-dump-mod).
+
+**Only the machine that plays can produce the data.** A server has no game to run
+`/recipedump` in and no reason to hold 410 mod jars, which is what
+[Feeding it from the machine that plays](#feeding-it-from-the-machine-that-plays) is about.
+A jar committed to `dist/` is therefore *published*, not *installed* — the file changing
+here does nothing until someone copies it into a client.
 
 ## Running the UI on a server
 
