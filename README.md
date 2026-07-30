@@ -341,13 +341,22 @@ and rendered recipe GUIs to scrape them, which is both slow and broken across th
 **A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
 
 ```bash
-cp dist/mc-recipe-dump-0.7.0.jar '/path/to/instance/minecraft/mods/'
+cp dist/mc-recipe-dump-0.8.0.jar '/path/to/instance/minecraft/mods/'
 ```
 
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
-source in `mod/` on both the dump schema and the version, so it cannot quietly fall behind
-the Python side that reads its output. If that test fails, rebuild and re-commit the jar
-rather than editing the expected numbers.
+source in `mod/` on the dump schema, the version, and a SHA-256 over the whole Java tree, so
+it cannot quietly fall behind the Python side that reads its output. If that test fails,
+rebuild and re-commit the jar rather than editing the expected numbers.
+
+**Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
+two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
+
+**This jar writes dump schema 4, and a schema-3 graph is not compatible with it.** The digest
+that identifies an NBT-bearing stack changed (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in
+`DumpCommand.java`), so upgrading means `/recipedump`, then `recipegraph build`, then
+`recipegraph have` again — in that order. Skipping the last step leaves AE2 stock filed under
+keys the new graph does not use, and `have` says so rather than letting it pass.
 
 **Status: builds clean**, and you do NOT need a system JDK 8 — Gradle provisions its own
 Java 8 toolchain while running on a modern JDK:

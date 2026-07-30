@@ -20,6 +20,7 @@ testing the fallback path that most real keys take.
 """
 
 from recipegraph.model import Graph, Ingredient, Recipe
+from recipegraph.sources import dump_meta
 
 # Eight is CONTAINER_FLUID_THRESHOLD. The fixture sits exactly ON the threshold rather
 # than comfortably past it, so a change to either number has to be deliberate.
@@ -60,7 +61,10 @@ def discriminated_graph():
       tell "the transfer lost" from "the transfer was the only option".
     """
     g = Graph()
-    g.dump_schema = 3
+    # The CURRENT schema, not a literal 3. This fixture stands for "a graph from a current
+    # dump", and a literal would silently make it stand for "a stale graph" after a bump --
+    # which now changes what `gaps.stock_report` prints. The stale case gets its own tests.
+    g.dump_schema = dump_meta.SCHEMA
     g.names = {
         CAN_BASE: "Empty Can",
         # Named variant and unnamed variant, so both label paths render: this one comes

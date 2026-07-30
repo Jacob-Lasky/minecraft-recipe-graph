@@ -6,18 +6,28 @@ catalysts -- was its absence, which is indistinguishable from a mod that tried a
 none. Same for any future field: an older dump read by a newer reader just quietly lacks
 things.
 
-SCHEMA tracks the SHAPE of the dumped files, not the mod version. Bump it in
-DumpCommand.java and here together when a file's shape changes:
+SCHEMA tracks the SHAPE of the dumped files, or the MEANING of a value a reader recomputes,
+not the mod version. Bump it in DumpCommand.java and here together:
   1  recipes.ndjson, oredict.json, names.json, skipped.ndjson, summary.json
   2  adds catalysts.json, and summary.json gains mod_version and schema
   3  item stacks may carry `n`, a digest of the NBT that decides what the stack IS, and
      names.json keys by the discriminated id so the digest has a readable name
+  4  `n` is computed differently: named lists are sorted and `ench` is cosmetic, so every
+     discriminated key moves. Shape-identical to 3 and NOT parse-compatible with it. #80, #63
+
+`tests/test_catalysts.py` reads DumpCommand.java and asserts the two numbers are equal, so
+bumping one alone fails without a JVM.
 """
 
 import json
 import os
 
-SCHEMA = 3
+try:
+    from ..nbt_digest import DIGEST_FORMAT_SCHEMA
+except ImportError:  # run directly as a script; see ae2_inventory's module docstring
+    from nbt_digest import DIGEST_FORMAT_SCHEMA
+
+SCHEMA = 4
 
 
 def _document(dump_dir):
@@ -85,6 +95,16 @@ def describe(meta):
     if meta["schema"] == SCHEMA:
         return "dump: written by mod %s, schema %d" % (version, SCHEMA)
     if meta["schema"] is not None and meta["schema"] < SCHEMA:
+        # Two different severities wear the same sentence otherwise. Missing a field costs
+        # a feature and the graph is still correct; predating the digest format means every
+        # discriminated key in this graph is one the current reader would never compute, so
+        # AE2 stock cannot match it. Naming which one it is here is the difference between
+        # "worth doing sometime" and "your stock reads as zero until you redump".
+        if meta["schema"] < DIGEST_FORMAT_SCHEMA:
+            return ("dump: written by mod %s at schema %s, OLDER THAN THE DIGEST FORMAT (%d)"
+                    " -- every discriminated key in it predates the current digest, so AE2"
+                    " stock cannot match one; re-run /recipedump, then `build`, then `have`"
+                    % (version, meta["schema"], DIGEST_FORMAT_SCHEMA))
         return ("dump: written by mod %s at schema %s, but this reader expects %d -- "
                 "re-run /recipedump to pick up newer fields"
                 % (version, meta["schema"], SCHEMA))

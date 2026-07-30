@@ -136,20 +136,151 @@ public class DiscriminatorTest {
                         DumpCommand.discriminator(withTag(two)));
     }
 
+    private static NBTTagList strings(String... values) {
+        NBTTagList list = new NBTTagList();
+        for (String v : values) {
+            list.appendTag(new NBTTagString(v));
+        }
+        return list;
+    }
+
+    private static NBTTagCompound listUnder(String key, String... values) {
+        NBTTagCompound tag = new NBTTagCompound();
+        tag.setTag(key, strings(values));
+        return tag;
+    }
+
+    /** One `{id, lvl}` entry, the shape 1.12.2 uses for `ench` and `StoredEnchantments`. */
+    private static NBTTagList enchantment(int id, int level) {
+        NBTTagCompound entry = new NBTTagCompound();
+        entry.setShort("id", (short) id);
+        entry.setShort("lvl", (short) level);
+        NBTTagList list = new NBTTagList();
+        list.appendTag(entry);
+        return list;
+    }
+
     @Test
     public void listOrderMatters() {
+        // Still true for any tag NOT in SORTED_LIST_TAGS, and that is the whole reason the
+        // #80 fix is a named list rather than a global sort. If this ever starts passing
+        // only because everything is sorted, the digest has begun merging items that differ.
+        assertNotEquals(DumpCommand.discriminator(withTag(listUnder("l", "one", "two"))),
+                        DumpCommand.discriminator(withTag(listUnder("l", "two", "one"))));
+    }
+
+    @Test
+    public void theOrderOfASortedListTagDoesNotMatter() {
+        // #80: `Special` permutes per JVM run, so two dumps of an unchanged pack gave the
+        // same tool two keys. Measured order-only on 9,359 forced pairs.
+        for (String tag : DumpCommand.SORTED_LIST_TAGS) {
+            assertEquals(tag + " is in SORTED_LIST_TAGS, so its order must not reach the key",
+                         DumpCommand.discriminator(withTag(listUnder(tag, "alpha", "beta"))),
+                         DumpCommand.discriminator(withTag(listUnder(tag, "beta", "alpha"))));
+        }
+    }
+
+    @Test
+    public void aSortedListTagIsSortedAtAnyDepth() {
+        // The sort follows the NAME, not the position: the reason `Special` permutes is the
+        // collection its producer iterates, which does not care where the tag ends up.
         NBTTagCompound a = new NBTTagCompound();
-        NBTTagList first = new NBTTagList();
-        first.appendTag(new NBTTagString("one"));
-        first.appendTag(new NBTTagString("two"));
-        a.setTag("l", first);
+        a.setTag("Outer", listUnder("Special", "alpha", "beta"));
         NBTTagCompound b = new NBTTagCompound();
-        NBTTagList second = new NBTTagList();
-        second.appendTag(new NBTTagString("two"));
-        second.appendTag(new NBTTagString("one"));
-        b.setTag("l", second);
-        assertNotEquals(DumpCommand.discriminator(withTag(a)),
-                        DumpCommand.discriminator(withTag(b)));
+        b.setTag("Outer", listUnder("Special", "beta", "alpha"));
+        assertEquals(DumpCommand.discriminator(withTag(a)), DumpCommand.discriminator(withTag(b)));
+    }
+
+    @Test
+    public void sortingDoesNotLeakFromASortedTagToItsSiblings() {
+        // The narrowness IS the fix. `canonical` threads one flag down the tree, so the
+        // obvious bug is turning it on for the compound that CONTAINS `Special` rather than
+        // for `Special` itself -- which would sort everything and silently merge stacks that
+        // differ only in an order-semantic list. That is the global sort the javadoc rejects.
+        NBTTagCompound base = listUnder("Special", "alpha", "beta");
+        base.setTag("l", strings("one", "two"));
+        NBTTagCompound specialMoved = listUnder("Special", "beta", "alpha");
+        specialMoved.setTag("l", strings("one", "two"));
+        NBTTagCompound siblingMoved = listUnder("Special", "alpha", "beta");
+        siblingMoved.setTag("l", strings("two", "one"));
+
+        assertEquals("only the sorted tag moved, so this is one key",
+                     DumpCommand.discriminator(withTag(base)),
+                     DumpCommand.discriminator(withTag(specialMoved)));
+        assertNotEquals("the SIBLING moved, and its order is still information",
+                        DumpCommand.discriminator(withTag(base)),
+                        DumpCommand.discriminator(withTag(siblingMoved)));
+    }
+
+    @Test
+    public void aListInsideASortedListTagIsSortedToo() {
+        // The trace's "u" field, which is what measured `Special` as order-only, sorts the
+        // whole subtree. A fix that sorted only the outermost list would be claiming
+        // something the measurement did not license.
+        NBTTagCompound a = new NBTTagCompound();
+        NBTTagList outerA = new NBTTagList();
+        outerA.appendTag(strings("a", "b"));
+        outerA.appendTag(strings("c"));
+        a.setTag("Special", outerA);
+        NBTTagCompound b = new NBTTagCompound();
+        NBTTagList outerB = new NBTTagList();
+        outerB.appendTag(strings("b", "a"));
+        outerB.appendTag(strings("c"));
+        b.setTag("Special", outerB);
+        assertEquals(DumpCommand.discriminator(withTag(a)), DumpCommand.discriminator(withTag(b)));
+    }
+
+    @Test
+    public void enchantmentsDoNotChangeWhatAnItemIs() {
+        // #63, and #80 measured a second reason: 1.12.2 stores `ench` as {id, lvl} with a
+        // registry-allocated id, so the SAME enchantment serialises differently next launch.
+        // 1,335 forced pairs churned on it across just five distinct digest transitions.
+        NBTTagCompound plain = genome("forestry.speciesForest");
+        NBTTagCompound enchanted = genome("forestry.speciesForest");
+        enchanted.setTag("ench", enchantment(16, 3));
+        assertEquals(DumpCommand.discriminator(withTag(plain)),
+                     DumpCommand.discriminator(withTag(enchanted)));
+
+        // And a DIFFERENT enchantment is still the same item, which is the part that makes
+        // the per-launch id harmless rather than merely less common.
+        NBTTagCompound otherwise = genome("forestry.speciesForest");
+        otherwise.setTag("ench", enchantment(99, 1));
+        assertEquals(DumpCommand.discriminator(withTag(plain)),
+                     DumpCommand.discriminator(withTag(otherwise)));
+    }
+
+    @Test
+    public void aStackWhoseOnlyNbtIsEnchantmentsStaysTheBareKey() {
+        NBTTagCompound tag = new NBTTagCompound();
+        tag.setTag("ench", enchantment(16, 1));
+        assertNull(DumpCommand.discriminator(withTag(tag)));
+    }
+
+    @Test
+    public void storedEnchantmentsAreDELIBERATELYStillPartOfIdentity() {
+        // NOT an oversight, and the reason is recorded beside COSMETIC_TAGS: an enchanted
+        // BOOK's identity IS its enchantment, so a Sharpness V book and a Fortune III book
+        // are different ingredients. #80 also found no evidence it churns -- 4 observations,
+        // all in ambiguous pairings, zero on forced ones. This test exists so that stripping
+        // it becomes a deliberate act with a measurement behind it rather than a tidy-up.
+        NBTTagCompound sharpness = new NBTTagCompound();
+        sharpness.setTag("StoredEnchantments", enchantment(16, 5));
+        NBTTagCompound fortune = new NBTTagCompound();
+        fortune.setTag("StoredEnchantments", enchantment(35, 3));
+
+        assertNotEquals(DumpCommand.discriminator(withTag(sharpness)),
+                        DumpCommand.discriminator(withTag(fortune)));
+    }
+
+    @Test
+    public void theTwoTagListsDoNotOverlap() {
+        // A name on both lists makes the sort dead code on a tag nothing digests, while
+        // reading in review as a live claim about that tag's order.
+        for (String sorted : DumpCommand.SORTED_LIST_TAGS) {
+            for (String cosmetic : DumpCommand.COSMETIC_TAGS) {
+                assertNotEquals(sorted, cosmetic);
+            }
+        }
     }
 
     @Test

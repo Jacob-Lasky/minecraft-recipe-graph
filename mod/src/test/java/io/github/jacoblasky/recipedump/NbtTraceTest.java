@@ -74,8 +74,25 @@ public class NbtTraceTest {
 
         StringBuilder frozen = new StringBuilder();
         DumpCommand.canonical(tag, frozen);
-        assertEquals("the two-argument canonical form is dump schema 3; the sortLists "
+        assertEquals("the two-argument canonical form is dump schema 4; the sortLists "
                      + "overload must not change it", frozen.toString(), canon(tag, false));
+    }
+
+    @Test
+    public void aSortedListTagReportsOEqualsUNowThatTheDigestSortsIt() {
+        // "o" means "the way the real digest serialises this tag". Once `Special` is in
+        // SORTED_LIST_TAGS the digest sorts it, so the trace must stop calling it a suspect
+        // -- otherwise the diagnostic goes on reporting churn that can no longer reach a key,
+        // and it contradicts the very fix it was built to justify.
+        NBTTagCompound tag = new NBTTagCompound();
+        tag.setTag("Special", strings("two", "one"));
+        tag.setTag("Traits", strings("two", "one"));
+
+        String json = DumpCommand.tagDigests(withTag(tag));
+        assertEquals("a sorted-list tag can no longer churn from order, so o == u",
+                     digest(json, "Special", "o"), digest(json, "Special", "u"));
+        assertNotEquals("an ordinary list tag is still order-sensitive and still a suspect",
+                        digest(json, "Traits", "o"), digest(json, "Traits", "u"));
     }
 
     @Test

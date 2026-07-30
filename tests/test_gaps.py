@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import gaps  # noqa: E402
+from recipegraph import gaps, nbt_digest  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 
 SUMMARY = {
@@ -136,6 +136,66 @@ class StockCoverageTest(unittest.TestCase):
 
     def test_no_stock_is_not_an_error(self):
         self.assertEqual(gaps.stock_report(self.cover({})), "no stock to reconcile")
+
+
+class StaleDigestGraphTest(unittest.TestCase):
+    """A graph built before the digest format changed cannot match a current scan.
+
+    Schema 4 changed how `n` is computed (#80, #63) and `have` recomputes it from the world
+    save. Against a schema-3 graph that disagreement is total: every discriminated key misses.
+    Without this the reconcile blames `digest not in this dump` -- which is true of each key
+    and useless as a diagnosis, because the answer is not "that variant is gone", it is "this
+    graph predates the format".
+    """
+
+    @staticmethod
+    def _graph(schema):
+        g = stocked_graph()
+        g.dump_schema = schema
+        return g
+
+    def _cover(self, schema, items=None):
+        return gaps.stock_coverage(self._graph(schema),
+                                   items if items is not None else {"mod:gone": 3},
+                                   reader=gaps.DIGEST_READER)
+
+    def test_a_graph_older_than_the_digest_format_is_flagged(self):
+        self.assertTrue(self._cover(3)["stale_digest_graph"])
+
+    def test_a_current_graph_is_not_flagged(self):
+        self.assertFalse(self._cover(nbt_digest.DIGEST_FORMAT_SCHEMA)["stale_digest_graph"])
+
+    def test_a_newer_graph_is_not_flagged_either(self):
+        # A reader older than the graph is a different problem, and `dump_meta.describe`
+        # already says so. Claiming the digest moved would be a guess about a future schema.
+        self.assertFalse(
+            self._cover(nbt_digest.DIGEST_FORMAT_SCHEMA + 1)["stale_digest_graph"])
+
+    def test_a_graph_with_no_recorded_schema_is_not_flagged(self):
+        # 0 means the field predates the graph, not that the graph is old. Every graph.json
+        # written before #38 reads as 0, and warning on all of them would be noise.
+        self.assertFalse(self._cover(0)["stale_digest_graph"])
+
+    def test_the_warning_leads_the_report(self):
+        text = gaps.stock_report(self._cover(3))
+        self.assertTrue(text.startswith(gaps.STALE_DIGEST_WARNING),
+                        "the warning has to come before the numbers it invalidates")
+        self.assertIn("1 of 1 stock keys match nothing", text)
+
+    def test_a_clean_match_on_a_stale_graph_still_warns(self):
+        """The case a `return` in the wrong order would swallow.
+
+        If nothing in the stock is discriminated, every key matches and the report would say
+        so cheerfully -- while the graph is still one no current scan can match for the keys
+        that DO carry a digest. The clean result is not evidence the graph is fine.
+        """
+        text = gaps.stock_report(self._cover(3, {"mod:widget": 1}))
+        self.assertIn("every stock key matches", text)
+        self.assertIn(gaps.STALE_DIGEST_WARNING, text)
+
+    def test_the_warning_names_the_schema_and_the_way_out(self):
+        self.assertIn(str(nbt_digest.DIGEST_FORMAT_SCHEMA), gaps.STALE_DIGEST_WARNING)
+        self.assertIn("/recipedump", gaps.STALE_DIGEST_WARNING)
 
 
 if __name__ == "__main__":

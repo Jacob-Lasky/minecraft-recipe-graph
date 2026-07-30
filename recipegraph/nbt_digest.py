@@ -30,10 +30,16 @@ The format, for reading the code against the mod:
   t<n>:<s> a string, length-prefixed in UTF-16 code units so its contents can never
            imitate the separators around it
   B/I      a byte or int array, each element followed by a comma
-  [a;b;]   a list, in order
+  [a;b;]   a list, in order -- EXCEPT under a `SORTED_LIST_TAGS` name, where the rendered
+           elements are sorted instead, because that tag's order is known to be noise
   {n:k=v;} a compound, keys sorted, each key length-prefixed like a string
 
 then FNV-1a over the UTF-16 code units of that string, keeping the low 48 bits.
+
+THE FORMAT MOVED ONCE, at schema 4, for #80 and #63: `Special` became order-insensitive and
+`ench` became cosmetic. `DIGEST_FORMAT_SCHEMA` below records that, and `gaps.stock_coverage`
+compares it against the graph so a stock scan against a pre-4 graph says so out loud instead
+of reporting every Tinkers tool as unowned.
 """
 
 import struct
@@ -53,9 +59,35 @@ except ImportError:  # run directly as a script; see ae2_inventory's module docs
 # THIS LIST MUST MATCH `DumpCommand.COSMETIC_TAGS` EXACTLY, and a test asserts that it
 # does by reading the Java source. Adding an entry here alone makes the reader strip
 # something the dump kept, which merges two stock keys onto a digest no recipe has.
-# Adding it in Java alone does the reverse. See #63, which wants `ench` added: that is a
-# change to BOTH lists plus a re-dump, in that order.
-COSMETIC_TAGS = ("RepairCost", "display", "HideFlags", "Damage")
+# Adding it in Java alone does the reverse.
+#
+# `ench` joined in schema 4 (#63, measured by #80). The Java list carries the full
+# reasoning, including why `StoredEnchantments` is deliberately NOT here.
+COSMETIC_TAGS = ("RepairCost", "display", "HideFlags", "Damage", "ench")
+
+# Tags whose list order carries no information, so they are digested SORTED.
+#
+# THIS LIST MUST MATCH `DumpCommand.SORTED_LIST_TAGS` EXACTLY, same test, same reason: a
+# name here and not in Java sorts a list the dump left alone, so the reader's digest
+# differs from the dump's for every stack carrying it -- and the symptom is once again
+# "the tool says I do not own my Tinkers tools" rather than an error.
+#
+# `Special` earned its place by measurement in #80, not by inspection: on 9,359 forced
+# pairs across two dumps of an unchanged pack, its order-irrelevant digest was identical
+# every time while its ordered one moved. See the Java list for the full argument, and do
+# not add a name here without the same evidence -- sorting an order-SEMANTIC list swaps a
+# visibly-duplicated key for a silently-wrong one.
+SORTED_LIST_TAGS = ("Special",)
+
+# The dump schema whose `n` values this module reproduces.
+#
+# SEPARATE FROM `dump_meta.SCHEMA` ON PURPOSE, and not a duplicate of it. That one is the
+# newest schema the reader understands at all; this one is the schema at which the DIGEST
+# FORMAT was last changed. They are equal today (both 4) and will diverge the moment a
+# schema bump adds a file or a field without touching `canonical`. Comparing a graph
+# against this one rather than against the newer number is what keeps `have`'s warning
+# from crying wolf on an unrelated bump. See `gaps.stock_coverage`.
+DIGEST_FORMAT_SCHEMA = 4
 
 FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
@@ -120,14 +152,20 @@ def _double_bits(value):
     return struct.unpack(">q", struct.pack(">d", value))[0]
 
 
-def canonical(node):
-    """The mod's deterministic, language-neutral rendering of one NBT value."""
+def canonical(node, sort_lists=False):
+    """The mod's deterministic, language-neutral rendering of one NBT value.
+
+    `sort_lists` mirrors `DumpCommand.canonical`'s third argument. It is False on the digest
+    path and turns on only underneath a `SORTED_LIST_TAGS` name, which the compound branch
+    below does per key. Exposed as a parameter because the recursion needs to carry it, not
+    because callers should reach for it.
+    """
     out = []
-    _write(node, out)
+    _write(node, out, sort_lists)
     return "".join(out)
 
 
-def _write(node, out):
+def _write(node, out, sort_lists=False):
     tag = tag_of(node)
     if tag is None:
         raise UntypedNode(
@@ -155,9 +193,28 @@ def _write(node, out):
         out.append("t%d:%s" % (_u16len(node), node))
     elif tag == TAG_LIST:
         out.append("[")
-        for item in node:
-            _write(item, out)
-            out.append(";")
+        if sort_lists:
+            # Render each element alone, then sort the RENDERED strings, exactly as the Java
+            # side does -- sorting the strings rather than the tags needs no ordering over
+            # NBT values and stays comparable at any nesting depth.
+            #
+            # `key=_utf16` for the SAME reason the compound branch uses it: Java's
+            # `Collections.sort` on Strings compares UTF-16 code units. Plain `sorted()`
+            # would compare code points and silently disagree with the mod on any element
+            # holding an astral character, which is the cross-language drift this whole
+            # module exists to prevent.
+            parts = []
+            for item in node:
+                one = []
+                _write(item, one, True)
+                parts.append("".join(one))
+            for part in sorted(parts, key=_utf16):
+                out.append(part)
+                out.append(";")
+        else:
+            for item in node:
+                _write(item, out, False)
+                out.append(";")
         out.append("]")
     elif tag == TAG_COMPOUND:
         out.append("{")
@@ -166,7 +223,10 @@ def _write(node, out):
         # by code point, and the two disagree once a key holds an astral character.
         for key in sorted(node, key=_utf16):
             out.append("%d:%s=" % (_u16len(key), key))
-            _write(node[key], out)
+            # `or key in SORTED_LIST_TAGS` is the narrow #80 fix, and this is the only
+            # place it applies. Once on it stays on for the whole subtree, matching the
+            # `sortLists || sortedListTag(k)` line in DumpCommand.canonical.
+            _write(node[key], out, sort_lists or key in SORTED_LIST_TAGS)
             out.append(";")
         out.append("}")
     elif tag == TAG_INT_ARRAY:

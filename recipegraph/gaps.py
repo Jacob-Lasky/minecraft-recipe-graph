@@ -18,6 +18,7 @@ import os
 
 from .ae2_inventory import DIGEST_READER, OPAQUE_MARKER
 from .model import is_digest, split_discriminator
+from .nbt_digest import DIGEST_FORMAT_SCHEMA
 
 # Why a scanned stock key matches nothing in the graph. The cause decides the fix, which
 # is the whole reason they are counted apart rather than as one "unmatched" number.
@@ -99,16 +100,51 @@ def stock_coverage(graph, items, reader=1):
         "unmatched": unmatched,
         "unmatched_stock": sum(count for _key, count in unmatched),
         "causes": causes,
+        "stale_digest_graph": stale_digest_graph(graph),
     }
+
+
+def stale_digest_graph(graph):
+    """Does this graph predate the digest format the scanner now computes?
+
+    WHY IT IS ASKED HERE. `have` recomputes each stack's digest from the world save with
+    `nbt_digest`, and matches the result against keys the DUMP wrote. Schema 4 changed how
+    that digest is computed (#80, #63), so a schema-3 graph and a current scanner disagree on
+    every discriminated key -- not a few, all of them. The scan looks like it worked, the
+    reconcile blames `digest not in this dump`, and the honest answer is "this graph is from
+    before the format changed".
+
+    Compared against `DIGEST_FORMAT_SCHEMA` rather than the newest schema the reader knows,
+    so a future bump that adds a file without touching `canonical` does NOT raise this. A
+    warning that fires when nothing is wrong gets trained away, and this one has to be
+    believed the one time it matters.
+
+    A graph with no recorded schema (0) says nothing either way: it predates the field, so
+    there is no claim to contradict and no warning to give.
+    """
+    schema = getattr(graph, "dump_schema", 0) or 0
+    return 0 < schema < DIGEST_FORMAT_SCHEMA
+
+
+STALE_DIGEST_WARNING = (
+    "THIS GRAPH PREDATES THE DIGEST FORMAT (schema < %d). Every discriminated key below is "
+    "one the current scanner would never compute, so the mismatch count is meaningless "
+    "until you re-run /recipedump and `recipegraph build`, then `have` again."
+    % DIGEST_FORMAT_SCHEMA)
 
 
 def stock_report(cov, top=8):
     """One block for the `have` command: the headline, then why, then the worst offenders."""
     if not cov["keys"]:
         return "no stock to reconcile"
+    # The warning goes FIRST and applies to both outcomes below. On a stale graph even a
+    # clean match is not good news: it means nothing in this stock was discriminated, so the
+    # match says nothing about the keys that would have failed. Reporting success without it
+    # buries the one fact that explains the next wrong plan.
+    stale = [STALE_DIGEST_WARNING] if cov.get("stale_digest_graph") else []
     if not cov["unmatched"]:
-        return "every stock key matches a key in the graph"
-    out = ["%s of %s stock keys match nothing in the graph (%s of %s items)"
+        return "\n".join(["every stock key matches a key in the graph"] + stale)
+    out = stale + ["%s of %s stock keys match nothing in the graph (%s of %s items)"
            % ("{:,}".format(cov["keys"] - cov["matched"]), "{:,}".format(cov["keys"]),
               "{:,}".format(cov["unmatched_stock"]), "{:,}".format(cov["stock"]))]
     for cause, (keys, stock) in sorted(cov["causes"].items(),
