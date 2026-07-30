@@ -85,10 +85,19 @@ def _placed_and_stock(have_path):
 
 
 def _machine_states(graph, have_path, overrides_path):
+    """(states, overrides, build targets) for the machine-gated commands.
+
+    Goes through `describe` rather than `resolve` because the cost model needs the machine
+    ITEM to price building it (#86), and `resolve` is the two-value view that drops it. The
+    states are derived from the same call, so the states a plan is gated on and the items it
+    prices cannot come from two different resolutions of the same question.
+    """
     placed, stock = _placed_and_stock(have_path)
     overrides = machines.load_overrides(overrides_path)
-    return machines.resolve(graph, placed, stock, overrides=overrides,
-                            no_machine=machines.load_no_machine(overrides_path)), overrides
+    info = machines.describe(graph, placed, stock, overrides=overrides,
+                             no_machine=machines.load_no_machine(overrides_path))
+    states = {uid: (i["state"], i["why"]) for uid, i in info.items()}
+    return states, overrides, machines.build_targets(info)
 
 
 def _token_kinds(args):
@@ -171,15 +180,15 @@ def cmd_plan(args):
         have, craftables = {}, set()
     if args.ignore_craftable:
         craftables = set()
-    states = {}
+    states, machine_items = {}, {}
     if not args.ignore_machines:
-        states, _ov = _machine_states(g, args.have, args.machines)
+        states, _ov, machine_items = _machine_states(g, args.have, args.machines)
     free = {} if args.ignore_sources else _free_sources(args.have, args.sources)
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
-                                         free_sources=free)
+                                         free_sources=free, machine_items=machine_items)
     # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
     # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
     pinned, pin_notes = ({}, {})
@@ -673,7 +682,7 @@ def cmd_machines(args):
         machines.save_overrides(args.file, overrides)
         print("wrote %s (%d overrides)" % (args.file, len(overrides)))
 
-    states, overrides = _machine_states(g, args.have, args.file)
+    states, overrides, _targets = _machine_states(g, args.have, args.file)
     counts = machines.summarise(states)
     print("categories: %s"
           % ", ".join("%d %s" % (counts[s], s) for s in machines.STATES))

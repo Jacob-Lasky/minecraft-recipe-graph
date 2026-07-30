@@ -46,6 +46,34 @@ from .defaults import DEFAULT_COST_CACHE
 # or an unidentified machine would beat one the player can demonstrably build.
 MACHINE_COST = {"have": 1.0, "buildable": 40.0, "unknown": 120.0, "unavailable": 5000.0}
 
+# `buildable` above is a FLOOR, not the whole answer. Two machines you have to build are
+# not equally expensive, and on the reference pack they are not remotely equally expensive:
+# measured over the 380 buildable categories whose machine item prices finitely, the build
+# cost runs min 1.0, median 2.0, p90 67, max 9,288 -- a 4,644x spread between the median and
+# an endgame NuclearCraft salt fission vessel. Priced by the flat constant alone, an AE2
+# grindstone and a fusion reactor both charge 40.0, so the ranker cannot prefer the one the
+# player can actually reach. That is issue #86.
+#
+# So a buildable machine's entry cost spans [MACHINE_COST["buildable"], + BUILD_SPREAD),
+# ordered by what building it costs. The map is bounded and monotonic rather than the raw
+# price, for two reasons:
+#
+#   * THE CEILING MUST STAY BELOW MACHINE_COST["unknown"]. That invariant is stated above
+#     and is load-bearing: an unidentified machine outranking one the player can
+#     demonstrably build is the failure the `unknown` figure was chosen to avoid. Feeding
+#     the raw 9,288 in would sail past `unknown` AND past `unavailable`, making a buildable
+#     machine read as worse than a proven-impossible one.
+#   * The floor must stay AT MACHINE_COST["buildable"]. The have-vs-buildable gap is what
+#     the Borax and Crystallizer cases in this module's header turn on, and cheapening
+#     buildable machines across the board would relitigate a decision this change is not
+#     about. #86 asks to tell two buildable machines apart, not to make building cheaper.
+#
+# BUILD_SCALE sets where the curve bends. At 64 it lands near p90 of the measured
+# distribution, so the mass of the pack (median 2.0) spreads across the low end of the band
+# instead of all compressing into the first percent of it.
+BUILD_SPREAD = 79.0        # so the band is [40.0, 119.0), strictly under `unknown` at 120
+BUILD_SCALE = 64.0
+
 # Used only when machine gating is off entirely (no states supplied), where every category
 # gets the same figure and the value is arbitrary. NOT the cost of an unidentified machine
 # -- that is MACHINE_COST["unknown"] above.
@@ -71,7 +99,7 @@ TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefe
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 2
+FORMULA_VERSION = 3
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -80,6 +108,77 @@ FORMULA_VERSION = 2
 # improvements forever -- hence a ceiling AND an early exit, not just one of them.
 PASSES = 20
 SETTLED_FRACTION = 0.002   # stop when a pass improves under 0.2% of recipes' outputs
+
+
+class CostTable(dict):
+    """Item costs, plus the per-category machine entry costs they were computed with.
+
+    A plain `dict` everywhere it is read, so the solver keeps indexing it by item key and
+    nothing else has to know this type exists. The entry costs ride ALONGSIDE rather than in
+    a second argument every caller must remember to thread, because `estimate` and
+    `recipe_cost` deriving that number separately is exactly how the relaxation and the
+    ranking came to disagree about which alternative a slot used -- see
+    `_cheapest_alternative`, which exists to fix the same class of divergence. Carried on the
+    table, the price the ranker charges CANNOT drift from the price the relaxation used.
+    """
+
+    def __init__(self, *args, **kwargs):
+        entry = kwargs.pop("machine_entry", None)
+        dict.__init__(self, *args, **kwargs)
+        self.machine_entry = dict(entry or {})
+
+
+def build_entry_cost(build_cost):
+    """Entry cost for a machine you must build, ordered by what building it costs.
+
+    Bounded into `[MACHINE_COST["buildable"], + BUILD_SPREAD)` and monotonic in
+    `build_cost`; see the BUILD_SPREAD comment for why the bound is not optional.
+
+    An UNREACHABLE machine item (inf, which 23 buildable categories on the reference pack
+    have: a producer exists but its own inputs never price) charges the top of the band. Not
+    `unavailable`: the state was decided by `machines._candidate_verdict` on evidence, and a
+    price this model failed to compute is a gap in the pricing, not a fact about the base.
+    Charging 5,000 here would override an evidence-based verdict with a numerical failure.
+    """
+    floor = MACHINE_COST["buildable"]
+    if build_cost is None or math.isinf(build_cost) or math.isnan(build_cost):
+        return floor + BUILD_SPREAD
+    b = max(0.0, build_cost)
+    return floor + BUILD_SPREAD * (b / (b + BUILD_SCALE))
+
+
+def machine_entry_costs(machine_items, cost):
+    """{category: entry cost} for the categories whose machine has to be built.
+
+    `machine_items` is `{category: (candidate key, ...)}` from `machines.build_targets`. The
+    CHEAPEST candidate sets the price: several blocks can open one category (smelting is not
+    only the furnace), and a player building one would build the cheapest that works, so
+    pricing the first listed would charge for a machine nobody would choose.
+    """
+    out = {}
+    for category, keys in (machine_items or {}).items():
+        best = math.inf
+        for key in keys:
+            c = cost.get(key, math.inf)
+            if c < best:
+                best = c
+        out[category] = build_entry_cost(best)
+    return out
+
+
+def category_entry_cost(category, machine_states=None, machine_entry=None):
+    """What running a recipe in `category` costs before any ingredient is counted.
+
+    ONE definition, read by both the relaxation in `estimate` and the ranking in
+    `recipe_cost`. Do NOT inline the MACHINE_COST lookup into either of them again: they held
+    separate copies, so a change to how a machine is priced silently applied to one and not
+    the other, and the symptom is a solver that expands a route the ranker did not price.
+    """
+    if machine_entry and category in machine_entry:
+        return machine_entry[category]
+    state = (machine_states or {}).get(category)
+    return (MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
+            else UNGATED_MACHINE_COST)
 
 
 def _scaled_qty(key, qty):
@@ -129,17 +228,42 @@ def _cheapest_alternative(cost, ingredient, ore_members):
     return min(alts, key=lambda a: input_cost(cost, a, ingredient.qty, ore_members))
 
 
-def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None):
-    """{item key: estimated cost}. Lower is easier to get."""
-    from .generators import SOURCE_COST
+def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None,
+             machine_items=None):
+    """{item key: estimated cost}. Lower is easier to get.
 
-    have = have or {}
-    machine_states = machine_states or {}
+    With `machine_items` (`{category: (machine item key, ...)}` from
+    `machines.build_targets`) this runs the relaxation TWICE, and the second run is issue
+    #86's fix. A buildable machine's entry cost is what building it costs, which is itself a
+    number this function computes, so it cannot be known before the first run.
+
+    TWO PASSES RATHER THAN RECOMPUTING ENTRY COSTS INSIDE THE LOOP, deliberately. The
+    relaxation only ever LOWERS a cost, so an entry price that rises between passes -- which
+    is exactly what happens when a machine's real cost replaces the optimistic flat 40 --
+    never propagates: the cheap prices computed in pass 1 stick, and the result silently
+    depends on pass order. Seeding a second clean relaxation with entry costs derived from
+    the first is deterministic and says what it does.
+
+    Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
+    machine price this relaxation used instead of re-deriving a flat one.
+    """
+    seed = _seed(graph, have, free_sources)
+    cost = _relax(graph, dict(seed), passes, machine_states, None)
+    if not machine_items:
+        return CostTable(cost)
+    entry = machine_entry_costs(machine_items, cost)
+    return CostTable(_relax(graph, dict(seed), passes, machine_states, entry),
+                     machine_entry=entry)
+
+
+def _seed(graph, have, free_sources):
+    """Starting costs, before any recipe is considered. Shared by both relaxation passes."""
+    from .generators import SOURCE_COST
 
     cost = {}
     # Anything in stock is free at the margin; that is what makes the solver prefer using
     # what you already own without needing a separate rule for it.
-    for key, qty in have.items():
+    for key, qty in (have or {}).items():
         if qty:
             cost[key] = 0.0
 
@@ -156,14 +280,16 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
             for alt in ing.alternatives:
                 if alt not in cost and alt not in produced:
                     cost[alt] = BASE_RAW_COST
+    return cost
 
+
+def _relax(graph, cost, passes, machine_states, machine_entry):
+    """One Bellman-Ford style relaxation over every recipe, mutating and returning `cost`."""
     machine_cost = {}
     for r in graph.recipes:
         if r.category not in machine_cost:
-            state = machine_states.get(r.category)
-            machine_cost[r.category] = (
-                MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
-                else UNGATED_MACHINE_COST)
+            machine_cost[r.category] = category_entry_cost(
+                r.category, machine_states, machine_entry)
 
     ore_members = graph.ore_members
     recipes = graph.recipes
@@ -210,7 +336,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     return cost
 
 
-def fingerprint(graph_path, have, machine_states, free_sources):
+def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -227,8 +353,9 @@ def fingerprint(graph_path, have, machine_states, free_sources):
     except OSError:
         h.update(str(graph_path).encode())
     h.update(repr(sorted((MACHINE_COST.items()))).encode())
-    h.update(("%r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
-                                     TRANSFER_PENALTY, PASSES, FORMULA_VERSION)).encode())
+    h.update(("%r %r %r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
+                                           TRANSFER_PENALTY, PASSES, FORMULA_VERSION,
+                                           BUILD_SPREAD, BUILD_SCALE)).encode())
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
     h.update(b"\x00")
@@ -237,31 +364,46 @@ def fingerprint(graph_path, have, machine_states, free_sources):
     h.update(b"\x00")
     for key in sorted(free_sources or ()):
         h.update(("%s;" % key).encode())
+    # The machine ITEMS, not just the states. A catalyst change can move which block a
+    # category's machine is without moving the state, and the entry cost is derived from that
+    # item's price -- so hashing states alone would serve prices for the old machine.
+    h.update(b"\x00")
+    for uid, keys in sorted((machine_items or {}).items()):
+        h.update(("%s=%s;" % (uid, ",".join(keys))).encode())
     return h.hexdigest()
 
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
-                    cache_path=DEFAULT_COST_CACHE, passes=PASSES):
+                    cache_path=DEFAULT_COST_CACHE, passes=PASSES, machine_items=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
-    The relaxation is ~8s on a 121k-recipe graph, which is fine once at server startup and
-    tedious on every `plan` invocation. A stale cache would be far worse than a slow one,
-    so validation is a content fingerprint and every failure path recomputes rather than
-    guessing.
+    Measured on the 117.7k-recipe reference graph: 15.6s for one relaxation, 26.1s for the
+    two `estimate` runs when build targets are supplied (#86). Fine once at server startup
+    and tedious on every `plan` invocation, which is what this is for. A stale cache would be
+    far worse than a slow one, so validation is a content fingerprint and every failure path
+    recomputes rather than guessing.
+
+    The cached document carries the machine entry costs alongside the item costs. It has to:
+    a hit that returned only the item prices would hand back a plain table, `recipe_cost`
+    would fall back to the flat constants, and the ranking would disagree with the very
+    relaxation the cache is serving -- a divergence visible only on a cache HIT, which is the
+    hard way to find it.
     """
-    stamp = fingerprint(graph_path, have, machine_states, free_sources)
+    stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items)
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:
                 doc = json.load(fh)
             if doc.get("fingerprint") == stamp and isinstance(doc.get("cost"), dict):
-                return {k: (math.inf if v is None else v)
-                        for k, v in doc["cost"].items()}
+                entry = doc.get("machine_entry")
+                return CostTable(
+                    {k: (math.inf if v is None else v) for k, v in doc["cost"].items()},
+                    machine_entry=entry if isinstance(entry, dict) else None)
         except (ValueError, OSError):
             pass
 
     cost = estimate(graph, have=have, machine_states=machine_states, passes=passes,
-                    free_sources=free_sources)
+                    free_sources=free_sources, machine_items=machine_items)
     if cache_path:
         try:
             os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
@@ -269,7 +411,8 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
             with open(tmp, "w") as fh:
                 json.dump({"fingerprint": stamp,
                            "cost": {k: (None if math.isinf(v) else v)
-                                    for k, v in cost.items()}}, fh)
+                                    for k, v in cost.items()},
+                           "machine_entry": getattr(cost, "machine_entry", None) or {}}, fh)
             os.replace(tmp, cache_path)   # atomic, so a killed run cannot leave a torn file
         except OSError:
             pass
@@ -289,10 +432,11 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
     is the one with a recipe. Nothing was mispriced; the price was simply for a route
     nobody took. See issue #29.
     """
-    machine_states = machine_states or {}
-    state = machine_states.get(recipe.category)
-    total = (MACHINE_COST.get(state[0], UNGATED_MACHINE_COST) if state
-             else UNGATED_MACHINE_COST)
+    # Off the table when it is a `CostTable`, so the machine price charged here is the one
+    # the relaxation actually used (#86). A plain dict still works and still gets the flat
+    # constants, which is what every caller passing a hand-built table wants.
+    total = category_entry_cost(recipe.category, machine_states,
+                                getattr(cost, "machine_entry", None))
     if recipe.transfer:
         total += TRANSFER_PENALTY
     for ing in recipe.inputs:

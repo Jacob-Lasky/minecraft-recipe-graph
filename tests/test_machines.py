@@ -7,6 +7,9 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# tests/ itself, so `import fixtures` works under `-m unittest tests.<mod>` and
+# not only under `discover -s tests`, which inserts this directory for us.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
 from recipegraph import cost, index, machines  # noqa: E402
@@ -29,6 +32,78 @@ def graph_with_two_routes():
                  [Ingredient(["mod:cheap_part"], 2)], category="mod_other_machine",
                  machine="Other Machine"))
     return g
+
+
+class BuildTargetsTest(unittest.TestCase):
+    """Which item the cost model must price to know what building a machine costs (#86).
+
+    `resolve` returns (state, why) and throws the machine item away, so this reads
+    `describe`. The evidence string is not a substitute: "craftable: mod:x" is prose for a
+    human, and parsing a key back out of it would make the cost model depend on how the
+    machines page words itself.
+    """
+
+    def targets(self, **kwargs):
+        g = graph_with_two_routes()
+        # The base fixture has no recipe producing the machine, which makes it `unavailable`
+        # rather than `buildable`, and `build_targets` is only ever about buildable ones.
+        g.add(Recipe("mk_machine", "t", [("mod:owned_machine", 1)],
+                     [Ingredient(["mod:cheap_part"], 1)], category="minecraft.crafting"))
+        return machines.build_targets(machines.describe(g, **kwargs))
+
+    def test_a_buildable_category_names_its_machine_item(self):
+        t = self.targets()
+        self.assertIn("mod_owned_machine", t)
+        self.assertIn("mod:owned_machine", t["mod_owned_machine"])
+
+    def test_a_machine_you_have_is_absent_rather_than_empty(self):
+        """Absent means "price this by the flat MACHINE_COST figure", which is correct here.
+
+        Present with an empty tuple would mean "priced from a machine item" and
+        `machine_entry_costs` would charge the top of the band for a machine you are standing
+        next to, since no candidate would price.
+        """
+        t = self.targets(placed={"mod:owned_machine": 1})
+        self.assertNotIn("mod_owned_machine", t)
+
+    def test_an_unavailable_category_is_absent(self):
+        # It must keep MACHINE_COST["unavailable"], whose 5,000 figure is the wall that stops
+        # the solver routing through a machine with no route to it.
+        t = self.targets(overrides={"mod_owned_machine": machines.UNAVAILABLE})
+        self.assertNotIn("mod_owned_machine", t)
+
+    def test_hand_crafting_is_absent(self):
+        g = graph_with_two_routes()
+        g.add(Recipe("hand", "t", [("mod:cheap_part", 1)],
+                     [Ingredient(["mod:mountain"], 1)], category="minecraft.crafting"))
+        self.assertNotIn("minecraft.crafting", machines.build_targets(machines.describe(g)))
+
+    def test_only_the_buildable_candidates_are_returned(self):
+        """A category can offer several blocks and have only some of them craftable.
+
+        Returning a candidate that is placed or in stock would let the cheapest-candidate rule
+        price a buildable category at a machine the player already owns, which is 1.0, and the
+        category would then read as nearly free while still needing a machine built.
+        """
+        info = {"cat": {"state": machines.BUILDABLE, "candidate_states": [
+            {"key": "mod:a", "state": machines.BUILDABLE, "why": "craftable: mod:a"},
+            {"key": "mod:b", "state": machines.UNAVAILABLE, "why": "no route to mod:b"},
+            {"key": "mod:c", "state": machines.HAVE, "why": "in stock: mod:c"},
+        ]}}
+        self.assertEqual(machines.build_targets(info), {"cat": ("mod:a",)})
+
+    def test_a_buildable_category_with_no_candidate_key_is_dropped(self):
+        # Rather than mapped to an empty tuple, for the same reason `have` is absent: an empty
+        # tuple prices at the top of the band, which is a claim, not a missing value.
+        info = {"cat": {"state": machines.BUILDABLE, "candidate_states": []}}
+        self.assertEqual(machines.build_targets(info), {})
+
+    def test_missing_keys_and_empty_input_do_not_raise(self):
+        # `describe` promises `candidate_states` is always present, but this runs on every
+        # category on every graph load and a KeyError here would be a 500 on the plan page.
+        self.assertEqual(machines.build_targets({}), {})
+        self.assertEqual(machines.build_targets(None), {})
+        self.assertEqual(machines.build_targets({"c": {"state": machines.BUILDABLE}}), {})
 
 
 class AvailabilityTest(unittest.TestCase):
@@ -346,9 +421,6 @@ class CostChoiceTest(unittest.TestCase):
         # what must not happen is a silently finite cost for a genuinely missing input.
         self.assertIn("mod:never", costs)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SameModTest(unittest.TestCase):
@@ -833,3 +905,7 @@ class StateTotalsTest(unittest.TestCase):
         counts = {"A": {machines.HAVE: 3, machines.BUILDABLE: 1},
                   "B": {machines.BUILDABLE: 2}}
         self.assertEqual(sum(machines.state_totals(counts).values()), 6)
+
+
+if __name__ == "__main__":
+    unittest.main()

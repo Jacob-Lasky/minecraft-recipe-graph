@@ -11,6 +11,9 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# tests/ itself, so `import fixtures` works under `-m unittest tests.<mod>` and
+# not only under `discover -s tests`, which inserts this directory for us.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
 from recipegraph import cost, generators, index  # noqa: E402

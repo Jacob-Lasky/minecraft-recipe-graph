@@ -752,7 +752,8 @@ class State:
         self.pinned, self.pin_notes = pins_mod.resolve(self.graph, self.pins)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
-            free_sources=self.free_sources)
+            free_sources=self.free_sources,
+            machine_items=machines_mod.build_targets(self.machine_info))
         # The two search indexes, built here rather than on first use. Between them they
         # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while

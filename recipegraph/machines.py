@@ -565,6 +565,35 @@ def summarise(states):
     return counts
 
 
+def build_targets(info):
+    """{category: (machine item key, ...)} for the categories whose machine must be built.
+
+    Takes `describe`'s detail, because the machine ITEM is the thing `resolve`'s two-value
+    view throws away, and `cost.machine_entry_costs` needs it to price building the machine
+    (#86).
+
+    Every candidate that earned a `buildable` verdict is returned, not just the winner: more
+    than one block opens a lot of categories, and which is CHEAPEST is a question about prices
+    that this module has none of. Ordering that by cost here would mean importing the cost
+    model into the machine model, so the caller with the price table picks.
+
+    Categories that are `have`, `unknown` or `unavailable` are absent rather than present with
+    an empty tuple. Their entry cost is the flat MACHINE_COST figure and a key here would mean
+    "priced from a machine item", which for those three would be a false claim: `have` is
+    nearly free by evidence, and the other two must keep the figures whose reasoning is
+    recorded on MACHINE_COST.
+    """
+    out = {}
+    for uid, rec in (info or {}).items():
+        if rec.get("state") != BUILDABLE:
+            continue
+        keys = tuple(cs["key"] for cs in rec.get("candidate_states") or ()
+                     if cs.get("state") == BUILDABLE)
+        if keys:
+            out[uid] = keys
+    return out
+
+
 def available_categories(states, include_buildable=True):
     """Categories a plan may route through.
 

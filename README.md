@@ -420,6 +420,15 @@ availability is a constraint on recipe choice rather than a guess. Three states:
 `unavailable`. Placed machines are read out of the world save during `have`, so this is
 evidence rather than configuration; manual overrides always win.
 
+`buildable` is not one price. Two machines you have to build are rarely comparable, and on
+the reference pack they are wildly incomparable: over the 380 buildable categories whose
+machine item can be priced, building one runs from 1 (an AE2 grindstone) up to 9,288 (a
+NuclearCraft salt fission vessel). So a buildable machine is ranked by **what building it
+actually costs**, derived from its own recipe rather than assumed — otherwise a machine
+needing parts you cannot get ranks level with one sitting a single craft away, and the
+ranking cannot prefer the reachable one. Measured over the 1,500 items whose two machines
+differ most, this moved 211 onto the cheaper machine and none onto a dearer one.
+
 Plans then report what you must build first:
 
 ```
@@ -427,6 +436,12 @@ Plans then report what you must build first:
   Chemical Reactor    buildable    craftable: nuclearcraft:chemical_reactor_idle
   Crystallizer        buildable    craftable: nuclearcraft:crystallizer_idle
 ```
+
+**That list is not costed into the shopping list above it.** The machine is named, not
+priced, so a plan tells you to build a Chemical Reactor without telling you what the reactor
+needs. Tracked in [#86](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/86);
+you build a machine once rather than once per craft, so folding it into per-item totals is a
+different calculation from the ranking above and not a matter of adding the numbers up.
 
 ### Gaps — what the dump could not read
 
