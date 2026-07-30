@@ -230,6 +230,37 @@ to compare. v0.6.0 is the first jar that can write `nbt_trace.json`; v0.7.0 writ
 default; v0.8.0 changes the digest itself, so it is the one jar whose redump is worth a
 launch right now.
 
+### Installing a built jar
+
+The install procedure, the one-jar-at-a-time rule, the JEI-runtime retry and the
+two-dumps-two-launches proof are all in the README; this is only what building here adds to
+them. **Compiling is not the last step** -- a jar left in `build/libs/` means the next launch
+runs the OLD mod and nobody finds out until afterwards, and a launch is the expensive action.
+
+Three things the README does not cover:
+
+- **`mkdir -p` the archive directory before moving the old jar out.** Without it `mv` errors,
+  and if the trailing slash is dropped from the destination it silently renames the jar TO the
+  archive name instead of moving it into one.
+- **Confirm the game is not running, and NOT with `pgrep -f`.** Forge reads `mods/` only at
+  startup, so a swap under a running game has no effect on it and the next `/recipedump`
+  spends a launch on the old jar. `pgrep -f <pattern>` matches the shell running the check
+  itself, so it reports the game as up when nothing is; `pgrep -a java` cannot.
+- **Verify the jar in `mods/`, not the one it was copied from,** by reading `SCHEMA` out of the
+  class constant pool -- neither the filename nor the version string can answer it, and
+  `tests.test_dist_jar._jar_schema(path)` works on any jar including an already-installed one.
+  More than one line of output here is the duplicate-modid crash, before the game says so.
+
+```bash
+python3 - <<'PY'
+import glob, sys
+sys.path.insert(0, ".")
+from tests.test_dist_jar import _jar_schema
+for p in sorted(glob.glob("<instance>/minecraft/mods/mc-recipe-dump-*.jar")):
+    print(p, "SCHEMA", _jar_schema(p))
+PY
+```
+
 **THE DESKTOP BUILDS AND TOWER SERVES, but not because Tower cannot build.** That was the
 standing claim and it is wrong: the AMP server instance has both prerequisites, 364 jars in
 `/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` and a 2.5 MB
