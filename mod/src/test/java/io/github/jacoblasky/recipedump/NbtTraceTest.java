@@ -208,21 +208,36 @@ public class NbtTraceTest {
     }
 
     @Test
-    public void theTraceFlagIsRecognisedHoweverItIsTyped() {
-        assertTrue(DumpCommand.wantsTrace(new String[] {"nbttrace"}));
-        assertTrue(DumpCommand.wantsTrace(new String[] {"NBTTRACE"}));
-        assertTrue(DumpCommand.wantsTrace(new String[] {"NbtTrace"}));
-        assertTrue(DumpCommand.wantsTrace(new String[] {" nbttrace "}));
-        assertTrue(DumpCommand.wantsTrace(new String[] {"other", "nbttrace"}));
+    public void aPlainDumpWRITESTheTrace() {
+        // The default, and the reason it is the default: the file cannot be rebuilt after
+        // the fact, and proving churn needs TWO dumps carrying it, so anything less than
+        // always-on makes two comparable dumps in a row the unlikely case.
+        assertTrue(DumpCommand.wantsTrace(null));
+        assertTrue(DumpCommand.wantsTrace(new String[] {}));
     }
 
     @Test
-    public void aDumpWithoutTheFlagIsUnchanged() {
-        assertFalse(DumpCommand.wantsTrace(null));
-        assertFalse(DumpCommand.wantsTrace(new String[] {}));
-        assertFalse(DumpCommand.wantsTrace(new String[] {"trace"}));
-        assertFalse(DumpCommand.wantsTrace(new String[] {"nbt_trace"}));
-        assertFalse(DumpCommand.wantsTrace(new String[] {null}));
+    public void theSuppressArgIsRecognisedHoweverItIsTyped() {
+        assertFalse(DumpCommand.wantsTrace(new String[] {"notrace"}));
+        assertFalse(DumpCommand.wantsTrace(new String[] {"NOTRACE"}));
+        assertFalse(DumpCommand.wantsTrace(new String[] {"NoTrace"}));
+        assertFalse(DumpCommand.wantsTrace(new String[] {" notrace "}));
+        assertFalse(DumpCommand.wantsTrace(new String[] {"other", "notrace"}));
+    }
+
+    @Test
+    public void anythingElseFAILSSAFEAndStillWritesTheTrace() {
+        // A typo must not silently produce a dump that cannot answer the question it was
+        // run for. That was the failure direction of the opt-in flag this replaced.
+        assertTrue(DumpCommand.wantsTrace(new String[] {"nottrace"}));
+        assertTrue(DumpCommand.wantsTrace(new String[] {"no-trace"}));
+        assertTrue(DumpCommand.wantsTrace(new String[] {null}));
+        // A leftover `nbttrace` from the older docs asks for what it already gets.
+        assertTrue(DumpCommand.wantsTrace(new String[] {"nbttrace"}));
+    }
+
+    @Test
+    public void theSinkStillHonoursBeingTurnedOff() {
         assertFalse(new DumpCommand.KeySink(false).tracing());
         assertNull(new DumpCommand.KeySink(false).trace());
         assertTrue(new DumpCommand.KeySink(true).tracing());

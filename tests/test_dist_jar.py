@@ -185,7 +185,15 @@ class DistJarMatchesSourceTest(unittest.TestCase):
         # spending a launch of the game on it.
         with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
             blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
-        for marker in (b"nbttrace", b"nbt_trace.json"):
+        # The suppress-arg literal is READ FROM THE SOURCE rather than written here. The
+        # assertion is "this jar carries the capability", not "the flag is spelled X" -- so a
+        # deliberate rename should follow along, while a jar that lost the capability still
+        # fails. Hardcoding it meant renaming `nbttrace` to `notrace` failed this test for
+        # the wrong reason and said nothing about the jar.
+        with open(JAVA_SRC) as fh:
+            arg = re.search(r'NO_TRACE_ARG\s*=\s*"([^"]+)"', fh.read())
+        self.assertIsNotNone(arg, "NO_TRACE_ARG not found in DumpCommand.java")
+        for marker in (arg.group(1).encode(), b"nbt_trace.json"):
             self.assertIn(marker, blob, "this jar cannot write the #80 trace")
 
     def test_it_targets_java_8(self):

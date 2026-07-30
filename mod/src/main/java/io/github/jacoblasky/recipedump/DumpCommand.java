@@ -39,8 +39,8 @@ import net.minecraftforge.oredict.OreDictionary;
 
 /**
  * `/recipedump` -- writes recipes.ndjson, catalysts.json, oredict.json, names.json,
- * skipped.ndjson and summary.json into &lt;gamedir&gt;/mc-recipe-dump/, plus
- * nbt_trace.json when run as `/recipedump nbttrace`.
+ * skipped.ndjson, summary.json and nbt_trace.json into &lt;gamedir&gt;/mc-recipe-dump/.
+ * `/recipedump notrace` skips the last of those.
  *
  * The dump is SPREAD ACROSS CLIENT TICKS rather than run inline. It is only about a
  * second of work, but a second spent inside a command handler is a second the render
@@ -72,32 +72,44 @@ public class DumpCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/recipedump [" + TRACE_ARG + "] -- dump all JEI recipes for offline "
-                + "crafting-tree tools; " + TRACE_ARG + " adds nbt_trace.json for issue #80";
+        return "/recipedump [" + NO_TRACE_ARG + "] -- dump all JEI recipes for offline "
+                + "crafting-tree tools; " + NO_TRACE_ARG + " skips nbt_trace.json (#80)";
     }
 
     /**
-     * Opt-in argument that adds `nbt_trace.json`. Issue #80's diagnostic.
+     * Argument that SUPPRESSES `nbt_trace.json`. Issue #80's diagnostic is ON by default.
      *
-     * OPT-IN rather than always-on because it is per-unique-key extra output that no part
-     * of `recipegraph build` reads, and a normal dump has no reason to carry it. Compared
-     * as lower case so `/recipedump NBTTRACE` works: the player is typing this from a wiki
-     * page or a chat message, and a silently-ignored flag would produce a dump that looks
-     * complete and cannot answer the question it was run to answer.
+     * IT SHIPPED OPT-IN AND THAT WAS WRONG. The reasoning was that no part of
+     * `recipegraph build` reads the file, so a normal dump has no reason to carry it. That
+     * weighs the wrong cost. Measured on the reference pack the trace is 34.3 MB against a
+     * 245 MB dump -- 14% -- and the expensive part of producing one is not the bytes, it is
+     * a launch of the game.
+     *
+     * The asymmetry is what decides it. The file CANNOT be reconstructed afterwards: the
+     * NBT it describes exists only in a running JVM, which is the whole reason #80 could not
+     * be investigated for months. And proving churn needs TWO dumps carrying it, because the
+     * effect only appears BETWEEN JVM runs -- so opt-in means every dump is a coin flip and
+     * two in a row is the unlikely case. Default-on makes any two consecutive dumps
+     * comparable, which is the only state in which the question is answerable at all.
+     *
+     * Fails SAFE in the right direction too: a mistyped `notrace` writes the trace anyway,
+     * where a mistyped opt-in silently produced a dump that could not answer the question it
+     * was run for. Compared as lower case, and a leftover `nbttrace` from the older docs is
+     * simply ignored and still gets what it asked for.
      */
-    static final String TRACE_ARG = "nbttrace";
+    static final String NO_TRACE_ARG = "notrace";
 
-    /** True when `args` asks for the trace. Unknown args are ignored, as before. */
+    /** True unless `args` asks to suppress the trace. Unknown args are ignored, as before. */
     static boolean wantsTrace(String[] args) {
         if (args == null) {
-            return false;
+            return true;
         }
         for (String a : args) {
-            if (a != null && TRACE_ARG.equalsIgnoreCase(a.trim())) {
-                return true;
+            if (a != null && NO_TRACE_ARG.equalsIgnoreCase(a.trim())) {
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     @Override
@@ -145,9 +157,13 @@ public class DumpCommand extends CommandBase {
         MinecraftForge.EVENT_BUS.register(runner);
         reply(sender, String.format("dumping %d recipe categories...", categories.size()));
         if (traceNbt) {
-            // Say it up front. The trace is the whole reason this run is happening, and
-            // the alternative is finding out 40 seconds later from a filename.
+            // Say it up front either way. The trace being DEFAULT is the surprising half
+            // now, and a player who does not know it is being written cannot choose to
+            // skip it; a player who asked to skip needs to see that it took.
             reply(sender, "  also writing nbt_trace.json (per-tag NBT digests)");
+        } else {
+            reply(sender, "  skipping nbt_trace.json -- this dump cannot be compared "
+                    + "against another for #80 digest churn");
         }
     }
 

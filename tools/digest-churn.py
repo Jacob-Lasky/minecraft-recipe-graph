@@ -8,7 +8,7 @@ ME system stops matching the recipe that consumes it. The cause could not be inv
 at all, because a dump records only the final digest and never the NBT behind it: there was
 nothing on disk to recompute or compare.
 
-`/recipedump nbttrace` now also writes `nbt_trace.json`, a per-TOP-LEVEL-TAG digest of every
+`/recipedump` now also writes `nbt_trace.json`, a per-TOP-LEVEL-TAG digest of every
 key with identifying NBT, in two flavours per tag:
 
     "o"   the tag as the real digest serialises it, lists IN ORDER
@@ -43,6 +43,10 @@ import os
 import sys
 
 TRACE_FILE = "nbt_trace.json"
+# The arg that SUPPRESSES the trace, mirrored from DumpCommand.NO_TRACE_ARG and pinned to it
+# by tests/test_digest_churn.TheJavaSourceContract. Named here so the error message above
+# cannot tell a player to use a flag the mod does not accept.
+NO_TRACE_ARG = "notrace"
 NAMES_FILE = "names.json"
 
 
@@ -75,9 +79,10 @@ def load_dump(path):
         names_path = os.path.join(os.path.dirname(path), NAMES_FILE)
     if not os.path.exists(trace_path):
         raise SystemExit(
-            "no %s in %s.\nThat file only exists when the dump was run as "
-            "`/recipedump nbttrace`; a normal dump does not write it, and it cannot be "
-            "reconstructed after the fact." % (TRACE_FILE, path))
+            "no %s in %s.\nEvery dump from mod v0.7.0 writes it unless `%s` was passed, "
+            "and a pre-0.6.0 jar cannot write it at all. It cannot be reconstructed after "
+            "the fact -- the NBT it describes only exists in a running JVM -- so this needs "
+            "another `/recipedump`." % (TRACE_FILE, path, NO_TRACE_ARG))
     with open(trace_path) as fh:
         trace = json.load(fh)
     names = {}

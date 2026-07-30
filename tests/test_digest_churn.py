@@ -242,14 +242,18 @@ class Loading(unittest.TestCase):
             self.assertEqual(names["a:b#1"], "N")
             self.assertEqual(trace["a:b#1"]["T"]["o"], "o")
 
-    def test_a_dump_without_the_trace_says_the_flag_was_needed(self):
-        # The likeliest mistake is running a normal dump and expecting this to work, and
-        # the file cannot be reconstructed afterwards -- so the error has to say so rather
-        # than reading as a missing path.
+    def test_a_dump_without_the_trace_explains_why_rather_than_reading_as_a_bad_path(self):
+        # Now that the trace is DEFAULT, an absent one means one of two specific things --
+        # `notrace` was passed, or the jar predates 0.6.0 -- and neither is guessable from
+        # "file not found". It also cannot be reconstructed afterwards, so the error has to
+        # say that another dump is required rather than implying a wrong path.
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises(SystemExit) as caught:
                 digest_churn.load_dump(root)
-            self.assertIn("nbttrace", str(caught.exception))
+            message = str(caught.exception)
+        self.assertIn(digest_churn.NO_TRACE_ARG, message)
+        self.assertIn("cannot be reconstructed", message)
+        self.assertIn("/recipedump", message)
 
     def test_a_missing_names_file_does_not_stop_the_suspect_mode(self):
         # names.json only matters for PAIRING across two dumps; the one-dump suspect list
@@ -350,16 +354,27 @@ class TheJavaSourceContract(unittest.TestCase):
         # there is nothing to pair on.
         self.assertIn('"%s"' % digest_churn.NAMES_FILE, self.src)
 
-    def test_the_flag_this_tool_tells_the_player_to_use_is_the_flag_the_mod_accepts(self):
-        found = re.search(r'TRACE_ARG\s*=\s*"([^"]+)"', self.src)
-        self.assertIsNotNone(found, "TRACE_ARG not found in %s" % self.JAVA)
-        message = digest_churn.load_dump.__doc__ or ""
+    def test_the_suppress_flag_this_tool_names_is_the_one_the_mod_accepts(self):
+        # The tool's "no trace here" error names this flag. If Java renames it, the message
+        # instructs the player to type something inert, and the cost of believing it is a
+        # launch of the game.
+        found = re.search(r'NO_TRACE_ARG\s*=\s*"([^"]+)"', self.src)
+        self.assertIsNotNone(found, "NO_TRACE_ARG not found in %s" % self.JAVA)
+        self.assertEqual(found.group(1), digest_churn.NO_TRACE_ARG)
         with tempfile.TemporaryDirectory() as empty:
             with self.assertRaises(SystemExit) as caught:
                 digest_churn.load_dump(empty)
-            message += str(caught.exception)
-        self.assertIn(found.group(1), message,
-                      "the tool tells the player to run a flag the mod does not accept")
+        self.assertIn(digest_churn.NO_TRACE_ARG, str(caught.exception))
+
+    def test_the_trace_is_on_by_default_in_the_mod(self):
+        # The tool's error message asserts "every dump from v0.7.0 writes it unless...".
+        # That claim lives in Java, so pin it: wantsTrace must return TRUE for no args.
+        body = re.search(r"static boolean wantsTrace\(String\[\] args\) \{(.*?)\n    \}",
+                         self.src, re.S)
+        self.assertIsNotNone(body, "wantsTrace not found in %s" % self.JAVA)
+        self.assertIn("return true;", body.group(1),
+                      "wantsTrace no longer defaults to writing the trace, but the tool "
+                      "still tells the player it is written by default")
 
 
 class Cli(unittest.TestCase):
