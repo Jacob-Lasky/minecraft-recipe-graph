@@ -721,14 +721,17 @@ public class DumpCommand extends CommandBase {
      *        Comparing this field for one item across TWO dumps names the tag that
      *        churned, which is the thing no dump on disk can currently answer.
      *   "u"  the same tag with list order made irrelevant. Comparing "o" against "u"
-     *        WITHIN ONE dump says whether the tag could churn from list order at all:
-     *        equal clears it, different makes it a suspect.
+     *        WITHIN ONE dump hints at whether list order could matter for that tag.
      *
-     * The "u" field is what makes a SINGLE dump useful. Churn is a between-JVM-run effect,
-     * so proving it needs two dumps and therefore two launches of the game; the suspect
-     * list needs only one. Given #80 already measured that the churn concentrates in
-     * tconstruct and plustic, a one-launch suspect list restricted to those mods is
-     * plausibly enough to write the narrow fix.
+     * "u" ALSO CARRIES THE PROOF, and that turned out to be its real value. Comparing "u"
+     * across two dumps separates a permutation from a content change: if "o" moved and "u"
+     * did not, list order is the whole difference and sorting that tag fixes it.
+     *
+     * DO NOT read the one-dump comparison as a verdict. Measured on the reference pack it is
+     * wrong in both directions: `Special` read as "equal" on 5,163 keys and then churned on
+     * 10,010, so a list that happens to be in sorted order in one dump hides there; and
+     * `Traits` led the one-dump table at 7,962 while churning zero times. The equal case is
+     * not a clearance. Two dumps are what answer the question.
      *
      * Top level only, deliberately. A deeper walk multiplies the output for a question
      * nobody has asked yet: the first thing needed is a tag NAME to put in the narrow

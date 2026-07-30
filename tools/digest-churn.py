@@ -22,10 +22,13 @@ This tool reads those.
 
 TWO MODES, AND ONE OF THEM NEEDS ONLY ONE LAUNCH OF THE GAME. Churn is a between-JVM-run
 effect, so OBSERVING it needs two dumps from two separate launches. But a single dump can
-say which tags are even capable of it: any tag whose "o" and "u" disagree holds a
-non-trivially-ordered list, and any tag where they agree is cleared outright. Given #80
-already measured where the churn concentrates, a one-dump suspect list filtered to those
-mods is plausibly enough to write the narrow fix.
+say which tags are even capable of it: a tag whose "o" and "u" disagree holds a
+non-trivially-ordered list right now.
+
+DO NOT TREAT THE ONE-DUMP MODE AS AN ANSWER. It is weak in both directions, measured: a list
+already in sorted order reads as "cleared" and still churns (5,003 such keys), and the tag it
+ranked first (`Traits`, 7,962) did not churn at all while `Special` churned on 10,010. Use it
+to narrow, never to conclude.
 
 THE KEY IS NOT THE JOIN COLUMN. The digest is IN the key (`tconstruct:hatchet:804#<digest>`),
 so the key itself churns and cannot be used to pair an item across two dumps. Pairing is on
@@ -97,9 +100,18 @@ def suspects(trace, mod=None):
 
     Returns {tag name: {"flagged": n, "cleared": n, "mods": Counter}}.
 
-    A tag where the two agree is CLEARED, and that is a real result rather than an absence:
-    it holds no non-trivially-ordered list, so #80's hypothesis cannot explain it and the
-    investigation has to look elsewhere for that tag.
+    "AGREE" IS NOT INNOCENCE, and an earlier version of this docstring said it was. `o == u`
+    means only that THIS dump's copy of the list was already in canonical order -- a list can
+    be sorted by luck in one dump and permuted in the next. Measured on the reference pack:
+    `Special` read as flagged on 5,007 keys and CLEARED on 5,163, and the two-dump comparison
+    then found it churning on 10,010, so at least 5,003 genuinely-churning keys were sitting
+    in the "cleared" column.
+
+    It is weak in the other direction too. The one-dump list ranked `Traits` top at 7,962
+    flagged, and `Traits` turned out not to churn at all.
+
+    So read this as "could this MECHANISM apply to this tag", never as a ranking of likely
+    culprits and never as a clearance. Only the two-dump mode answers what actually moved.
     """
     out = collections.defaultdict(
         lambda: {"flagged": 0, "cleared": 0, "mods": collections.Counter()})
@@ -128,7 +140,7 @@ def suspects(trace, mod=None):
 MAX_GROUP_PAIRS = 10000
 
 
-def _pair(old_entries, new_entries):
+def _pair(old_entries, new_entries, max_pairs=MAX_GROUP_PAIRS):
     """Pair (key, tags) across two dumps by MAXIMUM per-tag agreement.
 
     Both sides can hold several NBT species under one (base key, display name) -- 6,565
@@ -139,24 +151,63 @@ def _pair(old_entries, new_entries):
     confident wrong answer.
 
     Greedy, best-agreement-first. Returns [(old_key, old_tags, new_key, new_tags)].
+
+    AN EXACT SIEVE RUNS FIRST, and it is what makes this finish on a real pack. If every one
+    of an entry's tag digests matches an entry on the other side, the two are the same stack
+    and nothing churned -- the key digest is computed over the whole compound, so identical
+    tags means an identical key. Those need no search at all.
+
+    That is not a micro-optimisation, it is the difference between an answer and an
+    exclusion. Measured on the reference pack: 90,583 groups compared, 351.6M combinations
+    if paired naively, and 349M of them sit in just 68 groups -- every one a FLUID TANK
+    (`thermalexpansion:reservoir`, Blood Tank, Portable Tank) carrying ~3,600 NBT variants,
+    one per fluid and amount. Tanks do not churn, so the sieve retires all 3,602 of them in
+    linear time and the quadratic pass only ever sees genuinely-changed entries, of which
+    there are ~12k in the whole pack. Without it, 117,520 entries were excluded from the
+    verdict -- MORE than the 12,377 that were analysed, which is a conclusion drawn from a
+    minority while the report still looked complete.
     """
+    def signature(tags):
+        return tuple(sorted((t, d.get("o")) for t, d in tags.items()))
+
+    new_by_sig = collections.defaultdict(list)
+    for ni, (_nk, nt) in enumerate(new_entries):
+        new_by_sig[signature(nt)].append(ni)
+
+    pairs, rest_old, used_new = [], [], set()
+    for ok, ot in old_entries:
+        bucket = new_by_sig.get(signature(ot))
+        if bucket:
+            ni = bucket.pop()
+            used_new.add(ni)
+            nk, nt = new_entries[ni]
+            pairs.append((ok, ot, nk, nt))
+        else:
+            rest_old.append((ok, ot))
+    rest_new = [e for ni, e in enumerate(new_entries) if ni not in used_new]
+
+    # Whatever the sieve could not settle is churned, renamed, or new, and those groups are
+    # small. The cap still guards the pathological case rather than being the common path.
+    if len(rest_old) * len(rest_new) > max_pairs:
+        return pairs, min(len(rest_old), len(rest_new))
+
     scored = []
-    for oi, (ok, ot) in enumerate(old_entries):
-        for ni, (nk, nt) in enumerate(new_entries):
+    for oi, (ok, ot) in enumerate(rest_old):
+        for ni, (nk, nt) in enumerate(rest_new):
             shared = set(ot) & set(nt)
             agree = sum(1 for t in shared if ot[t].get("o") == nt[t].get("o"))
             scored.append((agree, -len(set(ot) ^ set(nt)), oi, ni))
     scored.sort(reverse=True)
-    used_old, used_new, pairs = set(), set(), []
+    used_o, used_n = set(), set()
     for _agree, _sym, oi, ni in scored:
-        if oi in used_old or ni in used_new:
+        if oi in used_o or ni in used_n:
             continue
-        used_old.add(oi)
-        used_new.add(ni)
-        ok, ot = old_entries[oi]
-        nk, nt = new_entries[ni]
+        used_o.add(oi)
+        used_n.add(ni)
+        ok, ot = rest_old[oi]
+        nk, nt = rest_new[ni]
         pairs.append((ok, ot, nk, nt))
-    return pairs
+    return pairs, 0
 
 
 def churn(old, new, mod=None, max_pairs=MAX_GROUP_PAIRS):
@@ -200,10 +251,9 @@ def churn(old, new, mod=None, max_pairs=MAX_GROUP_PAIRS):
         new_entries = new_groups.get(ident)
         if not new_entries:
             continue
-        if len(old_entries) * len(new_entries) > max_pairs:
-            oversized += min(len(old_entries), len(new_entries))
-            continue
-        for ok, ot, nk, nt in _pair(old_entries, new_entries):
+        paired, skipped = _pair(old_entries, new_entries, max_pairs)
+        oversized += skipped
+        for ok, ot, nk, nt in paired:
             if ok == nk:
                 # Same key on both sides: this item did not churn at all.
                 unchanged_items += 1
@@ -237,9 +287,13 @@ def churn(old, new, mod=None, max_pairs=MAX_GROUP_PAIRS):
 
 
 def _report_suspects(rows, limit):
-    print("SUSPECT TAGS -- can this tag churn from list order at all?")
-    print("A cleared tag holds no non-trivially-ordered list, so #80's hypothesis cannot")
-    print("explain it. This is one dump: it names candidates, it does not prove churn.\n")
+    print("SUSPECT TAGS -- could list order matter for this tag at all?")
+    print()
+    print("WEAK EVIDENCE, IN BOTH DIRECTIONS. `cleared` is NOT a clearance: a list that is")
+    print("already in sorted order in THIS dump reads as cleared and can still churn in the")
+    print("next one -- measured, 5,003 churning keys sat in that column. And a high flagged")
+    print("count is not a ranking: `Traits` led this table at 7,962 and did not churn, while")
+    print("`Special` churned on 10,010. Only two dumps answer what actually moved.\n")
     print("%-34s %9s %9s  %s" % ("tag", "flagged", "cleared", "top mods"))
     ranked = sorted(rows.items(), key=lambda kv: -kv[1]["flagged"])
     shown = 0

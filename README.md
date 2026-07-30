@@ -321,8 +321,15 @@ python3 tools/digest-churn.py <dump-dir>                # suspect tags, from ONE
 python3 tools/digest-churn.py <old-dump> <new-dump>      # which tag actually moved
 ```
 
-Churn is a between-JVM-run effect, so *proving* it needs two dumps from two separate launches;
-the one-dump mode names the tags that are even capable of it, which needs only one.
+Churn is a between-JVM-run effect, so it takes two dumps from two separate launches. The
+one-dump mode only narrows the field, and it is weak in both directions — measured, a tag can
+read as "cleared" and still churn (5,003 such keys), and the tag it ranked first did not churn
+at all. Draw conclusions from the two-dump run.
+
+On the reference pack that run answered #80: `Special` churned on 10,010 items and was
+**order-only every time**, so sorting that one tag fixes it, while `ench` churned on 2,423 with
+no order component at all — which is [#63](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/63)'s
+tag, and a different cause needing a different fix.
 
 It uses **only the public `mezz.jei.api` surface** — `getRecipeCategories()`,
 `getRecipeWrappers()`, `IRecipeWrapper.getIngredients()` — every signature verified
