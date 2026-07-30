@@ -541,6 +541,101 @@ for: a plan that routes through a nuclear fission chain to obtain a common reage
 
 Chemistry chains run 10+ hops, so the Bellman-Ford relaxation needs ~20 passes, not 6. The
 table is cached at `data/.cost-cache.json`, fingerprinted on graph mtime, stock, machine
+states, the machine ITEMS AND the tuning constants, so editing `MACHINE_COST` invalidates it
+rather than silently reusing old prices.
+
+**A/B-ING A COST CHANGE THROUGH THE CLI NEEDS A SEPARATE CACHE PATH PER ARM.** The fingerprint
+covers the constants, not the code, so if you A/B by monkeypatching a function (the obvious way
+to simulate "without the fix") NOTHING in the fingerprint moves, arm two is served arm one's
+cached table, and both plans come out identical. That reads exactly like "the change has no
+effect" and it is the wrong conclusion, drawn from a stale file. Override
+`defaults.DEFAULT_COST_CACHE` per arm, or delete the cache between runs. Hit this while
+verifying #86: two live CLI runs agreed, and the change was in fact moving 211 items.
+
+`buildable` is NOT one price (#86, `353d049`). A buildable machine's entry cost is derived
+from its own recipe, into a bounded band `[MACHINE_COST["buildable"], + BUILD_SPREAD)`. The
+bound is load-bearing at both ends: the ceiling must stay under `unknown` or a machine you can
+build reads as worse than one proven impossible (raw build costs reach 9,288 against an
+`unavailable` wall of 5,000), and the floor must stay at the old constant or every buildable
+machine gets cheaper across the board, which relitigates the Borax and Crystallizer cases.
+Two relaxations, not entry costs recomputed in the loop: relaxation only ever LOWERS a cost, so
+a rising entry price never propagates and the answer would depend on recipe order.
+
+`estimate` and `recipe_cost` must charge the SAME machine price. They each held their own
+`MACHINE_COST` lookup, so a change to one silently skipped the other, and the symptom is a
+solver expanding a route the ranker never priced (#29's shape one level up). Both go through
+`cost.category_entry_cost`, and the entry costs ride on the returned `CostTable` so a caller
+cannot forget to pass them. **The cache persists them too** -- dropping them would revert the
+ranking to flat constants on a cache HIT only, which is the hard way to find a bug.
+
+**Never move a constant in `cost.py` without running `tools/cost-probe.py` first.** It
+sweeps a tuning value across 18 items whose right answer a human can judge at a glance,
+four of them a control group that is correct today, and prints what each one reroutes to.
+Before it existed there was no way to see the damage or the benefit of moving a number, so
+constants were either argued about or left alone.
+
+```bash
+python3 tools/cost-probe.py                                  # the default sweep, ~15 min
+python3 tools/cost-probe.py --rank                           # ~50x faster, and it LIES
+python3 tools/cost-probe.py --item minecraft:diamond --explain
+```
+
+**`--rank` and the real solve disagree, and BOTH lie in their own direction.** The ranking
+skips the cycle guard, so `9 nuggets -> ingot` looks like the best route in the world; at
+`BASE_RAW_COST=20` it reorders 1,962 of 21,468 items. But do NOT assume the guard saves
+you: measured in real solves at that value, Diamond, Iron Ingot, Gold Ingot, Emerald and
+Redstone all really do end up on nugget assembly, which is #29's regression coming back.
+Use the slow mode for conclusions.
+
+**`BASE_RAW_COST` prices EVERY recipe-less input at the same 1.0**, so a decorative
+microblock, a loot token and a real ore tie exactly and a later tiebreak picks between
+them. `--explain minecraft:diamond` shows 44 candidates at one price, and before #61's fix
+the panel won on the `plain` bonus that hand crafting gets and smelting does not.
+
+**The tie is broken by the pack's own ore dictionary.** `Solver.ore_backed` prefers a route
+whose dead ends are all members of an `ore*` oredict group, which is what
+`Graph.world_ores` collects. It is pack-declared data rather than a guess at a registry
+name, and the `ore` prefix is load-bearing: `chisel:diamond` is in `blockDiamond`, so
+accepting every group readmits the decorative blocks this exists to demote. Measured with
+the pool emptied it moves 14 of 46,727 routes and no others; the cost-probe control group
+moves one line, Diamond onto Volcanic Diamond Ore.
+
+Three heuristics have been measured and REJECTED, so do not re-propose any of them without
+new evidence (#61):
+
+- **Demand** (prefer a leaf many recipes consume). Does not separate: Witch Hat 41 uses,
+  Sand 310, the microblock 2, and a genuine Deep Mob Learning data model also 2. Worse, on
+  Diamond it elects `chisel:diamond` at 67 uses over `erebus:ore_diamond` at 24, so it
+  picks a decorative block *because* it is popular.
+- **Raising the constant.** It is global, so it cannot reorder raw leaves against each
+  OTHER, only against produced ones. 2.5 and 5.0 fix Stick (Witch Hat to Oak Wood Planks)
+  and leave Diamond exactly where it was; 20 breaks the control group. At 40 Diamond and
+  Lapis do move, onto `nuclearcraft_ingot_former <- [fluid] Diamond`, which is #29's molten
+  metal returning.
+- **Ranking "rests on no raw leaf at all" above ore.** Sounds strictly better and is not:
+  it outranks `simple`, so it avoids a leaf at any price in complexity. 64 further routes
+  move, `Cherry Fence <- Cherry Wood Planks + Stick` becomes a nine-slot spelling of
+  itself, and `Tape Measure <- Iron Ingot + Tape` becomes `Iron Ingot + Iron Ingot + Tape
+  Measure Reel + Iron Ingot`.
+
+**A recipe's own outputs count as ancestors in `score_recipe`, not just the path's.** Two
+cyclic shapes an ancestor set cannot see, both found while measuring #61. A BYPRODUCT that
+feeds back is invisible at every depth, because `_build` passes `ancestors | {key}` and the
+cycle is through the *other* output: an insolator emitting 12 Heart Fruit plus 1 Heart Fruit
+Seed while eating a seed. And `score_recipe` called with no ancestors at all is what the
+recipe-chooser page does, so `/recipes?item=aoa3:heart_fruit_seeds` recommended that
+insolator recipe as the top choice to pin. 78 routes move; the Aedialite Fragment plan drops
+a Quartz Sliver line from 815 to 30. Gated on `available(alt) < qty` like the ancestor case,
+so a genuine upgrade or repair recipe you can feed from stock is still usable.
+
+**If every fluid prices near 0.0, the cost model is inert and recipe choice is back to being
+greedy.** `FLUID_SCALE` must be applied to recipe OUTPUT quantities as well as inputs: scaling
+one side made every fluid-to-fluid hop divide the cost by 1000, so a ten-hop chain priced at
+1e-30 and the table looked populated while discriminating between nothing. Symptom to watch
+for: a plan that routes through a nuclear fission chain to obtain a common reagent.
+
+Chemistry chains run 10+ hops, so the Bellman-Ford relaxation needs ~20 passes, not 6. The
+table is cached at `data/.cost-cache.json`, fingerprinted on graph mtime, stock, machine
 states, the tuning constants AND `cost.FORMULA_VERSION` -- so editing `MACHINE_COST`
 invalidates it, and so does changing the arithmetic, which moves no other input at all.
 **Bump `FORMULA_VERSION` whenever you touch the per-unit formula**, or every machine
