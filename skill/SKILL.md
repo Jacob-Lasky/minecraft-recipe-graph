@@ -508,7 +508,15 @@ per-character advances in it were measured off the rendered SVG; re-measure with
 sweeps a tuning value across 18 items whose right answer a human can judge at a glance,
 four of them a control group that is correct today, and prints what each one reroutes to.
 Before it existed there was no way to see the damage or the benefit of moving a number, so
-constants were either argued about or left alone.
+constants were either argued about or left alone. Borax resolving to
+`nuclearcraft_crystallizer` is the canary for the whole low-end calibration.
+
+**The probe was BLIND to machine entry costs until `64f6f12`**, because it went through
+`machines.resolve`, which drops the machine ITEM, so `estimate` ran with no build targets,
+`machine_entry_costs` never ran, and every buildable category priced at the flat constant. Any
+measurement of `BUILD_SCALE`, `BUILD_KNEE` or multiblock pricing from before that commit is
+worthless, and the failure mode was the worst available one: the tool reported no change and was
+believed.
 
 ```bash
 python3 tools/cost-probe.py                                  # the default sweep, ~15 min
@@ -599,11 +607,43 @@ solver expanding a route the ranker never priced (#29's shape one level up). Bot
 cannot forget to pass them. **The cache persists them too** -- dropping them would revert the
 ranking to flat constants on a cache HIT only, which is the hard way to find a bug.
 
-**Never move a constant in `cost.py` without running `tools/cost-probe.py` first.** It
-sweeps a tuning value across 18 items whose right answer a human can judge at a glance,
-four of them a control group that is correct today, and prints what each one reroutes to.
-Before it existed there was no way to see the damage or the benefit of moving a number, so
-constants were either argued about or left alone.
+A Modular Machinery machine is priced by its STRUCTURE (#93, `64f6f12`). Its controller recipe
+is a blueprint plus a blank controller, two items, for a machine of up to 8,813 placed blocks that
+appears in no recipe at all, because a multiblock is pack config rather than a crafting output. So
+#86 moved every MM machine toward the FLOOR of the band, making the pack's hardest machines look
+like its easiest. `recipegraph/multiblocks.py` reads
+`<instance>/config/modularmachinery/machinery/*.json`, and `graph.json` carries the result,
+because the server that answers plans has no pack instance to read. Reference pack: 259 machines,
+69,354 block positions, 0.25% unresolvable, and 117 of the 188 categories a plan can route through
+need at least one component with no obtainable recipe.
+
+Four traps in that data: `elements` is a bare string 32 times, so iterating it yields characters;
+`@meta` is BLOCKSTATE metadata rather than item metadata, so `stone_slab@9` is a top-side slab
+whose item is meta 1 and the base key is the correct fallback; the abstract port names have no
+colon, so `norm_key` would mint `minecraft:generalized_input_item`, a phantom key nobody can
+trace (`regex.txt` resolves the four that matter, alias in the SECOND column, CRLF); and one of
+the pack's own machinery files is malformed JSON, which the parser must survive and report.
+
+**The generic blueprint is a catalyst for all 188 MM categories, and the CHEAPEST candidate sets
+the price**, so one cheap non-machine would price every multiblock as trivial. It does not today
+only because the bare `modularmachinery:itemblueprint` has no producer and prices at infinity, the
+real blueprints being NBT-discriminated variants of it. That is luck, not a rule.
+`machines.NOT_A_MACHINE` excludes it in `build_targets`; do not drop that on the grounds that
+nothing appears to depend on it.
+
+**An entry cost cannot yet express a multiblock, and that is issue #95.** The band ceiling is 119,
+deliberately under `MACHINE_COST["unknown"]` at 120, while honest structure costs reach 279,863.
+Measured: of 241 items where an MM route beat a non-MM alternative, 77 of them machines the player
+already owns, NONE moved when MM prices tripled. Do not read "no plan changed" as evidence the
+structures are parsed wrongly; the ordering is right and the magnitude is compressed.
+
+`build_entry_cost` is LOGARITHMIC in the build cost, and `BUILD_KNEE = 1.0` is what keeps the low
+end where #86 measured it: a build cost of 1 prices at 41.21 against the old 41.22, and the pack's
+median 2 at 42.36 against 42.39. Raising it relitigates the Crystallizer case from the other side,
+because buildable machines getting DEARER lets an enormous chain through owned machines win. The
+curve had to change at all because `b / (b + BUILD_SCALE)` saturates above ~6,400, flattening 20 of
+the 71 fully-priced multiblocks within 1.0 of the ceiling, which is #86's own defect recurring
+among the expensive machines.
 
 ```bash
 python3 tools/cost-probe.py                                  # the default sweep, ~15 min
@@ -884,6 +924,14 @@ across a two-minute solve froze every other page.
 
 ## Gotchas that cost real debugging time
 
+- **A relative default path plus a container is a silent skip** (#92, `b5afdaf`). `--graph` is a
+  GLOBAL defaulting to `data/graph.json` and the image's WORKDIR is `/app`, so inside the
+  container the default resolves to nothing: `have` skipped its entire stock reconciliation and
+  `track` recorded snapshots labelled with raw item keys, both printing a success line and no
+  hint that anything was missing. Both go through `cli._resolve_graph` now, which also tries the
+  path beside the file the command WRITES. The general rule: **a check that exists to break
+  silence must never fail silently**, so a step guarded by `os.path.exists` owes the reader a
+  sentence in the else branch.
 - **AE2 cell counts live in the `Cnt` tag, not `Count`.** `Count` is an ItemStack byte
   capped at 127 and is meaningless for cell contents.
 - **Cell contents are `tag/#N` keys**, not an `Items` list, and the amount field differs
