@@ -70,11 +70,62 @@ def cmd_have(args):
     # Reconcile against the graph while both are in hand. A scan that writes 3,321 keys
     # looks like a success even when 320 of them name nothing any recipe uses, and that
     # silence is what let #21 sit unnoticed: the stock was there, the plans ignored it.
-    if os.path.exists(args.graph):
-        from . import gaps
-        print(gaps.stock_report(gaps.stock_coverage(Graph.load(args.graph), items,
-                                                    reader=ae2_inventory.READER)))
+    graph_path, note = _coverage_graph(args.graph, args.out)
+    if note:
+        print("coverage: %s" % note)
+    if graph_path is None:
+        return 0
+    from . import gaps
+    print(gaps.stock_report(gaps.stock_coverage(Graph.load(graph_path), items,
+                                                reader=ae2_inventory.READER)))
     return 0
+
+
+def _resolve_graph(graph_path, beside_path):
+    """(an existing graph to read, every path tried) -- the graph is None when there is none.
+
+    For the commands that use a graph OPTIONALLY, to enrich their output, rather than the
+    ones `_load_graph` can exit for. It resolves; the caller words the failure, because what
+    is lost differs: `have` loses the check that catches a stranded stock file, `metrics`
+    loses English labels on a chart.
+
+    A RELATIVE --graph IS ALSO TRIED BESIDE `beside_path`, and that is not a convenience.
+    `--graph` is a GLOBAL defaulting to the relative "data/graph.json", while the documented
+    way to read a server world is a container where data/ is mounted at /data and the working
+    directory has no data/ at all, so the default resolves to nothing there and the optional
+    step vanished with it (#92). The candidate carries the given BASENAME over rather than
+    assuming "graph.json", since reading a differently named file than the one asked for is
+    worse than reading none. An ABSOLUTE --graph is taken literally: the caller named a path,
+    and second-guessing it would open a file they did not ask for.
+    """
+    tried = [graph_path]
+    if os.path.exists(graph_path):
+        return graph_path, tried
+    beside = os.path.join(os.path.dirname(os.path.abspath(beside_path)),
+                          os.path.basename(graph_path))
+    if os.path.isabs(graph_path) or os.path.abspath(graph_path) == beside:
+        return None, tried
+    tried.append(beside)
+    return (beside if os.path.exists(beside) else None), tried
+
+
+def _coverage_graph(graph_path, out_path):
+    """(graph for `have` to reconcile against, sentence to print first) -- either can be empty.
+
+    A CHECK THAT EXISTS TO BREAK SILENCE MUST NOT FAIL SILENTLY. `stock_coverage` is what
+    surfaces both a stale-schema stock file and #21-style keys no recipe uses, so a run that
+    skips it while printing "wrote ...: 4599 items" looks like a complete success and is not
+    (#92). Never return None without a sentence saying so.
+    """
+    found, tried = _resolve_graph(graph_path, out_path)
+    if found == graph_path:
+        return found, ""
+    if found is not None:
+        return found, ("no graph at %s, reading %s beside --out instead"
+                       % (graph_path, found))
+    return None, ("no graph at %s, so the stock was NOT reconciled against the graph -- a "
+                  "stale stock file or keys no recipe uses would go unnoticed. Pass --graph "
+                  "to check." % " or ".join(tried))
 
 
 def _placed_and_stock(have_path):
@@ -353,10 +404,18 @@ def cmd_track(args):
         print("nothing to record", file=sys.stderr)
         return 1
 
-    # Backfill labels from the graph so the charts read in English.
-    if not names and os.path.exists(args.graph):
-        g = Graph.load(args.graph)
-        names = {k: g.display(k) for k in have if k in g.names}
+    # Backfill labels from the graph so the charts read in English. Anchored on --db because
+    # that is what this command writes, and metrics.db sits beside graph.json in data/.
+    if not names:
+        gpath, tried = _resolve_graph(args.graph, args.db)
+        if gpath is None:
+            # Same silence as #92, one command over: skipping this quietly ships a chart
+            # labelled with raw item keys and no hint that a graph would have fixed it.
+            print("no graph at %s, so the charts will show raw item keys rather than names"
+                  % " or ".join(tried), file=sys.stderr)
+        else:
+            g = Graph.load(gpath)
+            names = {k: g.display(k) for k in have if k in g.names}
 
     conn = metrics.connect(args.db)
     written = metrics.record(conn, have, source=source, power=power, names=names)

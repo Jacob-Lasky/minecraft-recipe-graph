@@ -94,9 +94,13 @@ holders** in about a minute.
 
 A stack whose NBT decides what it is (a bee's species, a potion's effect, a vis pod's
 aspect) gets the same `#digest` suffix the dump mod puts on it, so it matches the recipes
-that use it. If `data/graph.json` is present, the scan finishes by reporting how much of
-your stock the graph cannot see and why — that number was 320 keys and 1.5 million items
-before the reader learned to compute the digest.
+that use it. The scan finishes by reporting how much of your stock the graph cannot see and
+why — that number was 320 keys and 1.5 million items before the reader learned to compute
+the digest. It looks for the graph at `--graph`, and, when that is a relative path that does
+not resolve, beside `--out` as well, so reading a world from inside the container works
+without an extra flag. If it finds no graph either way it says so rather than skipping the
+reconciliation quietly, because a scan that reconciled nothing and a scan that reconciled
+cleanly otherwise look identical.
 
 Counts come from the cell's `Cnt` tag, *not* the ItemStack `Count` byte, which is capped
 at 127 and meaningless for cell contents.
