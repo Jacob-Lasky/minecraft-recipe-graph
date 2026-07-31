@@ -341,6 +341,11 @@ class Graph:
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
         self.instance_dir = None
+        # Modular Machinery structures, {registryname: entry}, from the pack's own config.
+        # CARRIED IN THE GRAPH RATHER THAN READ WHERE IT IS USED, because the deployment ships
+        # graph.json alone: the server that answers plans has no pack instance to read
+        # config/modularmachinery/ from. See multiblocks.parse and #93.
+        self.multiblocks = {}
         self._invalidate()
 
     def _invalidate(self):
@@ -793,6 +798,7 @@ class Graph:
             "dump_schema": self.dump_schema,
             "dump_version": self.dump_version,
             "instance_dir": self.instance_dir,
+            "multiblocks": self.multiblocks,
         }
 
     def save(self, path):
@@ -813,6 +819,10 @@ class Graph:
         g.dump_schema = d.get("dump_schema") or 0
         g.dump_version = d.get("dump_version") or None
         g.instance_dir = d.get("instance_dir")
+        # Absent from every graph built before #93, and absent from any pack without Modular
+        # Machinery. An empty map means "priced by the controller recipe alone", which is the
+        # pre-#93 behaviour, so an old graph.json keeps working rather than failing to load.
+        g.multiblocks = d.get("multiblocks") or {}
         # Here rather than only in `index.build`, so an ALREADY BUILT graph.json is fixed
         # without a rebuild. Rebuilding needs the game running and a fresh dump; the 115 MB
         # file on disk is what every surface reads today.

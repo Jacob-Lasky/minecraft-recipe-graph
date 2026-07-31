@@ -55,8 +55,20 @@ PROBES = [
 
 
 def load(graph_path):
+    """`(graph, machine states, build targets)`.
+
+    THROUGH `describe`, NOT `resolve`, and the build targets are not optional. `resolve` is
+    the two-value view that drops the machine ITEM, so `estimate` got no `machine_items`, so
+    `machine_entry_costs` never ran and every buildable category was priced at the flat
+    `MACHINE_COST["buildable"]`. This tool exists to check cost-model tuning, and it was
+    structurally unable to see the two constants that price a machine you have to build
+    (BUILD_SCALE, BUILD_KNEE) or the multiblock structures #93 added. A probe that cannot
+    observe the thing being tuned reports "no change" and is believed.
+    """
     graph = Graph.load(graph_path)
-    return graph, machines_mod.resolve(graph)
+    info = machines_mod.describe(graph, {}, {})
+    states = {uid: (i["state"], i["why"]) for uid, i in info.items()}
+    return graph, states, machines_mod.build_targets(info)
 
 
 def route(graph, solver, tree_or_recipe):
@@ -92,7 +104,7 @@ def route(graph, solver, tree_or_recipe):
     return "%-28s <- %s" % (cat[:28], ", ".join(marked) or "(nothing)")
 
 
-def sweep(graph, states, values, rank_only, items):
+def sweep(graph, states, values, rank_only, items, machine_items=None):
     """`{raw cost: ({label: route}, seconds)}`.
 
     Restores `cost.BASE_RAW_COST` on the way out. The tool is a one-shot CLI so the leak
@@ -105,7 +117,8 @@ def sweep(graph, states, values, rank_only, items):
         for value in values:
             cost_mod.BASE_RAW_COST = value
             started = time.time()
-            costs = cost_mod.estimate(graph, machine_states=states)
+            costs = cost_mod.estimate(graph, machine_states=states,
+                                      machine_items=machine_items)
             solver = Solver(graph, machine_states=states, costs=costs)
             answers = {}
             for key, label in items:
@@ -136,7 +149,7 @@ def report(rows, items):
           "and find one.")
 
 
-def explain(graph, states, key, limit, raw_cost=None):
+def explain(graph, states, key, limit, raw_cost=None, machine_items=None):
     """Every real producer of one item, best-ranked first, with the score that decided it.
 
     The view that made #61 legible. Three routes to a diamond TIE on cost at -2.0 -- a
@@ -149,7 +162,8 @@ def explain(graph, states, key, limit, raw_cost=None):
     if raw_cost is not None:
         cost_mod.BASE_RAW_COST = raw_cost
     try:
-        costs = cost_mod.estimate(graph, machine_states=states)
+        costs = cost_mod.estimate(graph, machine_states=states,
+                                  machine_items=machine_items)
         solver = Solver(graph, machine_states=states, costs=costs)
         candidates = graph.real_producers(key)
         print("%s: %d real producers, BASE_RAW_COST=%s\n"
@@ -175,14 +189,14 @@ def main():
     ap.add_argument("--limit", type=int, default=12)
     args = ap.parse_args()
 
-    graph, states = load(args.graph)
+    graph, states, targets = load(args.graph)
     if args.explain:
         if not args.item:
             ap.error("--explain needs --item")
         if len(args.raw) > 1:
             ap.error("--explain takes one --raw value, got %d" % len(args.raw))
         for key in args.item:
-            explain(graph, states, key, args.limit, args.raw[0])
+            explain(graph, states, key, args.limit, args.raw[0], targets)
         return
     items = [(k, graph.bare_name(k)) for k in args.item] or PROBES
     # SAY what was dropped. A mistyped --item, or a probe whose key a re-dump renamed, used
@@ -195,7 +209,7 @@ def main():
         print("skipping %s: no real producers" % k, file=sys.stderr)
     if not kept:
         ap.error("none of the %d requested items has a real producer" % len(items))
-    report(sweep(graph, states, args.raw, args.rank, kept), kept)
+    report(sweep(graph, states, args.raw, args.rank, kept, targets), kept)
 
 
 if __name__ == "__main__":

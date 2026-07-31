@@ -454,6 +454,22 @@ needing parts you cannot get ranks level with one sitting a single craft away, a
 ranking cannot prefer the reachable one. Measured over the 1,500 items whose two machines
 differ most, this moved 211 onto the cheaper machine and none onto a dearer one.
 
+A Modular Machinery machine is priced by the **structure**, not by the controller block. Its
+controller recipe is a blueprint plus a blank controller, two items, for a machine that is up
+to 8,813 placed blocks, so reading the recipe alone made the pack's hardest machines look like
+its easiest. The requirements come from the pack's own `config/modularmachinery/machinery/`
+and are baked into `graph.json` at build time, because the server that answers plans has no
+pack instance to read. On the reference pack that is 259 machines and 69,354 block positions,
+of which 0.25% cannot be resolved to an item; 117 of the 188 that a plan can route through
+need at least one component with no obtainable recipe, which is the difference between a
+machine that is expensive and one you cannot have.
+
+Honest pricing does not fully reach the ranking yet, and this is worth knowing before reading
+a plan: a buildable machine's entry cost is capped just under the figure for an unidentified
+one, so the dearest structure charges 119 where its materials really run to 279,863. The
+ordering between machines is right; the magnitude is compressed, so an ingredient difference
+can still outweigh it. See issue #95.
+
 Plans then report what you must build first:
 
 ```
