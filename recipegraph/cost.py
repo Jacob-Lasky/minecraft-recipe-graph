@@ -34,6 +34,7 @@ import json
 import math
 import os
 
+from . import multiblocks as multiblocks_mod
 from .defaults import DEFAULT_COST_CACHE
 
 # What a machine costs to route through. Owning it is nearly free; building one is a real
@@ -71,8 +72,26 @@ MACHINE_COST = {"have": 1.0, "buildable": 40.0, "unknown": 120.0, "unavailable":
 # BUILD_SCALE sets where the curve bends. At 64 it lands near p90 of the measured
 # distribution, so the mass of the pack (median 2.0) spreads across the low end of the band
 # instead of all compressing into the first percent of it.
+#
+# THE CURVE IS LOGARITHMIC IN THE BUILD COST, and #93 is why. It was `b / (b + BUILD_SCALE)`,
+# which is calibrated for the range a machine ITEM's recipe spans (1.0 to 9,288) and
+# saturates hard above it: everything past ~6,400 sits within 1% of the ceiling. Pricing a
+# Modular Machinery machine by the structure it stands for widened the input range by three
+# decades, to 279,861, and 42 of the 104 fully-priced multiblocks came out within 1.0 of the
+# ceiling -- flattened against each other, which is exactly the defect #86 removed, only
+# among the expensive machines instead of all of them.
+#
+# BUILD_KNEE IS 1.0 BECAUSE THAT IS WHAT KEEPS THE LOW END WHERE #86 MEASURED IT, which is
+# the floor bullet above read in the other direction: making buildable machines DEARER would
+# relitigate the Crystallizer case just as surely as cheapening them, by letting an enormous
+# chain through owned machines beat a two-step route through a machine merely to be built.
+# The two curves agree to within 0.05 across the mass of the pack, which is what makes the
+# recalibration safe: a build cost of 1.0 prices at 41.21 against the old 41.22, and the
+# median 2.0 at 42.36 against 42.39. Only the top three decades move. Any change to this
+# constant moves the whole low end, so re-measure with tools/cost-probe.py before touching it.
 BUILD_SPREAD = 79.0        # so the band is [40.0, 119.0), strictly under `unknown` at 120
 BUILD_SCALE = 64.0
+BUILD_KNEE = 1.0
 
 # Used only when machine gating is off entirely (no states supplied), where every category
 # gets the same figure and the value is arbitrary. NOT the cost of an unidentified machine
@@ -99,7 +118,7 @@ TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefe
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 3
+FORMULA_VERSION = 4
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -144,22 +163,35 @@ def build_entry_cost(build_cost):
     if build_cost is None or math.isinf(build_cost) or math.isnan(build_cost):
         return floor + BUILD_SPREAD
     b = max(0.0, build_cost)
-    return floor + BUILD_SPREAD * (b / (b + BUILD_SCALE))
+    span = math.log1p(b / BUILD_SCALE)
+    return floor + BUILD_SPREAD * (span / (span + BUILD_KNEE))
 
 
-def machine_entry_costs(machine_items, cost):
+def machine_entry_costs(machine_items, cost, multiblocks=None):
     """{category: entry cost} for the categories whose machine has to be built.
 
     `machine_items` is `{category: (candidate key, ...)}` from `machines.build_targets`. The
     CHEAPEST candidate sets the price: several blocks can open one category (smelting is not
     only the furnace), and a player building one would build the cheapest that works, so
     pricing the first listed would charge for a machine nobody would choose.
+
+    `multiblocks` is `graph.multiblocks`. A candidate that is a Modular Machinery controller
+    is charged its recipe PLUS the structure it stands for, because the recipe alone is a
+    blueprint and a blank controller while the machine is up to 8,813 placed blocks (#93).
+    The two are added rather than one replacing the other: you need the controller AND the
+    structure, and the controller is not among the machinery file's own parts.
     """
+    by_controller = {}
+    for entry in (multiblocks or {}).values():
+        by_controller[entry.get("controller")] = entry
     out = {}
     for category, keys in (machine_items or {}).items():
         best = math.inf
         for key in keys:
             c = cost.get(key, math.inf)
+            structure = by_controller.get(key)
+            if structure is not None and c < math.inf:
+                c += multiblocks_mod.structure_cost(structure, cost)
             if c < best:
                 best = c
         out[category] = build_entry_cost(best)
@@ -251,7 +283,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     cost = _relax(graph, dict(seed), passes, machine_states, None)
     if not machine_items:
         return CostTable(cost)
-    entry = machine_entry_costs(machine_items, cost)
+    entry = machine_entry_costs(machine_items, cost, getattr(graph, "multiblocks", None))
     return CostTable(_relax(graph, dict(seed), passes, machine_states, entry),
                      machine_entry=entry)
 
@@ -336,7 +368,8 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
     return cost
 
 
-def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None):
+def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None,
+                multiblocks=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -353,9 +386,9 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     except OSError:
         h.update(str(graph_path).encode())
     h.update(repr(sorted((MACHINE_COST.items()))).encode())
-    h.update(("%r %r %r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
-                                           TRANSFER_PENALTY, PASSES, FORMULA_VERSION,
-                                           BUILD_SPREAD, BUILD_SCALE)).encode())
+    h.update(("%r %r %r %r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
+                                              TRANSFER_PENALTY, PASSES, FORMULA_VERSION,
+                                              BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE)).encode())
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
     h.update(b"\x00")
@@ -370,6 +403,13 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     h.update(b"\x00")
     for uid, keys in sorted((machine_items or {}).items()):
         h.update(("%s=%s;" % (uid, ",".join(keys))).encode())
+    # The multiblock structures, in full. The graph file's size and mtime above already move
+    # when a rebuild changes them, so this is belt and braces for the one case that skips the
+    # file: a caller that supplies or edits `graph.multiblocks` in process, where every other
+    # input is identical and a hit would serve prices computed for a different structure. That
+    # is the shape of trap #86 hit, where patching a function moved no fingerprint input.
+    h.update(b"\x00")
+    h.update(json.dumps(multiblocks or {}, sort_keys=True).encode())
     return h.hexdigest()
 
 
@@ -389,7 +429,8 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     relaxation the cache is serving -- a divergence visible only on a cache HIT, which is the
     hard way to find it.
     """
-    stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items)
+    stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
+                        getattr(graph, "multiblocks", None))
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:

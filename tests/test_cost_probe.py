@@ -15,6 +15,7 @@ import importlib.util
 import io
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -146,6 +147,52 @@ class SweepHygieneTest(unittest.TestCase):
         self.assertEqual(seen, [1.0, 9.0])
 
 
+class TheProbeCanSeeWhatItIsTuningTest(unittest.TestCase):
+    """It could not, and that is worse than a wrong answer: it reported "no change".
+
+    `load` went through `machines.resolve`, which drops the machine ITEM, so `estimate` was
+    called with no `machine_items` and `machine_entry_costs` never ran. Every buildable
+    category priced at the flat `MACHINE_COST["buildable"]`, which means the tool the repo
+    requires before moving a cost constant was structurally blind to BUILD_SCALE, BUILD_KNEE
+    and the multiblock structures of #93.
+    """
+
+    def test_load_returns_build_targets_for_a_machine_that_must_be_built(self):
+        g = graph_with_a_choice_of_alternatives()
+        # A category whose machine is a real, craftable block. The shared fixture has none:
+        # its categories need no machine or have an unidentifiable one, so neither is a build
+        # target and neither can show whether the entry price was applied.
+        g.names["mod:press"] = "Press"
+        g.catalysts["mod.press"] = ["mod:press"]
+        g.add(Recipe("mk_press", "t", [("mod:press", 1)],
+                     [Ingredient(["mod:dust"], 4)], category="minecraft.crafting"))
+        g.add(Recipe("pressed", "Press", [("mod:plate", 1)],
+                     [Ingredient(["mod:ingot"], 1)], category="mod.press"))
+        path = os.path.join(tempfile.mkdtemp(), "g.json")
+        g.save(path)
+        graph, states, targets = probe.load(path)
+        self.assertEqual(len(graph.recipes), len(g.recipes))
+        self.assertEqual(states["mod.press"][0], "buildable")
+        self.assertEqual(targets.get("mod.press"), ("mod:press",))
+
+    def test_sweep_passes_the_build_targets_into_estimate(self):
+        g = graph_with_a_choice_of_alternatives()
+        seen = []
+        real = cost_mod.estimate
+
+        def spy(graph, **kw):
+            seen.append(kw.get("machine_items"))
+            return real(graph, **kw)
+
+        cost_mod.estimate = spy
+        try:
+            probe.sweep(g, {}, [1.0], True, [("mod:ingot", "Ingot")],
+                        {"mod.cat": ("mod:machine",)})
+        finally:
+            cost_mod.estimate = real
+        self.assertEqual(seen, [{"mod.cat": ("mod:machine",)}])
+
+
 class DroppedProbeTest(unittest.TestCase):
     def test_a_probe_with_no_producer_is_reported_not_silently_dropped(self):
         """It used to vanish, so a mistyped key gave "0 of 0" after a fifteen-minute run,
@@ -159,7 +206,12 @@ class DroppedProbeTest(unittest.TestCase):
             # stdout too: the report is the tool's normal output and has no place in a
             # test run's log.
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
-                probe.main.__globals__["load"] = lambda _p: (g, machines.resolve(g))
+                # RESTORED, because this writes into the imported module's globals and the
+                # replacement outlived the test: every later test that called `load` got this
+                # stub's graph instead of its own, which reads as a save/load bug.
+                self.addCleanup(setattr, probe, "load", probe.load)
+                probe.main.__globals__["load"] = lambda _p: (
+                    g, machines.resolve(g), {})
                 probe.main()
         finally:
             sys.argv = argv

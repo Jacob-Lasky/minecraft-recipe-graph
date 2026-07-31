@@ -50,6 +50,13 @@ UNAVAILABLE = "unavailable"
 
 STATES = (HAVE, BUILDABLE, UNKNOWN, UNAVAILABLE)
 
+# Items JEI lists as a catalyst that are NOT the machine, so they must never be what pricing
+# a machine measures. Modular Machinery's blueprint is the whole list: one cheap item that
+# catalyses 226 unrelated categories, and Jake's words for it are that the blueprints are
+# irrelevant, the multiblock and its components are the hard part. See `build_targets`, where
+# excluding it is load-bearing, and `order_by_specificity`, which demotes it for display.
+NOT_A_MACHINE = frozenset(["modularmachinery:itemblueprint"])
+
 # Categories that need no machine at all. Never gate these; the player always has hands.
 ALWAYS_AVAILABLE = {
     "minecraft.crafting", "minecraft.crafting.shaped", "minecraft.crafting.shapeless",
@@ -446,7 +453,10 @@ def order_by_specificity(catalysts):
     generic Machine Blueprint -- one item that catalyses 226 unrelated categories. Taken in
     JEI's order it becomes the answer to "what machine is this", so a plan read
     "Mythic Processor: Melter -- craftable: modularmachinery:itemblueprint". You can craft a
-    blueprint; that does not give you the machine.
+    blueprint; that does not give you the machine. Nor does crafting the controller: that is
+    two items for a structure of up to 8,813 placed blocks, which is what `multiblocks` and #93
+    are about. This function only fixes WHICH item is named; `NOT_A_MACHINE` and
+    `build_targets` are what stop a blueprint being what a machine is PRICED from.
 
     Ordering by how many categories an item catalyses, fewest first, fixes it with no
     threshold and no per-mod list: a purpose-built controller catalyses exactly one category
@@ -582,6 +592,15 @@ def build_targets(info):
     "priced from a machine item", which for those three would be a false claim: `have` is
     nearly free by evidence, and the other two must keep the figures whose reasoning is
     recorded on MACHINE_COST.
+
+    THE GENERIC BLUEPRINT IS EXCLUDED, and it has to be excluded HERE rather than left for the
+    caller to notice. `order_by_specificity` above demotes it because it is not the machine,
+    but demoting is not enough for pricing: the caller takes the CHEAPEST candidate, and a
+    blueprint is cheap, so one candidate that is not a machine sets the price for all 188
+    Modular Machinery categories and every multiblock reads as trivial again (#93). Today it
+    happens not to, because the bare `modularmachinery:itemblueprint` key has no producer and
+    prices at infinity while the real blueprints are NBT-discriminated variants of it. That is
+    luck, not a rule, and it would revert #93 silently the day the bare key gets a price.
     """
     out = {}
     for uid, rec in (info or {}).items():
@@ -589,8 +608,13 @@ def build_targets(info):
             continue
         keys = tuple(cs["key"] for cs in rec.get("candidate_states") or ()
                      if cs.get("state") == BUILDABLE)
-        if keys:
-            out[uid] = keys
+        machines_only = tuple(k for k in keys if k not in NOT_A_MACHINE)
+        # Only when something is left. A category whose ONLY identified candidate is a
+        # blueprint is no better identified than an `unknown` one, and inventing an empty
+        # tuple for it would charge the top of the band on this module's silence rather than
+        # on evidence.
+        if machines_only or keys:
+            out[uid] = machines_only or keys
     return out
 
 

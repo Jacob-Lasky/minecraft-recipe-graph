@@ -3,6 +3,7 @@
 import os
 import sys
 
+from . import multiblocks
 from .model import Graph, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
@@ -159,6 +160,11 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     if flagged:
         say("container transfers: %d recipes flagged as fluid moves, not production "
             "(%d container items detected)" % (flagged, len(containers)))
+
+    # LAST, and after the drop pass on purpose: `known` is derived from the finished recipe
+    # set, so parsing earlier would resolve blockstate metas against keys this graph no longer
+    # has.
+    g.multiblocks = multiblocks.parse(instance_dir, known=multiblocks.known_keys(g), say=say)
 
     say("graph: %d recipes, %d produced item keys, %d/%d oredict resolved"
         % (len(g.recipes), len(g.by_output),
