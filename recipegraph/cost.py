@@ -81,17 +81,64 @@ MACHINE_COST = {"have": 1.0, "buildable": 40.0, "unknown": 120.0, "unavailable":
 # ceiling -- flattened against each other, which is exactly the defect #86 removed, only
 # among the expensive machines instead of all of them.
 #
-# BUILD_KNEE IS 1.0 BECAUSE THAT IS WHAT KEEPS THE LOW END WHERE #86 MEASURED IT, which is
-# the floor bullet above read in the other direction: making buildable machines DEARER would
-# relitigate the Crystallizer case just as surely as cheapening them, by letting an enormous
-# chain through owned machines beat a two-step route through a machine merely to be built.
-# The two curves agree to within 0.05 across the mass of the pack, which is what makes the
-# recalibration safe: a build cost of 1.0 prices at 41.21 against the old 41.22, and the
-# median 2.0 at 42.36 against 42.39. Only the top three decades move. Any change to this
-# constant moves the whole low end, so re-measure with tools/cost-probe.py before touching it.
-BUILD_SPREAD = 79.0        # so the band is [40.0, 119.0), strictly under `unknown` at 120
+# BUILD_SLOPE IS WHAT KEEPS THE LOW END WHERE #86 MEASURED IT, which is the floor bullet above
+# read in the other direction: making buildable machines DEARER would relitigate the
+# Crystallizer case just as surely as cheapening them, by letting an enormous chain through
+# owned machines beat a two-step route through a machine merely to be built. Near b=0 the curve
+# is `BUILD_SLOPE * b / BUILD_SCALE`, so the SLOPE is the calibrated quantity and the spread is
+# free to move as long as the knee follows it. #93 measured the tolerance: a build cost of 1.0
+# prices at 41.21 against the old 41.22, and the median 2.0 at 42.36 against 42.39, agreeing to
+# within 0.05 across the mass of the pack. Any change to the SLOPE moves that whole low end, so
+# re-measure with tools/cost-probe.py before touching it.
+BUILD_SLOPE = 79.0
 BUILD_SCALE = 64.0
-BUILD_KNEE = 1.0
+BUILD_SPREAD = 70.0
+BUILD_KNEE = BUILD_SPREAD / BUILD_SLOPE
+
+# THE REGION BETWEEN THE PRICED BAND AND `unknown` IS NOT SPARE ROOM, IT IS THREE CLAIMS THAT
+# USED TO SHARE ONE NUMBER. That is issue #95. Everything a price could not be computed for
+# landed on the single band ceiling, and on the reference pack that was 140 of 403 categories,
+# 35% of them, holding two unrelated statements and destroying the ordering among both:
+#
+#   * 117 Modular Machinery categories whose structure needs a block nothing in the graph
+#     makes. Measured, these run from 0.14% of positions blocked (`the_cube`, 3 of 2,125) to
+#     100% (`mythic_excavation_lattice`, 135 of 135), and all 117 charged 119.000.
+#   * 23 categories whose machine ITEM never priced. `build_entry_cost` below already argues
+#     this is a gap in the pricing rather than a fact about the base -- and then charged it the
+#     same as an evidence-based impossibility.
+#
+# What that cost in practice: `aoa3:holly_top_petals` had a blocked Modular Machinery route beat
+# a Phytogenic Insolator, both at 119.000, by 0.037 of an ingredient point. A tie between two
+# different failures, broken by noise.
+#
+# So they get separate slices, ordered by how strong the claim is, every boundary derived from
+# the two anchors rather than typed in:
+#
+#     have 1.0 < priced [40.0, 110.0) < unpriced item 111.0
+#              < blocked structure [112.0, 119.0] < unknown 120.0 < unavailable 5000.0
+#
+# THE UNPRICED ITEM SITS BELOW THE BLOCKED STRUCTURE ON PURPOSE, and that ordering is the one
+# thing here not to swap. "This model failed to compute a number" is a weaker claim than "the
+# pack says this needs a block nothing makes", so the failure has to be the more optimistic of
+# the two. Reversed, a machine we merely could not price would lose to one we know is
+# unbuildable.
+#
+# AND THE WHOLE BLOCKED SLICE STAYS BELOW `unknown`, WHICH LOOKS BACKWARDS AND IS NOT. A
+# structure proven to need an unobtainable block sounds like a stronger claim than "we could
+# not identify this machine at all", so it is tempting to rank it worse. DO NOT: the blockage
+# signal is known to be WRONG in a specific, unfixed way. Chisel and Unlimited Chisel Works
+# variants have zero producers in the graph, because chisel recipes are dropped as
+# non-recipes, so `chisel:concrete_brown:1` reads unobtainable when it is trivially
+# obtainable. Any structure using one reads as blocked on a false negative. Ranking that above
+# `unknown` -- let alone at the `unavailable` wall -- would put real recipes behind a verdict
+# this tool cannot yet stand behind, which is the 40%-of-the-pack failure the `unknown` figure
+# was chosen to avoid. The ordinal is safe BECAUSE the whole slice is bounded; the individual
+# fractions inside it inherit that same unreliability and are a ranking, never a claim.
+# Fixing this means answering the chisel question first, and that is what #95 left open.
+PRICED_CEILING = MACHINE_COST["buildable"] + BUILD_SPREAD
+UNPRICED_MACHINE_COST = PRICED_CEILING + 1.0
+BLOCKED_FLOOR = UNPRICED_MACHINE_COST + 1.0
+BLOCKED_CEILING = MACHINE_COST["unknown"] - 1.0
 
 # Used only when machine gating is off entirely (no states supplied), where every category
 # gets the same figure and the value is arbitrary. NOT the cost of an unidentified machine
@@ -150,21 +197,46 @@ class CostTable(dict):
 def build_entry_cost(build_cost):
     """Entry cost for a machine you must build, ordered by what building it costs.
 
-    Bounded into `[MACHINE_COST["buildable"], + BUILD_SPREAD)` and monotonic in
-    `build_cost`; see the BUILD_SPREAD comment for why the bound is not optional.
+    Bounded into `[MACHINE_COST["buildable"], PRICED_CEILING)` and monotonic in `build_cost`;
+    see the BUILD_SPREAD comment for why the bound is not optional.
 
     An UNREACHABLE machine item (inf, which 23 buildable categories on the reference pack
-    have: a producer exists but its own inputs never price) charges the top of the band. Not
+    have: a producer exists but its own inputs never price) charges UNPRICED_MACHINE_COST. Not
     `unavailable`: the state was decided by `machines._candidate_verdict` on evidence, and a
     price this model failed to compute is a gap in the pricing, not a fact about the base.
-    Charging 5,000 here would override an evidence-based verdict with a numerical failure.
+    Charging 5,000 here would override an evidence-based verdict with a numerical failure. Nor
+    the top of the reserved region, which is #95: that is where a structure proven unbuildable
+    goes, and this is only a number we could not work out.
     """
     floor = MACHINE_COST["buildable"]
     if build_cost is None or math.isinf(build_cost) or math.isnan(build_cost):
-        return floor + BUILD_SPREAD
+        return UNPRICED_MACHINE_COST
     b = max(0.0, build_cost)
     span = math.log1p(b / BUILD_SCALE)
     return floor + BUILD_SPREAD * (span / (span + BUILD_KNEE))
+
+
+def blocked_entry_cost(fraction):
+    """Entry cost for a multiblock the pack says needs a block nothing in the graph makes.
+
+    `fraction` is `multiblocks.blocked_fraction`: the share of block POSITIONS with no
+    obtainable candidate. Mapped linearly onto `[BLOCKED_FLOOR, BLOCKED_CEILING]`, so the whole
+    slice stays above every priced machine and above an unpriced machine item, while the 117
+    categories inside it stop being one number.
+
+    LINEAR, not the logarithmic curve `build_entry_cost` uses, because this is not a cost. A
+    fraction is already bounded and already uniform over its range; there is no long tail to
+    compress and nothing to calibrate against, so a curve here would be decoration implying a
+    precision the ordinal does not have.
+
+    An out-of-range or missing fraction clamps rather than raises: this decides a ranking, and
+    a machine vanishing from the band because its structure parsed oddly would be a worse
+    failure than one ranked at the wrong end of a slice every member of which is unbuildable.
+    """
+    if fraction is None or math.isnan(fraction):
+        return BLOCKED_CEILING
+    f = min(1.0, max(0.0, fraction))
+    return BLOCKED_FLOOR + (BLOCKED_CEILING - BLOCKED_FLOOR) * f
 
 
 def machine_entry_costs(machine_items, cost, multiblocks=None):
@@ -180,21 +252,38 @@ def machine_entry_costs(machine_items, cost, multiblocks=None):
     blueprint and a blank controller while the machine is up to 8,813 placed blocks (#93).
     The two are added rather than one replacing the other: you need the controller AND the
     structure, and the controller is not among the machinery file's own parts.
+
+    THREE OUTCOMES PER CANDIDATE, not one number that might be infinite (#95): a price, a
+    structure the pack proves unbuildable, or a machine item this model could not price. They
+    land in three ordered regions, and which one a candidate reaches is decided here because
+    this is the only place that has both the structure and the item's price.
     """
     by_controller = {}
     for entry in (multiblocks or {}).values():
         by_controller[entry.get("controller")] = entry
     out = {}
     for category, keys in (machine_items or {}).items():
+        # THE MINIMUM IS TAKEN OVER ENTRY COSTS, NOT OVER RAW BUILD COSTS, because since #95 two
+        # candidates for one category can fail in different ways and a raw `inf` no longer says
+        # which. For the all-priced case this is the same answer -- `build_entry_cost` is
+        # monotonic, so the cheapest raw cost is still the cheapest entry cost -- and where they
+        # differ it is the case the old form could not express at all.
         best = math.inf
         for key in keys:
             c = cost.get(key, math.inf)
             structure = by_controller.get(key)
-            if structure is not None and c < math.inf:
-                c += multiblocks_mod.structure_cost(structure, cost)
-            if c < best:
-                best = c
-        out[category] = build_entry_cost(best)
+            if math.isinf(c):
+                priced = UNPRICED_MACHINE_COST
+            elif structure is None:
+                priced = build_entry_cost(c)
+            else:
+                placed = multiblocks_mod.structure_cost(structure, cost)
+                priced = (blocked_entry_cost(
+                              multiblocks_mod.blocked_fraction(structure, cost))
+                          if math.isinf(placed) else build_entry_cost(c + placed))
+            if priced < best:
+                best = priced
+        out[category] = best if best < math.inf else UNPRICED_MACHINE_COST
     return out
 
 
@@ -386,9 +475,15 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     except OSError:
         h.update(str(graph_path).encode())
     h.update(repr(sorted((MACHINE_COST.items()))).encode())
-    h.update(("%r %r %r %r %r %r %r %r %r" % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST,
-                                              TRANSFER_PENALTY, PASSES, FORMULA_VERSION,
-                                              BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE)).encode())
+    # Every tuning constant `machine_entry_costs` and `_relax` read. The #95 slice boundaries
+    # are derived from BUILD_SPREAD and MACHINE_COST rather than typed in, so hashing those two
+    # would in fact cover them today -- they are listed anyway, because "the cache is correct
+    # because of how a constant happens to be defined" is the kind of reasoning that goes stale
+    # the moment someone gives one of them a literal value.
+    h.update(("%r %r %r %r %r %r %r %r %r %r %r %r %r"
+              % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST, TRANSFER_PENALTY, PASSES,
+                 FORMULA_VERSION, BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE, BUILD_SLOPE,
+                 UNPRICED_MACHINE_COST, BLOCKED_FLOOR, BLOCKED_CEILING)).encode())
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
     h.update(b"\x00")

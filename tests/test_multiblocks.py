@@ -8,6 +8,7 @@ and one of the pack's own files is malformed JSON.
 """
 
 import json
+import math
 import os
 import sys
 import tempfile
@@ -262,17 +263,20 @@ class AMultiblockIsPricedByItsStructureTest(unittest.TestCase):
         got = cost.machine_entry_costs({other: ("mod:other_machine",)}, self.costs, self.mb)
         self.assertAlmostEqual(got[other], cost.build_entry_cost(2.0))
 
-    def test_an_unbuildable_structure_charges_the_top_of_the_band(self):
+    def test_an_unbuildable_structure_charges_the_blocked_slice(self):
         self.mb["big"]["parts"] = [[1, ["mod:unobtainable"]]]
         got = cost.machine_entry_costs({self.CAT: (self.CTRL,)}, self.costs, self.mb)
-        self.assertAlmostEqual(got[self.CAT],
-                              cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD)
+        # Every position is blocked, so this one sits at the top of the slice.
+        self.assertAlmostEqual(got[self.CAT], cost.BLOCKED_CEILING)
+        self.assertGreater(got[self.CAT], cost.PRICED_CEILING)
+        self.assertLess(got[self.CAT], cost.MACHINE_COST["unknown"])
 
     def test_an_unreachable_controller_is_not_made_reachable_by_a_cheap_structure(self):
         got = cost.machine_entry_costs({self.CAT: (self.CTRL,)},
                                       {"mod:brick": 5.0}, self.mb)
-        self.assertAlmostEqual(got[self.CAT],
-                              cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD)
+        # The CONTROLLER is what failed to price here, not the structure, so this is the
+        # pricing gap rather than an evidence-based impossibility (#95).
+        self.assertAlmostEqual(got[self.CAT], cost.UNPRICED_MACHINE_COST)
 
     def test_the_cheapest_candidate_still_wins_even_when_one_is_a_multiblock(self):
         # A category openable by either a multiblock or an ordinary block should be priced by
@@ -333,33 +337,51 @@ class TheBlueprintIsNotWhatAMachineIsPricedFromTest(unittest.TestCase):
 
 
 class TheEntryCurveKeepsItsLowEndTest(unittest.TestCase):
-    """#93 recalibrated `build_entry_cost`, and the low end is the part that must not move.
+    """The low end must not move, through #93's recalibration or #95's.
 
     Raising it would relitigate the Crystallizer case in cost.py's header from the other side:
     an enormous chain through machines the player owns beating a two-step route through a
-    machine they merely have to build. The values below are the OLD curve's, computed by hand
-    from `40 + 79 * b / (b + 64)`, so this fails if the low end drifts for any reason.
+    machine they merely have to build.
+
+    CHECKED AGAINST #86's CURVE, NOT AGAINST HAND-ROUNDED LITERALS. This used to assert
+    `build_entry_cost(1.0) == 41.21` to two places, which passed at 41.2061 and failed at
+    41.2038 -- a 0.002 move, 20x inside the tolerance cost.py documents, so the literal was a
+    tripwire on the rounding rather than on the calibration. Two rescalings have now come
+    through here and a third will. The invariant is agreement with `40 + 79 * b / (b + 64)`
+    to within 0.05, which is what #93 measured and what BUILD_SLOPE now pins.
     """
 
-    def test_a_build_cost_of_one_prices_where_it_did_before(self):
-        self.assertAlmostEqual(cost.build_entry_cost(1.0), 41.21, places=2)
+    def reference(self, b):
+        """#86's original curve: the calibration every later shape has had to preserve."""
+        return cost.MACHINE_COST["buildable"] + cost.BUILD_SLOPE * b / (b + cost.BUILD_SCALE)
 
-    def test_the_median_of_the_pack_prices_where_it_did_before(self):
-        # Measured median build cost over the buildable categories is 2.0; the old curve put
-        # it at 42.39.
-        self.assertAlmostEqual(cost.build_entry_cost(2.0), 42.36, places=2)
+    def test_it_tracks_eighty_sixs_curve_over_the_cheaper_half_of_the_pack(self):
+        # Measured build costs run min 1.0, median 2.0, so agreement up to 2.0 covers half
+        # the buildable categories -- "the mass of the pack" in cost.py's comment.
+        for b in (0.0, 0.5, 1.0, 2.0):
+            self.assertLess(abs(cost.build_entry_cost(b) - self.reference(b)), 0.05,
+                            "build cost %r drifted off #86's curve" % b)
+
+    def test_the_low_end_gradient_is_the_calibrated_one(self):
+        # Near zero both curves are BUILD_SLOPE * b / BUILD_SCALE, which is the whole reason
+        # BUILD_SPREAD can move and the low end cannot. Checked as a limit, so it holds for
+        # any future spread.
+        b = 1e-6
+        expected = cost.BUILD_SLOPE * b / cost.BUILD_SCALE
+        got = cost.build_entry_cost(b) - cost.MACHINE_COST["buildable"]
+        self.assertAlmostEqual(got / expected, 1.0, places=4)
 
     def test_a_free_machine_still_sits_exactly_on_the_floor(self):
         self.assertEqual(cost.build_entry_cost(0.0), cost.MACHINE_COST["buildable"])
 
     def test_the_top_of_the_range_no_longer_saturates(self):
-        # The point of the recalibration. Under the old curve these two were 118.95 and
+        # The point of #93's recalibration. Under the pre-#93 curve these two were 118.95 and
         # 118.98, i.e. indistinguishable; 20 of the 71 fully-priced multiblocks landed within
         # 1.0 of the ceiling and 9 of them shared a value with another machine.
         a = cost.build_entry_cost(112219.0)
         b = cost.build_entry_cost(279861.0)
         self.assertGreater(b - a, 0.5)
-        self.assertLess(b, cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD - 1.0)
+        self.assertLess(b, cost.PRICED_CEILING - 1.0)
 
     def test_it_stays_monotonic_across_six_decades(self):
         vals = [cost.build_entry_cost(b) for b in
@@ -368,13 +390,153 @@ class TheEntryCurveKeepsItsLowEndTest(unittest.TestCase):
         self.assertEqual(len(set(vals)), len(vals))
 
     def test_the_band_still_holds_at_the_extremes(self):
-        ceiling = cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD
-        self.assertLess(ceiling, cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.PRICED_CEILING, cost.MACHINE_COST["unknown"])
         for b in (0.0, 1.0, 1e9, 1e300):
             got = cost.build_entry_cost(b)
             self.assertGreaterEqual(got, cost.MACHINE_COST["buildable"])
-            self.assertLess(got, ceiling + 1e-9)
-        self.assertEqual(cost.build_entry_cost(INF), ceiling)
+            self.assertLess(got, cost.PRICED_CEILING)
+        self.assertEqual(cost.build_entry_cost(INF), cost.UNPRICED_MACHINE_COST)
+
+
+class TheCeilingHoldsOneClaimEachTest(unittest.TestCase):
+    """#95. Everything unpriceable used to land on one number, so 140 of the reference pack's
+    403 buildable categories charged exactly 119.000 and no two of them were distinguishable.
+
+    Two unrelated statements were stacked there: 117 Modular Machinery structures needing a
+    block nothing makes, and 23 machine ITEMS this model simply failed to price. The observed
+    consequence was `aoa3:holly_top_petals`, where a blocked multiblock beat a Phytogenic
+    Insolator -- both at 119.000 -- by 0.037 of an ingredient point.
+    """
+
+    def parts(self, *groups):
+        return {"name": "M", "controller": "mod:ctrl", "slots": 1, "blind": 0,
+                "parts": [list(g) for g in groups]}
+
+    def test_the_four_regions_are_strictly_ordered(self):
+        self.assertLess(cost.MACHINE_COST["have"], cost.MACHINE_COST["buildable"])
+        self.assertLess(cost.build_entry_cost(1e300), cost.PRICED_CEILING)
+        self.assertLess(cost.PRICED_CEILING, cost.UNPRICED_MACHINE_COST)
+        self.assertLess(cost.UNPRICED_MACHINE_COST, cost.BLOCKED_FLOOR)
+        self.assertLess(cost.BLOCKED_FLOOR, cost.BLOCKED_CEILING)
+        self.assertLess(cost.BLOCKED_CEILING, cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.MACHINE_COST["unknown"], cost.MACHINE_COST["unavailable"])
+
+    def test_a_failure_to_price_is_cheaper_than_a_proven_blockage(self):
+        """The holly_top_petals fix, and the one ordering here not to swap.
+
+        "This model could not work out a number" is a weaker claim than "the pack says this
+        needs a block nothing makes", so it must be the more optimistic of the two.
+        """
+        self.assertLess(cost.build_entry_cost(INF), cost.blocked_entry_cost(0.0))
+
+    def test_a_barely_blocked_structure_outranks_a_hopeless_one(self):
+        # `the_cube` misses 3 of 2,125 positions; `mythic_excavation_lattice` misses 135 of
+        # 135. Both charged 119.000 before this.
+        nearly = cost.blocked_entry_cost(3 / 2125.0)
+        hopeless = cost.blocked_entry_cost(1.0)
+        self.assertLess(nearly, hopeless)
+        self.assertGreater(hopeless - nearly, 5.0)
+
+    def test_even_the_least_blocked_structure_loses_to_every_priced_machine(self):
+        """Ordering inside the slice must not leak into the buildable band.
+
+        `structure_cost` returns inf rather than a partial sum precisely so that a machine
+        that cannot be placed never reads as merely expensive. Ordering the failures must not
+        undo that.
+        """
+        self.assertGreater(cost.blocked_entry_cost(0.0), cost.build_entry_cost(1e300))
+
+    def test_the_fraction_counts_positions_not_part_groups(self):
+        # `parts` collapses identical positions into groups, so counting groups would weigh
+        # one missing conduit the same as 6,456 of them.
+        entry = self.parts([6456, ["mod:nope"]], [1, ["mod:brick"]])
+        self.assertAlmostEqual(multiblocks.blocked_fraction(entry, {"mod:brick": 1.0}),
+                               6456 / 6457.0)
+
+    def test_a_fully_reachable_structure_is_not_blocked_at_all(self):
+        entry = self.parts([10, ["mod:brick"]])
+        self.assertEqual(multiblocks.blocked_fraction(entry, {"mod:brick": 1.0}), 0.0)
+
+    def test_an_empty_structure_is_not_blocked(self):
+        # Agrees with structure_cost, which prices an empty structure at 0.0 not inf.
+        self.assertEqual(multiblocks.blocked_fraction({"parts": []}, {}), 0.0)
+
+    def test_one_reachable_alternative_unblocks_the_position(self):
+        entry = self.parts([4, ["mod:nope", "mod:brick"]])
+        self.assertEqual(multiblocks.blocked_fraction(entry, {"mod:brick": 1.0}), 0.0)
+
+    def test_the_sum_and_the_fraction_never_disagree_about_a_position(self):
+        """Both read `position_cost`, and this is why that is one function.
+
+        The pair is used together on one structure -- the sum decides `inf`, the fraction
+        ranks it -- so a position the sum thinks is affordable and the fraction thinks is
+        missing is a contradiction with no symptom. Asserted as a property over a spread of
+        shapes rather than on one fixture, so it still holds for a position rule taught
+        anything new later.
+        """
+        prices = {"mod:cheap": 1.0, "mod:dear": 900.0}
+        shapes = ([[1, ["mod:cheap"]]],
+                  [[3, ["mod:nope"]]],
+                  [[2, ["mod:nope", "mod:cheap"]]],
+                  [[5, ["mod:dear"]], [1, ["mod:nope"]]],
+                  [[7, ["mod:cheap"]], [2, ["mod:dear"]]],
+                  [[1, []]],
+                  [])
+        for shape in shapes:
+            entry = {"parts": [list(g) for g in shape]}
+            placed = multiblocks.structure_cost(entry, prices)
+            fraction = multiblocks.blocked_fraction(entry, prices)
+            self.assertEqual(math.isinf(placed), fraction > 0.0,
+                             "sum and fraction disagree on %r" % (shape,))
+
+    def test_an_out_of_range_fraction_clamps_rather_than_escaping_the_slice(self):
+        for f in (-1.0, 0.0, 0.5, 1.0, 2.0, None, float("nan")):
+            got = cost.blocked_entry_cost(f)
+            self.assertGreaterEqual(got, cost.BLOCKED_FLOOR)
+            self.assertLessEqual(got, cost.BLOCKED_CEILING)
+
+    def test_the_slice_is_monotonic(self):
+        vals = [cost.blocked_entry_cost(f) for f in (0.0, .1, .25, .5, .75, .9, 1.0)]
+        self.assertEqual(vals, sorted(vals))
+        self.assertEqual(len(set(vals)), len(vals))
+
+    def test_two_different_failures_no_longer_price_the_same(self):
+        """The reported symptom, in the API that predates the fix so it can be run against it.
+
+        On the broken code both categories come back 119.000 and this fails on the assertion
+        below -- which is `aoa3:holly_top_petals` reduced to two dictionaries: a blocked
+        Modular Machinery route and a Phytogenic Insolator whose machine item never priced,
+        tied at the ceiling and separated by 0.037 of an ingredient point.
+        """
+        mb = {"m": self.parts([1, ["mod:unobtainable"]])}
+        got = cost.machine_entry_costs(
+            {"blocked": ("mod:ctrl",), "unpriced": ("mod:never_priced",)},
+            {"mod:ctrl": 2.0}, mb)
+        self.assertNotEqual(got["blocked"], got["unpriced"])
+        self.assertLess(got["unpriced"], got["blocked"])
+
+    def test_two_structures_blocked_to_different_degrees_no_longer_price_the_same(self):
+        """The other half of the symptom, also in the pre-existing API.
+
+        `the_cube` misses 3 of 2,125 positions and `mythic_excavation_lattice` misses all 135.
+        On the broken code both come back 119.000.
+        """
+        costs = {"mod:ctrl": 2.0, "mod:brick": 1.0}
+        nearly = {"m": {"name": "M", "controller": "mod:ctrl", "slots": 1, "blind": 0,
+                        "parts": [[2122, ["mod:brick"]], [3, ["mod:nope"]]]}}
+        hopeless = {"m": {"name": "M", "controller": "mod:ctrl", "slots": 1, "blind": 0,
+                          "parts": [[135, ["mod:nope"]]]}}
+        a = cost.machine_entry_costs({"c": ("mod:ctrl",)}, costs, nearly)["c"]
+        b = cost.machine_entry_costs({"c": ("mod:ctrl",)}, costs, hopeless)["c"]
+        self.assertLess(a, b)
+
+    def test_a_blocked_multiblock_loses_to_an_ordinary_candidate_for_the_same_category(self):
+        # The minimum is over entry costs now, so a category openable by a plain block is
+        # still priced by that block even when its multiblock candidate is unbuildable.
+        mb = {"m": self.parts([1, ["mod:unobtainable"]])}
+        got = cost.machine_entry_costs({"cat": ("mod:ctrl", "mod:press")},
+                                       {"mod:ctrl": 2.0, "mod:press": 3.0}, mb)
+        self.assertAlmostEqual(got["cat"], cost.build_entry_cost(3.0))
 
 
 class BuildAttachesThemToTheGraphTest(unittest.TestCase):
@@ -427,6 +589,27 @@ class TheCacheSeesTheStructuresTest(unittest.TestCase):
         # The deployed server holds a .cost-cache.json full of prices from the old curve, and
         # the curve is code rather than a hashed constant on its own.
         self.assertGreaterEqual(cost.FORMULA_VERSION, 4)
+
+    def test_every_band_constant_is_actually_hashed(self):
+        """`fingerprint`'s comment claims it lists the #95 boundaries "anyway". Prove it.
+
+        They are derived from BUILD_SPREAD today, so hashing that alone would cover them --
+        which means an omission here is INVISIBLE until someone gives one a literal value, and
+        then the deployed server serves prices from the old layout on a cache HIT only. Moving
+        each constant in turn is the only check that does not rely on how they are defined.
+        """
+        args = ("nonexistent-graph.json", {}, {}, ())
+        base = cost.fingerprint(*args)
+        for name in ("BUILD_SPREAD", "BUILD_SCALE", "BUILD_KNEE", "BUILD_SLOPE",
+                     "UNPRICED_MACHINE_COST", "BLOCKED_FLOOR", "BLOCKED_CEILING",
+                     "UNGATED_MACHINE_COST", "BASE_RAW_COST", "TRANSFER_PENALTY"):
+            was = getattr(cost, name)
+            setattr(cost, name, was + 1.0)
+            try:
+                self.assertNotEqual(cost.fingerprint(*args), base,
+                                    "moving cost.%s does not invalidate the cache" % name)
+            finally:
+                setattr(cost, name, was)
 
 
 if __name__ == "__main__":

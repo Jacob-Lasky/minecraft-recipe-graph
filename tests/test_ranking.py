@@ -650,10 +650,12 @@ class BuildableMachineIsPricedByWhatBuildingItCostsTest(unittest.TestCase):
         AND past `unavailable`, making a machine you can build read as worse than one proven
         impossible.
         """
-        self.assertLess(cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD,
-                        cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.PRICED_CEILING, cost.MACHINE_COST["unknown"])
         self.assertLess(cost.build_entry_cost(1e12), cost.MACHINE_COST["unknown"])
         self.assertLess(cost.build_entry_cost(1e12), cost.MACHINE_COST["unavailable"])
+        # #95 put two more slices between the priced band and `unknown`. Neither may cross it.
+        self.assertLess(cost.UNPRICED_MACHINE_COST, cost.MACHINE_COST["unknown"])
+        self.assertLess(cost.blocked_entry_cost(1.0), cost.MACHINE_COST["unknown"])
 
     def test_the_band_floor_is_the_buildable_constant(self):
         # A free machine still costs the flat figure to route through. Lowering the floor
@@ -668,18 +670,19 @@ class BuildableMachineIsPricedByWhatBuildingItCostsTest(unittest.TestCase):
         self.assertEqual(seen, sorted(seen))
         self.assertEqual(len(set(seen)), len(seen), "distinct build costs must not collide")
 
-    def test_an_unreachable_machine_charges_the_top_of_the_band_not_unavailable(self):
+    def test_an_unreachable_machine_charges_the_pricing_gap_not_unavailable(self):
         """23 buildable categories on the reference pack have an unpriced machine item.
 
         A price this model failed to compute is a gap in the pricing, not evidence about the
         base, and `machines._candidate_verdict` already decided `buildable` from a real
-        producer. Charging `unavailable` here would let a numerical failure overrule that.
+        producer. Charging `unavailable` here would let a numerical failure overrule that --
+        and since #95, so would charging what a structure proven unbuildable charges.
         """
-        top = cost.MACHINE_COST["buildable"] + cost.BUILD_SPREAD
-        self.assertEqual(cost.build_entry_cost(float("inf")), top)
-        self.assertEqual(cost.build_entry_cost(None), top)
+        self.assertEqual(cost.build_entry_cost(float("inf")), cost.UNPRICED_MACHINE_COST)
+        self.assertEqual(cost.build_entry_cost(None), cost.UNPRICED_MACHINE_COST)
         self.assertLess(cost.build_entry_cost(float("inf")),
                         cost.MACHINE_COST["unavailable"])
+        self.assertLess(cost.build_entry_cost(float("inf")), cost.blocked_entry_cost(0.0))
 
     def test_the_cheapest_candidate_sets_the_price(self):
         """More than one block opens a lot of categories, and a player builds the cheap one.
