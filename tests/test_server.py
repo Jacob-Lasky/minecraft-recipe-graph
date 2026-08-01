@@ -1162,6 +1162,63 @@ class MachineBuildCostIsWiredIntoTheServerTest(unittest.TestCase):
         self.assertLess(entry, cost_mod.MACHINE_COST["unknown"])
 
 
+class CostCacheLandsBesideTheGraphTest(unittest.TestCase):
+    """A `State` must memoise beside the graph it loaded, not beside the cwd.
+
+    Asserted as a PROPERTY of constructing a State -- "nothing appears under the working
+    directory" -- rather than by checking one expected filename, because that is the claim
+    that keeps holding when another cache or index is added later. The old behaviour took
+    `DEFAULT_COST_CACHE` literally, so both of these failed: the suite wrote fixture prices
+    into the repo's real data/.cost-cache.json (on Tower, the live server's own bind mount),
+    and the container memoised into /app/data/ and lost the table on every recreation.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.cwd = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.cwd, "data"))
+        here = os.getcwd()
+        os.chdir(self.cwd)
+        self.addCleanup(os.chdir, here)
+
+        g = Graph()
+        g.names["mod:part"] = "Part"
+        g.add(Recipe("part", "t", [("mod:part", 1)], [], category="minecraft.crafting"))
+        self.graph_path = os.path.join(self.dir, "graph.json")
+        g.save(self.graph_path)
+        self.have_path = os.path.join(self.dir, "have.json")
+        with open(self.have_path, "w") as fh:
+            json.dump({"items": {}, "placed": {}}, fh)
+
+    def _state(self):
+        return server.State(
+            self.graph_path, self.have_path, os.path.join(self.dir, "machines.json"),
+            sources_path=os.path.join(self.dir, "sources.json"),
+            tokens_path=os.path.join(self.dir, "tokens.json"),
+            pins_path=os.path.join(self.dir, "pins.json"))
+
+    def test_constructing_a_state_writes_nothing_under_the_working_directory(self):
+        self._state()
+        self.assertEqual(sorted(os.listdir(os.path.join(self.cwd, "data"))), [],
+                         "a State wrote into the cwd's data/ -- on Tower that directory is "
+                         "the running server's bind mount, so a test run discards its cache")
+
+    def test_the_cache_lands_beside_the_graph_so_a_container_keeps_it(self):
+        state = self._state()
+        self.assertEqual(os.path.dirname(os.path.abspath(state.cost_cache_path)),
+                         os.path.abspath(self.dir))
+        self.assertTrue(os.path.exists(state.cost_cache_path),
+                        "the cost table was not memoised at all")
+
+    def test_an_explicit_path_still_wins(self):
+        explicit = os.path.join(tempfile.mkdtemp(), "elsewhere.json")
+        state = server.State(
+            self.graph_path, self.have_path, os.path.join(self.dir, "machines.json"),
+            cost_cache_path=explicit)
+        self.assertEqual(state.cost_cache_path, explicit)
+        self.assertTrue(os.path.exists(explicit))
+
+
 class EnsureGraphTest(unittest.TestCase):
     """`serve` builds the graph itself rather than making the user run two commands."""
 

@@ -413,9 +413,38 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     return h.hexdigest()
 
 
+def cache_beside(graph_path):
+    """Where to memoise the cost table for `graph_path`: beside the GRAPH, not the cwd.
+
+    DO NOT restore `DEFAULT_COST_CACHE` as the default for `cache_path`. That constant is the
+    RELATIVE "data/.cost-cache.json", and a relative default plus a container is the #92 bug
+    in a second place -- once here and once in `server.State`, the two entry points that
+    memoise. The image's WORKDIR is /app while the graph is the mounted /data/graph.json, so
+    both the server and a containerised `plan` memoised into /app/data/ inside the container
+    layer and threw the table away on every recreation, paying the 26s relaxation again with a
+    valid cache one bind-mount away.
+
+    It also let the TEST SUITE write into the developer's real data/ dir. `tests/test_server`
+    puts the graph, stock, machines, sources, tokens and pins in a tempdir, and the cost cache
+    was the one path `State` gave it no way to redirect -- so `unittest discover` from the repo
+    root replaced data/.cost-cache.json with four fixture prices, and on Tower, where the repo
+    checkout's data/ IS the serving bind mount, a test run discarded the live server's warm
+    table. Resolved HERE rather than in each caller so a new caller cannot reintroduce it by
+    forgetting to pass a path; only the BASENAME comes from the constant, so the name of the
+    file stays in one place.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(graph_path)),
+                        os.path.basename(DEFAULT_COST_CACHE))
+
+
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
-                    cache_path=DEFAULT_COST_CACHE, passes=PASSES, machine_items=None):
+                    cache_path=None, passes=PASSES, machine_items=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
+
+    `cache_path` defaults to `cache_beside(graph_path)`; see there for why it is not the
+    relative constant. Pass one explicitly to override, which is what an A/B of a cost change
+    must do -- the fingerprint covers the constants but NOT the code, so two arms sharing a
+    cache serve arm one's table to arm two and agree by construction.
 
     Measured on the 117.7k-recipe reference graph: 15.6s for one relaxation, 26.1s for the
     two `estimate` runs when build targets are supplied (#86). Fine once at server startup
@@ -429,6 +458,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     relaxation the cache is serving -- a divergence visible only on a cache HIT, which is the
     hard way to find it.
     """
+    cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
                         getattr(graph, "multiblocks", None))
     if cache_path and os.path.exists(cache_path):

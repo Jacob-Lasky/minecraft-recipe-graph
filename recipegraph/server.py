@@ -683,13 +683,16 @@ class State:
     """Loaded once; requests read it. Rebuilt when overrides change or the files do."""
 
     def __init__(self, graph_path, have_path, machines_path, sources_path=None,
-                 tokens_path=None, pins_path=None):
+                 tokens_path=None, pins_path=None, cost_cache_path=None):
         self.graph_path = graph_path
         self.have_path = have_path
         self.machines_path = machines_path
         self.sources_path = sources_path or DEFAULT_SOURCES
         self.tokens_path = tokens_path or DEFAULT_TOKENS
         self.pins_path = pins_path or DEFAULT_PINS
+        # Resolved here rather than left to `estimate_cached` so the path the server memoises
+        # to is inspectable, and so an explicit override is visible on the State.
+        self.cost_cache_path = cost_cache_path or cost_mod.cache_beside(graph_path)
         self.lock = threading.Lock()
         self.load_all()
 
@@ -752,7 +755,7 @@ class State:
         self.pinned, self.pin_notes = pins_mod.resolve(self.graph, self.pins)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
-            free_sources=self.free_sources,
+            free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info))
         # The two search indexes, built here rather than on first use. Between them they
         # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
@@ -1906,9 +1909,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(graph_path, have_path, machines_path, host=DEFAULT_HOST,
           port=DEFAULT_PORT,
-          sources_path=None, tokens_path=None, pins_path=None):
+          sources_path=None, tokens_path=None, pins_path=None, cost_cache_path=None):
     state = State(graph_path, have_path, machines_path, sources_path, tokens_path,
-                  pins_path)
+                  pins_path, cost_cache_path)
     Handler.state = state
     httpd = ThreadingHTTPServer((host, port), Handler)
     return httpd, state

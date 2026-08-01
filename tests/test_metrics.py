@@ -94,5 +94,48 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(got[0]["avg_use"], 12.0)
 
 
+class EveryCallerClosesItsConnectionTest(unittest.TestCase):
+    """Nothing outside metrics.py may call `connect`; `open_db` is the one that closes.
+
+    A LINT rather than a behavioural test, because the failure it guards is a ResourceWarning
+    raised by the GARBAGE COLLECTOR and attributed to whatever query the collector happened to
+    interrupt -- it reads as a bug in metrics.py, and a plain `unittest discover` does not fail
+    on it at all, only prints it. `track`, `chart` and `metrics` all leaked this way and the
+    warning was scrolled past for exactly that reason. A test that only escalated warnings
+    would catch it solely on the paths a test happens to drive; this catches the call site.
+    """
+
+    def _sources(self):
+        pkg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "recipegraph")
+        for base, _dirs, files in os.walk(pkg):
+            for name in sorted(files):
+                if name.endswith(".py"):
+                    yield os.path.relpath(os.path.join(base, name), pkg), \
+                        os.path.join(base, name)
+
+    def test_no_module_calls_metrics_connect_directly(self):
+        offenders = []
+        for rel, path in self._sources():
+            if rel == "metrics.py":
+                continue
+            with open(path) as fh:
+                for n, line in enumerate(fh, 1):
+                    if "metrics.connect(" in line or "= connect(" in line:
+                        offenders.append("%s:%d" % (rel, n))
+        self.assertEqual(offenders, [],
+                         "use `with metrics.open_db(path) as conn:` so the WAL connection is "
+                         "closed and checkpointed instead of leaked to the collector")
+
+    def test_sqlite_is_opened_in_exactly_one_module(self):
+        opens = []
+        for rel, path in self._sources():
+            with open(path) as fh:
+                if "sqlite3.connect(" in fh.read():
+                    opens.append(rel)
+        self.assertEqual(opens, ["metrics.py"],
+                         "a second module opening sqlite directly bypasses open_db's close")
+
+
 if __name__ == "__main__":
     unittest.main()

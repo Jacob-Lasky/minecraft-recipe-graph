@@ -331,6 +331,54 @@ class CacheTest(unittest.TestCase):
         reloaded = cost.estimate_cached(g, "x.json", cache_path=path)
         self.assertTrue(math.isinf(reloaded.get("fluid:uranium_fluoride", math.inf)))
 
+    def test_no_cache_path_memoises_beside_the_graph_not_the_cwd(self):
+        """The default must follow the GRAPH, because `plan` runs in a container too.
+
+        `cli.cmd_plan` calls `estimate_cached` without a cache path, so with the old relative
+        default a containerised plan memoised into the image's /app/data/ rather than the
+        mounted /data beside the graph -- recomputing 26s of relaxation every invocation while
+        a valid table sat one bind-mount away (the #92 family). Guarded as "the cwd stays
+        clean" so it also catches a caller that reintroduces the relative constant.
+        """
+        g = chain_graph()
+        graph_dir = tempfile.mkdtemp()
+        graph_path = os.path.join(graph_dir, "graph.json")
+        g.save(graph_path)
+
+        cwd = tempfile.mkdtemp()
+        os.makedirs(os.path.join(cwd, "data"))
+        here = os.getcwd()
+        os.chdir(cwd)
+        self.addCleanup(os.chdir, here)
+
+        cost.estimate_cached(g, graph_path)
+        self.assertEqual(sorted(os.listdir(os.path.join(cwd, "data"))), [],
+                         "estimate_cached wrote into the cwd instead of beside the graph")
+        self.assertTrue(os.path.exists(cost.cache_beside(graph_path)))
+        self.assertEqual(os.path.dirname(cost.cache_beside(graph_path)), graph_dir)
+
+    def test_the_derived_cache_is_actually_READ_back(self):
+        """A derived path that never hits would be a silent 26s tax rather than a cache.
+
+        Proven by planting a sentinel price under the fingerprint the first run wrote and
+        requiring it back. Comparing two runs' tables cannot show this: a recompute returns
+        the same numbers and rewrites the same fingerprint, so it passes either way.
+        """
+        g = chain_graph()
+        graph_path = os.path.join(tempfile.mkdtemp(), "graph.json")
+        g.save(graph_path)
+        cost.estimate_cached(g, graph_path)
+
+        derived = cost.cache_beside(graph_path)
+        with open(derived) as fh:
+            doc = json.load(fh)
+        doc["cost"]["fluid:water"] = 1234.5
+        with open(derived, "w") as fh:
+            json.dump(doc, fh)
+
+        self.assertEqual(cost.estimate_cached(g, graph_path)["fluid:water"], 1234.5,
+                         "the derived cache was written but never read back")
+
 
 class DumpDirOverrideTest(unittest.TestCase):
     """`build --dump-dir` must move EVERY dump file, not just recipes.ndjson.

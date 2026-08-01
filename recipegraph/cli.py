@@ -17,9 +17,9 @@ from . import index
 from . import machines
 from . import pins as pins_mod
 from . import tokens as tokens_mod
-from .defaults import (DEFAULT_COST_CACHE, DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST,
-                       DEFAULT_MACHINES, DEFAULT_MAX_NODES, DEFAULT_METRICS_DB,
-                       DEFAULT_PINS, DEFAULT_PORT, DEFAULT_SOURCES, DEFAULT_TOKENS)
+from .defaults import (DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST, DEFAULT_MACHINES,
+                       DEFAULT_MAX_NODES, DEFAULT_METRICS_DB, DEFAULT_PINS, DEFAULT_PORT,
+                       DEFAULT_SOURCES, DEFAULT_TOKENS)
 from .model import Graph, essentia_key
 from .names import build_reverse, resolve
 from .sources import dump_meta
@@ -417,11 +417,11 @@ def cmd_track(args):
             g = Graph.load(gpath)
             names = {k: g.display(k) for k in have if k in g.names}
 
-    conn = metrics.connect(args.db)
-    written = metrics.record(conn, have, source=source, power=power, names=names)
-    if not args.no_prune:
-        metrics.prune(conn)
-    info = metrics.stats(conn)
+    with metrics.open_db(args.db) as conn:
+        written = metrics.record(conn, have, source=source, power=power, names=names)
+        if not args.no_prune:
+            metrics.prune(conn)
+        info = metrics.stats(conn)
     print("recorded %d items from %s; rows written per tier: %s"
           % (len(have), source, written))
     print("db %s: %d snapshots, %d level rows, %d distinct items"
@@ -433,36 +433,38 @@ def cmd_chart(args):
     from . import metrics
     from .chart import render_chart_html
 
-    conn = metrics.connect(args.db)
-    info = metrics.stats(conn)
-    if not info["snapshots"]:
-        print("no snapshots yet -- run `track` at least twice", file=sys.stderr)
-        return 1
+    with metrics.open_db(args.db) as conn:
+        info = metrics.stats(conn)
+        if not info["snapshots"]:
+            print("no snapshots yet -- run `track` at least twice", file=sys.stderr)
+            return 1
 
-    until = info["last_snapshot"]
-    window = _duration(args.window)
-    since = until - window
-    tier = metrics.pick_tier(window)
+        until = info["last_snapshot"]
+        window = _duration(args.window)
+        since = until - window
+        tier = metrics.pick_tier(window)
 
-    tops = metrics.movers(conn, since, until, limit=args.top, tier=tier)
-    if not tops:
-        print("no quantity changed in the last %s (need >=2 snapshots apart)" % args.window,
-              file=sys.stderr)
-        return 1
+        tops = metrics.movers(conn, since, until, limit=args.top, tier=tier)
+        if not tops:
+            print("no quantity changed in the last %s (need >=2 snapshots apart)"
+                  % args.window, file=sys.stderr)
+            return 1
 
-    payload = {
-        "since": since, "until": until, "tier": tier,
-        "window_label": args.window,
-        "range_label": "%s snapshots recorded, %s tracked items"
-                       % ("{:,}".format(info["snapshots"]),
-                          "{:,}".format(info["distinct_items"])),
-        "source": "mixed",
-        "movers": tops,
-        "series": {m["key"]: metrics.series(conn, m["key"], since, until, tier)
-                   for m in tops},
-        "power": metrics.power_series(conn, since, until, tier),
-        "storage": info,
-    }
+        # Every query the payload needs happens INSIDE the connection's scope; the rendering
+        # below must not reach back for a lazy series after the db is closed.
+        payload = {
+            "since": since, "until": until, "tier": tier,
+            "window_label": args.window,
+            "range_label": "%s snapshots recorded, %s tracked items"
+                           % ("{:,}".format(info["snapshots"]),
+                              "{:,}".format(info["distinct_items"])),
+            "source": "mixed",
+            "movers": tops,
+            "series": {m["key"]: metrics.series(conn, m["key"], since, until, tier)
+                       for m in tops},
+            "power": metrics.power_series(conn, since, until, tier),
+            "storage": info,
+        }
 
     for m in tops[: args.limit]:
         print("%-40s %14s -> %-14s %+12s  %s"
@@ -506,8 +508,8 @@ def cmd_gaps(args):
 
 def cmd_metrics(args):
     from . import metrics
-    conn = metrics.connect(args.db)
-    print(json.dumps(metrics.stats(conn), indent=2))
+    with metrics.open_db(args.db) as conn:
+        print(json.dumps(metrics.stats(conn), indent=2))
     return 0
 
 
