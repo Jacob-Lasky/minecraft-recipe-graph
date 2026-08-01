@@ -228,5 +228,118 @@ class IndexTest(unittest.TestCase):
         self.assertIn("fluid:lava", g.labels)
 
 
+def plates():
+    """Four items called "Iron Plate", as MeatballCraft really has six.
+
+    `zz:plate` is the canonical one and sorts LAST alphabetically, which is the whole defect:
+    on the reference pack `thermalfoundation:material:32` lost to `abyssalcraft:ironp` on the
+    letter "t" against "a".
+    """
+    g = Graph()
+    g.names = {"aa:plate": "Iron Plate", "mm:plate": "Iron Plate",
+               "zz:plate": "Iron Plate", "qq:plate": "Iron Plate",
+               "mod:ingot": "Iron Ingot"}
+    # zz: eight consumers and a machine route. aa: one crafting recipe and one consumer.
+    for i in range(8):
+        g.add(Recipe("use%d" % i, "t", [("mod:thing%d" % i, 1)],
+                     [Ingredient(["zz:plate"], 1)], category="c"))
+    g.add(Recipe("press", "t", [("zz:plate", 1)],
+                 [Ingredient(["mod:ingot"], 1)], category="ie.metalPress"))
+    g.add(Recipe("craft", "t", [("aa:plate", 1)],
+                 [Ingredient(["mod:ingot"], 1)], category="crafting_shaped"))
+    g.add(Recipe("useaa", "t", [("mod:other", 1)],
+                 [Ingredient(["aa:plate"], 1)], category="c"))
+    # qq: exists, consumed by nothing, made by nothing but the graph knows the name.
+    g.add(Recipe("useqq", "t", [("qq:plate", 1)],
+                 [Ingredient(["mod:ingot"], 1)], category="crafting_shaped"))
+    return g
+
+
+class SameNamedItemsAreOrderedByEvidenceTest(unittest.TestCase):
+    """Six items were called "Iron Plate" and the tie fell through to the registry id, so
+    ordering among them was decided by its first letter. The one with 42 in stock, 152
+    consumers and five machine routes came last, and the report was "the only way I can find
+    to craft an iron plate is shaped crafting"."""
+
+    def test_the_well_connected_item_wins_despite_sorting_last_alphabetically(self):
+        keys = explore.rank_matches(plates(), "iron plate").results
+        self.assertEqual(keys[0], "zz:plate")
+
+    def test_a_stack_in_stock_outranks_being_well_connected(self):
+        # 1,482 Sulfur is the pack telling you which one you use.
+        keys = explore.rank_matches(plates(), "iron plate",
+                                    have={"mm:plate": explore.STOCK_IS_DECISIVE}).results
+        self.assertEqual(keys[0], "mm:plate")
+
+    def test_holding_one_of_something_does_not_outrank_it(self):
+        # ONE `railcraft:abyssal_stone` beating `aoa3:abyss_stone` and its 165 consumers is
+        # the case the threshold exists to refuse.
+        keys = explore.rank_matches(plates(), "iron plate", have={"mm:plate": 1}).results
+        self.assertEqual(keys[0], "zz:plate")
+
+    def test_an_item_nothing_consumes_sinks_below_one_with_recipes(self):
+        keys = explore.rank_matches(plates(), "iron plate").results
+        self.assertLess(keys.index("aa:plate"), keys.index("qq:plate"))
+
+    def test_a_better_name_match_still_beats_a_better_connected_item(self):
+        """The tie-break must not become a longer sort key.
+
+        Applied to the whole list it would let connectivity outrank name relevance, which is
+        what the first three components exist to express.
+        """
+        g = plates()
+        g.names["mod:exact"] = "Plate"
+        # Needs a recipe, or the dead-key filter drops it before ranking ever sees it --
+        # which is what this test asserted the first time it was written.
+        g.add(Recipe("exact", "t", [("mod:exact", 1)],
+                     [Ingredient(["mod:ingot"], 1)], category="crafting_shaped"))
+        keys = explore.rank_matches(g, "plate").results
+        self.assertEqual(keys[0], "mod:exact")
+
+    def test_items_with_different_names_are_left_alone(self):
+        # Only character-identical labels are a tie; nothing else may be reordered.
+        g = plates()
+        before = explore.rank_matches(g, "iron").results
+        self.assertIn("mod:ingot", before)
+        self.assertEqual(sorted(before), sorted(set(before)))
+
+    def test_a_tie_group_straddling_the_limit_still_reorders_across_it(self):
+        """The `limit` cutoff is what keeps this off the keystroke path, and it is the part
+        most likely to be "simplified" into a truncation.
+
+        Stopping at the first group that CROSSES `limit`, rather than the first that starts at
+        or after it, would leave the best candidate stranded just outside the returned window
+        while the rows shown are the alphabetical ones. Built so the canonical item sits past
+        the cut before refinement and must be pulled inside it.
+        """
+        g = Graph()
+        g.names = {"mod:ingot": "Iron Ingot"}
+        # Thirty identically-named plates. `zz:` sorts last alphabetically and is the only one
+        # anything consumes, so before refinement it sits at index 29, outside a limit of 5.
+        for i in range(29):
+            key = "m%02d:plate" % i
+            g.names[key] = "Iron Plate"
+            g.add(Recipe("mk%d" % i, "t", [(key, 1)],
+                         [Ingredient(["mod:ingot"], 1)], category="crafting_shaped"))
+        g.names["zz:plate"] = "Iron Plate"
+        g.add(Recipe("press", "t", [("zz:plate", 1)],
+                     [Ingredient(["mod:ingot"], 1)], category="ie.metalPress"))
+        for i in range(6):
+            g.add(Recipe("use%d" % i, "t", [("mod:thing%d" % i, 1)],
+                         [Ingredient(["zz:plate"], 1)], category="c"))
+        keys = explore.rank_matches(g, "iron plate", limit=5).results
+        self.assertEqual(len(keys), 5)
+        self.assertEqual(keys[0], "zz:plate")
+
+    def test_the_order_is_total_so_two_identical_items_cannot_swap(self):
+        # Registry id remains the last resort, so the list is stable between requests rather
+        # than depending on dict order.
+        g = plates()
+        once = explore.rank_matches(g, "iron plate").results
+        twice = explore.rank_matches(g, "iron plate").results
+        self.assertEqual(once, twice)
+        self.assertEqual(once[-1], "qq:plate")
+
+
 if __name__ == "__main__":
     unittest.main()
