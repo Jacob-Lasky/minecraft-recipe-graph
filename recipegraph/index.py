@@ -4,7 +4,7 @@ import os
 import sys
 
 from . import multiblocks
-from .model import Graph, base_key, is_item_key
+from .model import FLUID_PREFIX, Graph, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
 from .sources import dump_meta, dump_names
@@ -306,7 +306,7 @@ def mark_container_transfers(g, quiet=True):
     for r in g.recipes:
         if r.transfer:
             continue
-        if not any(k.startswith("fluid:") for k, _q in r.outputs):
+        if not any(k.startswith(FLUID_PREFIX) for k, _q in r.outputs):
             continue
         out_bases = {base_key(k) for k, _q in r.outputs}
         if set(item_input_bases(r)) & out_bases:
@@ -318,7 +318,7 @@ def mark_container_transfers(g, quiet=True):
     for r in g.recipes:
         if r.transfer:
             continue
-        fluid_outs = {k for k, _q in r.outputs if k.startswith("fluid:")}
+        fluid_outs = {k for k, _q in r.outputs if k.startswith(FLUID_PREFIX)}
         if not fluid_outs:
             continue
         item_ins = item_input_bases(r)
@@ -332,7 +332,7 @@ def mark_container_transfers(g, quiet=True):
         for r in g.recipes:
             if r.transfer:
                 continue
-            if not any(k.startswith("fluid:") for k, _q in r.outputs):
+            if not any(k.startswith(FLUID_PREFIX) for k, _q in r.outputs):
                 continue
             item_ins = item_input_bases(r)
             if len(item_ins) == 1 and item_ins[0] in containers:

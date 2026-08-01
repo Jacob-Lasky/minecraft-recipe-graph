@@ -32,7 +32,7 @@ from .defaults import (DEFAULT_HOST, DEFAULT_MAX_NODES, DEFAULT_PINS, DEFAULT_PO
 from .htmlutil import esc as _esc
 from .htmlutil import script_json
 from .htmlutil import deeper_href, item_href, machine_href, plan_url
-from .model import Graph, path_of
+from .model import FLUID_PREFIX, Graph, fluid_key, path_of
 from .names import build_reverse
 from .present import (STATE_BADGE, STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED,
                       hidden_note, kind_chip_json, pin_badge)
@@ -713,7 +713,7 @@ class State:
                 doc = json.load(fh)
             self.have = dict(doc.get("items") or {})
             for name, amount in (doc.get("fluids") or {}).items():
-                self.have["fluid:%s" % name] = amount
+                self.have[fluid_key(name)] = amount
             for aspect, amount in (doc.get("essentia") or {}).items():
                 self.have["essentia:%s" % str(aspect).lower()] = amount
             self.craftables = set(doc.get("craftables") or ())
@@ -1876,7 +1876,7 @@ class Handler(BaseHTTPRequestHandler):
             if not block or not key:
                 return "give both a block id and what it makes"
             if key not in st.graph.names and not st.graph.producers(key) \
-                    and not key.startswith("fluid:"):
+                    and not key.startswith(FLUID_PREFIX):
                 # A typo would silently make nothing free, which looks identical to the
                 # feature not working.
                 return "no item or fluid called %s -- pick one from the list" % key

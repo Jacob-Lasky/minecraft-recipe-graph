@@ -36,6 +36,7 @@ import os
 
 from . import multiblocks as multiblocks_mod
 from .defaults import DEFAULT_COST_CACHE
+from .model import FLUID_PREFIX
 
 # What a machine costs to route through. Owning it is nearly free; building one is a real
 # but one-off expense; using one you cannot get should lose to almost anything.
@@ -304,7 +305,7 @@ def category_entry_cost(category, machine_states=None, machine_entry=None):
 
 def _scaled_qty(key, qty):
     """Quantity in normalised units: 1 item, or 1 bucket of fluid."""
-    q = max(qty, 1) * (FLUID_SCALE if key.startswith("fluid:") else 1.0)
+    q = max(qty, 1) * (FLUID_SCALE if key.startswith(FLUID_PREFIX) else 1.0)
     # A sub-millibucket output would divide by ~0 and manufacture a free resource.
     return max(q, FLUID_SCALE)
 
@@ -437,7 +438,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                 # own is not production. Mirrors Graph.real_producers, which is what the
                 # solver walks -- if these disagree the ranker prices a route the solver
                 # cannot take.
-                if r.transfer and key.startswith("fluid:"):
+                if r.transfer and key.startswith(FLUID_PREFIX):
                     continue
                 # ONLY THE INGREDIENTS AMORTISE. `base` is what running this recipe costs
                 # you at all -- overwhelmingly the machine -- and dividing it by the batch
