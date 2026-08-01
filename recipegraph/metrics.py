@@ -22,6 +22,7 @@ bounded:
 Power is dense (one small row per snapshot) because it is a handful of scalars.
 """
 
+import contextlib
 import os
 import sqlite3
 import time
@@ -72,6 +73,25 @@ def connect(path):
     if fresh:
         conn.commit()
     return conn
+
+
+@contextlib.contextmanager
+def open_db(path):
+    """`connect`, closed on the way out. PREFER THIS; `connect` leaves the caller holding it.
+
+    Every caller leaked before this existed: `track`, `chart` and `metrics` each connected and
+    returned without closing, and the tests connected in setUp, so `unittest discover` printed
+    "unclosed database" ResourceWarnings from the garbage collector. Warnings nobody can act on
+    are how a real one later goes unread, and the leak is not free either -- the connection is
+    WAL, so closing is what checkpoints -wal and -shm back into the db instead of leaving them
+    beside it. `track` is the caller documented to run from cron, so it is both the most
+    frequent and the one nobody is watching.
+    """
+    conn = connect(path)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _bucket(ts, size):
