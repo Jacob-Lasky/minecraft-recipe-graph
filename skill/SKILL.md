@@ -26,6 +26,40 @@ has to invalidate (`cost.fingerprint`, `FORMULA_VERSION`) and a schema still has
 (`SCHEMA` in the jar), because those catch a graph being served prices or shapes that no longer
 describe it -- that is a wrong-answer bug, not a compatibility concern.
 
+## ASK THE RUNNING SERVER, DO NOT COLD-LOAD THE GRAPH
+
+**`Graph.load` costs 4.4 seconds and the container already has the graph in memory. Twenty
+throwaway `python3` probes in one session is ninety seconds of reloading a 115 MB file off a
+FUSE mount, and Jake watched it happen and called it out twice.** The reflex to reach for is
+`curl`, not a heredoc.
+
+```bash
+time curl -s 'http://172.17.0.1:8765/plan?item=fluid:nethengeic_fluid&qty=1000'   # 0.048s
+curl -s --get --data-urlencode 'q=strong mythic essence' http://172.17.0.1:8765/suggest
+```
+
+That is a 90x difference and it compounds over an investigation. `172.17.0.1:8765`, never
+`127.0.0.1` from pocket-dev, for the reason in the connectivity section below.
+
+**When the server cannot answer it, that is a MISSING PRIMITIVE, not a reason to write a
+script.** Jake's words: *"idk why you keep building pure python scripts. whatever you're
+building, i feel, should probably be an endpoint or other sort of tool."* #108 tracks the read
+surface (`/api/key`, `/api/keys`, `/api/recipe`, `/api/cost`, `fmt=json` on `/plan`) plus the
+open question of how to express a SWEEP, which is the shape that genuinely has nowhere to go
+today. Until it lands, batch every question you have into ONE cold load rather than paying for
+each separately, and if you catch yourself writing the same probe shape twice, that is the
+signal to add the endpoint instead.
+
+Two other things a cold script gets wrong that the server does not:
+
+* **`plan` will not take a raw key.** `plan fluid:nethengeic_fluid` prints "no item matched"
+  because `names.resolve` reads `graph.names`, which is items only, while `labels` has the
+  1,198 fluids. Worse, planning it BY NAME silently plans a container ("Strong Mythic Essence
+  Can") after one line of preamble. `/plan?item=<key>` on the server is exact. See #107.
+* **Sweep results keyed by DISPLAY NAME are wrong**, because 5,095 names are shared. A sweep
+  keyed that way reported `Iron Nugget` as having zero producers; `minecraft:iron_nugget` has
+  94, and the hit was another mod's item wearing the label. Key sweeps by KEY. See #101.
+
 ## READ THIS BEFORE SAYING ANYTHING IS BLOCKED
 
 Two Claudes work on this repo, on two machines with different powers, and Jake talks to
