@@ -362,6 +362,7 @@ class Graph:
         """
         self._by_output = None
         self._by_input = None
+        self._by_rid = None
         self._ore_index = None
         self._world_ores = None
         self._labels = None
@@ -400,6 +401,22 @@ class Graph:
                             idx.setdefault(alt, []).append(r)
             self._by_input = idx
         return self._by_input
+
+    @property
+    def by_rid(self):
+        """rid -> [recipes carrying it]. The index a "show me that recipe" lookup needs.
+
+        A LIST RATHER THAN A RECIPE, because the rid is the dump's own id and nothing
+        enforces that it is unique: two JEI categories can hand back the same wrapper id, and
+        a dict keyed rid->recipe would silently serve whichever was added last while looking
+        authoritative. Returning both is the honest shape, and `api` reports the count.
+        """
+        if self._by_rid is None:
+            idx = {}
+            for r in self.recipes:
+                idx.setdefault(r.rid, []).append(r)
+            self._by_rid = idx
+        return self._by_rid
 
     @property
     def ore_index(self):
@@ -501,12 +518,16 @@ class Graph:
 
     @property
     def live_keys(self):
-        """Keys some recipe or catalyst actually touches. 167,365 of 342,070 labels.
+        """Keys some recipe or catalyst actually touches: 167,134 on the reference graph.
 
-        The other 174,705 are DEAD: no recipe makes them, no recipe uses them, nothing
-        names them as a machine. They cannot be planned or explored and can only push a
-        real result down a search page -- six identical "Pluton Scythe" NBT variants buried
-        Plutonium-238 through -242 on the first page of a search for `plut`. See #26.
+        Only 164,345 of them carry a label; the other 2,789 are keys a recipe names that
+        items.csv never did, which is why `api.universe` unions this with `labels` rather
+        than treating either as the whole key set.
+
+        Of the 262,841 LABELS, 98,496 are DEAD: no recipe makes them, no recipe uses them,
+        nothing names them as a machine. They cannot be planned or explored and can only
+        push a real result down a search page -- six identical "Pluton Scythe" NBT variants
+        buried Plutonium-238 through -242 on the first page of a search for `plut`. See #26.
 
         MUST STAY IN STEP WITH `producers` AND `consumers`, because a key hidden here while
         those two would have found recipes for it is an item that exists, works when linked

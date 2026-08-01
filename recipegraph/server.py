@@ -6,8 +6,12 @@ this has no authentication, so it must not be exposed to a network by accident. 
 --host 0.0.0.0 deliberately if you want that.
 
 Pages are SERVER-RENDERED, reusing the same renderers the CLI's --html flag uses, so there
-is exactly one implementation of each view. No client-side framework and no API to keep in
-sync.
+is exactly one implementation of each view, and no client-side framework.
+
+There IS a JSON surface, but it is not a second implementation of the pages: `/suggest`
+feeds the typeahead, and everything under `/api` is `recipegraph.api` wrapping the same
+`explore` and `cost` functions these pages render. Nothing there writes. It exists because
+`Graph.load` costs 4.4 seconds and this process is already holding the graph; see #108.
 
 The graph is loaded once at startup and held in memory. On a 121k-recipe graph that is
 several seconds and a few hundred MB, which is why this is a long-running server rather
@@ -20,6 +24,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from . import api as api_mod
 from . import cost as cost_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
@@ -758,14 +763,18 @@ class State:
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info))
         # The two search indexes, built here rather than on first use. Between them they
-        # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
+        # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while
         # every later one is instant, which reads as "the search is broken" rather than as
         # "the index is warming". Startup already costs 40 to 90 seconds and the
         # healthcheck's start-period covers it. Both counts are then what /explore reports,
         # so neither is warm-up-only state waiting to go stale.
         self.named = len(self.graph.labels)
-        self.searchable = len(self.graph.live_keys)
+        # THE INTERSECTION, not `len(live_keys)`. `rank_matches` walks `labels` and skips
+        # what is not live, so a live key with no label is never looked at -- and there are
+        # 2,788 of them, which the old figure counted as searched. The claim this number
+        # makes on the page is "what the search actually looked at", so it has to be that.
+        self.searchable = sum(1 for key in self.graph.labels if key in self.graph.live_keys)
 
     def solver(self, max_nodes=DEFAULT_MAX_NODES):
         return Solver(self.graph, have=self.have, craftables=self.craftables,
@@ -1664,13 +1673,20 @@ class Handler(BaseHTTPRequestHandler):
                 qty = max(1, int(one("qty", "1") or 1))
                 return self._send(home_page(st, one("q"), qty))
             if parts.path == "/suggest":
-                # The only JSON endpoint. Everything else is server-rendered; this exists
-                # because a keystroke must not re-render a page.
+                # The typeahead's own endpoint, kept separate from /api: it is RANKED and
+                # capped at 25 because it answers a keystroke, and those are exactly the
+                # properties that make it wrong for a measurement. /api/keys is the
+                # unranked, uncapped form. See #106, where a ranked capped answer was read
+                # as a census and reported the wrong item as having no producers.
                 hits = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
-                return self._send(json.dumps({"results": hits.results,
-                                              "hidden": hits.hidden,
-                                              "note": hidden_note(hits.hidden)}),
-                                  ctype="application/json; charset=utf-8")
+                return self._send(api_mod.dumps({"results": hits.results,
+                                                 "hidden": hits.hidden,
+                                                 "note": hidden_note(hits.hidden)}),
+                                  ctype=api_mod.JSON_CTYPE)
+            if parts.path == "/api" or parts.path.startswith("/api/"):
+                payload, status = api_mod.dispatch(st, parts.path, q)
+                return self._send(api_mod.dumps(payload), status,
+                                  ctype=api_mod.JSON_CTYPE)
             if parts.path == "/explore":
                 query = one("q")
                 hits = explore_mod.search(st.graph, query, have=st.have, limit=40)
@@ -1686,13 +1702,27 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path == "/plan":
                 key = one("item")
                 qty = max(1, int(one("qty", "1") or 1))
+                # Honoured on EVERY exit from this route, not just the happy one. A caller
+                # asking for JSON and receiving a 404 page of HTML gets a parse error where
+                # it wanted "no such item", which is a worse failure than not supporting the
+                # parameter at all -- and the parameter was already being passed and
+                # silently ignored, so #106's plan tree was recovered by regexing the tags
+                # out of the rendered page.
+                as_json = one("fmt") == "json"
                 if not key:
+                    if as_json:
+                        return self._send(api_mod.dumps({"error": "item= is required"}),
+                                          400, ctype=api_mod.JSON_CTYPE)
                     return self._send(home_page(st), 400)
                 # An unknown key otherwise produces a confident-looking empty plan titled
                 # with the raw id, which is indistinguishable from "this item needs
                 # nothing". Stale links and hand-typed ids both hit this.
                 if not (key in st.graph.names or st.graph.producers(key)
                         or st.have.get(key)):
+                    if as_json:
+                        return self._send(
+                            api_mod.dumps({"error": "no such item", "key": key}),
+                            404, ctype=api_mod.JSON_CTYPE)
                     return self._send(_page(
                         "Unknown item",
                         "<div class='wrap'>%s<div class='eyebrow'>Not in this graph</div>"
@@ -1722,6 +1752,11 @@ class Handler(BaseHTTPRequestHandler):
                 with st.lock:
                     solver = st.solver(cap)
                 result = solver.solve(key, qty)
+                if as_json:
+                    # The solver's own result dict, unmodified: `cli plan --json` writes this
+                    # same object, so a plan fetched over HTTP and a plan written to a file
+                    # cannot come out different shapes.
+                    return self._send(api_mod.dumps(result), ctype=api_mod.JSON_CTYPE)
                 title = "%s x%d" % (result["target_name"], qty)
                 return self._send(_wrap_fragment(
                     title,
