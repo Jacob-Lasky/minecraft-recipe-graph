@@ -11,6 +11,11 @@ You ask for an item. It walks the entire recipe chain, stops wherever your **AE2
 network already has the ingredient**, and hands you the actual shopping list — instead
 of you clicking through JEI one hop at a time and losing your place.
 
+It also stops at an **ore**, because an ore is something you go and mine rather than
+something you craft. The pack's own `ore*` oredict registration is the signal, so the
+shopping list says "4 Sednanite Ore" rather than walking the nugget/ingot ladder down to
+its smallest denomination.
+
 ```
 $ recipegraph plan "Ultimate Crafting Table" --have data/ae2_have.json
 

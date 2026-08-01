@@ -455,6 +455,39 @@ class Solver:
             self.leaf_totals[key] += remainder
             return node
 
+        # A WORLD ORE IS AN ACQUISITION UNIT: you go and hit it with a pick. Stopping here
+        # rather than descending is what makes a plan bottom out at "18 Sednanite Ore"
+        # instead of walking a denomination ladder to "18 Sednanite Nugget" -- #106, where
+        # the nugget was the only rung with no producer and therefore the only place the
+        # walk COULD stop, while the ore had two Plasmatic Condenser recipes and so looked
+        # craftable.
+        #
+        # Checked AFTER stock, free sources, `raw` and `craftables`: each of those is a
+        # better answer than "go mining" when it applies, and `take` has already drawn the
+        # pool down, so only the shortfall is ever charged to a pickaxe.
+        #
+        # NOT CONDITIONAL ON THE CRAFTED ROUTE BEING WORSE, and that is provable rather than
+        # merely measured. `cost._relax` prices an output at `machine_entry + inputs / qty`,
+        # and the machine entry is NOT divided by the yield -- so no crafted route can price
+        # below the cheapest possible entry, `MACHINE_COST["have"]`, which is 1.0, which is
+        # `BASE_RAW_COST`, which is what mining now costs. A comparison here would be a
+        # branch that can never take its other side.
+        #
+        # `AMachineCostsAtLeastAsMuchAsMiningTest` pins that equality, so lowering
+        # `MACHINE_COST["have"]` below `BASE_RAW_COST` fails there rather than silently
+        # making this unconditional stop the wrong call. That is the line to revisit if it
+        # ever moves; meanwhile `/recipes?item=<ore>` still lists every way to make one, so
+        # the routes are not lost from the tool, only from the plan tree.
+        #
+        # Consistent with the measurement, too: of 286 world ores on the reference graph, 88
+        # price below `BASE_RAW_COST` and every one of those 88 does so because it is IN
+        # STOCK, which `take` above has already spent.
+        if key in self.g.world_ores:
+            node["status"] = STATUS_RAW
+            node["note"] = "mined, not crafted"
+            self.leaf_totals[key] += remainder
+            return node
+
         candidates = self.g.real_producers(key)
         if not candidates:
             kind = self.token_kinds.get(key)
