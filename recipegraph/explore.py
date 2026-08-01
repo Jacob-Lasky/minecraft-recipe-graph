@@ -20,6 +20,25 @@ MAX_RESULTS = 60
 MAX_PRODUCERS = 8
 MAX_CONSUMERS = 12
 
+# When several items share a display name, how much of one you must hold before stock is
+# allowed to outrank how connected the item is. One stack.
+#
+# A THRESHOLD RATHER THAN `stock > 0`, and the difference is measured. On the reference pack
+# 5,095 display names are shared by two or more plain item keys, covering 21,888 keys -- six
+# things called "Iron Plate", 286 called "Spell Book" -- so this tie-break runs constantly and
+# being trigger-happy about stock is expensive. Ranking any held item first disagrees with
+# ranking by consumer count on 85 of those clusters; requiring a stack cuts it to 26, and the
+# disagreements it removes are the ones stock got wrong:
+#
+#   * Abyssal Stone -- ONE `railcraft:abyssal_stone` in the network beat `aoa3:abyss_stone`,
+#     which 165 recipes consume. One of something is a thing you picked up.
+#   * Sulfur -- 1,482 `thermalfoundation:material:771` is the pack telling you which sulfur you
+#     actually use, and it must beat a Betweenlands item with more consumers and none held.
+#
+# One boolean, not a curve: past a stack, more of it says nothing further about which item was
+# meant, and a magnitude term would let a chest of some vestigial duplicate win outright.
+STOCK_IS_DECISIVE = 64
+
 # What every entry point returns: the rows, and how many matches were suppressed as dead.
 # A plain list was the old shape and it had nowhere to put the count, which is how the
 # suppression would have become silent. Named fields so `hits.results` reads at the call
@@ -90,15 +109,73 @@ def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
         scored.append((2 if low.startswith(q) else 3, len(label), label, key))
 
     scored.sort()
-    seen, out = set(), []
-    for _rank, _len, _label, key in scored:
-        if key in seen:
+    # Deduplicated BEFORE the tie-break, not after, so a row's index is its output position
+    # and `_break_name_ties` can use `limit` to decide what cannot matter. The whole list is
+    # deduplicated rather than stopping at `limit`, because a tie group straddling the cut can
+    # still reorder across it.
+    seen, uniq = set(), []
+    for row in scored:
+        if row[3] in seen:
             continue
-        seen.add(key)
-        out.append(key)
-        if len(out) >= limit:
-            break
-    return Matches(out, hidden)
+        seen.add(row[3])
+        uniq.append(row)
+    _break_name_ties(graph, uniq, have, limit)
+    return Matches([row[3] for row in uniq[:limit]], hidden)
+
+
+def _canonical_first(graph, key, have):
+    """Sort key putting the item the PACK actually uses ahead of its vestigial duplicates.
+
+    Negated because the caller sorts ascending and every signal here is better when larger.
+
+    Only reached for keys whose label is character-identical to another hit's, so the cost is
+    paid per duplicate cluster rather than per keystroke -- `consumers` walks the oredict
+    groups and would be far too much to run over all 342,070 labels while someone types.
+    """
+    return (-(_stock_of(key, have) >= STOCK_IS_DECISIVE),
+            -len(graph.consumers(key)),
+            -len(graph.real_producers(key)),
+            key)
+
+
+def _break_name_ties(graph, scored, have, limit):
+    """Reorder, in place, runs of hits whose `(rank, length, label)` are identical.
+
+    WHY THIS IS NOT JUST A LONGER SORT KEY. `scored` holds every match, and for a one-letter
+    query that is most of the graph; computing consumer and producer counts for all of them on
+    every keystroke is the cost `rank_matches` is split out from `search` to avoid. Ties are
+    exactly the duplicate-name clusters, the largest of which is 286, so refining only those
+    keeps the work proportional to the ambiguity rather than to the result set.
+
+    STOPS AT `limit`, WHICH IS THE DIFFERENCE BETWEEN THIS BEING FREE AND DOUBLING THE COST OF
+    A KEYSTROKE. Measured on the reference graph before this cutoff existed, the query "a" went
+    from 397ms to 767ms: 60 rows are returned and every duplicate cluster in a 200,000-row
+    match list was being refined to produce them. `scored` is sorted, so a group starting at or
+    after `limit` permutes only within itself and can never reach the output. A group that
+    STRADDLES the cut is refined in full, because its members can still cross it.
+
+    Sorting the whole list by the long key would ALSO be wrong, not merely slow: it would let
+    a well-connected item outrank a better NAME match, and name relevance is the thing the
+    first three components exist to express.
+
+    The tie used to fall through to the registry id, so ordering among same-named items was
+    decided by its first letter. `thermalfoundation:material:32` -- 42 held, 152 recipes
+    consuming it, eight ways to make it including five machines -- came last of the six items
+    called "Iron Plate", behind `abyssalcraft:ironp`, which only crafting makes. The report was
+    "the only way I can find to craft an iron plate is shaped crafting".
+    """
+    start = 0
+    for i in range(1, len(scored) + 1):
+        if start >= limit:
+            return
+        if i < len(scored) and scored[i][:3] == scored[start][:3]:
+            continue
+        if i - start > 1:
+            head = scored[start][:3]
+            keys = sorted((row[3] for row in scored[start:i]),
+                          key=lambda k: _canonical_first(graph, k, have))
+            scored[start:i] = [head + (k,) for k in keys]
+        start = i
 
 
 def suggest(graph, query, have=None, limit=25):
