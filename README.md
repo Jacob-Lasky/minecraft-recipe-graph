@@ -215,6 +215,45 @@ there is no authentication, so widening it to `--host 0.0.0.0` has to be an expl
 choice. The graph is loaded once at startup (a few seconds for 121k recipes) and held in
 memory, which is why this is a long-running server rather than a per-request script.
 
+## Asking the graph questions
+
+Loading the graph costs about **4.4 seconds** and 115 MB off disk. The running server already
+has it and answers in **0.048**, so anything more curious than a plan should be a `curl` at
+the server rather than a script that loads the file again. Everything here is read-only.
+
+```bash
+curl -s localhost:8765/api | jq                       # the endpoints, fields and functions
+curl -s --get --data-urlencode 'key=fluid:nethengeic_fluid' localhost:8765/api/key
+curl -s 'localhost:8765/api/keys?match=sednanite&limit=0'
+curl -s --get --data-urlencode 'rid=some.recipe.id' localhost:8765/api/recipe
+curl -s 'localhost:8765/api/cost?category=tconstruct.smeltery'
+curl -s 'localhost:8765/plan?item=minecraft:piston&qty=8&fmt=json' | jq .tree
+```
+
+`/api/keys` matches labels and keys with no ranking and no cap, which is what `/suggest`
+cannot be: that one ranks and stops at 25 rows because it answers a keystroke, and reading a
+ranked capped answer as a census is how a measurement comes back wrong.
+
+The one that replaces a script is **`/api/sweep`**, which takes a predicate:
+
+```bash
+curl -s --get localhost:8765/api/sweep \
+  --data-urlencode 'where=endswith(label, "Nugget") and producers == 0' \
+  --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0'
+```
+
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+combined with `and or not`, the six comparisons, and
+`startswith endswith contains matches lower upper len`. `GET /api` prints the list, so it
+does not have to be remembered. A `limit` of 0 lifts the cap, `matched` always reports the
+true total, and `order=-cost` sorts descending.
+
+It is a small parser rather than `eval` on purpose. The container deployment below is
+LAN-only with no authentication and mounts `/data` read-write, so "on the LAN" is the only
+access control there is; the grammar has no attribute access, no indexing and no callable
+surface beyond that fixed list of functions, which makes read-only a property of the code
+rather than an intention.
+
 ## What ships where
 
 Three pieces, and they do not all live on the same machine or update on the same schedule.
@@ -234,8 +273,10 @@ the collapsible tree, the `/machines` filters, the production chart, the search 
 is emitted inline by the Python module that renders each page, so there is no bundle, no
 asset pipeline and no build step. Where the JS and the server-rendered HTML have to agree on
 something, the value is injected from the one Python constant rather than restated, so they
-cannot drift apart. The single JSON endpoint exists only so a keystroke in the search box
-does not re-render a page.
+cannot drift apart. The JSON endpoints under `/api` are not a second implementation of the
+pages either: they wrap the same `explore` and `cost` functions the pages render, and they
+exist for people and scripts asking the graph questions, not for the browser. See "Asking the
+graph questions" above.
 
 **The data is what couples the other two, and it is the only piece with a version they both
 agree to check.** The mod stamps the schema it wrote; the tool compares that against the

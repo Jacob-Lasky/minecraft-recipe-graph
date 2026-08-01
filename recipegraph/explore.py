@@ -72,14 +72,14 @@ def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
         low = label.lower()
         if not all(t in low or t in key.lower() for t in terms):
             continue
-        # Checked AFTER the term match, not before: `_stock_of` splits the key and may scan
+        # Checked AFTER the term match, not before: `stock_of` splits the key and may scan
         # the pool, and paying that for all 342,070 labels on every keystroke would cost
         # far more than the filter saves. Only matches reach here.
         #
         # Anything you actually hold stays findable however dead the graph thinks it is.
         # A stack in an AE2 system is a fact about the world; "no recipe touches it" is a
         # fact about the dump, and the dump does not get to overrule the world.
-        if key not in live and not _stock_of(key, have):
+        if key not in live and not stock_of(key, have):
             hidden += 1
             continue
         # exact > prefix > word-boundary > substring; shorter names win ties
@@ -132,7 +132,7 @@ def _canonical_first(graph, key, have):
     paid per duplicate cluster rather than per keystroke -- `consumers` walks the oredict
     groups and would be far too much to run over all 342,070 labels while someone types.
     """
-    return (-(_stock_of(key, have) >= STOCK_IS_DECISIVE),
+    return (-(stock_of(key, have) >= STOCK_IS_DECISIVE),
             -len(graph.consumers(key)),
             -len(graph.real_producers(key)),
             key)
@@ -189,15 +189,10 @@ def suggest(graph, query, have=None, limit=25):
     hits = rank_matches(graph, query, have, limit)
     out = []
     for key in hits.results:
-        out.append({
-            "key": key,
-            "name": graph.display(key),
-            "kind": graph.kind(key),
-            "label": graph.bare_name(key),
-            "stock": _stock_of(key, have),
-            "makes": len(graph.real_producers(key)),
-            "uses": len(graph.consumers(key)),
-        })
+        row = stack(graph, key, have)
+        row["makes"] = len(graph.real_producers(key))
+        row["uses"] = len(graph.consumers(key))
+        out.append(row)
     return Matches(out, hits.hidden)
 
 
@@ -208,18 +203,48 @@ def search(graph, query, have=None, limit=MAX_RESULTS):
     return Matches([describe(graph, key, have) for key in hits.results], hits.hidden)
 
 
+def identity(graph, key):
+    """The four fields that say WHICH thing a row is about.
+
+    One definition, because every payload in this module and in `api` carries them and they
+    were written out five times: a renderer reading `label` off a row built by the fifth copy
+    that still spelled it something else fails at display time, on that row only.
+    """
+    return {"key": key, "name": graph.display(key), "kind": graph.kind(key),
+            "label": graph.bare_name(key)}
+
+
+def stack(graph, key, have):
+    """`identity` plus how much of it you hold. What a row about an item carries."""
+    row = identity(graph, key)
+    row["stock"] = stock_of(key, have)
+    return row
+
+
+def output_rows(graph, outputs):
+    """`identity` plus a quantity, for a recipe's `[(key, qty)]` output list."""
+    rows = []
+    for key, qty in outputs:
+        row = identity(graph, key)
+        row["qty"] = qty
+        rows.append(row)
+    return rows
+
+
 def _stack(graph, key, have):
-    return {
-        "key": key,
-        "name": graph.display(key),
-        "kind": graph.kind(key),
-        "label": graph.bare_name(key),
-        "stock": _stock_of(key, have),
-        "makeable": bool(graph.producers(key)),
-    }
+    row = stack(graph, key, have)
+    # Whether, not how many: this feeds a badge on the explore page. `api` wants the count
+    # and adds its own, which is why the shared part stops at `stack`.
+    row["makeable"] = bool(graph.producers(key))
+    return row
 
 
-def _stock_of(key, have):
+def stock_of(key, have):
+    """How much of `key` the network holds, following a wildcard-meta key to its variants.
+
+    Public because `api.FIELDS` needs the same answer the search rows show: a sweep that
+    counted stock its own way would disagree with the page describing the same key.
+    """
     n = have.get(key, 0)
     base, meta = split_key(key)
     if meta == "*":
@@ -236,6 +261,9 @@ def _recipe_brief(graph, recipe, have, direction):
         "machine": recipe.machine,
         "source": recipe.source,
     }
+    # Outputs unconditionally: the two branches built the same list, so the "used" branch was
+    # a second copy of it kept in step by hand.
+    d["outputs"] = output_rows(graph, recipe.outputs)
     if direction == "makes":
         # Merged the same way the plan tree merges, for the same reason: a 3x3 of one
         # ingredient listed nine rows of "1x Tiny Clump" here too. Merged on the
@@ -248,13 +276,6 @@ def _recipe_brief(graph, recipe, have, direction):
             for _key, ing, qty, options in merge_slots(
                 recipe.inputs, lambda i: tuple(i.alternatives))
         ]
-        d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
-                        "label": graph.bare_name(k), "qty": q}
-                        for k, q in recipe.outputs]
-    else:
-        d["outputs"] = [{"key": k, "name": graph.display(k), "kind": graph.kind(k),
-                        "label": graph.bare_name(k), "qty": q}
-                        for k, q in recipe.outputs]
     return d
 
 
@@ -266,19 +287,14 @@ def describe(graph, key, have=None):
 
     ores = sorted(graph.ores_of(key))
 
-    return {
-        "key": key,
-        "name": graph.display(key),
-        "kind": graph.kind(key),
-        "label": graph.bare_name(key),
-        "stock": _stock_of(key, have),
+    return dict(stack(graph, key, have), **{
         "oredicts": ores,
         "oredict_guessed": [o for o in ores if o in graph.ore_guessed],
         "makes": [_recipe_brief(graph, r, have, "makes") for r in producers[:MAX_PRODUCERS]],
         "makes_total": len(producers),
         "used_in": [_recipe_brief(graph, r, have, "used") for r in consumers[:MAX_CONSUMERS]],
         "used_in_total": len(consumers),
-    }
+    })
 
 
 def name_hints(graph, query, limit=10):

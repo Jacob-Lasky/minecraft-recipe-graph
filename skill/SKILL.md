@@ -43,12 +43,43 @@ That is a 90x difference and it compounds over an investigation. `172.17.0.1:876
 
 **When the server cannot answer it, that is a MISSING PRIMITIVE, not a reason to write a
 script.** Jake's words: *"idk why you keep building pure python scripts. whatever you're
-building, i feel, should probably be an endpoint or other sort of tool."* #108 tracks the read
-surface (`/api/key`, `/api/keys`, `/api/recipe`, `/api/cost`, `fmt=json` on `/plan`) plus the
-open question of how to express a SWEEP, which is the shape that genuinely has nowhere to go
-today. Until it lands, batch every question you have into ONE cold load rather than paying for
-each separately, and if you catch yourself writing the same probe shape twice, that is the
-signal to add the endpoint instead.
+building, i feel, should probably be an endpoint or other sort of tool."* #108 built that read
+surface, so the questions that used to need a script are now URLs. All read-only.
+
+```bash
+B=http://172.17.0.1:8765
+curl -s $B/api | jq                            # the fields, functions and worked examples
+curl -s --get --data-urlencode 'key=fluid:nethengeic_fluid' $B/api/key | jq .facts
+curl -s "$B/api/keys?match=sednanite&limit=0"  # unranked and uncapped, unlike /suggest
+curl -s --get --data-urlencode 'rid=<rid>' $B/api/recipe
+curl -s "$B/api/cost?category=tconstruct.smeltery"
+curl -s "$B/plan?item=<key>&qty=1&fmt=json" | jq .tree
+```
+
+**The sweep is `/api/sweep?where=<predicate>`, and it is the one that replaced the scripts.**
+
+```bash
+curl -s --get $B/api/sweep \
+  --data-urlencode 'where=endswith(label, "Nugget") and producers == 0' \
+  --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0' | jq
+```
+
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+joined by `and or not`, the six comparisons, and
+`startswith endswith contains matches lower upper len`. **`GET /api` FIRST, do not guess a
+field name** -- it prints the whole vocabulary, and a wrong name is a 400 that lists the real
+ones. `limit=0` lifts the cap, `matched` is always the true total whatever `limit` did, and
+`order=-cost` sorts descending. Unpriced keys come back as `null` and sort last both ways.
+
+Two traps the endpoint does not remove:
+
+* **`producers` excludes container-emptying, `all_producers` does not.** Sweeping for
+  unmakeable fluids on the wrong one reports every bottled fluid as makeable. See #103.
+* **`matched` is the number to quote, not `len(results)`.** The default limit is 200, so a
+  scope measurement pasted from a truncated answer understates itself.
+
+Adding a fact is one entry in `api.FIELDS`, which is read by `select`, by `order` and by the
+expression language at once. That is the extension point; a new endpoint per question is not.
 
 Two other things a cold script gets wrong that the server does not:
 
