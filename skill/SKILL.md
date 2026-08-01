@@ -108,6 +108,23 @@ flow diagram, which runs left-to-right or top-to-bottom (#35).
 Prefer pointing the user at this over running `plan` for them repeatedly. Nothing auto-starts:
 the mod only writes JSON files, and the server is started by hand.
 
+**"This item has no machine recipe" is usually the wrong item, not missing coverage.** 5,095
+display names are shared by two or more plain item keys on the reference pack, covering 21,888
+keys: six things called "Iron Plate", 286 called "Spell Book". The duplicates are vestigial and
+the pack routes its recipes through exactly one of them. Reported as "the only way I can find to
+craft an iron plate is shaped crafting" -- `thermalfoundation:material:32` has eight producers
+including five machines, while `abyssalcraft:ironp` and `immersiveengineering:metal:39` genuinely
+have only crafting. Before concluding the dump missed a category, check the OTHER items with that
+name.
+
+Since #101 the search breaks same-name ties on evidence -- a stack in stock, then consumers, then
+producers, registry id last -- so the canonical one leads; it used to fall straight through to
+the registry id and let the alphabet decide. The **oredict is not the tie-break and is the
+weakest signal available**: on the Iron Plate cluster it separates 2 of the 6 while `uses`
+separates all six, so it was checked and rejected rather than overlooked.
+`explore.STOCK_IS_DECISIVE` is a threshold rather than `stock > 0` because one of something is a
+thing you picked up; see its comment for the measurement.
+
 ### It runs as a container on Tower
 
 The UI is worth having up when the gaming PC is off, so it is containerised and running:
