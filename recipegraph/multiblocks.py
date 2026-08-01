@@ -29,6 +29,8 @@ import os
 
 from .model import norm_key
 
+INF = float("inf")
+
 # Where the pack keeps them, relative to the instance's minecraft/ dir. `regex.txt` is MM's
 # own alias table, mapping its abstract I/O port names to the blocks that satisfy them.
 CONFIG_DIR = os.path.join("config", "modularmachinery", "machinery")
@@ -188,12 +190,23 @@ def parse(instance_dir, known=None, say=None):
     return out
 
 
+def position_cost(keys, cost):
+    """What one block POSITION costs: its cheapest acceptable alternative, or `inf`.
+
+    ONE definition, read by `structure_cost` and by `blocked_fraction`. They held a copy each
+    for one commit, which is a standing invitation to disagree about which positions are
+    blocked -- and the two are used together, on the same structure, to produce a price and
+    the ordinal that ranks it. A position the sum thinks is affordable and the fraction thinks
+    is missing would be a contradiction nothing reports.
+
+    Cheapest alternative, matching how #86 prices a machine with several candidate items: if
+    any acceptable block is affordable, that is what a player would use.
+    """
+    return min([cost.get(k, INF) for k in keys] or [INF])
+
+
 def structure_cost(entry, cost, blocked=None):
     """What placing this multiblock costs, given a cost table. `inf` when it cannot be placed.
-
-    A position is charged its CHEAPEST alternative, matching how #86 prices a machine with
-    several candidate items: if any acceptable block is affordable, that is what a player
-    would use.
 
     AN UNREACHABLE COMPONENT MEANS THE MACHINE CANNOT BE BUILT, so the cost is `inf` rather
     than the sum of the parts that happen to price. Skipping those positions would report the
@@ -201,13 +214,45 @@ def structure_cost(entry, cost, blocked=None):
     obtainable recipe, which is the same underpricing this module exists to fix. 155 of the
     reference pack's 259 machines are in that state, which matches the observation that these
     multiblocks are frequently unobtainable rather than merely dear.
+
+    `blocked_fraction` below is how #95 tells those 155 apart without weakening this.
     """
     total = 0.0
     for count, keys in entry.get("parts") or ():
-        best = min([cost.get(k, float("inf")) for k in keys] or [float("inf")])
-        if best == float("inf"):
+        best = position_cost(keys, cost)
+        if best == INF:
             if blocked is not None:
                 blocked.append(keys[0] if keys else None)
-            return float("inf")
+            return INF
         total += best * count
     return total
+
+
+def blocked_fraction(entry, cost):
+    """Share of this structure's block POSITIONS that no obtainable block satisfies, in [0, 1].
+
+    `structure_cost` above answers "can this be placed at all" and deliberately collapses to
+    `inf` the moment one position is unsatisfiable -- which is right, and #95 is what it costs:
+    every blocked machine reached the ranker as one indistinguishable number, so a structure
+    missing 3 of its 2,125 positions (`the_cube`) priced identically to one where all 135 are
+    missing (`mythic_excavation_lattice`). This is the ORDINAL that separates them, and it is
+    deliberately NOT a cost: a partial sum would say "merely expensive" about a machine that
+    cannot be built, which is the underpricing `structure_cost`'s own docstring exists to
+    refuse. Callers must keep both on the unbuildable side of every price.
+
+    POSITIONS, not part GROUPS. `parts` collapses 69,354 positions into 2,229 groups, so
+    counting groups would weigh one missing galaxy conduit the same as 6,456 of them -- the
+    grouping is a storage optimisation and must not become the unit of judgement.
+
+    A structure with no parts at all is 0.0: nothing is missing from nothing. That agrees with
+    `structure_cost`, which prices an empty structure at 0.0 rather than at `inf`.
+    """
+    total = 0
+    bad = 0
+    for count, keys in entry.get("parts") or ():
+        total += count
+        if position_cost(keys, cost) == INF:
+            bad += count
+    if not total:
+        return 0.0
+    return bad / float(total)

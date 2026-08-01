@@ -504,12 +504,28 @@ per-character advances in it were measured off the rendered SVG; re-measure with
 
 ## The cost model is load-bearing, and it fails silently
 
-**Never move a constant in `cost.py` without running `tools/cost-probe.py` first.** It
-sweeps a tuning value across 18 items whose right answer a human can judge at a glance,
-four of them a control group that is correct today, and prints what each one reroutes to.
-Before it existed there was no way to see the damage or the benefit of moving a number, so
-constants were either argued about or left alone. Borax resolving to
+**Never move a constant in `cost.py` without running BOTH audits first; they see different
+defects.** `tools/cost-probe.py` sweeps a tuning value across 18 items whose right answer a human
+can judge at a glance, four of them a control group that is correct today, and prints what each one
+reroutes to. Before it existed there was no way to see the damage or the benefit of moving a
+number, so constants were either argued about or left alone. Borax resolving to
 `nuclearcraft_crystallizer` is the canary for the whole low-end calibration.
+
+**A route probe is STRUCTURALLY BLIND to a clamp, which is why `tools/entry-census.py` exists.**
+All 140 categories stacked on the band ceiling before #95 had perfectly stable routes, so
+cost-probe reported no change while no two of them could be told apart. The census reports how many
+categories land in each region of the band and how many DISTINCT values they hold, which is the
+shape a flattening actually makes; a big cluster on one value is #95 recurring.
+
+```bash
+python3 tools/entry-census.py --have data/ae2_have.json --machines data/machines.json
+```
+
+Pass `--have` and `--machines` to reproduce a running server: machine states differ between a bare
+graph and a live instance -- a placed machine is `have` and drops out of the census entirely -- so
+a prediction made without them describes a configuration nobody is running. It computes uncached on
+purpose, so it answers for the constants in the working tree rather than for whatever was current
+when `.cost-cache.json` was written.
 
 **The probe was BLIND to machine entry costs until `64f6f12`**, because it went through
 `machines.resolve`, which drops the machine ITEM, so `estimate` ran with no build targets,
@@ -642,32 +658,71 @@ real blueprints being NBT-discriminated variants of it. That is luck, not a rule
 `machines.NOT_A_MACHINE` excludes it in `build_targets`; do not drop that on the grounds that
 nothing appears to depend on it.
 
-**An entry cost cannot yet express a multiblock, and that is issue #95.** The band ceiling is 119,
-deliberately under `MACHINE_COST["unknown"]` at 120, while honest structure costs reach 279,863.
-Measured: of 241 items where an MM route beat a non-MM alternative, 77 of them machines the player
-already owns, NONE moved when MM prices tripled. Do not read "no plan changed" as evidence the
-structures are parsed wrongly; the ordering is right and the magnitude is compressed.
+**Issue #95 shipped, and its own diagnosis was wrong.** It said the band was too narrow to express
+a 279,863-block structure. Measured, the log curve was doing fine: the 71 priced multiblocks spread
+across 55.06 to 110.58, four decades of structure cost. The defect was the CEILING, which was a
+clamp holding three different claims on one number -- 140 of 403 buildable categories, 35% of them,
+all at exactly 119.000:
 
-**That figure is about a change INSIDE the saturated band, and does not mean multiblock pricing is
-invisible in plans.** Going from the flat pre-#93 price to structure-derived is the larger move and
-it IS visible: measured when the deployed graph was first rebuilt with `multiblocks` present, 187
-of 188 MM categories moved (117 clamping to exactly 119.000), 5,103 MM recipes repriced, 12,027 of
-110,927 non-MM recipes repriced by propagation, and 668 of 45,418 produced keys changed their
-cheapest producer -- 616 of them moving OFF an MM route, which is the point. What the clamp still
-costs is discrimination *among* multiblocks: 117 of 188 are indistinguishable at the ceiling, so a
-279,863-cost structure prices identically to a modest one.
+| at 119.000 | n | what it means |
+| --- | --- | --- |
+| MM structure needs a block nothing makes | 117 | evidence from the pack |
+| machine ITEM never priced | 23 | a gap in this model, not a fact about the base |
 
-The "cheapest producer changed" count is an argmin proxy, not a plan diff -- `score_recipe` also
-weighs `ore_backed` and `simple + plain`, plus stock and the cycle guard -- so it bounds the blast
-radius rather than describing it.
+Those 117 ran from `the_cube` at 0.14% of positions blocked (3 of 2,125) to
+`mythic_excavation_lattice` at 100% (135 of 135), priced identically. The observable damage was
+`aoa3:holly_top_petals`, where a blocked multiblock beat a Phytogenic Insolator -- both at
+119.000 -- by 0.037 of an ingredient point.
 
-`build_entry_cost` is LOGARITHMIC in the build cost, and `BUILD_KNEE = 1.0` is what keeps the low
-end where #86 measured it: a build cost of 1 prices at 41.21 against the old 41.22, and the pack's
-median 2 at 42.36 against 42.39. Raising it relitigates the Crystallizer case from the other side,
-because buildable machines getting DEARER lets an enormous chain through owned machines win. The
-curve had to change at all because `b / (b + BUILD_SCALE)` saturates above ~6,400, flattening 20 of
-the 71 fully-priced multiblocks within 1.0 of the ceiling, which is #86's own defect recurring
-among the expensive machines.
+The region under `unknown` is now three ordered slices, every boundary derived from the two anchors
+rather than typed in:
+
+```
+have 1.0 < priced [40.0, 110.0) < unpriced item 111.0
+         < blocked structure [112.0, 119.0] < unknown 120.0 < unavailable 5000.0
+```
+
+Blocked structures are ordered by `multiblocks.blocked_fraction`, the share of block POSITIONS with
+no obtainable candidate. That is an ORDINAL, not a cost: `structure_cost` still returns `inf` the
+moment one position is unsatisfiable, so a machine that cannot be placed never reads as merely
+expensive, and the whole slice stays above every priced machine. The 117-way tie became 76 distinct
+values; the 23 unpriced items sit alone at 111.0.
+
+Two counter-intuitive orderings, both load-bearing. An unpriced ITEM is cheaper than a blocked
+structure, because "we failed to compute a number" is a weaker claim than "the pack says this needs
+an unobtainable block". And the whole blocked slice stays BELOW `unknown` even though a proven
+blockage sounds like the stronger claim -- because the blockage signal is known-wrong in an unfixed
+way: chisel recipes are dropped as non-recipes, so `chisel:concrete_brown:1` reads unobtainable when
+it is trivial, and any structure using one reads blocked on a false negative. Promoting that above
+`unknown` rebuilds the 40%-of-the-pack wall `unknown` exists to avoid. The chisel question is what
+#95 left open.
+
+**Going from #93's flat price to structure-derived was visible in plans, and a session once told
+Jake to expect otherwise.** Measured when the deployed graph was first rebuilt with `multiblocks`
+present: 187 of 188 MM categories moved (117 clamping to 119.000), 5,103 MM recipes repriced,
+12,027 of 110,927 non-MM recipes repriced by propagation, and 668 of 45,418 produced keys changed
+their cheapest producer -- 616 of them moving OFF an MM route, which is the point. The "0 of 241
+moved" figure that suggested otherwise was about a change INSIDE the saturated band, which the band
+absorbs by construction.
+
+Every "cheapest producer changed" count here is an argmin proxy, not a plan diff -- `score_recipe`
+also weighs `ore_backed` and `simple + plain`, plus stock and the cycle guard -- so it bounds the
+blast radius rather than describing it.
+
+**The low end is pinned by `BUILD_SLOPE = BUILD_SPREAD / BUILD_KNEE = 79`.** Near b=0 the curve is
+`BUILD_SLOPE * b / BUILD_SCALE`, so the SLOPE is the calibrated quantity and the spread is free to
+move as long as the knee follows it -- which is what let #95 lower the asymptote without touching
+the calibration: `build_entry_cost(1.0)` moved 0.002 against a documented 0.05 tolerance. Raising
+the low end relitigates the Crystallizer case from the other side, because buildable machines
+getting DEARER lets an enormous chain through owned machines win. The curve had to stop being
+`b / (b + BUILD_SCALE)` because it saturates above ~6,400, flattening 20 of the 71 fully-priced
+multiblocks within 1.0 of the ceiling, which is #86's own defect recurring among the expensive
+machines.
+
+What the #95 headroom cost: the priced band's asymptote came down from 119 to 110, so the dearest
+priced machines are ~7 points cheaper in absolute terms. Measured blast radius on the live graph,
+36 of 42,249 produced keys changed cheapest producer -- 25 moving off MM routes, 5 onto them (all
+five priced rather than blocked, all near-ties), 6 within class. All 18 cost-probe routes unchanged.
 
 **Only the ingredients amortise over a recipe's output quantity; the machine is charged per
 run.** The pack has a Hostile Computing Unit recipe yielding 1,024 iron ingots and an
