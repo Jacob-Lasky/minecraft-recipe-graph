@@ -699,6 +699,38 @@ accepting every group readmits the decorative blocks this exists to demote. Meas
 the pool emptied it moves 14 of 46,727 routes and no others; the cost-probe control group
 moves one line, Diamond onto Volcanic Diamond Ore.
 
+**AN ORE IS PRICED AS SOMETHING YOU MINE, EVEN WHEN A RECIPE ALSO MAKES IT, AND THE PLANNER
+STOPS THERE.** `cost._seed` used to price a leaf as obtainable only when NO recipe output it,
+which quietly assumes the only way to get a thing is to make one. `contenttweaker:sednanite_ore`
+is registered `oreSednanite` AND emitted by two Plasmatic Condenser recipes wanting 160,000 mB
+of Dense Plasma, so it counted as produced, priced at INFINITY, and an ore you dig up became
+unreachable. Every honest route to Sednanite Ingot went with it, and the planner walked a
+denomination ladder down to `18 Sednanite Nugget` instead -- the nugget being the only rung
+with no producer and therefore the only place the walk COULD stop. That is #106.
+
+Both halves are needed and they are separable:
+
+- `_seed` takes `min(existing, BASE_RAW_COST)` for every `world_ores` member. Measured before
+  the fix: 19 of 286 world ores priced at infinity, 14 of them because a recipe claimed to make
+  them, and 68 more priced above a raw leaf. After: 0 and 0.
+- `Solver.expand` treats a world ore as a leaf, AFTER stock, free sources, `raw` and
+  `craftables`. Without this the plan swaps a nugget ladder for a Plasmatic Condenser subtree,
+  which is a bigger wrong answer resting on a fluid nothing makes.
+
+**The stop is unconditional, and that is PROVABLE rather than measured.** `_relax` prices an
+output at `machine_entry + inputs / qty` and does NOT divide the entry by the yield, so the
+floor on any crafted price is `MACHINE_COST["have"]` = 1.0 = `BASE_RAW_COST` = what mining now
+costs. No recipe can undercut a pickaxe, however large its yield or however free its inputs.
+`tests/test_acquisition.AMachineCostsAtLeastAsMuchAsMiningTest` pins that equality; if it ever
+breaks, the stop must become a comparison against the best candidate's per-unit price.
+Consistent with measurement too: of the 88 world ores priced below `BASE_RAW_COST`, all 88 are
+in stock, which `take` spends first.
+
+**BUMP `FORMULA_VERSION` WHEN YOU TOUCH `_seed` OR `_relax`.** The cost cache is keyed on graph,
+stock and machine states, and a formula change moves none of them -- so a warm
+`.cost-cache.json` goes on serving nugget-ladder prices forever, which reads as "the fix did not
+work" rather than as a stale cache.
+
 Three heuristics have been measured and REJECTED, so do not re-propose any of them without
 new evidence (#61):
 

@@ -166,7 +166,7 @@ TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefe
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 4
+FORMULA_VERSION = 5
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -402,6 +402,28 @@ def _seed(graph, have, free_sources):
             for alt in ing.alternatives:
                 if alt not in cost and alt not in produced:
                     cost[alt] = BASE_RAW_COST
+
+    # AND EVERY WORLD ORE, WHETHER OR NOT SOMETHING PRODUCES IT. The loop above prices a
+    # leaf as obtainable only when NO recipe outputs it, which quietly assumes the only way
+    # to get a thing is to make it. That is false for the one class of key the graph can
+    # positively identify as obtainable another way: `world_ores` is the pack's own `ore*`
+    # oredict registration, meaning a block you find in the ground and hit.
+    #
+    # `contenttweaker:sednanite_ore` is the case. It is registered `oreSednanite`, and two
+    # Plasmatic Condenser recipes also emit it, each wanting 160,000 mB of Dense Plasma. So
+    # it counted as produced, both routes priced at infinity, and an ore you MINE ended up
+    # unreachable -- which then made every honest route to Sednanite Ingot invisible and
+    # sent the planner down a nugget ladder instead. See #106.
+    #
+    # Measured on the reference graph: 19 of 286 world ores priced at infinity, 14 of them
+    # because a recipe claimed to produce them, and a further 68 priced above a raw leaf.
+    #
+    # `min`, so this only ever LOWERS a price and can never overrule stock (0.0) or an
+    # infinite generator (SOURCE_COST). Mining is a ceiling on what an ore can cost, not a
+    # claim that mining is the best route: a genuinely cheaper crafted route still wins,
+    # because `_relax` goes on to lower it further.
+    for key in graph.world_ores:
+        cost[key] = min(cost.get(key, math.inf), BASE_RAW_COST)
     return cost
 
 
