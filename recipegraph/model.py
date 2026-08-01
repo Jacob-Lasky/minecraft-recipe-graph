@@ -518,12 +518,16 @@ class Graph:
 
     @property
     def live_keys(self):
-        """Keys some recipe or catalyst actually touches. 167,365 of 342,070 labels.
+        """Keys some recipe or catalyst actually touches: 167,134 on the reference graph.
 
-        The other 174,705 are DEAD: no recipe makes them, no recipe uses them, nothing
-        names them as a machine. They cannot be planned or explored and can only push a
-        real result down a search page -- six identical "Pluton Scythe" NBT variants buried
-        Plutonium-238 through -242 on the first page of a search for `plut`. See #26.
+        Only 164,345 of them carry a label; the other 2,789 are keys a recipe names that
+        items.csv never did, which is why `api.universe` unions this with `labels` rather
+        than treating either as the whole key set.
+
+        Of the 262,841 LABELS, 98,496 are DEAD: no recipe makes them, no recipe uses them,
+        nothing names them as a machine. They cannot be planned or explored and can only
+        push a real result down a search page -- six identical "Pluton Scythe" NBT variants
+        buried Plutonium-238 through -242 on the first page of a search for `plut`. See #26.
 
         MUST STAY IN STEP WITH `producers` AND `consumers`, because a key hidden here while
         those two would have found recipes for it is an item that exists, works when linked

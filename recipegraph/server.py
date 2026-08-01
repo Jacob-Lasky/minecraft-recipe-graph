@@ -763,14 +763,18 @@ class State:
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info))
         # The two search indexes, built here rather than on first use. Between them they
-        # scan 342,070 labels and take about two seconds, and the ONLY thing that triggers
+        # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while
         # every later one is instant, which reads as "the search is broken" rather than as
         # "the index is warming". Startup already costs 40 to 90 seconds and the
         # healthcheck's start-period covers it. Both counts are then what /explore reports,
         # so neither is warm-up-only state waiting to go stale.
         self.named = len(self.graph.labels)
-        self.searchable = len(self.graph.live_keys)
+        # THE INTERSECTION, not `len(live_keys)`. `rank_matches` walks `labels` and skips
+        # what is not live, so a live key with no label is never looked at -- and there are
+        # 2,788 of them, which the old figure counted as searched. The claim this number
+        # makes on the page is "what the search actually looked at", so it has to be that.
+        self.searchable = sum(1 for key in self.graph.labels if key in self.graph.live_keys)
 
     def solver(self, max_nodes=DEFAULT_MAX_NODES):
         return Solver(self.graph, have=self.have, craftables=self.craftables,

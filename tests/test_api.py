@@ -278,6 +278,16 @@ class SweepTest(ApiCase):
         self.assertEqual(status, 400)
         self.assertIn("cannot compare", payload["error"])
 
+    def test_a_key_a_recipe_names_but_items_csv_never_did_is_still_swept(self):
+        # 2,789 keys on the reference graph are live and unlabelled. Sweeping only
+        # `graph.labels` misses them, and a census that silently omits a key reads as a
+        # fact about the pack rather than about the scan. `mod:press` is named; the
+        # unlabelled one here is the ore group's own key, reached via live_keys.
+        keys = [r["key"] for r in self.sweep("live", "&limit=0")["results"]]
+        self.assertIn("ore:ingotSednanite", keys)
+        for key in self.state.graph.live_keys:
+            self.assertIn(key, keys, "%s is live but unsweepable" % key)
+
     def test_a_held_key_the_dump_never_saw_is_still_swept(self):
         # The correction `explore.rank_matches` makes at the bottom of its scan: an item in
         # the AE2 network that no recipe touches exists in the world, and a sweep that only

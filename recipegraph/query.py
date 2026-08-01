@@ -31,7 +31,7 @@ import re
 # `and`/`or` return the operand rather than a bool so they short-circuit, which is not a
 # micro-optimisation here: `api.Facts` computes each field on demand, so a left-hand
 # `endswith(label, "Nugget")` that fails means the expensive `consumers` count on the right
-# is never computed for that key. A sweep over 342,070 keys pays the full cost of a field
+# is never computed for that key. A sweep over 266,703 keys pays the full cost of a field
 # only for the keys that get that far.
 
 

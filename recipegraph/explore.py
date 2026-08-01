@@ -73,7 +73,7 @@ def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
         if not all(t in low or t in key.lower() for t in terms):
             continue
         # Checked AFTER the term match, not before: `stock_of` splits the key and may scan
-        # the pool, and paying that for all 342,070 labels on every keystroke would cost
+        # the pool, and paying that for all 262,841 labels on every keystroke would cost
         # far more than the filter saves. Only matches reach here.
         #
         # Anything you actually hold stays findable however dead the graph thinks it is.
@@ -130,7 +130,7 @@ def _canonical_first(graph, key, have):
 
     Only reached for keys whose label is character-identical to another hit's, so the cost is
     paid per duplicate cluster rather than per keystroke -- `consumers` walks the oredict
-    groups and would be far too much to run over all 342,070 labels while someone types.
+    groups and would be far too much to run over all 262,841 labels while someone types.
     """
     return (-(stock_of(key, have) >= STOCK_IS_DECISIVE),
             -len(graph.consumers(key)),

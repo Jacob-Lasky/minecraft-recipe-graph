@@ -129,7 +129,7 @@ class Facts:
     """One key's fields, each computed on first read and then remembered.
 
     LAZY IS THE WHOLE PERFORMANCE STORY OF THE SWEEP. `consumers` walks the oredict groups
-    and `cost` is a dict hit, but multiplied by 342,070 keys the difference between computing
+    and `cost` is a dict hit, but multiplied by 266,703 keys the difference between computing
     every field and computing the ones a predicate actually reaches is the difference between
     a sweep being a tool and being another reason to write a script. `query` compiles `and`
     and `or` to Python's own short-circuiting operators, so a predicate that opens with a
@@ -168,16 +168,27 @@ class Facts:
 # ---------------------------------------------------------------------------
 
 def universe(ctx):
-    """Every key worth sweeping: everything with a label, plus anything held but unlabelled.
+    """Every key the graph knows anything about: labelled, touched by a recipe, or held.
 
-    The second half matters and is the same correction `explore.rank_matches` makes at the
-    bottom of its scan: an NBT-discriminated stack the dump never saw exists in the world and
-    in the AE2 inventory, and a sweep that only walked `graph.labels` would report it absent.
+    ALL THREE SOURCES, because each contributes keys the others do not, and a sweep is a
+    census -- a key missing from it reads as a fact about the pack rather than about this
+    function.
+
+    * `labels` is names plus the fluid, ore and essentia keys collected off the recipes.
+    * `live_keys` adds the ones some recipe or catalyst touches that items.csv never named.
+      Measured on the reference graph: 2,788 keys are live and unlabelled, and they are
+      exactly the "what IS this thing nothing will tell me about" cases worth sweeping for.
+    * `have` adds NBT-discriminated stacks the dump never saw. Same correction
+      `explore.rank_matches` makes at the bottom of its scan: a stack in the AE2 network is
+      a fact about the world, and the dump does not get to overrule it.
+
+    Ordered rather than a set, so a sweep that does not sort still comes back the same way
+    twice. `dict.fromkeys` because it deduplicates and preserves first-seen order.
     """
-    keys = list(ctx.graph.labels)
-    labelled = ctx.graph.labels
-    keys.extend(k for k in ctx.have if k not in labelled)
-    return keys
+    keys = dict.fromkeys(ctx.graph.labels)
+    keys.update(dict.fromkeys(ctx.graph.live_keys))
+    keys.update(dict.fromkeys(ctx.have))
+    return list(keys)
 
 
 def _select(raw, default):
@@ -267,7 +278,7 @@ def scan(ctx, predicate, select, order=None, limit=DEFAULT_LIMIT):
 
     THE `Facts` IS DROPPED AS SOON AS ITS ROW IS BUILT, which is why the sort key is computed
     in the loop rather than in the `sort` call. Holding one per match looks tidier and means
-    `where=true&limit=0` keeps 342,070 objects and their memo dicts alive at once, inside a
+    `where=true&limit=0` keeps 266,703 objects and their memo dicts alive at once, inside a
     container capped at 4 GB that is already holding the graph.
     """
     field, descending = parse_order(order)
