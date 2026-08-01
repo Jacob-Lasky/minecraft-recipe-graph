@@ -45,7 +45,7 @@ def ore_key(name):
 
 
 def fluid_key(name):
-    return "fluid:%s" % name
+    return FLUID_PREFIX + name
 
 
 def essentia_key(aspect):
@@ -149,6 +149,10 @@ def _variant_label(suffix):
 # separate: it is the presentation layer and has its own completeness tests.
 NON_ITEM_KINDS = ("fluid", "essentia", "ore")
 NON_ITEM_PREFIXES = tuple("%s:" % k for k in NON_ITEM_KINDS)
+# Unpacked rather than written out again, so a fourth kind cannot arrive with one of
+# these left spelled as a literal. Every module that tests or strips a namespace uses
+# these; the bare strings were in six files and `labels` re-listed the whole tuple.
+FLUID_PREFIX, ESSENTIA_PREFIX, ORE_PREFIX = NON_ITEM_PREFIXES
 
 
 def is_item_key(key):
@@ -364,6 +368,7 @@ class Graph:
         self._live_keys = None
         self._variant_index = None
         self._meta_index = None
+        self._fluid_names = None
         self._producer_cache = {}
 
     def add(self, recipe):
@@ -461,10 +466,38 @@ class Graph:
             out = dict(self.names)
             for index in (self.by_output, self.by_input):
                 for key in index:
-                    if key.startswith(("fluid:", "essentia:", "ore:")) and key not in out:
+                    if key.startswith(NON_ITEM_PREFIXES) and key not in out:
                         out[key] = self.bare_name(key)
             self._labels = out
         return self._labels
+
+    @property
+    def fluid_names(self):
+        """`{fluid_key: display_name}` recovered from the containers each fluid is sold in.
+
+        DERIVED AT RUNTIME RATHER THAN BAKED INTO graph.json, unlike `multiblocks`, and the
+        difference is where the inputs live. Multiblock structures come from the pack's
+        config, which the deployment does not ship, so they have to travel inside the graph.
+        These come from recipes the graph already holds, so baking them would buy nothing and
+        cost a rebuild -- and a rebuild has to happen on the desktop, whose instance has ~410
+        jars against the server's 364, to avoid regressing the item names it is built from.
+        A derivation that needs no rebuild reaches the running container on a redeploy.
+
+        Costs 0.10s over 117,681 recipes, against a 4.4s graph load. See fluidnames and #103.
+        """
+        if self._fluid_names is None:
+            # Seeded BEFORE the derivation, not after. `fluidnames.derive` calls back into
+            # `bare_name`, and `bare_name` reads this property: a container base that ever
+            # named a `fluid:` key would recurse until the stack died. The curated list makes
+            # that structurally impossible today, and one assignment makes it impossible
+            # regardless -- a re-entrant read sees {} and falls through to `_prettify`.
+            # Imported here, not at module scope: `fluidnames` reads FLUID_PREFIX from
+            # this module, and a top-level import each way is a cycle.
+            from . import fluidnames
+
+            self._fluid_names = {}
+            self._fluid_names = fluidnames.derive(self.recipes, self.bare_name)
+        return self._fluid_names
 
     @property
     def live_keys(self):
@@ -669,7 +702,7 @@ class Graph:
         Not memoised on purpose -- it is a cheap filter over an already-memoised list, and
         a second cache keyed the same way is how the two drift apart.
         """
-        if not key.startswith("fluid:"):
+        if not key.startswith(FLUID_PREFIX):
             return self.producers(key)
         return [r for r in self.producers(key) if not r.transfer]
 
@@ -696,16 +729,22 @@ class Graph:
             if "%s" in label:
                 return label.replace("%s ", "").replace("%s", "").strip() or key
             return label
-        if key.startswith("ore:"):
-            return key[4:]
-        if key.startswith("fluid:"):
-            # `boric_acid` -> `Boric Acid`. A fluid has no items.csv entry, so the registry
-            # name is all there is; presented raw it looks like a variable next to
-            # properly-cased item names. Search still finds the raw form because the key is
-            # matched too.
-            return _prettify(key[6:])
-        if key.startswith("essentia:"):
-            return key[9:].capitalize()
+        if key.startswith(ORE_PREFIX):
+            return key[len(ORE_PREFIX):]
+        if key.startswith(FLUID_PREFIX):
+            # The containers the fluid is bottled in FIRST, because they are the only place
+            # a localized fluid name survives: the dump records `{"f":"nethengeic_fluid"}`
+            # and nothing else, so prettifying the registry name called the pack's Strong
+            # Mythic Essence "Nethengeic Fluid" and put it beyond reach of any search for
+            # what it is called on screen. 789 of 1,198 were wrong that way. See #103.
+            #
+            # `_prettify` stays as the fallback -- `boric_acid` -> `Boric Acid` -- for a
+            # fluid no container recipe ever touches. Presented raw it looks like a variable
+            # next to properly-cased item names. Search still finds the raw form either way,
+            # because the key is matched too.
+            return self.fluid_names.get(key) or _prettify(key[len(FLUID_PREFIX):])
+        if key.startswith(ESSENTIA_PREFIX):
+            return key[len(ESSENTIA_PREFIX):].capitalize()
         # `mod:item#aspect` -- an NBT-discriminated stack. Names for these are format
         # strings in items.csv ("%s Vis Pod"), so fill the placeholder with the aspect
         # rather than showing a raw %s to the user.

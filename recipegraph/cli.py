@@ -20,7 +20,7 @@ from . import tokens as tokens_mod
 from .defaults import (DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST, DEFAULT_MACHINES,
                        DEFAULT_MAX_NODES, DEFAULT_METRICS_DB, DEFAULT_PINS, DEFAULT_PORT,
                        DEFAULT_SOURCES, DEFAULT_TOKENS)
-from .model import Graph, essentia_key
+from .model import Graph, essentia_key, fluid_key
 from .names import build_reverse, resolve
 from .sources import dump_meta
 
@@ -204,7 +204,7 @@ def _load_have(path):
         doc = json.load(fh)
     have = dict(doc.get("items", {}))
     for name, amount in (doc.get("fluids") or {}).items():
-        have["fluid:%s" % name] = amount
+        have[fluid_key(name)] = amount
     for aspect, amount in (doc.get("essentia") or {}).items():
         have[essentia_key(aspect)] = amount
     craftables = set(doc.get("craftables") or ())
@@ -391,7 +391,7 @@ def cmd_track(args):
         items, fluids, _ess, st, _s, _pl = scan(paths)
         have = dict(items)
         for name, amount in fluids.items():
-            have["fluid:%s" % name] = amount
+            have[fluid_key(name)] = amount
         source, power, names = "save", None, None
     else:
         have, st, _craftables, names = _load_have(args.have)
