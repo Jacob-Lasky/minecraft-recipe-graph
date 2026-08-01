@@ -13,6 +13,19 @@ Pure Python 3 stdlib, no install step. The checkout path is machine-specific: ta
 from the path map in `MACHINE.md` rather than assuming, since it is `/coding/...` on
 the server and `~/Coding/...` elsewhere.
 
+**BACKWARDS COMPATIBILITY IS NOT A CONSTRAINT HERE. It starts mattering at v1.x.x and not
+before.** Jake's instruction, verbatim: *"it's unimportant for any of this to be backwards
+compatible. the only time we even need to consider this is when we are on v1.x.x."* One user,
+one deployment, one graph, and every artefact is regenerable. So change a persisted format, drop
+a field, rename a key, require a rebuild -- and do NOT spend a design on a compatibility shim, a
+version-sniffing branch, or a "keep the old path working" fallback. Those cost real complexity to
+buy nothing, and the entropy rule in `~/.claude/CLAUDE.md` says to fix that, not to add it.
+
+This is about compatibility with OLD DATA and OLD CALLERS, not about correctness. A cache still
+has to invalidate (`cost.fingerprint`, `FORMULA_VERSION`) and a schema still has to be checked
+(`SCHEMA` in the jar), because those catch a graph being served prices or shapes that no longer
+describe it -- that is a wrong-answer bug, not a compatibility concern.
+
 ## READ THIS BEFORE SAYING ANYTHING IS BLOCKED
 
 Two Claudes work on this repo, on two machines with different powers, and Jake talks to
@@ -85,6 +98,27 @@ Fluids need no special handling: they arrive through the same
 keys with amounts in mB. The one wrinkle is that a filled bucket
 (`forge:bucketfilled` + NBT) is a *different key* from the raw fluid, so bucket-based and
 fluid-based routes for the same material will not unify automatically.
+
+**A FLUID'S NAME IS NOT ITS REGISTRY NAME, AND "THAT FLUID DOES NOT EXIST" IS ALMOST ALWAYS
+THIS.** The dump writes `{"f":"nethengeic_fluid","a":1000}` and no localized name -- 337,434
+entries in `names.json` and zero of them `fluid:` keys -- so before #103 `bare_name` prettified
+the registry string. MeatballCraft reuses another mod's fluid and renames it in lang constantly,
+which made the label the PRE-RENAME identity of a different substance: 789 of 1,198 were wrong,
+and the pack's **Strong Mythic Essence is `fluid:nethengeic_fluid`**, Weak Mythic Essence is
+`fluid:liquid_void`. Reported as "strong mythic essence doesn't exist as a fluid, I only see the
+cell and bucket versions" -- the containers looked right because they are ITEMS and items.csv
+names them.
+
+`fluidnames.derive` now recovers the real name from container-transfer recipes ("&lt;the fluid&gt;
+Can"), 1,198 of 1,198, at load rather than baked into `graph.json`. Two things to keep:
+
+* **The container list is curated, and a suffix guess was measured wrong.** Accepting any
+  "&lt;something&gt; Cell" admits `plustic:battery_cell`, whose "Manyullyn Battery Cell" outvoted
+  the truth 5 to 2 and renamed `fluid:manyullyn` to "Manyullyn Battery"; it broke `fluid:stone`
+  and `fluid:copper` in the same pass. Those items are named AFTER a fluid without containing
+  one, and their labels are perfectly well formed, so votes cannot separate them.
+* **If a fluid still looks absent, find its container and read the pairing recipe**, rather than
+  concluding the dump missed it. `<X> Cell -> Empty Cell + fluid:Y` names Y for you.
 
 ## Writing the user-facing text
 
@@ -518,6 +552,29 @@ measured in chromium, `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px w
 `Boron Ore` next to `64` wasted 116px. `graphview._label_limit` spends the interior. The
 per-character advances in it were measured off the rendered SVG; re-measure with
 `getBBox()` if the fonts change.
+
+## The cost model prices MACHINES, never PROGRESSION
+
+**Nothing about world progress is in the cost, and the error only runs one way: gated routes
+are systematically underpriced.** Worth stating because the model looks like it handles this and
+does not -- `MACHINE_COST` has an `unavailable` state at 5000.0, which is about whether you can
+build the BLOCK, not whether you can reach the PLACE.
+
+* **A locked quest chapter is priced at 1.0, the same as a cobblestone.** The pack's 11 GATE
+  tokens (`contenttweaker:chapter_1` gates 38 recipes, `space_station` 32, `hunter_level_20` 20)
+  are consumed by recipes and produced by nothing, and `cost.py` never mentions tokens, so they
+  fall through to `BASE_RAW_COST = 1.0` -- "an item with no recipe: assume it can be obtained
+  somehow". Gating is a REPORTING concept only: `solve.py` badges the node "locked" and lists it
+  under "locked behind progress". Nothing steers the planner away from the route.
+* **Dimension access is not modelled at all**, not even as a token. Travelling is not a recipe,
+  so the graph cannot see it. `contenttweaker:sednanite_ore` has exactly two producers, both the
+  Plasmatic Condenser; the "mine it on Sedna" route does not exist in the model. The tool will
+  never warn about the trip AND will never present the condenser as the alternative to it -- it
+  believes the condenser is the only way there is.
+
+So when Jake asks "do I need to unlock X for this plan", the plan cannot answer it. Read the
+`tokens_needed` / "locked behind progress" rollup, and say plainly that the price does not
+reflect it.
 
 ## The cost model is load-bearing, and it fails silently
 
