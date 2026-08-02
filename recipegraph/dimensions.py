@@ -39,6 +39,8 @@ scan and no per-mod knowledge.
 import os
 import re
 
+from .model import is_world_ore_group
+
 # The overworld is where you already are, so it can never gate anything. Named rather than
 # filtered by id at each call site, because "0 is not a gate" is a fact about the world and
 # not an implementation detail of any one caller.
@@ -129,6 +131,78 @@ def exclusive_keys(defs):
             seen.setdefault(key, []).append((dim, name))
     return {key: where[0][1] for key, where in seen.items()
             if len(where) == 1 and where[0][0] != HOME_DIMENSION}
+
+
+def shadow_ores(graph, dimension_ores):
+    """The same gated ores again, under whatever OTHER key the pack registered them as.
+
+    WHY A SECOND KEY EXISTS AT ALL. MeatballCraft builds its custom ores twice. A material
+    declared to ContentTweaker's MaterialSystem gets its whole part set generated, and
+    `registerPart("ore")` lands in a shared holder block -- `contenttweaker:sub_block_holder_1:2`
+    is the ore part of Sednanite (`scripts/CustomMaterials.zs:105`). The block that actually
+    generates in the ground is a separate, hand-made one:
+    `VanillaFactory.createBlock("sednanite_ore", ...)` (`scripts/CustomBlocks.zs:251`), and it
+    is the one `planetDefs.xml` names. Both carry the display name "Sednanite Ore" and both
+    are registered `oreSednanite`, so the pack means them as one ore -- it just has two ids
+    for it, and only ever declared worldgen against one.
+
+    THE HARM IS THAT ONLY ONE OF THEM GETS PRICED. #112 raised the floor under the key
+    planetDefs names; the holder key kept the plain `BASE_RAW_COST` of a leaf, and 26 recipes
+    consume the holder key LITERALLY rather than through `ore:oreSednanite`, so there is no
+    alternative for the solver to prefer. The gate computed, the plan node said "mined on
+    Sedna, and you have not been there", and the number the planner used never moved. See
+    #117.
+
+    THE TEST IS DISPLAY NAME **AND** A SHARED `ore*` GROUP, and needing both is the whole
+    reason this is sound where the obvious version is not. Spreading a gate across the
+    oredict group alone was built and rejected: `oreUranium` also holds `tardis:power_cell`,
+    a Trionic Power Cell, which is not an ore you mine on Oi. Requiring the display name to
+    match declines it by construction, because it is not called Uranium Ore. Requiring the
+    group declines the reverse error, two unrelated blocks that happen to share a label --
+    the `chisel:lapis:0..8` family in #118 is nine genuinely distinct blocks all called
+    "Lapis Lazuli Block", and nothing would gate them because `blockLapis` is not an `ore*`
+    group. Measured on the reference graph: of the 5 keys the group-only rule would have
+    touched, this takes 3 and leaves 2.
+
+    WHAT IT DELIBERATELY DOES NOT DO is claim the two keys are one node. They stay separate
+    in the graph, with separate recipes and separate stock, because merging them is a change
+    to everything that walks a key and the canonical direction is genuinely unsettled: 26
+    recipes consume the holder and 30 the block. All this says is that a trip to Sedna is
+    priced into both, which is true of any id you give the same rock.
+
+    AND MERGING IS NOT NEEDED, WHICH IS THE MEASUREMENT THAT SETTLED IT. #117 suspected this
+    was the #61 shape at large -- a producerless duplicate winning every slot that accepts
+    the group, gate or no gate. It is not. The reference graph holds 129 same-name pairs
+    inside a shared `ore*` group, and with the gate spread applied all 129 price IDENTICALLY:
+    outside a dimension gate both halves are `BASE_RAW_COST` leaves anyway, so there is no
+    cheaper half for a plan to prefer. A gate was the only thing that could tell them apart,
+    which is why this lives here and not in a general de-duplication pass.
+
+    Returns only the NEW entries, in `Graph.dimension_ores`' own `[dim id, name]` shape, so
+    a shadow inherits the whole gate: fly to Sedna and both keys stop being gated together.
+    """
+    if not dimension_ores:
+        return {}
+    by_name = {}
+    for key in graph.world_ores:
+        name = graph.names.get(key)
+        if name:
+            by_name.setdefault(name, []).append(key)
+
+    def ore_groups(key):
+        return {g for g in graph.ores_of(key) if is_world_ore_group(g)}
+
+    out = {}
+    for key, entry in dimension_ores.items():
+        groups = ore_groups(key)
+        if not groups:
+            continue
+        for sibling in by_name.get(graph.names.get(key)) or ():
+            if sibling == key or sibling in dimension_ores:
+                continue
+            if groups & ore_groups(sibling):
+                out[sibling] = list(entry)
+    return out
 
 
 def _region_count(path):

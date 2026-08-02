@@ -308,5 +308,125 @@ class ThePlanSaysWhereTest(unittest.TestCase):
         self.assertNotIn("dimension", node)
 
 
+# The pack's OTHER id for the same rock. ContentTweaker's MaterialSystem generates an `ore`
+# part for every material declared to it and packs those into shared holder blocks, so
+# `<materialpart:sednanite:ore>` is a metadata slot of `sub_block_holder_1`. The block that
+# actually generates on Sedna is the hand-made `VanillaFactory.createBlock("sednanite_ore")`.
+# Same display name, same `oreSednanite` registration, two keys. See #117.
+HOLDER = "contenttweaker:sub_block_holder_1:2"
+# `oreUranium` really does hold this, because planetDefs declares ordinary uranium on Oi as
+# ADDITIONAL generation. It is a Trionic Power Cell, not an ore, and it is why spreading a
+# gate across the whole oredict group was built and thrown away.
+POWER_CELL = "tardis:power_cell"
+
+
+def shadow_graph(power_cell=False, same_name=True, same_group=True):
+    """`gated_graph` plus the duplicate registration, and the recipe that only knows it.
+
+    The literal input is the point. 26 of the reference pack's recipes consume the holder
+    key directly rather than through `ore:oreSednanite`, so `Solver.pick_alternative` is
+    never offered the properly priced block and no amount of ranking can rescue the plan.
+    """
+    g = gated_graph()
+    g.names[HOLDER] = "Sednanite Ore" if same_name else "Sednanite Ore Chunk"
+    g.ore_members["oreSednanite"] = [SEDNANITE] + ([HOLDER] if same_group else [])
+    if not same_group:
+        g.ore_members["blockSednanite"] = [HOLDER]
+    if power_cell:
+        g.names[POWER_CELL] = "Trionic Power Cell"
+        g.ore_members["oreSednanite"].append(POWER_CELL)
+    g.add(Recipe("melt", "t", [("fluid:sednanite", 100)],
+                 [Ingredient([HOLDER], 1)], category="minecraft.crafting"))
+    return g
+
+
+class TheOtherIdForTheSameOreTest(unittest.TestCase):
+    """#117: the gate priced the key planetDefs names, and the recipes consume the other one.
+
+    The symptom was a plan whose node said "mined on Sedna, and you have not been there"
+    above a number that had not moved, because the branch under it walked a different key.
+    """
+
+    def _costs(self, g, visited=None):
+        gates = dimensions.gates_for(g, visited or {"DIM-1": 42})
+        return cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+
+    def test_the_duplicate_registration_is_found(self):
+        g = shadow_graph()
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores),
+                         {HOLDER: [147, "Sedna"]})
+
+    def test_the_index_pass_puts_it_in_the_graph(self):
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        self.assertEqual(dimensions.gates_for(g, {"DIM-1": 42}),
+                         {SEDNANITE: "Sedna", HOLDER: "Sedna"})
+
+    def test_the_holder_key_is_charged_for_the_trip(self):
+        """The defect itself: 1.0 before, because nothing produces it and it is a leaf."""
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        self.assertAlmostEqual(self._costs(g)[HOLDER],
+                               cost.BASE_RAW_COST + cost.DIMENSION_COST, places=6)
+
+    def test_what_the_recipes_actually_consume_gets_dearer(self):
+        """The consequence the player sees: the fluid route stops looking like cobblestone."""
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        self.assertGreater(self._costs(g)["fluid:sednanite"], cost.DIMENSION_COST)
+
+    def test_a_trionic_power_cell_is_not_an_ore_you_mine_on_oi(self):
+        """The 1-in-5 that killed the group-only rule. The display name declines it."""
+        g = shadow_graph(power_cell=True)
+        self.assertNotIn(POWER_CELL, dimensions.shadow_ores(g, g.dimension_ores))
+
+    def test_a_shared_name_alone_is_not_enough(self):
+        """`chisel:lapis:0..8` are nine distinct blocks all called "Lapis Lazuli Block"."""
+        g = shadow_graph(same_group=False)
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+    def test_a_shared_ore_group_alone_is_not_enough(self):
+        g = shadow_graph(same_name=False)
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+    def test_a_block_group_is_not_ore_evidence(self):
+        """`blockDiamond` holds `chisel:diamond`, which is the readmission #61 refused."""
+        g = shadow_graph(same_group=False)
+        g.ore_members["blockSednanite"] = [SEDNANITE, HOLDER]
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+    def test_visiting_sedna_lifts_the_gate_on_both_keys_together(self):
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        self.assertEqual(dimensions.gates_for(g, {"DIM147": 3}), {})
+
+    def test_nothing_gated_means_no_shadows(self):
+        g = shadow_graph()
+        self.assertEqual(dimensions.shadow_ores(g, {}), {})
+
+    def test_the_two_keys_stay_separate_nodes(self):
+        """Priced alike, NOT merged. Merging is a change to everything that walks a key."""
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        self.assertNotEqual(g.by_output.get(SEDNANITE), g.by_output.get(HOLDER))
+        self.assertIn(HOLDER, g.names)
+        self.assertIn(SEDNANITE, g.names)
+
+    def test_a_shadow_with_its_own_cheap_route_keeps_it(self):
+        """Still a FLOOR under `min`, exactly as the gate on the declared key is."""
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        g.add(Recipe("cheap", "t", [(HOLDER, 1)],
+                     [Ingredient(["mod:dirt"], 1)], category="minecraft.crafting"))
+        self.assertAlmostEqual(self._costs(g)[HOLDER],
+                               cost.MACHINE_COST["have"] + cost.BASE_RAW_COST, places=6)
+
+    def test_an_unnamed_key_cannot_shadow_anything(self):
+        """`names` is incomplete for anything items.csv and the dump both missed."""
+        g = shadow_graph()
+        del g.names[HOLDER]
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -151,9 +151,14 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         by_name = {name: dim for dim, (name, _ores) in defs.items()}
         g.dimension_ores = {key: [by_name[name], name] for key, name in exclusive.items()
                             if key in g.world_ores and name in by_name}
+        # And the same ores again under the pack's OTHER id for them, which is where #112's
+        # price went missing: the key planetDefs names is not the key the recipes consume.
+        shadows = dimensions.shadow_ores(g, g.dimension_ores)
+        g.dimension_ores.update(shadows)
         say("dimensions: %d declared, %d ores generate in exactly one of them "
-            "(%d after the ore* filter)"
-            % (len(defs), len(exclusive), len(g.dimension_ores)))
+            "(%d after the ore* filter, +%d duplicate registrations of those)"
+            % (len(defs), len(exclusive), len(g.dimension_ores) - len(shadows),
+               len(shadows)))
     else:
         say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
             "dimension is not priced, which is the pre-#112 behaviour")
