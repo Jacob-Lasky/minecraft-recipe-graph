@@ -560,8 +560,17 @@ class Solver:
                 # is #136 and needs both cost audits; moving a price from here would change
                 # routing with none of that scrutiny, and no test here would notice.
                 node["unsourced"] = True
-                node["note"] = ("no recipe reaches this state; the graph can only make %s"
-                                % self.g.bare_name(other))
+                # TWO WORDINGS, because they are two different claims and a reader has to be
+                # able to act on the difference. An NBT STATE means "you have the item, this
+                # tier of it is out of reach"; a processed FORM means "this shape of the
+                # material is not made at all, use the other one". Collapsing them into one
+                # sentence would make the second read as though levelling were involved.
+                node["note"] = (
+                    "no recipe reaches this state; the graph can only make %s"
+                    % self.g.bare_name(other)
+                    if base_key(key) != key else
+                    "nothing makes this form; the graph can only make %s"
+                    % self.g.bare_name(other))
             self.leaf_totals[key] += remainder
             return node
 
@@ -641,17 +650,39 @@ class Solver:
         the reader at. Without something to name, the mark would just be "no recipe", which
         the NEED badge already says.
 
-        DELIBERATELY DOES NOT COVER A PLAIN KEY NOTHING MAKES -- the Sednanite Nugget that
-        opened #136. It carries no NBT, so there is no other form to name, and #136's
-        measurement found no signal separating it from an ordinary mob drop. That half stays
-        open rather than being papered over with a rule that would fire on cobblestone.
+        A PLAIN KEY NOTHING MAKES IS NOW COVERED TOO, on the same terms and no looser. This
+        docstring used to say the Sednanite Nugget could not be badged because "there is no
+        other form to name" -- correct at the time, and #136's measurement supplied the
+        missing name. The pack registers `nuggetSednanite` and `ingotSednanite`, so Forge's
+        own convention says those are one material, and the ingot has 27 producers. There IS
+        a specific other form to point at, so the second clause is satisfied exactly as the
+        NBT case satisfies it.
+
+        It stays narrow for the same reason. Cobblestone is in no `<form><Material>` group
+        and is not badged. A mob drop is not badged. A material whose every form is
+        unobtainable is not badged, because then there is nothing to name and the mark
+        would collapse to "no recipe", which the NEED badge already says.
+
+        STILL DISPLAY-ONLY, and that is the whole bargain -- see the caller. Pricing an
+        unobtainable processed form was measured for #136 and produces a plan whose shopping
+        list contains the item being planned, which is worse than the bug. This says what
+        the tool does not know; it does not pretend to fix the routing.
         """
         if self.g.real_producers(key):
             return None
-        stem = base_key(key)
-        if stem == key:
+        # A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is not evidence of
+        # anything. `Graph.producers` gathers `base:*` for a concrete meta and never the
+        # other way round, so `natura:sticks:*` comes back empty while `natura:sticks:0` is
+        # perfectly craftable. Measured: without this the first regeneration badged
+        # "nothing makes this form" on Maple Sticks and pointed the reader at Sawdust. The
+        # same inflation #136's own comment flags for `ore:` group keys, which are
+        # producerless for the same structural reason.
+        if split_key(key)[1] == "*":
             return None
-        return stem if self.g.real_producers(stem) else None
+        stem = base_key(key)
+        if stem != key and self.g.real_producers(stem):
+            return stem
+        return self.g.obtainable_sibling(key)
 
     def _snapshot(self):
         """Everything a discarded branch must not leave behind.

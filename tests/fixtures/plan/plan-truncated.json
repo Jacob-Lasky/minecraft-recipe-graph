@@ -133,7 +133,8 @@
     "kind": "item",
     "label": "Sednanite Nugget",
     "name": "Sednanite Nugget",
-    "qty": 18
+    "qty": 18,
+    "unsourced": true
    },
    {
     "key": "cyclicmagic:nether_coal_ore",
@@ -147,7 +148,8 @@
     "kind": "item",
     "label": "Dreadite Nugget",
     "name": "Dreadite Nugget",
-    "qty": 9
+    "qty": 9,
+    "unsourced": true
    },
    {
     "key": "thermalfoundation:storage:6",
@@ -357,7 +359,9 @@
                    "label": "Sednanite Nugget",
                    "name": "Sednanite Nugget",
                    "need": 18,
-                   "status": "raw"
+                   "note": "nothing makes this form; the graph can only make Sednanite Ingot",
+                   "status": "raw",
+                   "unsourced": true
                   }
                  ],
                  "key": "contenttweaker:material_part:54",
@@ -636,7 +640,9 @@
                "label": "Dreadite Nugget",
                "name": "Dreadite Nugget",
                "need": 9,
-               "status": "raw"
+               "note": "nothing makes this form; the graph can only make Dreadite Plate",
+               "status": "raw",
+               "unsourced": true
               }
              ],
              "key": "fluid:dreadite",

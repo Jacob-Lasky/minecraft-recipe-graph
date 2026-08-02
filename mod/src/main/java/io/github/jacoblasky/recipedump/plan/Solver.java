@@ -764,7 +764,13 @@ public final class Solver {
                 // that is #136 and needs both cost audits; moving a price from here would
                 // change routing with none of that scrutiny, and no test here would notice.
                 node.unsourced = Boolean.TRUE;
-                node.note = "no recipe reaches this state; the graph can only make "
+                // TWO WORDINGS, because they are two different claims. An NBT STATE means
+                // "you have the item, this tier is out of reach"; a processed FORM means
+                // "this shape is not made, use the other one". One sentence for both would
+                // make the second read as though levelling were involved.
+                node.note = (Keys.baseKey(g.key(keyId)).equals(g.key(keyId))
+                             ? "nothing makes this form; the graph can only make "
+                             : "no recipe reaches this state; the graph can only make ")
                         + g.bareName(other);
             }
             leafTotals.add(keyId, remainder);
@@ -889,15 +895,70 @@ public final class Solver {
         if (hasRealProducers(keyId)) {
             return -1;
         }
-        String stem = Keys.baseKey(g.key(keyId));
-        if (stem.equals(g.key(keyId))) {
+        String key = g.key(keyId);
+        // A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is evidence of
+        // nothing: `producers` widens a concrete meta to `base:*` and never the reverse.
+        // Measured on the reference graph -- without this, `natura:sticks:*` is badged
+        // "nothing makes this form" while its concrete metas are ordinary craftable sticks.
+        if (isWildcard(keyId)) {
             return -1;
         }
-        int stemId = g.keyId(stem);
-        if (stemId < 0 || !hasRealProducers(stemId)) {
+        String stem = Keys.baseKey(key);
+        if (!stem.equals(key)) {
+            int stemId = g.keyId(stem);
+            return stemId >= 0 && hasRealProducers(stemId) ? stemId : -1;
+        }
+        return obtainableSibling(keyId);
+    }
+
+    /**
+     * Another form of this key's material that the graph CAN make, or -1.
+     *
+     * THE #136 HALF. `nuggetSednanite` and `ingotSednanite` are one material by Forge's own
+     * oredict convention, so a nugget nothing makes has a specific other form to point a
+     * reader at -- which is the second clause {@link #reachableForm} refuses to badge
+     * without, and the thing that was missing when the plain-key case was first declared out
+     * of scope.
+     *
+     * DETERMINISTIC, because this reaches a plan tree and `tests/fixtures/plan/*.json`
+     * freezes those: most producers wins, then the key string. That also makes the answer
+     * "the form the pack actually makes" rather than whichever came back first.
+     *
+     * Mirrors `Graph.obtainable_sibling` in python and is held to it by the golden gate.
+     */
+    private int obtainableSibling(int keyId) {
+        String material = null;
+        Csr ores = g.oresOf();
+        for (int p = ores.start(keyId); p < ores.end(keyId) && material == null; p++) {
+            material = Keys.materialOfOreGroup(g.oreGroupName(ores.at(p)));
+        }
+        if (material == null) {
             return -1;
         }
-        return stemId;
+        int best = -1;
+        int bestMade = 0;
+        Csr members = g.oreMembers();
+        for (int group = 0; group < g.oreGroupCount(); group++) {
+            if (!material.equals(Keys.materialOfOreGroup(g.oreGroupName(group)))) {
+                continue;
+            }
+            for (int p = members.start(group); p < members.end(group); p++) {
+                int member = members.at(p);
+                if (member == keyId) {
+                    continue;
+                }
+                int made = realProducerCount(member);
+                if (made <= 0) {
+                    continue;
+                }
+                if (best < 0 || made > bestMade
+                        || (made == bestMade && g.key(member).compareTo(g.key(best)) < 0)) {
+                    best = member;
+                    bestMade = made;
+                }
+            }
+        }
+        return best;
     }
 
     /**

@@ -19,9 +19,17 @@ WHAT THIS DOES **NOT** CLAIM, because #136 measured both alternatives and reject
     BASE_RAW_COST is the underlying defect and it stays open on #136; a display badge that
     quietly moved a number would be the worst of both.
 
-It claims exactly one thing: THE GRAPH CAN MAKE THIS ITEM, BUT NOT IN THE STATE BEING ASKED
-FOR. That is checkable, non-obvious, and it is the sentence a reader needs in order to
+It claims exactly one thing: THE GRAPH CAN MAKE THIS MATERIAL, BUT NOT IN THE SHAPE BEING
+ASKED FOR. That is checkable, non-obvious, and it is the sentence a reader needs in order to
 distrust the line.
+
+TWO WAYS A KEY CAN BE THE WRONG SHAPE, and both are covered:
+
+  * an NBT STATE of a producible item -- a levelled data model, the case above;
+  * a PROCESSED FORM of a producible material -- the Sednanite Nugget that opened #136.
+    `nuggetSednanite` and `ingotSednanite` are one material by Forge's own convention, and
+    the ingot has 27 producers, so there is a specific other form to name. That second
+    clause is what this file's `ScopeTest` refuses to badge without.
 """
 
 import os
@@ -99,10 +107,16 @@ class TheReportedFailureTest(unittest.TestCase):
 class ScopeTest(unittest.TestCase):
     """The mark fires on a STATE of a producible item, and on nothing else."""
 
-    def test_a_plain_key_with_no_producer_is_not_marked(self):
-        # The Sednanite Nugget case. It has no NBT, so there is no "other form" to point at,
-        # and #136's measurement found no signal separating it from a mob drop. Out of scope
-        # here ON PURPOSE rather than by oversight; the seed defect stays open.
+    def test_a_plain_key_with_no_producer_and_no_family_is_not_marked(self):
+        # THE COBBLESTONE BOUNDARY, and the reason the mark stays narrow. This key has no
+        # oredict registration at all, so the pack says nothing about what material it is a
+        # shape of and there is no other form to point a reader at. Marking it would collapse
+        # to "no recipe", which the NEED badge already says.
+        #
+        # This test used to stand for the Sednanite Nugget being out of scope. It no longer
+        # does: a nugget in a `<form><Material>` group WITH a makeable sibling is now marked,
+        # and `ProcessedFormTest` below covers it. What survives here is the case that has no
+        # family, which is still correctly silent.
         g = Graph()
         g.names = {"mod:nugget": "Sednanite Nugget", "mod:thing": "Thing"}
         g.add(Recipe("r", "test", [("mod:thing", 1)], [Ingredient(["mod:nugget"], 9)]))
@@ -157,6 +171,151 @@ class PresentationTest(unittest.TestCase):
         # order has to be unambiguous where both are passed.
         text, _cls = present.status_badge("token", token_kind="loot", unsourced=True)
         self.assertNotIn("no known source", text.lower())
+
+
+class ProcessedFormTest(unittest.TestCase):
+    """A shape of a material the pack does not make. The #136 half that was left open.
+
+    The reported plan asked for 18 Sednanite Nuggets. Nothing in the pack makes one -- there
+    is a nugget-to-ingot recipe and no ingot-to-nugget, confirmed against the dump -- so the
+    shopping list named a step that cannot be performed. The ingot, by contrast, has 27
+    producers. Forge's convention makes `nuggetSednanite` and `ingotSednanite` one material,
+    which is the signal that was missing when this was first declared out of scope.
+    """
+
+    @staticmethod
+    def _graph(nugget_group="nuggetSednanite", ingot_producible=True):
+        g = Graph()
+        g.names = {"mod:nugget": "Sednanite Nugget", "mod:ingot": "Sednanite Ingot",
+                   "mod:ore": "Sednanite Ore", "mod:out": "Sednanite Block"}
+        g.ore_members = {nugget_group: ["mod:nugget"], "ingotSednanite": ["mod:ingot"]}
+        # The plan reaches the nugget: nine of them make the thing being planned.
+        g.add(Recipe("r1", "test", [("mod:out", 1)], [Ingredient(["mod:nugget"], 9)]))
+        if ingot_producible:
+            g.add(Recipe("r2", "test", [("mod:ingot", 1)], [Ingredient(["mod:ore"], 1)]))
+        return g
+
+    def _leaf(self, g):
+        tree = Solver(g).solve("mod:out", 1)["tree"]
+        return tree["children"][0]
+
+    def test_the_unmakeable_nugget_is_marked(self):
+        leaf = self._leaf(self._graph())
+        self.assertEqual(leaf["key"], "mod:nugget")
+        self.assertTrue(leaf.get("unsourced"))
+
+    def test_the_note_names_the_form_that_IS_makeable(self):
+        # The point of the second clause: a reader gets somewhere to go, not just a warning.
+        self.assertIn("Sednanite Ingot", self._leaf(self._graph())["note"])
+
+    def test_the_wording_says_FORM_rather_than_STATE(self):
+        # A state means "you have the item, this tier is out of reach"; a form means "this
+        # shape is not made, use the other one". One sentence for both would make the second
+        # read as though levelling were involved.
+        note = self._leaf(self._graph())["note"]
+        self.assertIn("nothing makes this form", note)
+        self.assertNotIn("reaches this state", note)
+
+    def test_a_family_with_nothing_makeable_is_NOT_marked(self):
+        # Same refusal the NBT half makes: with no obtainable sibling there is nothing to
+        # name, and the mark degenerates into "no recipe".
+        leaf = self._leaf(self._graph(ingot_producible=False))
+        self.assertFalse(leaf.get("unsourced"))
+
+    def test_a_group_that_is_not_a_form_is_NOT_marked(self):
+        # `ore*` is deliberately absent from PROCESSED_FORM_PREFIXES: an ore is the
+        # obtainable end of a family, and a key registered only as one is something you mine.
+        leaf = self._leaf(self._graph(nugget_group="oreSednanite"))
+        self.assertFalse(leaf.get("unsourced"))
+
+    def test_a_different_material_is_not_a_sibling(self):
+        # The family link is the MATERIAL, not the form. An unmakeable Sednanite Nugget must
+        # not be excused by a perfectly makeable Iron Ingot.
+        g = self._graph(ingot_producible=False)
+        g.names["mod:iron"] = "Iron Ingot"
+        g.ore_members["ingotIron"] = ["mod:iron"]
+        g.add(Recipe("r3", "test", [("mod:iron", 1)], [Ingredient(["mod:ore"], 1)]))
+        self.assertFalse(self._leaf(g).get("unsourced"))
+
+    def test_a_WILDCARD_meta_is_never_marked(self):
+        # `Graph.producers` gathers `base:*` for a concrete meta and never the reverse, so a
+        # wildcard key is producerless by construction and its count is evidence of nothing.
+        # The first regeneration of the fixtures badged `natura:sticks:*` and told the reader
+        # to use Sawdust; the concrete metas are ordinary craftable sticks.
+        g = self._graph(ingot_producible=True)
+        g.names["mod:nugget:*"] = "Sednanite Nugget (*)"
+        g.ore_members["nuggetSednanite"].append("mod:nugget:*")
+        g.add(Recipe("r5", "test", [("mod:out2", 1)], [Ingredient(["mod:nugget:*"], 1)]))
+        g.names["mod:out2"] = "Other"
+        leaf = Solver(g).solve("mod:out2", 1)["tree"]["children"][0]
+        self.assertEqual(leaf["key"], "mod:nugget:*")
+        self.assertFalse(leaf.get("unsourced"))
+
+    def test_a_makeable_form_is_never_marked(self):
+        # The first clause still applies: having a producer settles it, family or no family.
+        g = self._graph()
+        g.add(Recipe("r4", "test", [("mod:nugget", 9)], [Ingredient(["mod:ingot"], 1)]))
+        self.assertFalse(self._leaf(g).get("unsourced"))
+
+    def test_the_sibling_choice_is_deterministic(self):
+        # It reaches a plan tree, and `tests/fixtures/plan/*.json` freezes those for the Java
+        # port -- so "which sibling gets named" cannot depend on dict order. Most producers
+        # wins, then the key, which also makes it the form the pack actually makes.
+        g = self._graph()
+        g.names["mod:plate"] = "Sednanite Plate"
+        g.ore_members["plateSednanite"] = ["mod:plate"]
+        for rid in ("p1", "p2"):
+            g.add(Recipe(rid, "test", [("mod:plate", 1)], [Ingredient(["mod:ore"], 1)]))
+        for _ in range(20):
+            self.assertEqual("mod:plate", Graph.obtainable_sibling(g, "mod:nugget"))
+
+
+class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
+    """`PROCESSED_FORM_PREFIXES` decides who gets marked, so the two copies must agree.
+
+    WHY A SOURCE-TEXT TEST RATHER THAN TRUST. The list decides which keys carry the
+    `unsourced` field, that field is compared node for node by `PlanFixtureTest`, and the
+    fixtures are only regenerated deliberately -- so a prefix added on one side and not the
+    other is a failing golden gate with no behavioural change to point at, discovered by
+    whoever next regenerates rather than by whoever caused it. `test_nbt_digest` pins the
+    digest constants across the same seam for the same reason, and needs no JVM either.
+    """
+
+    JAVA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "mod", "src", "main", "java", "io", "github", "jacoblasky",
+                        "recipedump", "graph", "Keys.java")
+
+    def _java_list(self):
+        with open(self.JAVA) as fh:
+            src = fh.read()
+        start = src.index("PROCESSED_FORM_PREFIXES = {")
+        body = src[start:src.index("};", start)]
+        return [chunk.split('"')[1] for chunk in body.split(",") if '"' in chunk]
+
+    def test_both_languages_list_the_same_forms_in_the_same_order(self):
+        from recipegraph.model import PROCESSED_FORM_PREFIXES
+        self.assertEqual(list(PROCESSED_FORM_PREFIXES), self._java_list())
+
+    def test_neither_list_admits_ore_or_block(self):
+        # Both absences are load-bearing and both are argued at the declaration: `ore` is the
+        # OBTAINABLE end of a family, so admitting it would let a family be named by the very
+        # thing that is out of reach; `block` would readmit `chisel:diamond` through
+        # `blockDiamond`, which is the decorative-block cluster #61 demoted.
+        from recipegraph.model import PROCESSED_FORM_PREFIXES
+        for forms in (list(PROCESSED_FORM_PREFIXES), self._java_list()):
+            self.assertNotIn("ore", forms)
+            self.assertNotIn("block", forms)
+
+    def test_the_split_agrees_with_the_convention(self):
+        from recipegraph.model import split_ore_group
+        self.assertEqual(("nugget", "Sednanite"), split_ore_group("nuggetSednanite"))
+        self.assertEqual(("ingot", "Iron"), split_ore_group("ingotIron"))
+        # An `ore*` group is not a processed form, so it does not split -- which is what
+        # keeps a mined thing from being described as a shape of something else.
+        self.assertIsNone(split_ore_group("oreSednanite"))
+        # A bare form name has no material after it and names nothing.
+        self.assertIsNone(split_ore_group("dust"))
+        self.assertIsNone(split_ore_group("plankWood".replace("plank", "zzz")))
 
 
 if __name__ == "__main__":
