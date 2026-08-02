@@ -136,6 +136,58 @@ public class PlanJsonTest {
         assertEquals("loot", root.tokenKind());
     }
 
+    /**
+     * The in-game door: JSON text straight from the Java solver's serializer.
+     *
+     * Asserted to agree with the object door on the same bytes, because the two must not be
+     * able to disagree -- the offline tests use one and the mod uses the other.
+     */
+    @Test
+    public void aResultReadsTheSameFromTextAsFromAParsedObject() throws Exception {
+        String text = readFixtureText("plan-truncated");
+        com.google.gson.JsonObject result = new com.google.gson.JsonParser()
+                .parse(text).getAsJsonObject().getAsJsonObject("result");
+        PlanView fromObject = PlanJson.readResult(result);
+        PlanView fromText = PlanJson.readResult(result.toString());
+        assertEquals(fromObject.target(), fromText.target());
+        assertEquals(fromObject.nodes(), fromText.nodes());
+        assertEquals(fromObject.flatten().size(), fromText.flatten().size());
+        assertEquals(fromObject.shoppingList().size(), fromText.shoppingList().size());
+        assertEquals(fromObject.truncated(), fromText.truncated());
+    }
+
+    @Test
+    public void aResultCarryingFieldsThePanelDoesNotDrawStillReads() {
+        // The solver emits `work`, `pins_overruled`, `from_emc` and more that no widget shows.
+        // Refusing a plan because it carried a field nobody draws would be the worse failure.
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "test:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.RAW);
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        result.add("tree", tree);
+        result.addProperty("target", "test:thing");
+        result.addProperty("work", 12345);
+        result.addProperty("something_added_next_year", "surprise");
+        result.add("pins_overruled", new com.google.gson.JsonObject());
+        PlanView plan = PlanJson.readResult(result);
+        assertEquals("test:thing", plan.target());
+        assertEquals(1, plan.flatten().size());
+    }
+
+    private static String readFixtureText(String name) throws Exception {
+        for (String prefix : new String[]{"../", "./"}) {
+            java.io.File file = new java.io.File(prefix + "tests/fixtures/plan/" + name
+                                                 + ".json");
+            if (file.isFile()) {
+                return new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                                  java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        throw new IllegalStateException("fixture " + name + " not found");
+    }
+
     @Test
     public void theUnsourcedMarkIsReadBackFromTheFixturesThatCarryIt() {
         // #139 added the field and #147 regenerated the fixtures with it. The parser dropped

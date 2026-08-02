@@ -23,6 +23,13 @@ import com.google.gson.JsonParser;
  * called "Iron Plate" -- which is far better test data than anything anyone would write by
  * hand, and it is already checked in.
  *
+ * IT READS A SUBSET OF THE RESULT AND IGNORES THE REST, on purpose. `target`, `qty`, `tree`,
+ * `truncated`, `exhausted`, `nodes`, `max_nodes`, `shopping_list` and `machines_to_build` are
+ * what the panel draws; `work`, `work_budget`, `pins_overruled`, `used_from_stock`,
+ * `from_emc`, `from_sources` and `tokens_needed` are read past without complaint. An unknown
+ * field is not an error -- the solver is free to add one -- and a panel that refused to render
+ * a plan because it carried a field nobody draws would be the worse failure.
+ *
  * EVERY FIELD IS READ DEFENSIVELY, and that is not paranoia about the fixtures. This same
  * reader is what a future `PlanResult.toJson` round-trip would go through, and a missing
  * optional field must produce a node that renders rather than an exception in the middle of
@@ -43,6 +50,18 @@ public final class PlanJson {
                     + " top-level keys");
         }
         return readResult(result);
+    }
+
+    /**
+     * Read a bare plan result from JSON text.
+     *
+     * The door for the in-game path: the Java solver's own `plan.PlanJson.toJson` produces
+     * exactly this, and that serializer is the one the golden gate pins against the Python
+     * oracle. So a plan that renders in game rendered from bytes provably identical to what
+     * Python produces, and there is no third place the shape lives.
+     */
+    public static PlanView readResult(String json) {
+        return readResult(new JsonParser().parse(json).getAsJsonObject());
     }
 
     /** Read a bare plan result, which is what a solver hands back. */
