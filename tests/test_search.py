@@ -45,7 +45,7 @@ class RankingTest(unittest.TestCase):
         self.assertIn("fluid:boric_acid", keys)
 
     def test_an_empty_query_matches_nothing(self):
-        self.assertEqual(explore.rank_matches(chem_graph(), "   "), ([], 0))
+        self.assertEqual(explore.rank_matches(chem_graph(), "   "), ([], 0, 0))
 
     def test_limit_is_respected(self):
         self.assertEqual(len(explore.rank_matches(chem_graph(), "a", limit=1).results), 1)

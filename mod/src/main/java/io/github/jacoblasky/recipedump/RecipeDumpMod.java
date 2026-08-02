@@ -24,6 +24,17 @@ public class RecipeDumpMod {
     public static IJeiRuntime runtime;
 
     /**
+     * JEI's complete item list, captured in DumpPlugin#register; null before then.
+     *
+     * SEPARATE FROM `runtime` BECAUSE IT HAS TO BE -- see DumpPlugin#register. It is the
+     * source for every per-ITEM file (emc.json, machine_names.json's blueprint half, the
+     * icon atlas), as opposed to the per-RECIPE walk that fills recipes.ndjson. The two
+     * populations differ: an item nothing crafts and nothing consumes appears here and
+     * nowhere in the recipe stream, and #50's whole subject is drop-only items.
+     */
+    public static mezz.jei.api.ingredients.IIngredientRegistry ingredients;
+
+    /**
      * The running mod's version, read from the metadata Forge already parsed.
      *
      * `useMetadata = true` above is what makes gradle.properties the ONLY place a version

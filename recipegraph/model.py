@@ -357,6 +357,27 @@ class Graph:
         # so the two never have to be rebuilt together. Empty for a pack with no
         # Advanced Rocketry, which behaves exactly as before.
         self.dimension_ores = {}
+        # item key -> maxDamage, for items whose META IS DURABILITY rather than a subtype.
+        # From the item registry via the dump, because nothing structural can tell 46 damage
+        # values of one Iron Axe from 9 genuinely distinct `chisel:lapis` blocks -- see
+        # sources/damageable and #118. Empty on a pre-schema-5 graph, which behaves exactly
+        # as before: every damage value stays its own row.
+        self.max_damage = {}
+        # Modular Machinery's own {machine registry name: localized name}, and
+        # {blueprint key: machine registry name}. Two maps because the blueprint key holds
+        # an NBT digest and churns with every dump while the registry name does not. See
+        # sources/machine_names and #55.
+        self.machine_names = {}
+        self.blueprint_machines = {}
+        # item key -> ProjectE EMC value. PACK DATA; what the player has LEARNED is world
+        # state and lives in the have file. See sources/emc and #50.
+        self.emc = {}
+        # The item icon atlas index: {"icon", "cols", "pages", "keys"}, where `keys` maps a
+        # base item key to [page, column, row]. The PNG pages themselves travel BESIDE
+        # graph.json rather than inside it, because base64 in a JSON document would inflate
+        # them by a third and make every graph load pay for pictures it is not going to
+        # draw. See sources/icons and #36.
+        self.icons = {}
         # Which dump schema produced this graph, 0 for none. Recorded because some
         # judgements are only SAFE once the data supports them: see
         # machines.SPECIES_SCHEMA, where "bee breeding needs no machine" has to wait for
@@ -766,6 +787,47 @@ class Graph:
         return sorted((k for k in self.meta_index.get(stem, ())
                        if k != exclude and self.producers(k)), key=rank)
 
+    def damage_base(self, key):
+        """The undamaged key a worn one is a state of; `key` unchanged for everything else.
+
+        `minecraft:iron_axe:187` -> `minecraft:iron_axe`. `chisel:lapis:3` -> itself,
+        because chisel blocks are not damageable and their meta is a real subtype.
+
+        THE GATE IS `max_damage`, WHICH IS PACK DATA READ BACK FROM THE ITEM REGISTRY, not
+        a guess from the shape of the key. Every structural rule anyone proposed for this
+        also matched the 286-meta Spell Book and the nine `chisel:lapis` blocks; see
+        sources/damageable for the measurement and #110 for why getting those wrong is
+        worse than the noise it would remove.
+
+        NBT SURVIVES. A discriminated key keeps its digest, so a named or enchanted tool is
+        still its own item -- only the durability tick collapses. The `#digest` is split off
+        and re-attached rather than being allowed to reach `split_key`, which does not know
+        about it.
+
+        RETURNS A KEY, IT DOES NOT MERGE ANYTHING. `producers`, `consumers` and stock are
+        untouched: `minecraft:iron_axe` really does hold the 2 in stock and really is the
+        key recipes ask for, which is why #118 is a display defect rather than a wrong plan.
+        Collapsing the GRAPH would touch the solver, `gaps.stock_coverage` and every
+        key-walking surface to fix something none of them get wrong.
+        """
+        base, disc = split_discriminator(key)
+        stem, meta = split_key(base)
+        if meta in (0, None) or stem not in self.max_damage:
+            return key
+        return stem if disc is None else "%s#%s" % (stem, disc)
+
+    def damage_of(self, key):
+        """`(damage, maxDamage)` for a worn tool, or None when the key is not one.
+
+        So a UI can say "Iron Axe (187/250 damage)" instead of "Iron Axe (187)", which is
+        the difference between a durability reading and an apparently meaningless number.
+        """
+        stem, meta = split_key(base_key(key))
+        max_damage = self.max_damage.get(stem)
+        if max_damage is None or not isinstance(meta, int) or meta <= 0:
+            return None
+        return meta, max_damage
+
     def real_producers(self, key):
         """`producers`, minus container transfers asked to CREATE a fluid.
 
@@ -802,6 +864,13 @@ class Graph:
 
     def bare_name(self, key):
         """`display` without the type prefix, for callers that show the type separately."""
+        # BEFORE the `names` lookup, because the blueprint IS named -- all 261 of them are
+        # named "Machine Blueprint", which is what the game genuinely returns and what makes
+        # a plan for any multiblock read "1 of 261 possibilities". The dump's own machine
+        # registry is the only thing that can say which. #55
+        machine = self.blueprint_name(key)
+        if machine:
+            return machine
         if key in self.names:
             label = self.names[key]
             # items.csv stores aspect-parameterised names as format strings ("%s Vis
@@ -846,7 +915,38 @@ class Graph:
             # still rendered beside the name in search rows and on the item page, so the
             # modid is not lost by prettifying.
             label = _prettify(path_of(base))
-        return label if meta in (0, None) else "%s (%s)" % (label, meta)
+        if meta in (0, None):
+            return label
+        # A bare "(187)" beside an item name reads as a variant number and is in fact a
+        # durability reading, which is how 46 rows of one axe looked like 46 items. Saying
+        # what the number MEANS costs one lookup and is the smallest honest fix. #118
+        wear = self.damage_of(key)
+        if wear:
+            return "%s (%d/%d damage)" % (label, wear[0], wear[1])
+        return "%s (%s)" % (label, meta)
+
+    def blueprint_name(self, key):
+        """"Machine Blueprint (Dragonfire Crucible)", or None when `key` is not one.
+
+        THE PARENTHETICAL FORM, not "Dragonfire Crucible Blueprint", and #55 left the choice
+        open. The deciding argument is search: `labels` indexes exactly this string, so the
+        parenthetical is findable under BOTH the name the game shows and the name in the
+        player's JEI, while the reworded form is findable under neither of the two words a
+        player looking at a blueprint in their hand would type. It reads marginally worse in
+        a shopping list and is reachable by two more queries, which is the better trade for
+        an item whose whole problem is that nobody can tell which one they are looking at.
+
+        A blueprint whose machine the registry does not name falls through to None rather
+        than to "Machine Blueprint ()" -- the same policy as every other optional field
+        here: no data means the old behaviour, not a decorated absence.
+        """
+        machine = self.blueprint_machines.get(key)
+        if not machine:
+            return None
+        name = self.machine_names.get(machine)
+        if not name:
+            return None
+        return "%s (%s)" % (self.names.get(key) or "Machine Blueprint", name)
 
     # Text prefixes, for the CLI and anything else without colour. `ore` reads "oredict"
     # rather than "ore" because it means "any member of", not "an ore".
@@ -920,6 +1020,11 @@ class Graph:
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
+            "max_damage": self.max_damage,
+            "machine_names": self.machine_names,
+            "blueprint_machines": self.blueprint_machines,
+            "emc": self.emc,
+            "icons": self.icons,
         }
 
     def save(self, path):
@@ -946,6 +1051,15 @@ class Graph:
         g.multiblocks = d.get("multiblocks") or {}
         # Absent before #112; empty means "no dimension is priced", the pre-#112 behaviour.
         g.dimension_ores = d.get("dimension_ores") or {}
+        # All five absent before schema 5, and every one of them means "the feature is off"
+        # rather than "something is broken": no meta collapse, no blueprint names, no EMC
+        # route, no icons. A graph built from an older dump goes on working unchanged, which
+        # is the point of reading them with `or {}` rather than asserting them present.
+        g.max_damage = d.get("max_damage") or {}
+        g.machine_names = d.get("machine_names") or {}
+        g.blueprint_machines = d.get("blueprint_machines") or {}
+        g.emc = d.get("emc") or {}
+        g.icons = d.get("icons") or {}
         # Here rather than only in `index.build`, so an ALREADY BUILT graph.json is fixed
         # without a rebuild. Rebuilding needs the game running and a fresh dump; the 115 MB
         # file on disk is what every surface reads today.

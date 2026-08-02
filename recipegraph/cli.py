@@ -18,6 +18,7 @@ from . import explore as explore_mod
 from . import index
 from . import machines
 from . import pins as pins_mod
+from . import projecte
 from . import tokens as tokens_mod
 from .defaults import (DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST, DEFAULT_MACHINES,
                        DEFAULT_MAX_NODES, DEFAULT_METRICS_DB, DEFAULT_PINS, DEFAULT_PORT,
@@ -37,9 +38,11 @@ def _duration(text):
 
 
 def cmd_build(args):
-    g = index.build(args.instance, hei_path=args.hei, no_guess=args.no_guess,
-                    dump_dir=args.dump_dir)
+    # `out_path` is passed so the icon atlas pages land BESIDE the graph rather than being
+    # left in the pack instance, which the serving container cannot see. See sources/icons.
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    g = index.build(args.instance, hei_path=args.hei, no_guess=args.no_guess,
+                    dump_dir=args.dump_dir, out_path=args.out)
     g.save(args.out)
     print("wrote %s (%.1f MB)" % (args.out, os.path.getsize(args.out) / 1e6))
     return 0
@@ -68,12 +71,18 @@ def cmd_have(args):
     # a planet and a mod dimension with no portal at all.
     world_dir = _world_dir(paths)
     visited = dimensions.visited(world_dir) if world_dir else {}
+    # ProjectE transmutation knowledge, from the same save root, for the same reason: it is
+    # world state that decides whether a drop-only item is reachable, and it changes without
+    # the pack changing. Reads `playerdata/*.dat` and no chunk data, so it costs milliseconds
+    # against the region walk's seven minutes. See projecte and #50.
+    knowledge = projecte.read_knowledge(world_dir) if world_dir else {}
     # `reader` stamps WHICH scanner wrote this, because an unmatched NBT key means
     # "rescan" on a pre-#21 file and "the dump cannot digest this stack" on a current
     # one. See ae2_inventory.READER and gaps.stock_coverage.
     payload = {"stats": stats, "reader": ae2_inventory.READER, "items": dict(items),
                "fluids": dict(fluids), "essentia": dict(essentia),
-               "placed": dict(placed), "dimensions": visited}
+               "placed": dict(placed), "dimensions": visited,
+               "emc_knowledge": knowledge}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as fh:
         json.dump(payload, fh, indent=1, sort_keys=True)
@@ -81,6 +90,16 @@ def cmd_have(args):
           "%d placed machine types; %d dimensions visited"
           % (args.out, len(items), len(fluids), len(essentia), stats["cells"], len(placed),
              len(visited)))
+    if knowledge.get("players"):
+        print("  EMC: %d items learned across %d player(s), %s EMC banked%s"
+              % (len(knowledge["learned"]), knowledge["players"],
+                 "{:,}".format(knowledge["emc"]),
+                 " (full knowledge)" if knowledge["full"] else ""))
+    else:
+        # Said out loud rather than left to be inferred from an absent line. An empty EMC
+        # section is indistinguishable from a save with no ProjectE, and #50 only pays off
+        # when there is knowledge to read.
+        print("  EMC: no playerdata read -- transmutation is not an available route")
     # Reconcile against the graph while both are in hand. A scan that writes 3,321 keys
     # looks like a success even when 320 of them name nothing any recipe uses, and that
     # silence is what let #21 sit unnoticed: the stock was there, the plans ignored it.
@@ -159,12 +178,28 @@ def _coverage_graph(graph_path, out_path):
                   "to check." % " or ".join(tried))
 
 
+def _have_document(have_path):
+    """A have file as a dict, or {} when there is not one.
+
+    ONE reader for the raw document, because three different callers want three different
+    slices of it -- stock, placed tile entities, ProjectE knowledge -- and each of them
+    opening the file itself is three places to get the missing-file case wrong. Never
+    raises: an absent stock file is an ordinary state that every caller here already treats
+    as "an empty network".
+    """
+    if not have_path or not os.path.exists(have_path):
+        return {}
+    try:
+        with open(have_path) as fh:
+            doc = json.load(fh)
+    except ValueError:
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
 def _placed_and_stock(have_path):
     """Placed tile entities and item stock from a have file, for evidence-based checks."""
-    if not have_path or not os.path.exists(have_path):
-        return {}, {}
-    with open(have_path) as fh:
-        doc = json.load(fh)
+    doc = _have_document(have_path)
     return doc.get("placed") or {}, doc.get("items") or {}
 
 
@@ -243,8 +278,7 @@ def _load_have(path):
         print("no stock file at %s -- planning against an empty network" % path,
               file=sys.stderr)
         return {}, {}, set(), {}, {}
-    with open(path) as fh:
-        doc = json.load(fh)
+    doc = _have_document(path)
     have = dict(doc.get("items", {}))
     for name, amount in (doc.get("fluids") or {}).items():
         have[fluid_key(name)] = amount
@@ -290,12 +324,16 @@ def cmd_plan(args):
     # Same rule as the tokens above: resolved once, so the price a route is ranked at and
     # the trip the plan reports are derived from one answer.
     gates = dimensions.gates_for(g, visited)
+    # Same rule again: one answer, shared by the cost seed and the solver's terminator, so a
+    # route priced as reachable through EMC cannot be one the plan then refuses to stop at.
+    emc_available = projecte.available(g, _have_document(args.have).get("emc_knowledge"))
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
                                          free_sources=free, machine_items=machine_items,
-                                         token_kinds=token_kinds, dimension_gates=gates)
+                                         token_kinds=token_kinds, dimension_gates=gates,
+                                         emc_available=emc_available)
     # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
     # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
     pinned, pin_notes = ({}, {})
@@ -307,7 +345,7 @@ def cmd_plan(args):
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
                     costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
                     free_sources=free, token_kinds=token_kinds, pinned=pinned,
-                    dimension_gates=gates)
+                    dimension_gates=gates, emc_available=emc_available)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
@@ -360,6 +398,15 @@ def cmd_plan(args):
             print("  %14s  %-34s %s" % ("{:,}".format(row["qty"]),
                                         row["name"][:34], row["why"]))
 
+    if result.get("from_emc"):
+        # Same argument as the sources block above: a route that costs no crafting still has
+        # a quantity, and the EMC value is what makes the claim checkable rather than
+        # something the reader has to take on trust.
+        print("\n-- made by transmutation (ProjectE) --")
+        for row in result["from_emc"][:15]:
+            print("  %14s  %-34s EMC %s" % ("{:,}".format(row["qty"]), row["name"][:34],
+                                            "{:,}".format(row.get("emc", 0))))
+
     if result.get("machines_to_build"):
         print("\n-- machines you do not have yet --")
         for m in result["machines_to_build"]:
@@ -370,10 +417,15 @@ def cmd_plan(args):
             json.dump(result, fh, indent=1)
         print("\nwrote %s" % args.json)
     if args.html:
+        from . import iconset
         from .render import render_html
 
         with open(args.html, "w") as fh:
-            fh.write(render_html(result, g))
+            # `inline=True`: this file outlives the server and may be published as a
+            # Claude Artifact, whose CSP blocks every off-host request. The atlas pages sit
+            # beside the graph, which is where `build` copied them. See iconset.resolver.
+            fh.write(render_html(result, g, icon=iconset.resolver(
+                g, os.path.dirname(os.path.abspath(args.graph)), inline=True)))
         print("wrote %s" % args.html)
     return 0
 
@@ -381,6 +433,7 @@ def cmd_plan(args):
 def cmd_explore(args):
     from . import explore
     from . import present
+    from . import iconset
     from .render import render_explore_html
 
     g = _load_graph(args.graph)
@@ -392,10 +445,10 @@ def cmd_explore(args):
     results = hits.results
     if not results:
         print("no item name matched %r" % args.query, file=sys.stderr)
-        if hits.hidden:
+        if hits.hidden or hits.collapsed:
             # Distinguishes "that word is nowhere in the pack" from "every match is an NBT
             # variant nothing can make". Only the second is worth widening the query for.
-            print(present.hidden_note(hits.hidden), file=sys.stderr)
+            print(present.hidden_note(hits.hidden, hits.collapsed), file=sys.stderr)
         hints = explore.name_hints(g, args.query)
         if hints:
             print("did you mean: %s" % ", ".join(hints), file=sys.stderr)
@@ -411,10 +464,11 @@ def cmd_explore(args):
             flags.append("ore: " + ",".join(r["oredicts"][:3]))
         print("%-44s %-38s %s" % (r["key"], r["name"][:38], " | ".join(flags)))
 
-    if hits.hidden:
-        print("\n" + present.hidden_note(hits.hidden))
+    if hits.hidden or hits.collapsed:
+        print("\n" + present.hidden_note(hits.hidden, hits.collapsed))
 
     payload = {"query": args.query, "results": results, "hidden": hits.hidden,
+               "collapsed": hits.collapsed,
                "searched": len(g.live_keys), "named": len(g.labels)}
     if args.json:
         with open(args.json, "w") as fh:
@@ -426,7 +480,8 @@ def cmd_explore(args):
             note = ("This graph has no machine recipes yet: run /recipedump in game, "
                     "otherwise machine-made items show as having no recipe.")
         with open(args.html, "w") as fh:
-            fh.write(render_explore_html(payload, note))
+            fh.write(render_explore_html(payload, note, icon=iconset.resolver(
+                g, os.path.dirname(os.path.abspath(args.graph)), inline=True)))
         print("wrote %s" % args.html)
     return 0
 
@@ -613,8 +668,8 @@ def ensure_graph(graph_path, instance_dir=None, quiet=False, allow_build=True):
     say("%s -- building from %s"
         % ("no graph yet" if not have_graph else "dump is newer than the graph",
            instance_dir))
-    g = index.build(instance_dir)
     os.makedirs(os.path.dirname(graph_path) or ".", exist_ok=True)
+    g = index.build(instance_dir, out_path=graph_path)
     g.save(graph_path)
     say("wrote %s (%.1f MB)" % (graph_path, os.path.getsize(graph_path) / 1e6))
     return graph_path

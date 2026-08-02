@@ -71,7 +71,7 @@ class StatusCoverageTest(unittest.TestCase):
         rows = present.status_legend()
         self.assertEqual(len(rows), len({fill for fill, _ink, _lab in rows}))
         green = [lab for fill, _ink, lab in rows if fill == "var(--okbg)"]
-        self.assertEqual(green, ["in stock, infinite"])
+        self.assertEqual(green, ["in stock, infinite, transmute"])
 
     def test_the_legend_only_covers_the_statuses_asked_for(self):
         rows = present.status_legend(["craft"])

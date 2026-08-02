@@ -7,12 +7,14 @@ from . import dimensions, multiblocks
 from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
+from .sources import damageable as damageable_src
 from .sources import dump_meta, dump_names
-from .sources import hei_dump, jar_json, oredict
+from .sources import emc as emc_src
+from .sources import hei_dump, icons as icons_src, jar_json, machine_names, oredict
 
 
 def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
-          keep_categories=None, dump_dir=None):
+          keep_categories=None, dump_dir=None, out_path=None):
     def say(msg):
         if not quiet:
             print(msg, file=sys.stderr)
@@ -163,10 +165,69 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
             "dimension is not priced, which is the pre-#112 behaviour")
 
+    _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say)
+
+
     say("graph: %d recipes, %d produced item keys, %d/%d oredict resolved"
         % (len(g.recipes), len(g.by_output),
            len(referenced & set(g.ore_members)), len(referenced)))
     return g
+
+
+def _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say):
+    """The four files schema 5 added, each optional and each inert when absent.
+
+    ONE FUNCTION RATHER THAN FOUR BLOCKS INLINE, because they share a property worth
+    stating once: every one of them turns a feature ON, and every one of them missing means
+    the graph behaves exactly as a schema-4 graph does. None of them can make a plan wrong,
+    so none of them warrants the "this graph is degraded" warning `describe` gives for a
+    stale digest format -- what they warrant is a line saying which feature is off.
+    """
+    g.max_damage = damageable_src.load(damageable_src.find(instance_dir, dump_dir))
+    if g.max_damage:
+        say("damageable: %d item types use their meta as durability, so their damage "
+            "values collapse in search (#118)" % len(g.max_damage))
+    else:
+        say("damageable: damageable.json not present -- every damage value of a tool stays "
+            "its own search row, which is the pre-schema-5 behaviour")
+
+    g.machine_names, g.blueprint_machines = machine_names.load(
+        machine_names.find(instance_dir, dump_dir))
+    named = sum(1 for m in g.blueprint_machines.values() if m in g.machine_names)
+    if g.blueprint_machines:
+        say("machine names: %d Modular Machinery machines, %d of %d blueprints named "
+            "after the machine they build (#55)"
+            % (len(g.machine_names), named, len(g.blueprint_machines)))
+    else:
+        say("machine names: machine_names.json not present -- every Modular Machinery "
+            "blueprint stays 1 of 261 items called \"Machine Blueprint\"")
+
+    g.emc = emc_src.load(emc_src.find(instance_dir, dump_dir))
+    if g.emc:
+        # The count that decides whether #50 is worth anything on this pack: an EMC value
+        # only helps for a key the graph could not otherwise reach.
+        dead_ends = sum(1 for key in g.emc if not g.real_producers(key))
+        say("emc: %d items carry a ProjectE EMC value, %d of which nothing in the graph "
+            "produces (#50)" % (len(g.emc), dead_ends))
+    else:
+        say("emc: emc.json not present -- a drop-only item still dead-ends on its loot "
+            "token, which is the pre-#50 behaviour")
+
+    index = icons_src.load(icons_src.find(instance_dir, dump_dir))
+    if index and out_path:
+        # `dump_root`, not a second `dump_meta.dir_for` call. They agree today and the
+        # DIR_NAME docstring records what happens when two resolutions of the same directory
+        # drift: a graph holding recipes from one dump and names from another.
+        index = icons_src.copy_pages(index, dump_root,
+                                     os.path.dirname(os.path.abspath(out_path)), say)
+    g.icons = index
+    if g.icons:
+        say("icons: %d sprites across %d atlas page(s)%s (#36)"
+            % (len(g.icons["keys"]), len(g.icons["pages"]),
+               "" if out_path else " -- NOT copied, no --out to copy them beside"))
+    else:
+        say("icons: icons.json not present -- rows keep the per-mod hue chip instead of a "
+            "picture, which is the pre-#36 behaviour")
 
 
 # JEI categories that are NOT production recipes. They dominate the dump by volume --

@@ -455,14 +455,32 @@ class TheJavaSourceContract(unittest.TestCase):
         self.assertIn(digest_churn.NO_TRACE_ARG, str(caught.exception))
 
     def test_the_trace_is_on_by_default_in_the_mod(self):
-        # The tool's error message asserts "every dump from v0.7.0 writes it unless...".
-        # That claim lives in Java, so pin it: wantsTrace must return TRUE for no args.
-        body = re.search(r"static boolean wantsTrace\(String\[\] args\) \{(.*?)\n    \}",
-                         self.src, re.S)
-        self.assertIsNotNone(body, "wantsTrace not found in %s" % self.JAVA)
-        self.assertIn("return true;", body.group(1),
-                      "wantsTrace no longer defaults to writing the trace, but the tool "
-                      "still tells the player it is written by default")
+        """The tool's error message asserts "every dump from v0.7.0 writes it unless...".
+
+        THE PROPERTY IS PINNED IN JAVA AND THIS ASSERTS THE PIN EXISTS, rather than
+        re-deriving it from the shape of the source. This test used to grep `wantsTrace`'s
+        body for a literal `return true;`, which pinned one IMPLEMENTATION of the default
+        rather than the default -- and it broke the moment schema 5 factored the two
+        suppress flags through a shared `suppressed()` helper, on a change that could not
+        possibly have altered what a no-args dump writes. A source-shape assertion that
+        fires on a refactor and would say nothing about a real inversion is worse than no
+        assertion, because it trains the next person to edit the expectation.
+
+        `SchemaFiveTest` runs in a JVM against the real method and asserts both flags
+        default on and neither takes the other with it. What this can usefully check from
+        python, with no JDK, is that the assertion is still there.
+        """
+        java_test = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "mod", "src", "test", "java", "io", "github", "jacoblasky",
+                                 "recipedump", "SchemaFiveTest.java")
+        self.assertTrue(os.path.exists(java_test),
+                        "the JVM test that pins the trace default is gone: %s" % java_test)
+        with open(java_test) as fh:
+            body = fh.read()
+        self.assertRegex(
+            body, r"assertTrue\(DumpCommand\.wantsTrace\(none\)\)",
+            "SchemaFiveTest no longer asserts that a no-args /recipedump writes the trace, "
+            "but the tool still tells the player it is written by default")
 
 
 class Cli(unittest.TestCase):

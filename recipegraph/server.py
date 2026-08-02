@@ -30,7 +30,9 @@ from . import dimensions as dimensions_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
+from . import iconset
 from . import pins as pins_mod
+from . import projecte as projecte_mod
 from . import tokens as tokens_mod
 from . import version as version_mod
 from .defaults import (DEFAULT_HOST, DEFAULT_MAX_NODES, DEFAULT_PINS, DEFAULT_PORT,
@@ -699,6 +701,13 @@ class State:
         # Resolved here rather than left to `estimate_cached` so the path the server memoises
         # to is inspectable, and so an explicit override is visible on the State.
         self.cost_cache_path = cost_cache_path or cost_mod.cache_beside(graph_path)
+        # Where the icon atlas pages live: beside the graph, because that is where
+        # `index.build` copies them and what rsyncs into the container's bind mount. Derived
+        # from `graph_path` rather than taken as a flag, for the same reason
+        # `cost.cache_beside` is -- a second path that had to agree with the first is a
+        # second thing to get wrong, and getting it wrong here means every row silently
+        # loses its picture.
+        self.data_dir = os.path.dirname(os.path.abspath(graph_path))
         self.lock = threading.Lock()
         self.load_all()
 
@@ -718,6 +727,10 @@ class State:
         # #112 or by the in-game Lua dump, and empty means "gate nothing" -- see
         # dimensions.gates_for for why that is the safe reading of a missing field.
         self.visited_dimensions = {}
+        # The ProjectE half of the have file. Empty for a stock file written before #50 or
+        # by the in-game Lua dump, and empty means "transmutation is not a route", which is
+        # the pre-#50 behaviour rather than a degraded one.
+        self.emc_knowledge = {}
         if self.have_path and os.path.exists(self.have_path):
             with open(self.have_path) as fh:
                 doc = json.load(fh)
@@ -729,6 +742,7 @@ class State:
             self.craftables = set(doc.get("craftables") or ())
             self.placed = doc.get("placed") or {}
             self.visited_dimensions = doc.get("dimensions") or {}
+            self.emc_knowledge = doc.get("emc_knowledge") or {}
         self.refresh_machines()
 
     def stale(self):
@@ -772,11 +786,15 @@ class State:
         # above: one answer, so prices and labels cannot disagree.
         self.dimension_gates = dimensions_mod.gates_for(self.graph,
                                                         self.visited_dimensions)
+        # #50's terminator, resolved once here for the same reason: the price a route is
+        # ranked at and the node the plan stops on have to come from one answer.
+        self.emc_available = projecte_mod.available(self.graph, self.emc_knowledge)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info),
-            token_kinds=self.token_kinds, dimension_gates=self.dimension_gates)
+            token_kinds=self.token_kinds, dimension_gates=self.dimension_gates,
+            emc_available=self.emc_available)
         # The two search indexes, built here rather than on first use. Between them they
         # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while
@@ -796,7 +814,8 @@ class State:
                       machine_states=self.states, costs=self.costs,
                       free_sources=self.free_sources, token_kinds=self.token_kinds,
                       pinned=self.pinned, max_nodes=max_nodes,
-                      dimension_gates=self.dimension_gates)
+                      dimension_gates=self.dimension_gates,
+                      emc_available=self.emc_available)
 
 
 HOME_JS = """
@@ -1668,13 +1687,25 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # the access log is noise for a single-user local tool
 
-    def _send(self, body, status=200, ctype="text/html; charset=utf-8"):
-        raw = body.encode("utf-8")
+    def _send_bytes(self, raw, status=200, ctype="application/octet-stream", cache=None):
+        """The byte path. `_send` encodes text and calls this, so headers live in one place.
+
+        `cache` sets Cache-Control. Only the atlas pages use it: they are megabytes, they are
+        requested once per row on a page full of icons, and they cannot change without the
+        graph changing -- a reload swaps both, and the browser is told to revalidate then
+        because `_stamp` is what decides the graph moved, not a URL.
+        """
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
+        if cache:
+            self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(raw)
+
+    def _send(self, body, status=200, ctype="text/html; charset=utf-8"):
+        raw = body.encode("utf-8")
+        self._send_bytes(raw, status, ctype)
 
     def do_GET(self):
         parts = urllib.parse.urlparse(self.path)
@@ -1697,7 +1728,9 @@ class Handler(BaseHTTPRequestHandler):
                 hits = explore_mod.suggest(st.graph, one("q"), have=st.have, limit=25)
                 return self._send(api_mod.dumps({"results": hits.results,
                                                  "hidden": hits.hidden,
-                                                 "note": hidden_note(hits.hidden)}),
+                                                 "collapsed": hits.collapsed,
+                                                 "note": hidden_note(hits.hidden,
+                                                                     hits.collapsed)}),
                                   ctype=api_mod.JSON_CTYPE)
             if parts.path == "/api" or parts.path.startswith("/api/"):
                 payload, status = api_mod.dispatch(st, parts.path, q)
@@ -1710,10 +1743,11 @@ class Handler(BaseHTTPRequestHandler):
                 # than half the named keys are dead and never enter the scan, so the old
                 # figure claimed a reach the search does not have.
                 payload = {"query": query, "results": hits.results,
-                           "hidden": hits.hidden,
+                           "hidden": hits.hidden, "collapsed": hits.collapsed,
                            "searched": st.searchable, "named": st.named}
                 return self._send(_wrap_fragment(
-                    "Explore: %s" % query, render_explore_html(payload), st,
+                    "Explore: %s" % query,
+                    render_explore_html(payload, icon=iconset.resolver(st.graph)), st,
                     _crumb("Explore “%s”" % query), path="/explore"))
             if parts.path == "/plan":
                 key = one("item")
@@ -1777,7 +1811,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(_wrap_fragment(
                     title,
                     render_html(result, st.graph, back=plan_url(key, qty, cap),
-                                deeper=_deeper(key, qty, cap)),
+                                deeper=_deeper(key, qty, cap),
+                                icon=iconset.resolver(st.graph)),
                     st, _crumb(title), path="/plan"))
             if parts.path == "/recipes":
                 page, status = recipes_page(st, one("item"),
@@ -1802,6 +1837,18 @@ class Handler(BaseHTTPRequestHandler):
                     " stroke='#fff' fill='none' stroke-width='1.4'"
                     " stroke-linecap='round' stroke-linejoin='round'/></svg>",
                     ctype="image/svg+xml")
+            if parts.path.startswith(iconset.URL_PREFIX):
+                # `/icons/<N>.png`. The number indexes `graph.icons["pages"]`; it is never
+                # joined onto a path, so no request can name a file this build did not
+                # write. See iconset.page_bytes.
+                name = parts.path[len(iconset.URL_PREFIX):]
+                page = int(name[:-4]) if name[:-4].isdigit() and name.endswith(".png") else -1
+                raw = iconset.page_bytes(st.graph, page, st.data_dir)
+                if raw is None:
+                    return self._send(_page("Not found", "<div class='wrap'><h1>No such "
+                                            "atlas page</h1></div>", st), 404)
+                return self._send_bytes(raw, ctype="image/png",
+                                        cache="public, max-age=0, must-revalidate")
             if parts.path == "/healthz":
                 return self._send("ok", ctype="text/plain; charset=utf-8")
         except (ValueError, KeyError) as exc:

@@ -14,6 +14,17 @@ not the mod version. Bump it in DumpCommand.java and here together:
      names.json keys by the discriminated id so the digest has a readable name
   4  `n` is computed differently: named lists are sorted and `ench` is cosmetic, so every
      discriminated key moves. Shape-identical to 3 and NOT parse-compatible with it. #80, #63
+  5  summary.json's `skipped` becomes `threw` and gains `skip_lines` (#90); adds
+     damageable.json (#118), emc.json (#50), machine_names.json (#55) and the
+     icons-N.png / icons.json atlas (#36)
+
+SCHEMA 5 IS A SHAPE CHANGE ONLY -- `n` is computed exactly as it was at 4, so a schema-4
+graph's discriminated keys are still the keys this reader computes and AE2 stock still
+matches. That is why `DIGEST_FORMAT_SCHEMA` stayed at 4 and why `describe` says "re-run
+/recipedump to pick up newer fields" for a schema-4 dump rather than the far louder warning
+it gives for a schema-3 one. Moving DIGEST_FORMAT_SCHEMA for a bump that did not touch the
+digest would cry wolf, and a warning that cries wolf gets trained away before the one time
+it matters.
 
 `tests/test_catalysts.py` reads DumpCommand.java and asserts the two numbers are equal, so
 bumping one alone fails without a JVM.
@@ -27,7 +38,7 @@ try:
 except ImportError:  # run directly as a script; see ae2_inventory's module docstring
     from nbt_digest import DIGEST_FORMAT_SCHEMA
 
-SCHEMA = 4
+SCHEMA = 5
 
 #: The directory `/recipedump` writes into, relative to the pack's `minecraft/` dir.
 #:

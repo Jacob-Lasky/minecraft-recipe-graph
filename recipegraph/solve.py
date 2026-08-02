@@ -34,6 +34,11 @@ STATUS_DEPTH = "depth"      # hit the depth/size cap
 # materials, or a mechanic. Not craftable and not shoppable, so it leaves the shopping list
 # and is reported on its own. See tokens.py.
 STATUS_TOKEN = "token"
+# The ProjectE transmutation network can make this: the item has an EMC value AND somebody
+# has learned it. A TERMINATOR IN THE `source` FAMILY RATHER THAN A RECIPE, because it is not
+# a crafting step -- it is a thing you already effectively have, and the plan should say so
+# and stop. See projecte and #50.
+STATUS_EMC = "emc"
 
 
 def _count_cycles(node):
@@ -70,7 +75,7 @@ class Solver:
                  max_depth=24, max_nodes=DEFAULT_MAX_NODES, craftables=None,
                  branch_tries=4,
                  work_budget=None, machine_states=None, costs=None, free_sources=None,
-                 token_kinds=None, dimension_gates=None):
+                 token_kinds=None, dimension_gates=None, emc_available=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self._by_base = _index_pool(self.pool)
@@ -82,6 +87,13 @@ class Solver:
         # quantity stays visible. See generators.py.
         self.free_sources = dict(free_sources or {})
         self.from_sources = collections.Counter()
+        # Keys the ProjectE network can transmute: learned AND carrying an EMC value. Held
+        # apart from `free_sources` even though both terminate a branch, because they make
+        # DIFFERENT claims and a plan has to be able to say which. A generator is infinite
+        # and free; EMC is finite and fungible, and the row has to name its grounds
+        # ("EMC 2,048, learned") so a reader can check it. See projecte.available and #50.
+        self.emc_available = set(emc_available or ())
+        self.from_emc = collections.Counter()
         # {item key: frozenset of acceptable recipe ids}, from pins.resolve. A SET, not
         # one id: a pin that lapsed onto its category accepts every recipe in it, and
         # this class keeps its own ranking among whatever is acceptable rather than being
@@ -446,6 +458,24 @@ class Solver:
             self.from_sources[key] += remainder
             return node
 
+        # AFTER stock and free sources, BEFORE `raw`/`craftables` and any recipe lookup, and
+        # each half of that placement is a claim.
+        #
+        # After stock, because spending what you already hold is strictly better than
+        # spending EMC, and `take` has drawn the pool down so only the shortfall is charged.
+        # After free sources, because those are genuinely free and this is not.
+        #
+        # Before recipes, because that is the whole point: `erebus:materials` has a recipe
+        # in the graph -- it is "dropped by a dungeon", expressed as a pseudo-item -- and
+        # descending into it produces the dead end #50 was reported for. A player with a
+        # working transmutation network does not go and farm a dungeon for an item their
+        # network already makes.
+        if key in self.emc_available:
+            node["status"] = STATUS_EMC
+            node["note"] = "EMC %s, learned" % "{:,}".format(self.g.emc.get(key, 0))
+            self.from_emc[key] += remainder
+            return node
+
         if key in self.raw or key in self.craftables:
             node["status"] = STATUS_HAVE if key in self.craftables else STATUS_RAW
             if key in self.craftables:
@@ -582,11 +612,11 @@ class Solver:
         """
         return (self.pool.copy(), self.used_from_stock.copy(),
                 self.leaf_totals.copy(), self.from_sources.copy(),
-                self.tokens_needed.copy(), self.nodes)
+                self.tokens_needed.copy(), self.from_emc.copy(), self.nodes)
 
     def _restore(self, snap):
         (self.pool, self.used_from_stock, self.leaf_totals,
-         self.from_sources, self.tokens_needed, self.nodes) = snap
+         self.from_sources, self.tokens_needed, self.from_emc, self.nodes) = snap
 
     def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth):
         """Expand one specific recipe choice for `key`."""
@@ -667,6 +697,12 @@ class Solver:
             "tokens_needed": [dict(self._entry(k, n),
                                    token_kind=self.token_kinds.get(k, ""))
                               for k, n in self.tokens_needed.most_common()],
+            # Its own list rather than folded into `shopping_list`, for the same reason
+            # `from_sources` is: these are not things to go and get. Carrying the EMC value
+            # per row keeps the claim checkable -- "EMC 2,048" is something a player can
+            # look up, where a bare "from EMC" is something they have to take on trust.
+            "from_emc": [dict(self._entry(k, n), emc=self.g.emc.get(k, 0))
+                         for k, n in self.from_emc.most_common()],
             "machines_to_build": [
                 {"category": cat, "machine": m, "state": st, "why": why}
                 for cat, (m, st, why) in sorted(self.machines_needed.items())

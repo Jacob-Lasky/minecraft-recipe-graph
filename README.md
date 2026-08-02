@@ -299,7 +299,7 @@ wrong, so it is worth reading once.
 | Piece | What it is | Where it goes | Version |
 | --- | --- | --- | --- |
 | **The tool** | `recipegraph/` — the CLI, the renderers and the web server, one Python package | anywhere with Python 3.8+; on a server, the Docker image below | git commit, printed in the page footer |
-| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.8.0.jar` |
+| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.9.0.jar` |
 | **The data** | `mc-recipe-dump/` from the mod, then `graph.json` and `ae2_have.json` built from it | the `/data` mount the tool reads | a `schema` number, recorded in every file and checked on read |
 
 **The web UI is not a separate piece.** Pages are server-rendered by the same renderers the
@@ -427,6 +427,27 @@ draws on the next frame. It walks
 JEI's `IRecipeRegistry` and writes `recipes.ndjson`, `oredict.json` and `names.json`
 into `<gamedir>/mc-recipe-dump/`.
 
+It then walks JEI's complete item list — a different population, since an item nothing
+crafts and nothing consumes never appears in a recipe — and writes three more files.
+`damageable.json` says which items use their metadata as durability, which is the only
+sound way to tell 46 damage values of one Iron Axe from 9 genuinely distinct
+`chisel:lapis` blocks ([#118](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/118)).
+`emc.json` carries each item's ProjectE EMC value, so a drop-only item stops dead-ending on
+its loot token ([#50](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/50)).
+`machine_names.json` carries Modular Machinery's own machine registry and the machine each
+blueprint builds, so a plan can say *which* of the 261 items called "Machine Blueprint" it
+means ([#55](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/55)). All three
+are absent, without complaint, on a pack that does not run the mod they read.
+
+Last, and only after every other file is closed, it renders every item to a 16×16 sprite and
+writes an `icons-N.png` atlas plus `icons.json`
+([#36](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/36)). `/recipedump
+noicons` skips it. It runs last because it is the one phase that can plausibly fail —
+rendering tens of thousands of arbitrary modded stacks offscreen touches code paths never
+written to run outside a GUI frame — and the irreplaceable thing here is the launch of the
+game, not the pictures. It reports rendered/blank/threw counts in chat, so the launch itself
+says whether it worked.
+
 It also writes `nbt_trace.json` by default: a per-top-level-tag digest of every key that
 carries identifying NBT, in two flavours per tag — lists in order, and lists sorted.
 `/recipedump notrace` skips it. That is a diagnostic for [#80](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/80),
@@ -480,7 +501,7 @@ and rendered recipe GUIs to scrape them, which is both slow and broken across th
 **A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
 
 ```bash
-cp dist/mc-recipe-dump-0.8.0.jar '/path/to/instance/minecraft/mods/'
+cp dist/mc-recipe-dump-0.9.0.jar '/path/to/instance/minecraft/mods/'
 ```
 
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
@@ -491,9 +512,14 @@ rebuild and re-commit the jar rather than editing the expected numbers.
 **Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
 two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
 
-**This jar writes dump schema 4, and a schema-3 graph is not compatible with it.** The digest
-that identifies an NBT-bearing stack changed (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in
-`DumpCommand.java`), so upgrading means `/recipedump`, then `recipegraph build`, then
+**This jar writes dump schema 5.** Schema 5 adds files and renames one summary field; it does
+NOT change how an NBT-bearing stack is digested, so a schema-4 graph's keys are still the keys
+this reader computes and AE2 stock still matches. Upgrading from 4 costs a `/recipedump` and a
+`recipegraph build` to pick up the new files, and no re-run of `have`.
+
+**A schema-3 graph is a different matter and is not compatible.** The digest that identifies
+an NBT-bearing stack changed at schema 4 (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in
+`DumpCommand.java`), so upgrading from 3 means `/recipedump`, then `recipegraph build`, then
 `recipegraph have` again — in that order. Skipping the last step leaves AE2 stock filed under
 keys the new graph does not use, and `have` says so rather than letting it pass.
 

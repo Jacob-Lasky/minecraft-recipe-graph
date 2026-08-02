@@ -17,8 +17,8 @@ DO NOT add a local status->colour dict to a renderer. Add the case here.
 from . import pins
 from .htmlutil import script_json
 from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
-from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_HAVE, STATUS_PARTIAL,
-                    STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
+from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_EMC, STATUS_HAVE,
+                    STATUS_PARTIAL, STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
 from .tokens import KIND_BADGE
 
 # The oredict node the solver emits from `resolve_ore`, which is a string rather than a
@@ -26,7 +26,7 @@ from .tokens import KIND_BADGE
 STATUS_OREDICT = "oredict"
 
 ALL_STATUSES = (STATUS_HAVE, STATUS_PARTIAL, STATUS_CRAFT, STATUS_RAW, STATUS_TOKEN,
-                STATUS_SOURCE, STATUS_CYCLE, STATUS_DEPTH, STATUS_OREDICT)
+                STATUS_SOURCE, STATUS_EMC, STATUS_CYCLE, STATUS_DEPTH, STATUS_OREDICT)
 
 # status -> (badge text, css class). The class names are the semantic tokens in render.CSS.
 STATUS_LABEL = {
@@ -38,6 +38,9 @@ STATUS_LABEL = {
     # quest gate you cannot go and get.
     STATUS_TOKEN: ("go get", "need"),
     STATUS_SOURCE: ("infinite", "ok"),
+    # "transmute", not "EMC" or "have": the badge says what the player DOES, the way every
+    # other one here does, and the node's note carries the evidence ("EMC 2,048, learned").
+    STATUS_EMC: ("transmute", "ok"),
     STATUS_CYCLE: ("loop", "muted"),
     STATUS_DEPTH: ("cut off", "muted"),
     STATUS_OREDICT: ("any of", "muted"),
@@ -61,6 +64,11 @@ STATUS_STYLE = {
     # hunt for a difference that is not there.
     STATUS_TOKEN: ("var(--needbg)", "var(--need)"),
     STATUS_SOURCE: ("var(--okbg)", "var(--ok)"),
+    # SHARES the ok fill with `source` and `have`, on the same argument the two need-fills
+    # above are shared on: what the diagram's colour says is "this branch stops here and
+    # costs you nothing to obtain", and stock, an infinite generator and a learned
+    # transmutation are all that. The difference is a word.
+    STATUS_EMC: ("var(--okbg)", "var(--ok)"),
     STATUS_CYCLE: (_MUTED, "var(--dim)"),
     STATUS_DEPTH: (_MUTED, "var(--dim)"),
     STATUS_OREDICT: (_MUTED, "var(--dim)"),
@@ -188,8 +196,8 @@ def pin_badge(state):
     return text, PIN_CLASS.get(state, "muted")
 
 
-def hidden_note(hidden):
-    """`N hidden: no recipe makes or uses them`, or "" when nothing was suppressed.
+def hidden_note(hidden, collapsed=0):
+    """What the search suppressed, or "" when it suppressed nothing.
 
     THE ONE WORDING, for all three search surfaces: the explore page, the typeahead and the
     CLI's `find`. It briefly lived in three places -- here, a hand-written copy inside the
@@ -204,6 +212,13 @@ def hidden_note(hidden):
     indistinguishable from one that is broken. The sentence says WHY, because "174,705
     hidden" on its own invites the reader to wonder what else is being kept from them.
     """
-    if not hidden:
-        return ""
-    return "%s hidden: no recipe makes or uses them" % "{:,}".format(hidden)
+    parts = []
+    if hidden:
+        parts.append("%s hidden: no recipe makes or uses them" % "{:,}".format(hidden))
+    # SAID, NOT SILENT, exactly like `hidden`. Folding 45 of 46 Iron Axe rows into one is the
+    # right answer and it is still 45 rows a reader can no longer see; a search that removes
+    # them without a word is indistinguishable from one that lost them. #118
+    if collapsed:
+        parts.append("%s folded in: damage values of an item already listed"
+                     % "{:,}".format(collapsed))
+    return "; ".join(parts)

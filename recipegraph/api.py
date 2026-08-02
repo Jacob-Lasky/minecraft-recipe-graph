@@ -31,7 +31,8 @@ import json
 import math
 
 from . import cost as cost_mod
-from . import explore, query
+from . import explore
+from . import iconset, query
 
 JSON_CTYPE = "application/json; charset=utf-8"
 
@@ -106,6 +107,21 @@ FIELDS = {
              "whether any recipe touches it at all"),
     "ores": (lambda c, k: " ".join(sorted(c.graph.ores_of(k))),
              "its oredict groups, space-joined so text functions work on them"),
+    # The #50 measurement IS a sweep -- `emc > 0 and producers == 0` names every item whose
+    # only route the graph knows is a drop and which the transmutation network could make
+    # instead -- so it belongs in the vocabulary rather than in a script. That is this
+    # module's whole argument: a question the server cannot answer is a missing FIELD, not a
+    # reason to reach for python.
+    "emc": (lambda c, k: c.graph.emc.get(k, 0),
+            "its ProjectE EMC value, 0 for an item the pack gives none"),
+    # Whether #36's atlas has a picture for it, so "what is missing art" is answerable
+    # without opening the PNGs. False on every key of a pre-schema-5 graph.
+    "icon": (lambda c, k: iconset.locate(c.graph, k) is not None,
+             "whether the icon atlas holds a sprite for it"),
+    # `damaged` separates a worn tool from an item whose meta is a subtype, which is the
+    # distinction #118 turns on and the one no shape of the key can express.
+    "damaged": (lambda c, k: c.graph.damage_base(k) != k,
+                "whether this key is a durability variant of another item"),
 }
 
 
