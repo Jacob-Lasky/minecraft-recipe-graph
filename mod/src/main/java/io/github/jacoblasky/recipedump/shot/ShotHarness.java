@@ -45,6 +45,8 @@ public final class ShotHarness {
     public static final String PROP_TIMEOUT = "mcrecipedump.shotTimeoutSeconds";
     /** `true` keeps ModularUI's widget-outline overlay in the picture. */
     public static final String PROP_DEBUG_OVERLAY = "mcrecipedump.shotDebugOverlay";
+    /** Frames to TIME after settling, driving the screen once per frame. 0 turns it off. */
+    public static final String PROP_FRAMES = "mcrecipedump.shotTimedFrames";
 
     /**
      * Frames between opening the screen and capturing it.
@@ -111,7 +113,28 @@ public final class ShotHarness {
 
         private final String spec;
         private final int settleFrames;
+        private final int timedFrames;
         private final long deadlineNanos;
+        /**
+         * DRAW cost per frame: render-tick START to END, in nanoseconds.
+         *
+         * THE DRAW AND NOT THE PERIOD, and that distinction is the whole reason this mode
+         * produces a usable number. Minecraft throttles hard when no world is loaded, so the
+         * gap between one frame and the next is a deliberate sleep and measuring it reports
+         * the throttle rather than the work -- the first version of this did exactly that and
+         * came back with 33.2ms, which is 30.0 fps to three figures, on a screen holding four
+         * widgets. Disabling vsync changed nothing, because vsync was never the cause.
+         *
+         * START to END brackets the render and excludes `Display.update` and the frame
+         * limiter's wait, both of which happen after `onRenderTickEnd`. "Does the draw fit in
+         * 16.67ms" is also the question the 60 fps gate is actually asking.
+         */
+        private long[] periods;
+        /** Wall-clock period, kept only to show how much of it was throttle. */
+        private long[] wallPeriods;
+        private int timed;
+        private long previousFrameNanos;
+        private long drawStartedNanos;
 
         /** null until the screen has been asked for; then counts frames down to the capture. */
         private Integer framesLeft;
@@ -120,6 +143,7 @@ public final class ShotHarness {
         Runner(String spec) {
             this.spec = spec;
             this.settleFrames = intProperty(PROP_SETTLE, DEFAULT_SETTLE_FRAMES);
+            this.timedFrames = Math.max(0, intProperty(PROP_FRAMES, 0));
             this.deadlineNanos = System.nanoTime()
                     + intProperty(PROP_TIMEOUT, DEFAULT_TIMEOUT_SECONDS) * 1_000_000_000L;
             this.lastReportNanos = System.nanoTime();
@@ -156,6 +180,13 @@ public final class ShotHarness {
         }
 
         @SubscribeEvent
+        public void onRenderTickStart(TickEvent.RenderTickEvent event) {
+            if (event.phase == TickEvent.Phase.START && framesLeft != null) {
+                drawStartedNanos = System.nanoTime();
+            }
+        }
+
+        @SubscribeEvent
         public void onRenderTick(TickEvent.RenderTickEvent event) {
             if (event.phase != TickEvent.Phase.END || framesLeft == null) {
                 return;
@@ -164,7 +195,124 @@ public final class ShotHarness {
                 framesLeft = framesLeft - 1;
                 return;
             }
+            if (timedFrames > 0 && timed <= timedFrames) {
+                measure();
+                return;
+            }
             capture();
+        }
+
+        /**
+         * One timed frame: record how long the last one took, then drive the screen.
+         *
+         * THE PERIOD BETWEEN SUCCESSIVE RENDER TICKS is the frame time, which is what "fps"
+         * means here -- not the duration of any one draw call. The first timed frame has no
+         * predecessor and so contributes no period; that is why the loop runs to
+         * `timedFrames` inclusive and the sample count is one lower.
+         */
+        private void measure() {
+            long now = System.nanoTime();
+            if (periods == null) {
+                periods = new long[timedFrames];
+                wallPeriods = new long[timedFrames];
+                unclamp();
+                log("timing " + timedFrames + " frames"
+                        + (ShotScreens.animated() == null
+                           ? " of a STATIC screen -- it registered nothing to drive, so this "
+                             + "measures redraw and not panning"
+                           : ", driving the screen once per frame"));
+            } else {
+                periods[timed - 1] = now - drawStartedNanos;
+                wallPeriods[timed - 1] = now - previousFrameNanos;
+            }
+            previousFrameNanos = now;
+            ShotScreens.Animated screen = ShotScreens.animated();
+            if (screen != null) {
+                try {
+                    screen.step(timed);
+                } catch (Throwable t) {
+                    log("the screen threw while being driven at frame " + timed + ": " + t);
+                    exit(EXIT_WRITE_FAILED);
+                    return;
+                }
+            }
+            timed++;
+            if (timed > timedFrames) {
+                report();
+            }
+        }
+
+        /**
+         * Turn off vsync and the frame limiter before timing anything.
+         *
+         * WITHOUT THIS THE HARNESS MEASURES THE CLAMP, NOT THE WORK, and it does so
+         * convincingly. Minecraft 1.12.2 defaults to vsync ON and a 120 fps limit; under
+         * Xvfb the first timing run reported p50 = 33.23ms on a screen holding four widgets,
+         * which is 30.0 fps to three figures. That is not a rasteriser being slow, it is
+         * vsync missing the 60 Hz deadline and landing on the next one -- the classic
+         * halving. A number that lands on an exact submultiple of 60 is the tell.
+         *
+         * `Display.setSwapInterval(0)` as well as the settings field, because the field is
+         * only read when the options screen applies it and nothing here opens that screen.
+         */
+        private void unclamp() {
+            try {
+                Minecraft mc = Minecraft.getMinecraft();
+                mc.gameSettings.enableVsync = false;
+                // 260 is what vanilla's own slider treats as unlimited.
+                mc.gameSettings.limitFramerate = 260;
+                org.lwjgl.opengl.Display.setSwapInterval(0);
+            } catch (Throwable t) {
+                // Worth continuing: a clamped measurement is still a measurement, and the
+                // report says it is a floor either way. But say so, because an exact
+                // submultiple of 60 in the output would otherwise look like a real result.
+                log("could not disable vsync (" + t + "); frame times may be a clamp rather "
+                        + "than the cost of the work");
+            }
+        }
+
+        /**
+         * The frame times, as percentiles.
+         *
+         * A FLOOR AND NOT A PREDICTION, and the log says so every run rather than leaving it
+         * to whoever reads the number. This harness rasterises in software on a shared host:
+         * llvmpipe's fill cost is far above a GPU's while the CPU-side widget work is
+         * comparable, so HOLDING a frame budget here is strong evidence it holds on real
+         * hardware, and MISSING one here is not evidence of anything -- it could be the
+         * rasteriser, or another container on the box. Quote a pass; do not quote a fail.
+         */
+        private void report() {
+            long[] sorted = java.util.Arrays.copyOf(periods, timedFrames - 1);
+            java.util.Arrays.sort(sorted);
+            long[] wall = java.util.Arrays.copyOf(wallPeriods, timedFrames - 1);
+            java.util.Arrays.sort(wall);
+            long budget = 16_666_667L;   // 60 fps
+            int over = 0;
+            for (long period : sorted) {
+                if (period > budget) {
+                    over++;
+                }
+            }
+            log(String.format(java.util.Locale.ROOT,
+                    "draw: n=%d  p50=%.2fms  p95=%.2fms  p99=%.2fms  max=%.2fms  "
+                            + "over-16.67ms=%d (%.1f%%)",
+                    sorted.length, ms(percentile(sorted, 50)), ms(percentile(sorted, 95)),
+                    ms(percentile(sorted, 99)), ms(sorted[sorted.length - 1]), over,
+                    100.0 * over / sorted.length));
+            log(String.format(java.util.Locale.ROOT,
+                    "wall period p50=%.2fms -- the difference is the client's own throttle, "
+                            + "not work this diagram does", ms(percentile(wall, 50))));
+            log("that is a FLOOR: software rasteriser on a shared host. A pass here implies "
+                    + "a pass on a GPU; a miss here implies nothing.");
+        }
+
+        private static long percentile(long[] sorted, int percent) {
+            int at = (int) Math.min(sorted.length - 1L, (long) sorted.length * percent / 100L);
+            return sorted[at];
+        }
+
+        private static double ms(long nanos) {
+            return nanos / 1_000_000.0;
         }
 
         /** Log what the client is sitting on every 15s, and fail once past the deadline. */

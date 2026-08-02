@@ -26,6 +26,17 @@ public class CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {
         PlanBookCapability.register();
         PlanBookNetwork.register();
+        // STARTED HERE, AT preInit, AND NOT WHEN THE PLANNER IS FIRST OPENED. The read is
+        // 5.47 s measured, so a player who right-clicks the calculator and waits five seconds
+        // for a window has been given a slow tool; started at load, the graph is ready long
+        // before anything is crafted. It costs nothing when there is no file -- `startLoad`
+        // resolves to MISSING without touching a thread -- so a pack that never supplies one
+        // pays only a `File.isFile()`.
+        //
+        // COMMON, not client. The graph is pack data and Phase 5 wants it server-side to read
+        // a real AE2 grid, so a server loading it now is the intended end state rather than
+        // waste. `GraphService` names no client class.
+        GraphService.get().startLoad(event.getModConfigurationDirectory());
     }
 
     public void init(FMLInitializationEvent event) {

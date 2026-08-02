@@ -1,0 +1,152 @@
+package io.github.jacoblasky.recipedump.common;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.Reader;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import org.junit.Test;
+
+/**
+ * The live-input list, held to the fixtures' own vocabulary.
+ *
+ * WHY THIS IS A CONTRACT TEST AND NOT A SPELLING CHECK. `ScenarioSource` names the fields of
+ * a plan scenario so the planner can tell a player which of them it could not read. If a name
+ * drifts from what `tests/fixtures/plan/*.json` uses, two things break quietly: the planner
+ * warns about an input that no longer exists, and it stops warning about one that does --
+ * so the player is told the plan accounts for their AE2 stock when it does not. Nothing
+ * throws either way.
+ *
+ * Asserted against a COMMITTED FIXTURE rather than a list restated here, because a second
+ * copy of the field names in this test would drift in exactly the same way and agree with
+ * itself while doing it.
+ */
+public class ScenarioSourceTest {
+
+    /**
+     * Any plan fixture will do -- every one carries a full `scenario` block, which is itself
+     * asserted by `tests/test_plan_fixtures.py`. The bare one is chosen because it is the
+     * smallest and sets no field to anything interesting.
+     */
+    private static final String FIXTURE = "tests/fixtures/plan/plan-dimension-gate.json";
+
+    /**
+     * Gradle runs tests with the module directory as the working directory, and a run from
+     * the repository root is reasonable too. Same two candidates `DigestFixtureTest` tries,
+     * for the same reason.
+     */
+    private static JsonObject fixture() throws IOException {
+        File[] candidates = {new File("../" + FIXTURE), new File(FIXTURE)};
+        for (File candidate : candidates) {
+            if (candidate.isFile()) {
+                Reader reader = new FileReader(candidate);
+                try {
+                    return new JsonParser().parse(reader).getAsJsonObject();
+                } finally {
+                    reader.close();
+                }
+            }
+        }
+        throw new IOException("cannot find " + FIXTURE + " from "
+                + new File(".").getAbsolutePath());
+    }
+
+    /** `entrySet`, not `keySet`: gson 2.8.0 is what 1.12.2 ships and it has no `keySet`. */
+    private static Set<String> keysOf(JsonObject object) {
+        Set<String> out = new LinkedHashSet<String>();
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            out.add(entry.getKey());
+        }
+        return out;
+    }
+
+    private static Set<String> fixtureFields() throws IOException {
+        return keysOf(fixture().getAsJsonObject("scenario"));
+    }
+
+    private static Set<String> declaredFields() {
+        Set<String> out = new LinkedHashSet<String>();
+        for (ScenarioSource source : ScenarioSource.values()) {
+            out.add(source.field());
+        }
+        return out;
+    }
+
+    @Test
+    public void everyScenarioFieldIsDeclaredAndNothingExtraIs() throws IOException {
+        // BOTH DIRECTIONS. A missing entry means an input the planner never warns about; an
+        // extra one means it warns about a field the solver does not read.
+        assertEquals(fixtureFields(), declaredFields());
+    }
+
+    @Test
+    public void thePlannerBuildsEveryFieldTheFixturesCarry() throws IOException {
+        // `PlannerService.liveScenario` is what `ScenarioInputs.resolve` is handed in game,
+        // so a field it forgets is one the game silently defaults where a fixture states it.
+        assertEquals(fixtureFields(), keysOf(PlannerService.liveScenario()));
+    }
+
+    @Test
+    public void anInputThatIsNotLiveCarriesAReason() {
+        // A warning with no reason is one a player cannot act on, and it is the reason rather
+        // than the flag that stops "planned without: have" reading as a defect.
+        for (ScenarioSource source : ScenarioSource.values()) {
+            if (!source.live()) {
+                assertFalse(source + " is not live and says nothing about why",
+                            source.note().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    public void aLiveInputDoesNotWarn() {
+        for (ScenarioSource source : ScenarioSource.values()) {
+            if (source.live()) {
+                assertTrue(source + " is live and should have nothing to warn about",
+                           source.note().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    public void theSummaryNamesTheUnreadInputs() {
+        // The one line that keeps an incomplete plan from reading as a complete one. Stock is
+        // the case that matters: an unread `have` is the claim "you own nothing".
+        String summary = ScenarioSource.summary();
+        assertTrue(summary, summary.contains(ScenarioSource.HAVE.field()));
+        assertFalse(summary, summary.contains(ScenarioSource.PINS.field()));
+    }
+
+    @Test
+    public void theSummaryIsEmptyOnceEverythingIsLive() {
+        // Pins the shape of the end state rather than today's: when Phase 5 lands and every
+        // source reports live, the caveat must disappear instead of becoming an empty
+        // "planned without: " that reads like a bug.
+        boolean anyMissing = false;
+        for (ScenarioSource source : ScenarioSource.values()) {
+            anyMissing |= !source.live();
+        }
+        assertEquals(anyMissing, !ScenarioSource.summary().isEmpty());
+    }
+
+    @Test
+    public void stockIsNotSilentlyAssumedEmpty() {
+        // The specific wrong answer this whole enum exists to prevent: planning as though the
+        // player owns nothing, which tells them to fetch things already in their ME system.
+        assertFalse(ScenarioSource.HAVE.live());
+        assertTrue(ScenarioSource.HAVE.note(),
+                   ScenarioSource.HAVE.note().contains("own nothing"));
+        assertTrue(ScenarioSource.missingNotes().contains(ScenarioSource.HAVE.note()));
+    }
+}

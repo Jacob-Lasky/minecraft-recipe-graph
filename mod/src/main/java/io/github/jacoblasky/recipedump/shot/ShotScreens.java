@@ -31,6 +31,45 @@ public final class ShotScreens {
         void open(String arg);
     }
 
+    /**
+     * A screen that can be DRIVEN, so the harness can time it doing something rather than
+     * time it sitting still.
+     *
+     * The 60 fps gate on #19 phase 3b is about PANNING a 4,000 node plan, and a static
+     * screenshot of one measures nothing: the frame cost that matters is the one paid while
+     * the viewport is moving and the culler is re-deciding what is on screen. A screen
+     * implementing this gets `step` called once per timed frame and is expected to move
+     * itself a little.
+     *
+     * Registered by the opener through {@link #animate}, rather than found by casting
+     * `Minecraft.currentScreen`, because a ModularUI screen is wrapped in a
+     * `GuiScreenWrapper` and the thing on the screen field is not the thing that knows how
+     * to pan.
+     */
+    public interface Animated {
+        /** @param frame 0-based index of the timed frame about to be drawn. */
+        void step(int frame);
+    }
+
+    /** Set by the current run's opener; null when the screen cannot be driven. */
+    private static Animated animated;
+
+    /**
+     * Offer the harness something to drive. Call from inside an {@link Opener}.
+     *
+     * CLEARED BY {@link #open} BEFORE EVERY OPEN, so a screen that does not register one
+     * cannot inherit the previous screen's. One process opens one screen today, but a
+     * leftover here would make a static screen report the pan timings of another.
+     */
+    public static void animate(Animated screen) {
+        animated = screen;
+    }
+
+    /** What the last opened screen registered, or null. */
+    public static Animated animated() {
+        return animated;
+    }
+
     private static final Map<String, Opener> SCREENS = new LinkedHashMap<String, Opener>();
 
     static {
@@ -44,6 +83,14 @@ public final class ShotScreens {
             @Override
             public void open(String arg) {
                 PlannerShot.openTree(arg);
+            }
+        });
+        // The only screen that SOLVES rather than reading a fixture. See LivePlanShot for
+        // why both exist: fixtures prove the drawing, this proves the plumbing.
+        register("planner-live", new Opener() {
+            @Override
+            public void open(String arg) {
+                LivePlanShot.open(arg);
             }
         });
         register("planner-menu", new Opener() {
@@ -107,6 +154,7 @@ public final class ShotScreens {
         if (opener == null) {
             return "no screen named '" + name + "'; known screens: " + names();
         }
+        animated = null;
         try {
             opener.open(arg);
         } catch (Throwable t) {
