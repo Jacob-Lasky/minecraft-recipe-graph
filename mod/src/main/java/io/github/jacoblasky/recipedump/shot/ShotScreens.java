@@ -40,6 +40,12 @@ public final class ShotScreens {
                 HarnessFixtureScreen.open();
             }
         });
+        register("planner", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.open();
+            }
+        });
     }
 
     private ShotScreens() {

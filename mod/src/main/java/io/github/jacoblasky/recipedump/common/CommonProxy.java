@@ -1,5 +1,8 @@
 package io.github.jacoblasky.recipedump.common;
 
+import io.github.jacoblasky.recipedump.common.net.PlanBookNetwork;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 
@@ -21,8 +24,29 @@ import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 public class CommonProxy {
 
     public void preInit(FMLPreInitializationEvent event) {
+        PlanBookCapability.register();
+        PlanBookNetwork.register();
     }
 
     public void init(FMLInitializationEvent event) {
+    }
+
+    /**
+     * Take a synced plan book. A no-op on a server, which is the authority and never receives
+     * one; {@code ClientProxy} copies it into the local player's book.
+     *
+     * On the proxy rather than in the packet handler because the handler class is loaded on
+     * both sides -- see {@code PlanBookSyncMessage.Handler}.
+     */
+    public void applyPlanBookSync(NBTTagCompound payload) {
+    }
+
+    /**
+     * Open the planner UI. A no-op on a server, which has no screens.
+     *
+     * The calculator item runs on both sides, so without this the item could not open
+     * anything without dragging {@code net.minecraft.client} into a common class.
+     */
+    public void openPlanner(EntityPlayer player) {
     }
 }
