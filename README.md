@@ -299,7 +299,7 @@ wrong, so it is worth reading once.
 | Piece | What it is | Where it goes | Version |
 | --- | --- | --- | --- |
 | **The tool** | `recipegraph/` — the CLI, the renderers and the web server, one Python package | anywhere with Python 3.8+; on a server, the Docker image below | git commit, printed in the page footer |
-| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.9.11.jar` |
+| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | built with `mod/tools/build-jar.sh` |
 | **The data** | `mc-recipe-dump/` from the mod, then `graph.json` and `ae2_have.json` built from it | the `/data` mount the tool reads | a `schema` number, recorded in every file and checked on read |
 
 **The web UI is not a separate piece.** Pages are server-rendered by the same renderers the
@@ -326,8 +326,8 @@ reported on the page footer and by `have`; the current upgrade order is in
 **Only the machine that plays can produce the data.** A server has no game to run
 `/recipedump` in and no reason to hold 410 mod jars, which is what
 [Feeding it from the machine that plays](#feeding-it-from-the-machine-that-plays) is about.
-A jar committed to `dist/` is therefore *published*, not *installed* — the file changing
-here does nothing until someone copies it into a client.
+A jar built here is therefore *available*, not *installed* — building it does nothing until
+someone copies it into a client.
 
 ## Running the UI on a server
 
@@ -498,10 +498,12 @@ against `HadEnoughItems_1.12.2-4.28.1.jar`. That is deliberate: the older
 and rendered recipe GUIs to scrape them, which is both slow and broken across the JEI
 4.8 → HEI 4.28 gap.
 
-**A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
+**Build the jar**, which takes about three minutes in a container and needs no JDK
+installed:
 
 ```bash
-cp dist/mc-recipe-dump-0.9.11.jar '/path/to/instance/minecraft/mods/'
+mod/tools/build-jar.sh                      # ~3 min, verifies what it produced
+cp mod/build/libs/mc-recipe-dump-*.jar '/path/to/instance/minecraft/mods/'
 ```
 
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
