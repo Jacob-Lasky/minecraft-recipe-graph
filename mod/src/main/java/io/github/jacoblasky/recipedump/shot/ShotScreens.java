@@ -46,6 +46,14 @@ public final class ShotScreens {
                 PlannerShot.openTree(arg);
             }
         });
+        // The only screen that SOLVES rather than reading a fixture. See LivePlanShot for
+        // why both exist: fixtures prove the drawing, this proves the plumbing.
+        register("planner-live", new Opener() {
+            @Override
+            public void open(String arg) {
+                LivePlanShot.open(arg);
+            }
+        });
         register("planner-menu", new Opener() {
             @Override
             public void open(String arg) {

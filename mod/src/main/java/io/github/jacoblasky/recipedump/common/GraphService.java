@@ -1,0 +1,255 @@
+package io.github.jacoblasky.recipedump.common;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+import io.github.jacoblasky.recipedump.graph.GraphJsonReader;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
+
+/**
+ * Holds the one loaded graph, and loads it without freezing the game.
+ *
+ * OFF THE MAIN THREAD BECAUSE THE NUMBER SAYS SO. Re-measured with `mod/tools/heap-gate.sh`
+ * on Java 8 under a compacting collector: 5.47 s to read the 115.8 MB oracle, 45.3 MB
+ * retained. Five seconds of a frozen client is not a slow load, it is a hang -- Forge's
+ * watchdog aside, the player cannot tell it from a crash. So the read happens on a daemon
+ * thread and the UI asks {@link #progress} what to draw.
+ *
+ * REPORT PROGRESS, NOT THE ABSENCE OF A PROBLEM. The skill is explicit about this and the
+ * dump learned it the hard way: an in-game message reading "the game stays playable" was
+ * removed because the player can see the game is running, so the reassurance is noise that
+ * reads as an apology for a defect. This says "reading graph.json, 62%", and when there is
+ * no graph it says which paths it tried.
+ *
+ * ONE GRAPH PER PROCESS. There is exactly one pack, so a second copy would be 45 MB spent to
+ * hold the same answer. `JeiBridge` already assumes this -- it caches a `StackIndex` against
+ * the identity of the graph it was built for -- so a service handing out different instances
+ * would silently rebuild that index on every plan.
+ *
+ * STATE IS READ FROM THE RENDER THREAD AND WRITTEN FROM THE LOADER, so every field crossing
+ * that boundary is `volatile`. They are written once each, in the order a reader can rely on:
+ * `graph` before `state`, so a thread that sees READY sees a fully built graph. DO NOT
+ * reorder those two assignments; the happens-before is the whole synchronisation here and
+ * there is no lock to fall back on.
+ */
+public final class GraphService {
+
+    /** What the planner can say about the graph right now. */
+    public enum State {
+        /** No load attempted yet. */
+        IDLE,
+        /** A load is running; see {@link #progress}. */
+        LOADING,
+        /** {@link #graph} is usable. */
+        READY,
+        /** No file at any candidate path. {@link #detail} says where it looked. */
+        MISSING,
+        /** A file was found and could not be read. {@link #detail} says why. */
+        FAILED
+    }
+
+    private static final GraphService INSTANCE = new GraphService();
+
+    private volatile RecipeGraph graph;
+    private volatile State state = State.IDLE;
+    private volatile String detail = "";
+    private volatile File source;
+    private volatile long totalBytes;
+    private volatile long readBytes;
+    private Thread loader;
+
+    private GraphService() {
+    }
+
+    public static GraphService get() {
+        return INSTANCE;
+    }
+
+    public State state() {
+        return state;
+    }
+
+    /** The loaded graph, or null unless {@link #state} is READY. */
+    public RecipeGraph graph() {
+        return graph;
+    }
+
+    /** Why it is MISSING or FAILED, or "" otherwise. Safe to show a player. */
+    public String detail() {
+        return detail;
+    }
+
+    public File source() {
+        return source;
+    }
+
+    /**
+     * 0.0 to 1.0 through the file, or -1 when there is nothing to report.
+     *
+     * BYTES READ, NOT WORK DONE, and the difference is worth being honest about: parsing is
+     * not uniform across the file, so the bar moves unevenly and the last few per cent take
+     * longer than the first. A smoothed or faked bar would be a nicer lie. The alternative --
+     * counting recipes against a total nobody knows until the end -- cannot report anything
+     * at all until it is too late to matter.
+     */
+    public float progress() {
+        long total = totalBytes;
+        if (state != State.LOADING || total <= 0L) {
+            return -1.0f;
+        }
+        return Math.min(1.0f, (float) ((double) readBytes / (double) total));
+    }
+
+    /** One line for a player: what is happening, or what went wrong. */
+    public String describe() {
+        switch (state) {
+            case READY:
+                return "graph ready: " + graph.keyCount() + " keys, "
+                        + graph.recipes().count() + " recipes";
+            case LOADING:
+                float p = progress();
+                return p < 0.0f
+                        ? "reading " + name()
+                        : "reading " + name() + ", " + (int) (p * 100.0f) + "%";
+            case MISSING:
+                return "no graph.json. " + detail;
+            case FAILED:
+                return "could not read " + name() + ": " + detail;
+            default:
+                return "no graph loaded";
+        }
+    }
+
+    private String name() {
+        File file = source;
+        return file == null ? GraphSource.FILE_NAME : file.getName();
+    }
+
+    /**
+     * Start loading, if a load is not already running or finished.
+     *
+     * IDEMPOTENT, because more than one thing wants a graph -- the JEI keybind, the calculator
+     * item, and eventually a server-side plan request -- and none of them should have to know
+     * whether it is the first. Two concurrent reads would be 90 MB of transient garbage and
+     * two 45 MB graphs, one of which gets dropped.
+     *
+     * Returns immediately. Callers poll {@link #state}; nothing here blocks a caller, because
+     * the one caller that must never block is the render thread.
+     */
+    public synchronized void startLoad(File configDir) {
+        if (state == State.LOADING || state == State.READY) {
+            return;
+        }
+        File file = GraphSource.locate(configDir);
+        if (file == null) {
+            state = State.MISSING;
+            detail = GraphSource.describeSearch(configDir);
+            return;
+        }
+        source = file;
+        totalBytes = file.length();
+        readBytes = 0L;
+        detail = "";
+        state = State.LOADING;
+        loader = new Thread(new Loader(file), "mcrecipedump-graph-load");
+        // A DAEMON, so a half-finished load cannot keep the JVM alive after the player quits.
+        // Nothing downstream of a load is durable -- no file is written, no state is
+        // published outside this object -- so abandoning one mid-read costs nothing.
+        loader.setDaemon(true);
+        // BELOW NORMAL. The load is several seconds of solid CPU and allocation on a machine
+        // that is also rendering; it is not urgent enough to compete with the frame.
+        loader.setPriority(Thread.MIN_PRIORITY);
+        loader.start();
+    }
+
+    /** Drop the graph and forget how it went, so the next {@link #startLoad} really reloads. */
+    public synchronized void reset() {
+        state = State.IDLE;
+        graph = null;
+        detail = "";
+        source = null;
+        totalBytes = 0L;
+        readBytes = 0L;
+    }
+
+    private final class Loader implements Runnable {
+
+        private final File file;
+
+        Loader(File file) {
+            this.file = file;
+        }
+
+        @Override
+        public void run() {
+            InputStream in = null;
+            try {
+                in = new Counting(new FileInputStream(file));
+                RecipeGraph loaded = GraphJsonReader.read(in, file.length());
+                // `graph` BEFORE `state`: a reader that sees READY must see the graph. See
+                // the note on the class.
+                graph = loaded;
+                state = State.READY;
+            } catch (IOException e) {
+                fail(e);
+            } catch (RuntimeException e) {
+                // A truncated or hand-edited file surfaces as a gson parse error, not an
+                // IOException, and an unhandled throw on a daemon thread would leave the
+                // state on LOADING for ever -- a progress bar that never finishes and never
+                // says why, which is the worst of the three outcomes.
+                fail(e);
+            } catch (OutOfMemoryError e) {
+                // Named rather than swallowed with the rest: 45 MB retained is fine in a
+                // normal client and not in one already at its ceiling, and "out of memory"
+                // tells the player to raise -Xmx where "could not read" sends them looking
+                // at the file.
+                fail(e);
+            }
+        }
+
+        private void fail(Throwable e) {
+            graph = null;
+            detail = e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage());
+            state = State.FAILED;
+        }
+
+        /** Counts bytes as they are consumed, so {@link #progress} has something to report. */
+        private final class Counting extends FilterInputStream {
+
+            Counting(InputStream in) {
+                super(in);
+            }
+
+            @Override
+            public int read() throws IOException {
+                int b = super.read();
+                if (b >= 0) {
+                    readBytes++;
+                }
+                return b;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                int n = super.read(b, off, len);
+                if (n > 0) {
+                    readBytes += n;
+                }
+                return n;
+            }
+
+            @Override
+            public long skip(long n) throws IOException {
+                long skipped = super.skip(n);
+                if (skipped > 0L) {
+                    readBytes += skipped;
+                }
+                return skipped;
+            }
+        }
+    }
+}

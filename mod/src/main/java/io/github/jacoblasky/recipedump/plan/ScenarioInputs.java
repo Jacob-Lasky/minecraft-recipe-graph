@@ -9,22 +9,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 
 /**
- * A fixture's `scenario` block turned into the inputs a {@link Solver} takes.
+ * A `scenario` document turned into the inputs a {@link Solver} takes.
  *
- * WHY THIS IS IN THE TEST TREE. A scenario is a document describing a world -- placed tile
- * entities, which dimensions have been visited, what the player has learned. Production never
- * sees one: the mod reads the live world, the live ProjectE registry and the live AE2 grid.
- * Only the fixtures speak this language, so only the fixtures carry the code that reads it.
+ * ONE RESOLVER FOR THE FIXTURES AND FOR THE GAME, which is the whole reason this is in
+ * `main`. It was in the test tree while the only thing that spoke scenario JSON was
+ * `tests/fixtures/plan/*.json`, and its own note said to move it here rather than copy it the
+ * day something else called it. That day is #19's in-game planner: `common.PlannerService`
+ * builds the same document from live world state and resolves it through this.
+ *
+ * THAT SHARING IS THE POINT, NOT A CONVENIENCE. `PlanFixtureTest` proves this port plans
+ * exactly as Python does, and it proves it THROUGH THIS CLASS. A second resolver on the
+ * production path would be code the golden gate never touches, so the mod could price a plan
+ * differently from the oracle while every fixture stayed green -- and the symptom would be a
+ * plausible plan with a different route, which is the failure #19's whole fixture strategy
+ * exists to make impossible. If the in-game planner and the gate ever need to disagree about
+ * an input, that disagreement belongs in the document, not in a second reader of it.
+ *
+ * A SCENARIO IS ALSO THE RIGHT SHAPE FOR LIVE STATE, which was not obvious. It describes a
+ * world -- placed tile entities, which dimensions have been visited, what the player has
+ * learned -- and the mod can fill that in from the world as readily as a fixture can from
+ * disk. Building the document rather than bypassing it buys two things: the in-game inputs
+ * are inspectable in exactly the format the fixtures use, and planning the same target with
+ * the same document in game and offline is a comparison anyone can run.
  *
  * FOUR RESOLVERS ARE PORTED HERE AND NOWHERE ELSE, and that is a deliberate, narrow bet.
- * `machines.resolve` and `cost.estimate` are production concerns and are graphmodel's, in
- * `Machines` and `Cost`. These four are not:
+ * `machines.resolve` and `cost.estimate` are production concerns and live in `Machines` and
+ * `Cost`. These four are not:
  *
  *   `generators.resolve`   curated block -&gt; output map, matched against placed tile entities
  *   `tokens.resolve`       the curated placeholder map
@@ -32,12 +49,11 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
  *   `projecte.available`   learned AND carrying a positive EMC value
  *
  * Each is a handful of lines over a small curated table, and the tables are copied from the
- * Python originals rather than re-derived. IF ANY OF THEM GROWS A SECOND CALLER IN THE MOD,
- * MOVE IT TO `main` RATHER THAN COPYING IT -- a second home for `DEFAULT_TOKENS` is a second
+ * Python originals rather than re-derived. A second home for `DEFAULT_TOKENS` is a second
  * thing to keep in step with `tokens.py`, and the symptom of drift is a plan that quietly
  * stops badging a quest gate.
  */
-final class ScenarioInputs {
+public final class ScenarioInputs {
 
     /**
      * `tokens.DEFAULT_TOKENS`, copied verbatim. A pack placeholder standing in for an
@@ -109,7 +125,7 @@ final class ScenarioInputs {
     }
 
     /** Everything a scenario resolves to, so a cost table can be shared between fixtures. */
-    static final class Resolved {
+    public static final class Resolved {
         final Map<Integer, Long> have = new LinkedHashMap<Integer, Long>();
         final Set<Integer> craftables = new LinkedHashSet<Integer>();
         final Map<Integer, String> freeSources = new LinkedHashMap<Integer, String>();
@@ -130,7 +146,7 @@ final class ScenarioInputs {
          *
          * `craftables` and `pinned` are absent because neither reaches the cost model.
          */
-        String costSignature() {
+        public String costSignature() {
             return have + "|" + freeSources.keySet() + "|" + tokenKinds + "|"
                     + dimensionGates.keySet() + "|" + emcAvailable + "|"
                     + Arrays.toString(machineStates.summarise()) + "|"
@@ -138,7 +154,7 @@ final class ScenarioInputs {
         }
     }
 
-    static Resolved resolve(RecipeGraph g, JsonObject scenario) {
+    public static Resolved resolve(RecipeGraph g, JsonObject scenario) {
         Resolved out = new Resolved();
 
         Map<String, Long> haveByKey = new LinkedHashMap<String, Long>();
@@ -149,7 +165,7 @@ final class ScenarioInputs {
                 out.have.put(keyId, e.getValue().getAsLong());
             }
         }
-        for (JsonElement e : scenario.getAsJsonArray("craftables")) {
+        for (JsonElement e : array(scenario, "craftables")) {
             int keyId = g.keyId(e.getAsString());
             if (keyId >= 0) {
                 out.craftables.add(keyId);
@@ -177,7 +193,7 @@ final class ScenarioInputs {
                 evidence.override(e.getKey(), state);
             }
         }
-        for (JsonElement e : scenario.getAsJsonArray("no_machine")) {
+        for (JsonElement e : array(scenario, "no_machine")) {
             evidence.noMachine(e.getAsString());
         }
         out.machineStates = Machines.resolve(g, evidence);
@@ -368,7 +384,7 @@ final class ScenarioInputs {
     }
 
     /** `Cost.estimate` for a resolved scenario. The expensive step; memoise on the caller. */
-    static CostTable price(RecipeGraph g, Resolved resolved) {
+    public static CostTable price(RecipeGraph g, Resolved resolved) {
         CostInputs inputs = new CostInputs();
         for (int keyId : resolved.have.keySet()) {
             inputs.have(keyId);
@@ -391,7 +407,8 @@ final class ScenarioInputs {
     }
 
     /** The Solver the Python generator's `solver_for` builds. Keep the argument list in step. */
-    static Solver solverFor(RecipeGraph g, Resolved r, CostTable costs, int maxNodes) {
+    public static Solver solverFor(RecipeGraph g, Resolved r, CostTable costs,
+                                   int maxNodes) {
         return new Solver.Builder(g)
                 .have(r.have)
                 .craftables(r.craftables)
@@ -411,6 +428,27 @@ final class ScenarioInputs {
     private static JsonObject object(JsonObject parent, String name) {
         return parent.has(name) && parent.get(name).isJsonObject()
                 ? parent.getAsJsonObject(name) : new JsonObject();
+    }
+
+    /**
+     * The counterpart of {@link #object} for an array field, and it exists because its
+     * absence was a bug.
+     *
+     * `getAsJsonArray` returns NULL for a field that is not there, so `for (JsonElement e :
+     * scenario.getAsJsonArray("craftables"))` threw a NullPointerException on any document
+     * that omitted it -- while every OBJECT field tolerated being absent, through the helper
+     * above. Two rules for two shapes, with nothing saying so. It went unnoticed because the
+     * only documents this class had ever read were generated by
+     * `tools/make-java-fixtures.py`, which always writes every field; the first partial
+     * document came from the in-game planner and found it immediately.
+     *
+     * ABSENT AND EMPTY MEAN THE SAME THING HERE, deliberately. A scenario names what is true
+     * of a world, so "no craftables" and "the craftables field was not written" are the same
+     * claim -- unlike a COST, where an absent price and a zero price are different facts.
+     */
+    private static JsonArray array(JsonObject parent, String name) {
+        return parent.has(name) && parent.get(name).isJsonArray()
+                ? parent.getAsJsonArray(name) : new JsonArray();
     }
 
     private static Set<String> strings(JsonObject parent, String name) {
