@@ -10,6 +10,7 @@ import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 
@@ -45,7 +46,9 @@ public final class PlannerScreen {
         openPanel(new Function<ModularGuiContext, ModularPanel>() {
             @Override
             public ModularPanel apply(ModularGuiContext context) {
-                return PlannerWidgets.todoPanel(PlanView.empty(), book);
+                ModularPanel panel = PlannerWidgets.todoPanel(PlanView.empty(), book);
+                PlannerAreaSource.install(panel);
+                return panel;
             }
         });
     }
@@ -65,6 +68,10 @@ public final class PlannerScreen {
                 LivePlannerActions actions = new LivePlannerActions();
                 ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, actions);
                 actions.attachTo(panel);
+                // So JEI lays its item list out AROUND the planner rather than over it
+                // (#145's other seam). The source reports nothing once the panel closes, so
+                // there is nothing to deregister.
+                PlannerAreaSource.install(panel);
                 return panel;
             }
         });

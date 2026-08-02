@@ -132,6 +132,41 @@ public class NodeStatusTest {
         assertEquals("tokens.KIND_BADGE should have four kinds", 4, checked);
     }
 
+    /**
+     * #139's mark: the graph can make it, but not in the state that was asked for.
+     *
+     * The constant existed and nothing read it, which the review caught -- and by then the
+     * fixtures had gained the field, so the panel was silently dropping a mark the browser
+     * shows. That is the exact drift `NodeStatusTest` exists to prevent, missed because the
+     * completeness tests check STATUSES and this is a flag.
+     */
+    @Test
+    public void anUnsourcedLeafSaysSoAndKeepsTheNeedColour() {
+        PlanNode plain = node(NodeStatus.RAW, null, false);
+        PlanNode unsourced = node(NodeStatus.RAW, null, true);
+        assertEquals("NEED", NodeStatus.badge(plain));
+        assertEquals("no known source", NodeStatus.badge(unsourced));
+        assertEquals("the claim is the same kind of claim, so the colour does not move",
+                     NodeStatus.colour(plain), NodeStatus.colour(unsourced));
+    }
+
+    @Test
+    public void aTokenKindOutranksTheUnsourcedMark() {
+        // `present.status_badge`'s documented order. The combination cannot occur -- `expand`
+        // returns at the token branch first -- but a caller that passes both must get one
+        // answer, and "locked" is the more specific instruction.
+        PlanNode both = node(NodeStatus.TOKEN, "gate", true);
+        assertEquals("locked", NodeStatus.badge(both));
+    }
+
+    @Test
+    public void theUnsourcedWordMatchesPresentPysConstant() throws IOException {
+        Matcher matcher = Pattern.compile("UNSOURCED_BADGE = \"([^\"]*)\"")
+                                 .matcher(readPresentPy());
+        assertTrue("present.py should define UNSOURCED_BADGE", matcher.find());
+        assertEquals(matcher.group(1), NodeStatus.UNSOURCED_BADGE);
+    }
+
     @Test
     public void anUnknownStatusPrintsItselfRatherThanNothing() {
         // A blank badge is indistinguishable from a rendering bug. This cannot happen while
@@ -194,6 +229,10 @@ public class NodeStatusTest {
     }
 
     private static PlanNode node(String status, String tokenKind) {
+        return node(status, tokenKind, false);
+    }
+
+    private static PlanNode node(String status, String tokenKind, boolean unsourced) {
         com.google.gson.JsonObject json = new com.google.gson.JsonObject();
         json.addProperty("key", "test:thing");
         json.addProperty("label", "Thing");
@@ -201,6 +240,9 @@ public class NodeStatusTest {
         json.addProperty("status", status);
         if (tokenKind != null) {
             json.addProperty("token_kind", tokenKind);
+        }
+        if (unsourced) {
+            json.addProperty("unsourced", true);
         }
         return PlanJson.readNode(json);
     }

@@ -112,6 +112,7 @@ public final class PlanJson {
         builder.tokenKind = optional(json, "token_kind");
         builder.fromStock = number(json, "from_stock", 0L);
         builder.pinned = bool(json, "pinned");
+        builder.unsourced = bool(json, "unsourced");
 
         JsonArray kids = json.getAsJsonArray("children");
         if (kids == null || kids.size() == 0) {

@@ -46,6 +46,7 @@ public final class PlanNode {
     private final String tokenKind;
     private final long fromStock;
     private final boolean pinned;
+    private final boolean unsourced;
 
     private final List<PlanNode> children;
 
@@ -71,6 +72,7 @@ public final class PlanNode {
         this.tokenKind = builder.tokenKind;
         this.fromStock = builder.fromStock;
         this.pinned = builder.pinned;
+        this.unsourced = builder.unsourced;
         this.children = Collections.unmodifiableList(builder.children);
     }
 
@@ -177,6 +179,18 @@ public final class PlanNode {
         return pinned;
     }
 
+    /**
+     * True when the graph can make this item but not in the state that was asked for.
+     *
+     * A FLAG RATHER THAN AN ELEVENTH STATUS, which is #139's decision and matters to a
+     * renderer: the node is still `raw` -- the solver resolved it identically to any other
+     * raw leaf -- so it keeps the NEED colour and only the WORD changes. An extra status
+     * would have earned the legend a swatch meaning "red, but differently".
+     */
+    public boolean unsourced() {
+        return unsourced;
+    }
+
     public List<PlanNode> children() {
         return children;
     }
@@ -212,6 +226,7 @@ public final class PlanNode {
         String tokenKind;
         long fromStock;
         boolean pinned;
+        boolean unsourced;
         List<PlanNode> children = Collections.emptyList();
 
         PlanNode build() {

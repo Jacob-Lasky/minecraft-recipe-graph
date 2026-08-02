@@ -55,7 +55,12 @@ public final class NodeStatus {
     public static final int INK_NEED = 0xFFA3272B;
     public static final int INK_MUTED = 0xFF6F6D68;
 
-    /** What the row says when the graph can make the item but not in the state asked for. */
+    /**
+     * What the row says when the graph can make the item but not in the state asked for.
+     *
+     * ONE DEFINITION, because the tree badge, the shopping-list row and the legend all show
+     * it -- the same reason `present.UNSOURCED_BADGE` exists on the Python side.
+     */
     public static final String UNSOURCED_BADGE = "no known source";
 
     private static final Map<String, Entry> ENTRIES;
@@ -94,6 +99,12 @@ public final class NodeStatus {
         return Collections.unmodifiableList(new java.util.ArrayList<String>(ENTRIES.keySet()));
     }
 
+    /** The word a token kind refines the generic badge to. */
+    public static String tokenBadge(String kind) {
+        String refined = TOKEN_BADGE.get(kind);
+        return refined == null ? badgeFor(TOKEN) : refined;
+    }
+
     /** Every token kind that refines a `token` badge. */
     public static List<String> tokenKinds() {
         return Collections.unmodifiableList(new java.util.ArrayList<String>(TOKEN_BADGE.keySet()));
@@ -121,6 +132,13 @@ public final class NodeStatus {
             if (refined != null) {
                 return refined;
             }
+        }
+        // #139's mark. The solver resolved this identically to any other raw leaf, but a
+        // reader must not treat it identically: the tool cannot say where to get it. A TOKEN
+        // KIND WINS, matching `present.status_badge` -- the combination cannot occur, since
+        // `expand` returns at the token branch first, but the order has to be unambiguous.
+        if (node.unsourced()) {
+            return UNSOURCED_BADGE;
         }
         // An unknown status prints itself rather than an empty badge: a blank cell is
         // indistinguishable from a rendering bug, and the raw word at least names the case.

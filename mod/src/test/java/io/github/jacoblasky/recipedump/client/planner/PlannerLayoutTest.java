@@ -351,6 +351,108 @@ public class PlannerLayoutTest {
                    list.getScrollData().getScrollSize() > list.getArea().h());
     }
 
+    /**
+     * No badge is ever cut, for any node in any fixture.
+     *
+     * A badge is fixed vocabulary; a LABEL is a registry name and may legitimately be cut, so
+     * the two need different rules and only the badge gets an absolute one. The screenshot of
+     * `plan-variant-table` is what found it -- #139's "no known source" rendered as
+     * "no known...", which is a mark saying half of itself.
+     */
+    @Test
+    public void theBadgeColumnFitsEveryWordTheVocabularyCanProduce() {
+        for (String status : NodeStatus.all()) {
+            assertBadgeFits(NodeStatus.badgeFor(status));
+        }
+        for (String kind : NodeStatus.tokenKinds()) {
+            assertBadgeFits(NodeStatus.tokenBadge(kind));
+        }
+        assertBadgeFits(NodeStatus.UNSOURCED_BADGE);
+
+        // And in practice, over every node of every fixture.
+        for (String fixture : PlanFixtures.names()) {
+            for (PlanNode node : PlanFixtures.load(fixture).flatten()) {
+                assertBadgeFits(NodeStatus.badge(node));
+            }
+        }
+    }
+
+    private static void assertBadgeFits(String badge) {
+        assertEquals("the badge column cuts \"" + badge + "\"",
+                     badge, NodeRowText.fit(badge, PlannerWidgets.BADGE));
+    }
+
+    /**
+     * The shared row seam (#19 Phase 3b): same content, caller's geometry.
+     *
+     * The diagram positions a couple of hundred of these at absolute coordinates, so the one
+     * thing it needs from this method is that it honours BOTH dimensions and assumes nothing
+     * about a panel.
+     */
+    @Test
+    public void theSharedNodeContentHonoursWhateverSizeItIsGiven() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        int[][] sizes = {{120, 10}, {80, 14}, {200, 20}};
+        for (int[] size : sizes) {
+            com.cleanroommc.modularui.widget.ParentWidget<?> box =
+                    PlannerWidgets.planNodeContent(node, size[0], size[1]);
+            ModularPanel panel = HeadlessLayout.layOutPanel(
+                    "node", PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT, box);
+            assertEquals("width " + size[0], size[0], box.getArea().w());
+            assertEquals("height " + size[1], size[1], box.getArea().h());
+            for (IWidget widget : HeadlessLayout.flatten(box)) {
+                Area area = widget.getArea();
+                assertTrue("a child has no box at " + size[0] + "x" + size[1] + ": " + area,
+                           area.w() > 0 && area.h() > 0);
+                assertTrue("a child overflows the box it was given: " + area,
+                           area.ex() <= box.getArea().ex());
+            }
+            assertTrue(panel.getArea().w() > 0);
+        }
+    }
+
+    @Test
+    public void theSharedNodeContentIsNotClickable() {
+        // A diagram node hit-tests through its own viewport transform; a canvas of clickable
+        // rows would fight it.
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        com.cleanroommc.modularui.widget.ParentWidget<?> box =
+                PlannerWidgets.planNodeContent(node, 120, 10);
+        HeadlessLayout.layOutPanel("node", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+        assertTrue(clickables(box).isEmpty());
+    }
+
+    /** The panels shown before a plan exists. Each says something different on purpose. */
+    @Test
+    public void everyPlannerStateRendersItsOwnMessage() {
+        PlannerState[] states = {
+            PlannerState.IDLE,
+            PlannerState.loading("loading graph, 40%"),
+            PlannerState.solving("solving"),
+            PlannerState.failed("no graph at data/graph.json"),
+        };
+        java.util.Set<String> messages = new java.util.HashSet<String>();
+        for (PlannerState state : states) {
+            ModularPanel panel = PlannerWidgets.statePanel(state);
+            HeadlessLayout.layOut(panel);
+            assertEquals(PlannerWidgets.PANEL_WIDTH, panel.getArea().w());
+            assertTrue("a state panel must fit the screen",
+                       panel.getArea().h() <= HeadlessLayout.SCREEN_HEIGHT);
+            for (IWidget widget : HeadlessLayout.flatten(panel)) {
+                assertTrue("state " + state.kind() + " left a widget unsized",
+                           widget.getArea().w() > 0 && widget.getArea().h() > 0);
+            }
+            messages.add(state.message());
+        }
+        assertEquals("four states, four distinct sentences -- a shared one would make "
+                     + "'still loading' and 'no graph found' indistinguishable",
+                     4, messages.size());
+        assertEquals("only a failure is red", NodeStatus.INK_NEED,
+                     PlannerState.failed("x").colour());
+        assertEquals(NodeStatus.INK_MUTED, PlannerState.loading("x").colour());
+    }
+
     @Test
     public void aPopulatedTodoPanelIsTallerThanAnEmptyOne() {
         // BELOW the cap, which is where the panel still sizes to its contents.

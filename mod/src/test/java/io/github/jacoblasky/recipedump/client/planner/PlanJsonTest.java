@@ -137,6 +137,26 @@ public class PlanJsonTest {
     }
 
     @Test
+    public void theUnsourcedMarkIsReadBackFromTheFixturesThatCarryIt() {
+        // #139 added the field and #147 regenerated the fixtures with it. The parser dropped
+        // it silently until the review looked for a reader of `NodeStatus.UNSOURCED_BADGE`
+        // and could not find one -- a mark the browser shows and the panel did not.
+        int marked = 0;
+        for (String name : PlanFixtures.names()) {
+            for (PlanNode node : PlanFixtures.load(name).flatten()) {
+                if (node.unsourced()) {
+                    marked++;
+                    assertEquals("the mark refines a raw leaf and nothing else",
+                                 NodeStatus.RAW, node.status());
+                    assertEquals("no known source", NodeStatus.badge(node));
+                }
+            }
+        }
+        assertTrue("some fixture should carry the #139 mark, or this test proves nothing",
+                   marked > 0);
+    }
+
+    @Test
     public void aFluidQuantityBiggerThanAnIntSurvivesTheRead() {
         // `need` is a long for this reason. The reference pack plans six and seven figures of
         // mB routinely, and an int field would have been a silent negative.

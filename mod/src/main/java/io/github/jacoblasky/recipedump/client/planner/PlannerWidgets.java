@@ -55,7 +55,15 @@ public final class PlannerWidgets {
     public static final int ICON = 10;
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
     public static final int QTY = 52;
-    public static final int BADGE = 66;
+    /**
+     * The badge column, wide enough for the LONGEST word the vocabulary can produce.
+     *
+     * Derived rather than guessed, and `theBadgeColumnFitsEveryWordTheVocabularyCanProduce`
+     * pins it. A badge is fixed vocabulary -- unlike a label, which is a registry name and may
+     * legitimately be cut -- so a truncated one is always a bug. At 66 the screenshot of
+     * `plan-variant-table` read "no known…", which is #139's mark saying half of itself.
+     */
+    public static final int BADGE = widestBadge();
     public static final int GAP = 3;
 
     /**
@@ -78,6 +86,18 @@ public final class PlannerWidgets {
     public static final int PICKER_WIDTH = 330;
 
     private PlannerWidgets() {
+    }
+
+    /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
+    private static int widestBadge() {
+        int widest = NodeStatus.UNSOURCED_BADGE.length();
+        for (String status : NodeStatus.all()) {
+            widest = Math.max(widest, NodeStatus.badgeFor(status).length());
+        }
+        for (String kind : NodeStatus.tokenKinds()) {
+            widest = Math.max(widest, NodeStatus.tokenBadge(kind).length());
+        }
+        return widest * NodeRowText.CHAR_WIDTH;
     }
 
     /** A parent that positions its children absolutely. Concrete because `ParentWidget` is
@@ -183,10 +203,51 @@ public final class PlannerWidgets {
     }
 
     /**
-     * One node row: indent, icon, quantity, label, meta, badge.
+     * ONE NODE'S CONTENT, at a size the caller chooses. The seam #19 Phase 3b asked for.
+     *
+     * The tree and the flow diagram want the same CONTENT -- icon, quantity, label, status
+     * badge -- and different GEOMETRY: a full-width row in a scrolling list, or a fixed box at
+     * an absolute position on a canvas with a couple of hundred visible at once. So the
+     * content is shared and the container is not, which is why this takes both dimensions and
+     * assumes nothing about a panel.
+     *
+     * NOT CLICKABLE, unlike {@link #row}. A diagram node has its own hit-testing through the
+     * viewport transform, and a canvas of clickable rows would fight it.
+     *
+     * The colours come from {@link NodeStatus} and must keep doing so: `present.py`'s own
+     * docstring records that node statuses are drawn by four components which each kept their
+     * own dict of bare strings, so adding a status drew silently wrong. `NodeStatusTest` reads
+     * that file and asserts both directions, so there is one mapping and it is enforced.
+     */
+    public static ParentWidget<?> planNodeContent(PlanNode node, int width, int height) {
+        Group box = new Group();
+        box.size(width, height);
+        int badgeWidth = Math.min(BADGE, Math.max(0, width - QTY - GAP * 2));
+        int x = 0;
+        net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
+        if (!stack.isEmpty()) {
+            box.child(icon(stack).pos(x, 0));
+        }
+        x += ICON + GAP;
+        int colour = NodeStatus.colour(node);
+        box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
+        x += QTY + GAP;
+        int labelWidth = Math.max(GAP, width - badgeWidth - GAP - x);
+        box.child(line(NodeRowText.label(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
+        if (badgeWidth > 0) {
+            box.child(line(NodeStatus.badge(node), badgeWidth, colour)
+                              .pos(width - badgeWidth, 0));
+        }
+        return box;
+    }
+
+    /**
+     * One tree row: indent, icon, quantity, label, meta, badge, and clickable.
      *
      * The column order is the browser's, so a reader moving between the two finds the same
-     * fact in the same place.
+     * fact in the same place. Kept separate from {@link #planNodeContent} rather than built on
+     * it, because a row indents, carries the meta detail and opens a menu, and none of those
+     * are true of a diagram node.
      */
     public static ParentWidget<?> row(final PlanNode node, int depth, int width,
                                       final PlannerActions actions) {
@@ -413,6 +474,22 @@ public final class PlannerWidgets {
             list.child(row);
         }
         return list;
+    }
+
+    /**
+     * The panel shown when there is no plan: loading, solving, failed, or simply idle.
+     *
+     * Same size as the real planner, so opening one and then the other does not make the
+     * window jump.
+     */
+    public static ModularPanel statePanel(PlannerState state) {
+        Group body = new Group();
+        body.pos(PADDING, PADDING);
+        body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
+        body.child(line("Planner", CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, 0));
+        body.child(line(state.message(), CONTENT_WIDTH, state.colour()).pos(0, LINE + 1));
+        return ModularPanel.defaultPanel("mcrecipedump_planner_state",
+                                         PANEL_WIDTH, PANEL_HEIGHT).child(body);
     }
 
     private static String footer(PlanView plan, PlanBook book) {
