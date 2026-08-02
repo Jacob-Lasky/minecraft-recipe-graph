@@ -11,6 +11,7 @@ import com.cleanroommc.modularui.widgets.ListWidget;
 import com.cleanroommc.modularui.widgets.TextWidget;
 
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.common.ScenarioSource;
 
 /**
  * Every widget the planner draws, as functions of plain data.
@@ -193,10 +194,24 @@ public final class PlannerWidgets {
             y += LINE;
         }
 
-        int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE - 2;
+        // THE CAVEAT IS ITS OWN LINE AND NOT PART OF THE FOOTER, because it is not a
+        // statistic about the plan -- it is the reason the plan may be wrong. An unread
+        // `have` is the claim "you own nothing", so a tree built on it can tell a player to
+        // fetch iron they are standing beside. Folding it in next to "15 nodes" would read as
+        // another count. See `common.ScenarioSource`.
+        //
+        // RESERVED BEFORE THE TREE IS SIZED, not appended after. The tree takes whatever is
+        // left, so a line added below it without taking its height out first is drawn past
+        // the bottom of the panel -- ModularUI neither clamps nor clips a child (#125).
+        String caveat = ScenarioSource.summary();
+        int footerLines = caveat.isEmpty() ? 1 : 2;
+        int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE * footerLines - 2;
         body.child(tree(plan, CONTENT_WIDTH, treeHeight, actions).pos(0, y));
         y += treeHeight + 2;
         body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
+        if (!caveat.isEmpty()) {
+            body.child(line(caveat, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y + LINE));
+        }
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
                 .child(body);
