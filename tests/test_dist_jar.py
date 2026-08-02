@@ -221,8 +221,8 @@ class DistJarMatchesSourceTest(unittest.TestCase):
                              "it is certainly stale. Rebuild and re-commit.")
             got = z.read(names[0]).decode("utf-8").strip()
         self.assertEqual(got, want,
-                         "dist/ was built from different source than mod/ holds now; "
-                         "rebuild and re-commit the jar")
+                         "the built jar is from different source than mod/ holds now; "
+                         "rebuild it with mod/tools/build-jar.sh")
 
     def test_it_carries_the_nbt_trace_diagnostic(self):
         # Same rot class as the schema check above, one capability later. A jar predating
