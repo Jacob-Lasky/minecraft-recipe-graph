@@ -111,6 +111,9 @@ public final class RecipeGraph {
     private final Csr oreMembers;
     private final Csr oreIndex;
     private final int[] oreGroupKeyId;
+    /** The inverse of {@link #oreGroupKeyId}: sorted `ore:` key ids, and their group. */
+    private final KeyIndex oreKeys;
+    private final int[] oreKeyGroup;
     private final long[] oreGuessed;
     private final long[] worldOres;
     private final long[] liveKeys;
@@ -156,12 +159,25 @@ public final class RecipeGraph {
 
     private FluidNames fluidNames;
 
+    /**
+     * base key -&gt; the discriminated keys some recipe produces. Built on first use.
+     *
+     * LAZY, unlike every other index here, and the reason is where it is read from. The
+     * solver never touches it: machine IDENTIFICATION does, once, over ~500 categories, and
+     * so does the machines page. Building it eagerly would put its bytes on every graph load
+     * including the ones that only ever plan, and the heap gate is measured on that path.
+     */
+    private Csr variantIndex;
+    /** item stem -&gt; produced keys at any meta of it. Built on first use, same reason. */
+    private Csr metaIndex;
+    private KeyIndex metaStems;
+
     RecipeGraph(StringTable keys, StringTable displayNames, int[] nameId,
                 long[] unlocalizedName, byte[] kindOf, StringTable categories,
                 StringTable machineNames, StringTable sources, StringTable roles,
                 RecipeStore recipes, Csr byOutput, Csr byInput, int[] wildcardSibling,
                 StringTable oreNames, Csr oreMembers, Csr oreIndex, int[] oreGroupKeyId,
-                long[] oreGuessed, long[] worldOres, long[] liveKeys, long[] reshapedOnly,
+                KeyIndex oreKeys, int[] oreKeyGroup, long[] oreGuessed, long[] worldOres, long[] liveKeys, long[] reshapedOnly,
                 Csr catalysts, StringTable categoryMods, int[] categoryModId,
                 KeyIndex dimensionOres, int[] dimensionOreDimId, int[] dimensionOreNameId,
                 StringTable dimensionNames, KeyIndex damageable, int[] maxDamage,
@@ -185,6 +201,8 @@ public final class RecipeGraph {
         this.oreMembers = oreMembers;
         this.oreIndex = oreIndex;
         this.oreGroupKeyId = oreGroupKeyId;
+        this.oreKeys = oreKeys;
+        this.oreKeyGroup = oreKeyGroup;
         this.oreGuessed = oreGuessed;
         this.worldOres = worldOres;
         this.liveKeys = liveKeys;
@@ -232,6 +250,23 @@ public final class RecipeGraph {
         return kindOf[keyId] == Keys.KIND_FLUID;
     }
 
+    public boolean isOre(int keyId) {
+        return kindOf[keyId] == Keys.KIND_ORE;
+    }
+
+    /**
+     * The oredict group an `ore:` key names, or -1.
+     *
+     * The inverse of the group-to-key mapping, and it exists because the cost model's
+     * innermost loop needs it. Resolving a group by slicing the key string and hashing the
+     * name would allocate a String on a path that runs roughly fifteen million times during
+     * one relaxation; a binary search over 3,116 sorted ids does not allocate at all.
+     */
+    public int oreGroupOfKey(int keyId) {
+        int slot = oreKeys.slotOf(keyId);
+        return slot < 0 ? -1 : oreKeyGroup[slot];
+    }
+
     // -- names --------------------------------------------------------------------------
 
     /** True when some source recorded a label for this key, usable or not. */
@@ -245,6 +280,24 @@ public final class RecipeGraph {
             return null;
         }
         return displayNames.get(nameId[keyId]);
+    }
+
+    /**
+     * The label as `graph.names` HOLDS it, which is not always what is rendered.
+     *
+     * Exactly what python's `names[key]` returns after `relabel_unlocalized`: the recorded
+     * string when it is usable, the readable replacement when it was an unlocalized lang key,
+     * and the prettified registry path when nothing named it at all.
+     *
+     * DIFFERENT FROM {@link #bareName}, and the difference matters wherever a label is
+     * MATCHED rather than shown. An aspect-parameterised entry is recorded as the literal
+     * "%s Vis Pod" and rendered as "Vis Pod"; a meta sibling is recorded under its base and
+     * rendered as "Wool (3)". Machine identification matches a JEI category title against the
+     * recorded form, so using the rendered one there silently changes which titles hit.
+     */
+    public String recordedName(int keyId) {
+        String recorded = usableName(keyId);
+        return recorded != null ? recorded : bareNameOfKey(keyId);
     }
 
     /**
@@ -448,6 +501,20 @@ public final class RecipeGraph {
             appended += byOutput.appendRow(wild, out);
         }
         return appended;
+    }
+
+    /**
+     * Whether anything produces this key, without materialising the list.
+     *
+     * Same widening as {@link #producers}, including the wildcard fallback, because a caller
+     * asking "is there a route" must get the same answer as one asking "which routes".
+     */
+    public boolean hasProducers(int keyId) {
+        if (byOutput.count(keyId) > 0) {
+            return true;
+        }
+        int wild = wildcardSibling(keyId);
+        return wild >= 0 && byOutput.count(wild) > 0;
     }
 
     /**
@@ -718,6 +785,262 @@ public final class RecipeGraph {
         return (label == null ? "Machine Blueprint" : label) + " (" + machine + ")";
     }
 
+    // -- NBT and metadata siblings ----------------------------------------------------------
+    //
+    // Three widenings of "what can make this", each one step looser than the last: exact,
+    // then any NBT variant, then any metadata sibling. Machine identification walks all
+    // three in that order and the ORDER IS TESTED, because reordering to exact-then-meta
+    // keeps a suite green while making `thermalexpansion.pulverizer` name a Redstone Furnace
+    // as its route (#28).
+
+    /** The discriminated keys some recipe produces under `baseKeyId`. */
+    public int[] variantsOf(int baseKeyId) {
+        Csr index = variantIndex();
+        // Tolerates the -1 an unknown-key lookup returns, because `variantsOf(keyId(name))`
+        // is the natural call and a name the graph never saw is an ordinary answer, not an
+        // index error.
+        if (baseKeyId < 0 || baseKeyId >= index.rows()) {
+            return new int[0];
+        }
+        return index.row(baseKeyId);
+    }
+
+    /**
+     * {@link #producers}, widened to every NBT variant of `keyId`.
+     *
+     * For questions about the ITEM rather than about one NBT state of it. A JEI catalyst
+     * names `thermalexpansion:machine:1`, while every crafting recipe for a Pulverizer
+     * outputs `thermalexpansion:machine:1#f56885268ad5` because the level and augments live
+     * in NBT. Asking the narrow question finds nothing and concludes there is no route to a
+     * machine that is plainly craftable -- 16 Thermal Expansion categories and 3 Botania
+     * flowers on the reference pack.
+     *
+     * DELIBERATELY NOT WHAT {@link #producers} DOES. The solver asks "give me exactly this
+     * stack", and a Pulverizer with different augments is not a substitute for the one a
+     * recipe called for. Widening `producers` itself would let every plan satisfy an
+     * NBT-bearing ingredient with the wrong variant.
+     */
+    public int producersAnyVariant(int keyId, IntArray out) {
+        int appended = producers(keyId, out);
+        if (Keys.discriminator(keys.get(keyId)) == null) {
+            for (int variant : variantsOf(keyId)) {
+                appended += producers(variant, out);
+            }
+        }
+        return appended;
+    }
+
+    /**
+     * A produced key that is the same registered item at another meta, or -1.
+     *
+     * One step wider than {@link #producersAnyVariant} and the last one there is: NBT, then
+     * meta, then nothing.
+     *
+     * DO NOT call this from the solver or the cost model. It answers only "does this BLOCK
+     * exist in the pack at all", which is the machines page's question, and it is wrong for
+     * every other one: a recipe asking for `tconstruct:ingots:3` will not accept `:0`.
+     *
+     * ONLY FOR AN UNNAMED META, and that gate is the whole safety argument. An unnamed meta
+     * is the dump reporting a stack STATE nobody registered as an item; a meta the pack DID
+     * name is its own item, and saying it is craftable "as" a sibling is a falsehood.
+     * Measured without the gate: it fired on four categories and two were false --
+     * `bloodmagic:ritual_diviner:2` ("[Dawn]") reported craftable via `:1` ("[Dusk]").
+     */
+    public int metaSiblingMade(int keyId) {
+        String stem = Keys.itemStem(keys.get(keyId));
+        if (stem == null || hasName(keyId)) {
+            return -1;
+        }
+        int[] siblings = siblingsMade(stem, keyId);
+        return siblings.length == 0 ? -1 : siblings[0];
+    }
+
+    /**
+     * Produced keys under `stem`, plain base first, then ascending meta, NBT last.
+     *
+     * ORDERED, because {@link #metaSiblingMade} returns the head and adjacency order is dump
+     * order: unsorted, a re-dump could silently change which sibling gets named. Plain base
+     * first because it is the least surprising thing to call an item "as", and
+     * NBT-discriminated keys last because a meta sibling should never be reported through an
+     * NBT state when a plain one exists.
+     */
+    public int[] siblingsMade(String stem, int exclude) {
+        Csr index = metaIndex();
+        int slot = metaStems.slotOf(keys.idOf(stem));
+        if (slot < 0) {
+            return new int[0];
+        }
+        IntArray kept = new IntArray();
+        for (int p = index.start(slot); p < index.end(slot); p++) {
+            int key = index.at(p);
+            if (key != exclude && hasProducers(key)) {
+                kept.add(key);
+            }
+        }
+        int[] out = kept.trimmed();
+        sortSiblings(out);
+        return out;
+    }
+
+    /**
+     * Insertion sort on (has discriminator, meta, key) -- the python `rank` tuple.
+     *
+     * A wildcard meta ranks at 1 &lt;&lt; 20, above every real meta, exactly as python's
+     * `meta if isinstance(meta, int) else 1 << 20` does. Insertion sort because these lists
+     * are a handful of entries and a comparator would mean boxing every key.
+     */
+    private void sortSiblings(int[] keyIds) {
+        for (int i = 1; i < keyIds.length; i++) {
+            int key = keyIds[i];
+            int j = i - 1;
+            while (j >= 0 && compareSibling(keyIds[j], key) > 0) {
+                keyIds[j + 1] = keyIds[j];
+                j--;
+            }
+            keyIds[j + 1] = key;
+        }
+    }
+
+    private int compareSibling(int leftId, int rightId) {
+        String left = keys.get(leftId);
+        String right = keys.get(rightId);
+        int byDiscriminator = Boolean.compare(Keys.discriminator(left) != null,
+                Keys.discriminator(right) != null);
+        if (byDiscriminator != 0) {
+            return byDiscriminator;
+        }
+        int byMeta = Integer.compare(siblingMeta(left), siblingMeta(right));
+        return byMeta != 0 ? byMeta : left.compareTo(right);
+    }
+
+    private static int siblingMeta(String key) {
+        int meta = Keys.metaOf(Keys.baseKey(key));
+        return meta == Keys.META_WILDCARD || meta == Keys.META_NONE ? 1 << 20 : meta;
+    }
+
+    /**
+     * base -&gt; discriminated produced keys, IN THE ORDER RECIPES FIRST OUTPUT THEM.
+     *
+     * NOT ascending key id, and the difference is observable. Python builds this by walking
+     * `by_output`, whose insertion order is the order each key was first seen as some
+     * recipe's output; interning order is the order keys were first seen ANYWHERE, including
+     * as an ingredient or in the names section. Measured against the oracle on the real
+     * graph, exactly three categories disagreed -- `botania.orechid`, `orechid_ignem` and
+     * `pureDaisy` all named `botania:specialflower#025babb4d6cc` as their craftable variant
+     * where python names `#cf734f9c96f6`. Same state, same build targets, same prices; only
+     * the evidence sentence differed, which is the quietest possible way for two
+     * implementations to drift.
+     */
+    private Csr variantIndex() {
+        if (variantIndex == null) {
+            Csr.Builder builder = new Csr.Builder(keys.size());
+            long[] seen = Bits.ofSize(keys.size());
+            for (int recipe = 0; recipe < recipes.count(); recipe++) {
+                for (int p = recipes.outputStart(recipe); p < recipes.outputEnd(recipe); p++) {
+                    int key = recipes.outputKeyAt(p);
+                    if (Bits.get(seen, key)) {
+                        continue;
+                    }
+                    Bits.set(seen, key);
+                    int base = discriminatedBaseOf(key);
+                    if (base >= 0) {
+                        builder.count(base);
+                    }
+                }
+            }
+            builder.prepare();
+            long[] placed = Bits.ofSize(keys.size());
+            for (int recipe = 0; recipe < recipes.count(); recipe++) {
+                for (int p = recipes.outputStart(recipe); p < recipes.outputEnd(recipe); p++) {
+                    int key = recipes.outputKeyAt(p);
+                    if (Bits.get(placed, key)) {
+                        continue;
+                    }
+                    Bits.set(placed, key);
+                    int base = discriminatedBaseOf(key);
+                    if (base >= 0) {
+                        builder.place(base, key);
+                    }
+                }
+            }
+            variantIndex = builder.build();
+        }
+        return variantIndex;
+    }
+
+    /** The interned id of a discriminated key's base, or -1 when it has none or is unknown. */
+    private int discriminatedBaseOf(int keyId) {
+        String key = keys.get(keyId);
+        int at = Keys.discriminatorAt(key);
+        return at < 0 ? -1 : keys.idOf(key.substring(0, at));
+    }
+
+    private Csr metaIndex() {
+        if (metaIndex == null) {
+            KeyIndex.Builder stems = new KeyIndex.Builder();
+            IntArray stemOf = new IntArray();
+            IntArray produced = new IntArray();
+            // Walked in the same by-output insertion order as `variantIndex`, for the same
+            // reason. `siblingsMade` sorts what it reads and its sort key ends with the key
+            // string, so no tie survives to depend on this -- but two indexes over one
+            // relation ordered by two different rules is a difference waiting to matter.
+            long[] seenStem = Bits.ofSize(keys.size());
+            IntArray producedKeys = new IntArray();
+            for (int recipe = 0; recipe < recipes.count(); recipe++) {
+                for (int p = recipes.outputStart(recipe); p < recipes.outputEnd(recipe); p++) {
+                    int key = recipes.outputKeyAt(p);
+                    if (!Bits.get(seenStem, key)) {
+                        Bits.set(seenStem, key);
+                        producedKeys.add(key);
+                    }
+                }
+            }
+            for (int i = 0; i < producedKeys.size(); i++) {
+                int key = producedKeys.get(i);
+                String stem = Keys.itemStem(keys.get(key));
+                // Non-items are skipped rather than piling up under a null stem. The bucket
+                // was inert in python, but it filed 1,198 fluid and oredict keys under a key
+                // this index documents as holding registry names, waiting for a second caller.
+                if (stem == null) {
+                    continue;
+                }
+                int stemId = keys.idOf(stem);
+                if (stemId < 0) {
+                    continue;
+                }
+                stemOf.add(stemId);
+                produced.add(key);
+            }
+            // One slot per DISTINCT stem, so the CSR rows are dense over the stems that
+            // exist rather than over every key.
+            IntArray distinct = new IntArray();
+            long[] seen = Bits.ofSize(keys.size());
+            for (int i = 0; i < stemOf.size(); i++) {
+                if (!Bits.get(seen, stemOf.get(i))) {
+                    Bits.set(seen, stemOf.get(i));
+                    distinct.add(stemOf.get(i));
+                }
+            }
+            int[] sortedStems = distinct.trimmed();
+            java.util.Arrays.sort(sortedStems);
+            for (int stem : sortedStems) {
+                stems.add(stem);
+            }
+            KeyIndex index = stems.build(stems.permutation());
+            Csr.Builder builder = new Csr.Builder(index.size());
+            for (int i = 0; i < stemOf.size(); i++) {
+                builder.count(index.slotOf(stemOf.get(i)));
+            }
+            builder.prepare();
+            for (int i = 0; i < stemOf.size(); i++) {
+                builder.place(index.slotOf(stemOf.get(i)), produced.get(i));
+            }
+            metaStems = index;
+            metaIndex = builder.build();
+        }
+        return metaIndex;
+    }
+
     public Multiblocks multiblocks() {
         return multiblocks;
     }
@@ -774,7 +1097,8 @@ public final class RecipeGraph {
         long adjacency = byOutput.retainedBytes() + byInput.retainedBytes()
                 + Sizes.bytes(wildcardSibling)
                 + oreMembers.retainedBytes() + oreIndex.retainedBytes()
-                + Sizes.bytes(oreGroupKeyId) + Sizes.bytes(worldOres)
+                + Sizes.bytes(oreGroupKeyId) + oreKeys.retainedBytes()
+                + Sizes.bytes(oreKeyGroup) + Sizes.bytes(worldOres)
                 + Sizes.bytes(liveKeys) + Sizes.bytes(reshapedOnly);
         long itemFacts = damageable.retainedBytes() + Sizes.bytes(maxDamage)
                 + emcKeys.retainedBytes() + Sizes.bytes(emcValue)
@@ -788,7 +1112,13 @@ public final class RecipeGraph {
                 // Zero until something asks for a fluid's name. Counted rather than assumed
                 // away, because a running GUI derives it on the first fluid it renders and a
                 // heap figure taken before that would understate the steady state.
-                + (fluidNames == null ? 0L : fluidNames.retainedBytes());
+                + (fluidNames == null ? 0L : fluidNames.retainedBytes())
+                // Same rule for the two lazy sibling indexes: zero until machine
+                // identification asks, counted honestly once it has. A report that showed
+                // them as free would understate any process that resolves machines.
+                + (variantIndex == null ? 0L : variantIndex.retainedBytes())
+                + (metaIndex == null ? 0L
+                        : metaIndex.retainedBytes() + metaStems.retainedBytes());
         return new GraphSizes(keyTable, recipeBytes, names, adjacency, itemFacts, other,
                 recipes.ridBytes(), keys.indexBytes());
     }

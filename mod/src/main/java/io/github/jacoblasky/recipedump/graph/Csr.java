@@ -52,6 +52,20 @@ public final class Csr {
         return data[position];
     }
 
+    /**
+     * A copy of one row.
+     *
+     * FOR COLD PATHS ONLY -- it allocates. The hot path walks
+     * {@link #start}/{@link #end}/{@link #at}, which is the whole reason this class exists.
+     */
+    public int[] row(int row) {
+        int from = offsets[row];
+        int length = offsets[row + 1] - from;
+        int[] out = new int[length];
+        System.arraycopy(data, from, out, 0, length);
+        return out;
+    }
+
     /** Appends every value in `row` to `out`. Returns how many were appended. */
     public int appendRow(int row, IntArray out) {
         int from = offsets[row];

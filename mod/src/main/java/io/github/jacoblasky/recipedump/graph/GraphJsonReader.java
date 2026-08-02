@@ -424,18 +424,24 @@ public final class GraphJsonReader {
      * code change -- and so the heap report prices it the first time it is real.
      */
     private static void readIcons(JsonReader reader, GraphBuilder builder) throws IOException {
-        String icon = null;
+        int iconSize = 0;
         int columns = 0;
-        int pages = 0;
         reader.beginObject();
         while (reader.hasNext()) {
             String field = reader.nextName();
             if (field.equals("icon")) {
-                icon = nextStringOrNull(reader);
+                // The sprite EDGE LENGTH in pixels, not a filename. `keys` carries column and
+                // row rather than pixel offsets precisely so the reader multiplies by this
+                // and cannot disagree with the writer about the sprite size.
+                iconSize = reader.nextInt();
             } else if (field.equals("cols")) {
                 columns = reader.nextInt();
             } else if (field.equals("pages")) {
-                pages = reader.nextInt();
+                reader.beginArray();
+                while (reader.hasNext()) {
+                    builder.icons().page(reader.nextString());
+                }
+                reader.endArray();
             } else if (field.equals("keys")) {
                 reader.beginObject();
                 while (reader.hasNext()) {
@@ -456,7 +462,7 @@ public final class GraphJsonReader {
             }
         }
         reader.endObject();
-        builder.icons().sheet(icon, columns, pages);
+        builder.icons().sheet(iconSize, columns);
     }
 
     private static String nextStringOrNull(JsonReader reader) throws IOException {
