@@ -4,7 +4,7 @@ import os
 import sys
 
 from . import multiblocks
-from .model import FLUID_PREFIX, Graph, base_key, is_item_key
+from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
 from .sources import dump_meta, dump_names
@@ -126,35 +126,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     elif missing:
         say("oredict: %d referenced ore names have no membership" % len(missing))
 
-    keep = {k.lower() for k in (keep_categories or ())}
-    before = len(g.recipes)
-    dropped_by_cat = {}
-    loops_by_cat = {}
-    kept = []
-    for r in g.recipes:
-        if is_non_recipe(r.category, keep):
-            dropped_by_cat[r.category] = dropped_by_cat.get(r.category, 0) + 1
-        elif produces_nothing_new(r):
-            loops_by_cat[r.category] = loops_by_cat.get(r.category, 0) + 1
-        else:
-            kept.append(r)
-    if loops_by_cat:
-        # Reported separately from the category drops above: the causes and the fixes are
-        # different, and folding them together once made 8,051 wrongly-dropped crafting
-        # recipes read as "info panels and anvil permutations".
-        top = sorted(loops_by_cat.items(), key=lambda t: -t[1])[:4]
-        say("no-ops: dropped %d recipes that consume as much of their output as they "
-            "make (%s) -- charging, chisel variants, display entries"
-            % (sum(loops_by_cat.values()),
-               ", ".join("%s x%d" % (c, n) for c, n in top)))
-    if len(kept) != before:
-        g.recipes = kept
-        g._invalidate()
-        top = sorted(dropped_by_cat.items(), key=lambda t: -t[1])[:4]
-        say("non-recipes: dropped %d of %d entries (%s) -- info panels, anvil "
-            "permutations, loot tables and container fills are not production"
-            % (before - len(kept), before,
-               ", ".join("%s x%d" % (c, n) for c, n in top)))
+    apply_recipe_filters(g, keep_categories, say)
 
     flagged, containers = mark_container_transfers(g)
     if flagged:
@@ -194,6 +166,16 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 #   throws           Chickens' colour-egg throwing: an interaction with the world
 #   right_click      likewise, a use action presented in the recipe browser
 #   puzzle           a puzzle display
+#   booklet/manual   an in-game guide book's pages, rendered in the recipe browser. Same
+#                    thing as `information`, under two names this list did not have.
+#   blockpatterns    ExtraUtils2 showing which blocks are the same multiblock part
+#                    (`quarry` and `quarryproxy`), not a way to make either.
+# The last two entries were caught only by accident until #110: every booklet and manual
+# page in the reference pack happens to list its subject on BOTH sides, so the no-op test
+# below swallowed all 386 of them. That is not a filter, it is a coincidence -- and #110
+# made it load-bearing, because `expand_interconversion` reads a two-sided entry as a
+# conversion. A manual page listing six crystal colours would have become a recipe for
+# turning a black crystal into a red one.
 # Squeezers, smelteries and centrifuges are REAL production and must not be added here.
 # Neither is bee or chicken breeding, which IS production and has no machine -- see
 # machines.NO_MACHINE_PATTERNS, a different answer to a different question.
@@ -208,6 +190,7 @@ NON_RECIPE_CATEGORY_PATTERNS = (
     "_stats", ".stats", ":stats",
     "preview",
     "package_contents", "machine_produce", "throws", "right_click", "puzzle",
+    "booklet", "manual", "blockpattern",
 )
 
 
@@ -222,10 +205,16 @@ def produces_nothing_new(recipe):
     """True when a recipe consumes at least as much of every output as it produces.
 
     These are display entries and no-ops, not production edges: `Empty Cell -> Empty Cell`
-    in a TechReborn Extractor, `Flux Capacitor -> Flux Capacitor` for charging, the chisel
-    variant tables, EnderIO's `GrindingBall` category showing a ball's SAG Mill bonus. Left
-    in, the item looks craftable from itself and the solver spends backtracking budget
-    rediscovering the cycle at every visit.
+    in a TechReborn Extractor, `Flux Capacitor -> Flux Capacitor` for charging, EnderIO's
+    `GrindingBall` category showing a ball's SAG Mill bonus. Left in, the item looks
+    craftable from itself and the solver spends backtracking budget rediscovering the cycle
+    at every visit.
+
+    ANSWERING TRUE IS NOT THE SAME AS "DROP IT". A chisel variant table scores true here
+    and is a real conversion; `apply_recipe_filters` asks `expand_interconversion` before
+    dropping anything this flags. Do not fold that test into this one -- this answers "does
+    this entry produce anything new AS WRITTEN", and the two questions have different
+    answers on exactly the entries #110 is about.
 
     TWO CONDITIONS, both learned from real false positives, and the reason this is not the
     obvious one-line set test:
@@ -243,16 +232,187 @@ def produces_nothing_new(recipe):
     """
     if not recipe.outputs:
         return True
-    required = {}
-    for ing in recipe.inputs:
-        if len(ing.alternatives) != 1:
-            continue
-        key = ing.alternatives[0]
-        required[key] = required.get(key, 0) + max(ing.qty, 1)
+    required, _unambiguous = required_items(recipe)
     for key, qty in recipe.outputs:
         if required.get(key, 0) < max(qty, 1):
             return False
     return True
+
+
+def required_items(recipe):
+    """`({key: qty this recipe definitely needs}, every slot named exactly one thing)`.
+
+    Shared by `produces_nothing_new` and `expand_interconversion`, which ask different
+    questions of the same tally. A slot offering a choice contributes NOTHING to the tally
+    -- it does not require any particular alternative, which is condition 1 in
+    `produces_nothing_new` and cost a real recipe (`Chest + Tripwire Hook -> Trapped
+    Chest`) when it was got wrong. The second return value is how a caller that
+    additionally needs "and there were no choices at all" asks, without re-walking the
+    slots to find out.
+
+    ROLE IS NOT CONSULTED HERE, deliberately. A fluid slot naming one fluid genuinely is
+    required, and a fluid appears on both sides of the container fill/empty entries the
+    no-op test exists to catch, so skipping it would readmit them. `expand_interconversion`
+    wants item-only slots and asks that separately, because it is its own question.
+    """
+    required = {}
+    unambiguous = True
+    for ing in recipe.inputs:
+        if len(ing.alternatives) != 1:
+            unambiguous = False
+            continue
+        key = ing.alternatives[0]
+        required[key] = required.get(key, 0) + max(ing.qty, 1)
+    return required, unambiguous
+
+
+def apply_recipe_filters(g, keep_categories=(), say=None):
+    """Drop what is not production, expand what only looks like it is not, in one pass.
+
+    Separate from `build` so it can be exercised without an instance directory: every
+    judgement about what counts as a production edge lives here, and #110's fix could not
+    be reproduced against a 400-mod install on the machine that has no game.
+
+    Returns the counts it reported, keyed by category, so a caller can assert on them.
+    """
+    if say is None:
+        def say(_msg):
+            pass
+    keep = {k.lower() for k in (keep_categories or ())}
+    before = len(g.recipes)
+    dropped_by_cat = {}
+    loops_by_cat = {}
+    tables_by_cat = {}
+    expanded_total = 0
+    kept = []
+    tables = []
+    for r in g.recipes:
+        if is_non_recipe(r.category, keep):
+            dropped_by_cat[r.category] = dropped_by_cat.get(r.category, 0) + 1
+        elif produces_nothing_new(r):
+            # Before writing it off as a no-op, ask whether it is a variant TABLE, which
+            # only looks like one because of how JEI flattens it. See
+            # expand_interconversion.
+            expanded = expand_interconversion(r)
+            if expanded:
+                tables.append((r, expanded))
+            else:
+                loops_by_cat[r.category] = loops_by_cat.get(r.category, 0) + 1
+        else:
+            kept.append(r)
+    for recipe, expanded in tables:
+        kept.extend(expanded)
+        tables_by_cat[recipe.category] = tables_by_cat.get(recipe.category, 0) + 1
+        expanded_total += len(expanded)
+    if tables_by_cat:
+        top = sorted(tables_by_cat.items(), key=lambda t: -t[1])[:4]
+        say("variant tables: expanded %d interconversion tables into %d conversions (%s) "
+            "-- any one member chisels into any other"
+            % (sum(tables_by_cat.values()), expanded_total,
+               ", ".join("%s x%d" % (c, n) for c, n in top)))
+    if loops_by_cat:
+        # Reported separately from the category drops above: the causes and the fixes are
+        # different, and folding them together once made 8,051 wrongly-dropped crafting
+        # recipes read as "info panels and anvil permutations".
+        top = sorted(loops_by_cat.items(), key=lambda t: -t[1])[:4]
+        say("no-ops: dropped %d recipes that consume as much of their output as they "
+            "make (%s) -- charging, display entries"
+            % (sum(loops_by_cat.values()),
+               ", ".join("%s x%d" % (c, n) for c, n in top)))
+    # COMPARE THE LISTS, NOT THE TWO LENGTHS. This branch is where `kept` is INSTALLED, so
+    # whatever guards it decides whether the whole pass had any effect. `len(kept) !=
+    # before` was that guard and it is wrong once expansion exists: expansion adds recipes
+    # while the drops remove them, so the counts can tie while the contents differ in
+    # thousands of places, silently discarding every drop AND every expansion at once.
+    #
+    # A list comparison rather than a chain of "did this counter fill up" booleans, which
+    # is the same bug one category later: that chain has to be extended by hand every time
+    # this pass learns a new verdict, and the first time it was written one verdict was
+    # already missing from it. `Recipe` defines no `__eq__`, so this compares identity
+    # element by element and cannot disagree with what actually happened.
+    if kept != g.recipes:
+        g.recipes = kept
+        g._invalidate()
+        dropped = sum(dropped_by_cat.values())
+        top = sorted(dropped_by_cat.items(), key=lambda t: -t[1])[:4]
+        say("non-recipes: dropped %d of %d entries (%s) -- info panels, anvil "
+            "permutations, loot tables and container fills are not production"
+            % (dropped, before,
+               ", ".join("%s x%d" % (c, n) for c, n in top)))
+    return {"dropped": dropped_by_cat, "loops": loops_by_cat, "tables": tables_by_cat,
+            "expanded": expanded_total}
+
+
+def expand_interconversion(recipe):
+    """A JEI variant table, expanded into the conversions it actually offers.
+
+    Chisel and Unlimited Chisel Works publish one entry per material listing every variant
+    in BOTH columns: 37 input slots, and the same 37 stacks as outputs. The table means
+    "any ONE of these becomes any other one", but flattened like that it reads as "all 37
+    in, all 37 out", which `produces_nothing_new` correctly scores as a no-op and drops.
+
+    Dropping it is the whole of #110. `chisel:lapis:1` ends up with zero producers, so
+    `cost._seed` gives it BASE_RAW_COST and a decorative block prices BELOW the
+    `minecraft:lapis_block` it is chiselled from -- 33 recipes could reach Lapis Lazuli
+    through it. The same shape #61 fixed for Diamond, surviving in the keys `ore_backed`
+    cannot rank because they are not ores. Measured on the reference pack: 341 tables,
+    6,856 members, 61 of them a `<M> Block` that something else consumes.
+
+    So expand rather than drop: one recipe per member, taking any OTHER member as a single
+    slot. THE SLOT'S AMBIGUITY IS LOAD-BEARING TWICE. It is what the table actually says --
+    any one of the others will do -- and it is what stops `produces_nothing_new` dropping
+    the expansion on a later pass, by condition 1: a slot listing interchangeable stacks
+    does not require any particular one.
+
+    This cannot make a variant cheaper than its honest source. The member's price becomes
+    the chisel's entry cost plus the cheapest OTHER member, and an entry cost is never
+    below `BASE_RAW_COST`, so the group is anchored to whatever real block is in it. Same
+    argument `solve` makes for world ore in #106.
+
+    EVERY ARM IS FLAGGED `variant`, and that flag is not decoration. Expanding a table makes
+    its members produced keys, and `cost._seed` gives `BASE_RAW_COST` only to keys nothing
+    produces, so a group with no way in would become a closed cycle priced at infinity --
+    measured at 327 keys on the reference dump, previously finite. `cost._settle_reshaped`
+    reads the flag to give those keys their leaf price back. Expand without setting it and
+    #110 trades a cheap lie for an expensive one.
+
+    THE SHAPE ALONE IS NOT ENOUGH TO IDENTIFY ONE, which is why the documentation
+    categories had to go into NON_RECIPE_CATEGORY_PATTERNS first. An Actually Additions
+    manual page listing all six crystal colours side by side is bit-for-bit this shape and
+    is not a conversion: you cannot chisel a black crystal into a red one. Measured before
+    that filter went in, the structural test matched 354 entries, 13 of them documentation.
+
+    Returns None for anything that is not this shape, so the caller falls through to the
+    existing drop.
+    """
+    if recipe.transfer or not recipe.outputs:
+        return None
+    # A slot offering a choice already survives `produces_nothing_new`, so it never reaches
+    # here; requiring unambiguous slots is what makes "the columns are equal" meaningful.
+    # Item-only on top of that: nothing chisels a fluid, and a table carrying one is a
+    # shape nobody has measured.
+    if any(ing.role != "item" for ing in recipe.inputs):
+        return None
+    required, unambiguous = required_items(recipe)
+    if not unambiguous:
+        return None
+    produced = {}
+    for key, qty in recipe.outputs:
+        produced[key] = produced.get(key, 0) + max(qty, 1)
+    # Equal columns, and more than one thing in them. One key on both sides is a charging
+    # or display no-op (`Flux Capacitor -> Flux Capacitor`) and must stay dropped.
+    if len(produced) < 2 or required != produced:
+        return None
+    members = list(produced)
+    out = []
+    for i, key in enumerate(members):
+        others = [m for m in members if m != key]
+        out.append(Recipe(
+            "%s#%d" % (recipe.rid, i), recipe.source, [(key, 1)],
+            [Ingredient(others, 1, "item")],
+            category=recipe.category, machine=recipe.machine, variant=True,
+        ))
+    return out
 
 
 CONTAINER_FLUID_THRESHOLD = 8
