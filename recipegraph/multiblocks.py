@@ -228,8 +228,52 @@ def structure_cost(entry, cost, blocked=None):
     return total
 
 
+BLOCKED_REASONS = ("produced, never priced", "nothing makes it")
+
+
+def blocking_keys(entry, cost):
+    """`{key: positions}` for the keys that made a position unsatisfiable.
+
+    `blocked_fraction` says HOW MUCH of a structure cannot be placed and deliberately says
+    nothing about what did it, which is the gap #100 was filed over: the ordinal ranks 166
+    structures against each other and no output anywhere names a single blocking block, so
+    the claim behind the ranking could not be audited. Every acceptable candidate for a
+    blocked position is counted, because any one of them would have satisfied it.
+    """
+    out = {}
+    for count, keys in entry.get("parts") or ():
+        if position_cost(keys, cost) != INF:
+            continue
+        for key in keys:
+            out[key] = out.get(key, 0) + count
+    return out
+
+
+def blocked_reason(graph, key, cost):
+    """WHY this key is unobtainable, in the terms the cost model can actually justify.
+
+    THE TWO ARE NOT THE SAME CLAIM AND THE SPLIT IS THE POINT. "Nothing in the pack makes
+    this" is a fact about the pack. "This has a recipe and the model never reached a finite
+    price for it" is a fact about the model's own coverage, and dressing it up as the first
+    is what #100 means by evidence that reads like a proof. Measured on the reference graph
+    after #110: of 26,236 blocked positions, **25,109 (95.7%) are the second kind**, across
+    190 of the 250 distinct blocking keys. `contenttweaker:galaxy_conduit` (6,456 positions)
+    has a 7x7 Extended Crafting recipe whose own inputs are unpriced; `biomesoplenty:flesh`
+    (844) is four flesh chunks, and a flesh chunk is a mob drop.
+
+    An oredict sibling is deliberately NOT accepted as a way out, though the position would
+    price if it were. Modular Machinery matches the BLOCK at a position, not an oredict
+    group, so a sibling that shares `blockIron` is not a thing you could place there. The
+    pack's own alias table (`regex.txt`, already read by `parse`) is the only substitution
+    that is real, and it is applied before a position ever reaches here.
+    """
+    if graph.by_output.get(key):
+        return BLOCKED_REASONS[0]
+    return BLOCKED_REASONS[1]
+
+
 def blocked_fraction(entry, cost):
-    """Share of this structure's block POSITIONS that no obtainable block satisfies, in [0, 1].
+    """Share of this structure's block POSITIONS with no PRICED candidate, in [0, 1].
 
     `structure_cost` above answers "can this be placed at all" and deliberately collapses to
     `inf` the moment one position is unsatisfiable -- which is right, and #95 is what it costs:
@@ -246,6 +290,13 @@ def blocked_fraction(entry, cost):
 
     A structure with no parts at all is 0.0: nothing is missing from nothing. That agrees with
     `structure_cost`, which prices an empty structure at 0.0 rather than at `inf`.
+
+    "PRICED", NOT "OBTAINABLE", and the wording is a correction rather than a nicety. This
+    reads `cost`, so a position is blocked when no candidate has a finite entry in the cost
+    table -- which is a weaker statement than the pack proving the block unobtainable, and
+    `blocked_reason` above measures how much weaker. Callers that need the stronger claim do
+    not have it, which is why the whole slice `blocked_entry_cost` maps onto stays below
+    `MACHINE_COST["unknown"]`.
     """
     total = 0
     bad = 0
