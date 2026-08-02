@@ -275,10 +275,10 @@ def merge_slots(inputs, key_of):
 
 class Recipe:
     __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine",
-                 "transfer")
+                 "transfer", "variant")
 
     def __init__(self, rid, source, outputs, inputs, category="crafting", machine=None,
-                 transfer=False):
+                 transfer=False, variant=False):
         self.rid = rid
         self.source = source          # which extractor produced this
         self.category = category      # JEI category / recipe kind
@@ -289,6 +289,12 @@ class Recipe:
         # create it. Treating them as production makes every fluid free to anyone who
         # owns a tank. Set by index.mark_container_transfers, never by an extractor.
         self.transfer = transfer
+        # True for one arm of an expanded variant table: chiselling RESHAPES a block you
+        # already have rather than obtaining one. A real edge -- the solver may walk it and
+        # the ranker must price it -- but not evidence that the material can be got, which
+        # is a distinction `cost` needs and nothing else does. Set by
+        # index.expand_interconversion, never by an extractor. See #110.
+        self.variant = variant
 
     def to_json(self):
         return {
@@ -299,6 +305,7 @@ class Recipe:
             "in": [i.to_json() for i in self.inputs],
             **({"machine": self.machine} if self.machine else {}),
             **({"xf": 1} if self.transfer else {}),
+            **({"var": 1} if self.variant else {}),
         }
 
     @staticmethod
@@ -308,6 +315,7 @@ class Recipe:
             [(o["key"], o["qty"]) for o in d["out"]],
             [Ingredient.from_json(i) for i in d["in"]],
             d.get("cat", "crafting"), d.get("machine"), bool(d.get("xf")),
+            bool(d.get("var")),
         )
 
 
@@ -368,6 +376,7 @@ class Graph:
         self._labels = None
         self._live_keys = None
         self._variant_index = None
+        self._reshaped_only = None
         self._meta_index = None
         self._fluid_names = None
         self._producer_cache = {}
@@ -453,7 +462,11 @@ class Graph:
         excluded. `chisel:diamond` is a member of `blockDiamond`, so accepting every
         group would readmit exactly the decorative blocks this exists to demote, and
         measured on the reference graph it is the difference between 39 corrected routes
-        and none. See `Solver.ore_backed`, which is the only consumer.
+        and none.
+
+        Two consumers, and they ask different questions of the same set: `Solver.ore_backed`
+        ranks with it, and `cost._seed` prices an ore at `BASE_RAW_COST` whether or not
+        something claims to produce it (#106).
         """
         if self._world_ores is None:
             self._world_ores = {
@@ -462,6 +475,33 @@ class Graph:
                 for member in members
             }
         return self._world_ores
+
+    @property
+    def reshaped_only(self):
+        """Keys nothing can make except by reshaping another form of themselves.
+
+        Every producer is a `variant` recipe -- one arm of an expanded chisel table -- so
+        the graph knows how to CONVERT this key but not how to obtain any of it. #110's
+        second half depends on the distinction: expanding a table gives its members
+        producers, and `cost._seed` hands `BASE_RAW_COST` only to keys nothing produces, so
+        without this a group whose members are all leaves becomes a closed cycle with no
+        base case and every member prices at infinity. Measured on the reference dump: 327
+        keys went from a finite price to unreachable, `abyssalcraft:abybrick` among them.
+
+        A key with even one ordinary producer is NOT here, however unreachable that
+        producer turns out to be: its unreachability is a real statement about the pack
+        rather than an artifact of this expansion, so it gets no fallback of its own. It
+        can still end up priced THROUGH the group, one chisel from a sibling that did get
+        one, and that is intended. A chisel group is an equivalence class, so assuming any
+        member obtainable assumes all of them are; what the distinction buys is that the
+        assumption enters at exactly one place, on the keys that have no other story.
+        """
+        if self._reshaped_only is None:
+            self._reshaped_only = {
+                key for key, made_by in self.by_output.items()
+                if all(r.variant for r in made_by)
+            }
+        return self._reshaped_only
 
     @property
     def labels(self):

@@ -128,15 +128,29 @@ BUILD_KNEE = BUILD_SPREAD / BUILD_SLOPE
 # AND THE WHOLE BLOCKED SLICE STAYS BELOW `unknown`, WHICH LOOKS BACKWARDS AND IS NOT. A
 # structure proven to need an unobtainable block sounds like a stronger claim than "we could
 # not identify this machine at all", so it is tempting to rank it worse. DO NOT: the blockage
-# signal is known to be WRONG in a specific, unfixed way. Chisel and Unlimited Chisel Works
-# variants have zero producers in the graph, because chisel recipes are dropped as
-# non-recipes, so `chisel:concrete_brown:1` reads unobtainable when it is trivially
-# obtainable. Any structure using one reads as blocked on a false negative. Ranking that above
-# `unknown` -- let alone at the `unavailable` wall -- would put real recipes behind a verdict
-# this tool cannot yet stand behind, which is the 40%-of-the-pack failure the `unknown` figure
-# was chosen to avoid. The ordinal is safe BECAUSE the whole slice is bounded; the individual
-# fractions inside it inherit that same unreliability and are a ranking, never a claim.
-# Fixing this means answering the chisel question first, and that is what #95 left open.
+# signal has a history of being WRONG in ways that read exactly like a proof.
+#
+# The case this comment was written against is now fixed. Chisel and Unlimited Chisel Works
+# variants had zero producers, because chisel recipes were dropped as non-recipes, so
+# `chisel:concrete_brown:1` read unobtainable when it is trivially obtainable and any
+# structure using one read as blocked on a false negative. #110 expands those tables instead
+# of dropping them. Measured on the reference graph before and after: 26 of the 44
+# chisel-family keys used as a multiblock part were absent from the cost table and are now
+# all priced, blocked positions fell from 30,753 of 69,181 (44.45%) to 26,236 (37.92%), 8
+# structures went from partly blocked to clean, and ZERO blocked positions still involve a
+# chisel-family key.
+#
+# THE ORDERING DOES NOT MOVE ON THAT EVIDENCE, and #110 deliberately did not move it. What
+# was measured is that ONE named false-negative family is gone, not that the remaining 37.92%
+# is sound. The rest is dominated by endgame ContentTweaker parts -- 6,456 Galaxy Conduit
+# positions, 1,562 Hyperuranion Casing -- which are plausibly true negatives and have not been
+# audited as such, and at least one entry (`biomesoplenty:flesh`, 844 positions) is a produced
+# key whose own chain never prices, which is a different failure wearing the same face.
+# Ranking blocked above `unknown` -- let alone at the `unavailable` wall -- would put real
+# recipes behind a verdict this tool still cannot stand behind, which is the 40%-of-the-pack
+# failure the `unknown` figure was chosen to avoid. The ordinal is safe BECAUSE the whole slice
+# is bounded; the individual fractions inside it inherit that same unreliability and are a
+# ranking, never a claim. Moving it is #95's call and wants that audit first.
 PRICED_CEILING = MACHINE_COST["buildable"] + BUILD_SPREAD
 UNPRICED_MACHINE_COST = PRICED_CEILING + 1.0
 BLOCKED_FLOOR = UNPRICED_MACHINE_COST + 1.0
@@ -206,7 +220,7 @@ TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 6
+FORMULA_VERSION = 7
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -410,12 +424,45 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     machine price this relaxation used instead of re-deriving a flat one.
     """
     seed = _seed(graph, have, free_sources, token_kinds)
-    cost = _relax(graph, dict(seed), passes, machine_states, None)
+    cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
+                            passes, machine_states, None)
     if not machine_items:
         return CostTable(cost)
     entry = machine_entry_costs(machine_items, cost, getattr(graph, "multiblocks", None))
-    return CostTable(_relax(graph, dict(seed), passes, machine_states, entry),
-                     machine_entry=entry)
+    return CostTable(
+        _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, entry),
+                         passes, machine_states, entry),
+        machine_entry=entry)
+
+
+def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
+    """Give back the leaf price to keys only a reshaping can make, when nothing can.
+
+    RUNS AFTER RELAXATION BECAUSE IT CANNOT BE DECIDED BEFORE IT. `graph.reshaped_only` is
+    structural -- every producer is one arm of an expanded chisel table -- but whether the
+    group has any way IN is not: the anchor may have a producer that is itself unreachable,
+    two tables deep. #110 tried to answer it at build time from "does some member have a
+    producer" and left 168 keys unreachable that had been finite, `bewitchment:coquina_shell`
+    and `contenttweaker:stone_of_life_essence` among them.
+
+    So the rule is stated where the answer exists. A reshaped-only key that relaxation could
+    not reach means the graph knows how to convert this material and no way to obtain any of
+    it, which is exactly what it knew before the table was expanded -- and back then the key
+    was a leaf at `BASE_RAW_COST`. Restore that and relax again so the price propagates to
+    whatever consumes it.
+
+    THIS CANNOT REINTRODUCE #110's UNDERCUT. It only ever fires on a key relaxation left at
+    infinity, so a variant with any real route keeps the price that route earned, one chisel
+    above its anchor. The keys it does fire on were priced `BASE_RAW_COST` before #110 too,
+    so the floor it restores is a floor that already shipped.
+    """
+    stranded = [key for key in graph.reshaped_only
+                if math.isinf(cost.get(key, math.inf))]
+    if not stranded:
+        return cost
+    for key in stranded:
+        cost[key] = BASE_RAW_COST
+    return _relax(graph, cost, passes, machine_states, machine_entry)
 
 
 def _seed(graph, have, free_sources, token_kinds=None):
@@ -629,6 +676,16 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     far worse than a slow one, so validation is a content fingerprint and every failure path
     recomputes rather than guessing.
 
+    #110 ROUGHLY DOUBLED A CACHE MISS and that is the price of the fix, not an oversight.
+    `_settle_reshaped` restores the leaf price to keys an expanded chisel table stranded and
+    then relaxes again so it propagates, and the propagation is real work: 1,608 stranded
+    keys turn 4,814 others from unreachable into priced, over 8 further passes. Re-measured
+    end to end on one machine so the arms are comparable, single-relaxation path: 25.5s over
+    117,681 recipes before, 48.0s over 124,467 after, of which 20.0s is the second
+    relaxation and the rest is the 6,786 added conversions. Do not "optimise" this by
+    seeding the fallback instead: relaxation only ever lowers a cost, so a key seeded at
+    BASE_RAW_COST keeps it, and #110's undercut comes straight back.
+
     The cached document carries the machine entry costs alongside the item costs. It has to:
     a hit that returned only the item prices would hand back a plain table, `recipe_cost`
     would fall back to the flat constants, and the ranking would disagree with the very
@@ -676,10 +733,17 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
     `Solver.pick_alternative`, and it has to: pricing a slot at its cheapest option and
     then expanding a different one is how "1 Iron Ingot" became "cast 1,296 mB of molten
     iron". That recipe's slot accepts a Block of Iron or a decorative Chisel block, the
-    Chisel block is a raw leaf costing BASE_RAW_COST, so the recipe priced at 2.0 and beat
+    Chisel block WAS a raw leaf costing BASE_RAW_COST, so the recipe priced at 2.0 and beat
     smelting an ore -- and then the solver expanded the Block of Iron instead, because it
     is the one with a recipe. Nothing was mispriced; the price was simply for a route
     nobody took. See issue #29.
+
+    Past tense on the Chisel block because #110 expanded the chiselling tables and it now
+    prices one chisel ABOVE the Block of Iron rather than below it. That removes this
+    example's cheapest wrong answer; it does NOT remove the need for `pick`. Any slot whose
+    cheapest option is not the one the caller will expand reproduces the same divergence,
+    and the solver still picks on grounds of its own -- stock, pins, `ore_backed` -- that
+    the cheapest-alternative default knows nothing about.
     """
     # Off the table when it is a `CostTable`, so the machine price charged here is the one
     # the relaxation actually used (#86). A plain dict still works and still gets the flat

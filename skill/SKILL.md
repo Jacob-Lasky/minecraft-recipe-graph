@@ -880,11 +880,21 @@ values; the 23 unpriced items sit alone at 111.0.
 Two counter-intuitive orderings, both load-bearing. An unpriced ITEM is cheaper than a blocked
 structure, because "we failed to compute a number" is a weaker claim than "the pack says this needs
 an unobtainable block". And the whole blocked slice stays BELOW `unknown` even though a proven
-blockage sounds like the stronger claim -- because the blockage signal is known-wrong in an unfixed
-way: chisel recipes are dropped as non-recipes, so `chisel:concrete_brown:1` reads unobtainable when
-it is trivial, and any structure using one reads blocked on a false negative. Promoting that above
-`unknown` rebuilds the 40%-of-the-pack wall `unknown` exists to avoid. The chisel question is what
-#95 left open.
+blockage sounds like the stronger claim -- because the blockage signal has a history of reading
+exactly like a proof while being wrong. The case that argument was written on is FIXED: chisel
+recipes used to be dropped as non-recipes, so `chisel:concrete_brown:1` read unobtainable when it is
+trivial, and #110 expands those tables instead. Measured before and after -- 26 of the 44
+chisel-family multiblock part keys were absent from the cost table and are now all priced, blocked
+positions fell from 44.45% to 37.92% of 69,181, 8 structures went from partly blocked to clean, and
+ZERO blocked positions still involve a chisel key.
+
+**#110 did not move the ordering, and neither should you without the audit.** What was measured is
+that one named false-negative family is gone, not that the remaining 37.92% is sound. It is
+dominated by endgame ContentTweaker parts (6,456 Galaxy Conduit positions, 1,562 Hyperuranion
+Casing) that are plausibly TRUE negatives and unaudited, and `biomesoplenty:flesh` (844 positions)
+is a produced key whose own chain never prices -- a different failure wearing the same face.
+Promoting blocked above `unknown` rebuilds the 40%-of-the-pack wall `unknown` exists to avoid.
+Still #95's call.
 
 **Going from #93's flat price to structure-derived was visible in plans, and a session once told
 Jake to expect otherwise.** Measured when the deployed graph was first rebuilt with `multiblocks`
@@ -957,7 +967,33 @@ On the reference pack **235,226 of 343,860 dumped entries were not production re
 (133k), plus JEI info panels, worldgen, villager trades, loot tables, Tinkers' material stat
 tables and Modular Machinery structure previews. A further **11,634 are no-ops**: recipes that
 consume at least as much of every output as they produce (`Empty Cell -> Empty Cell`,
-`Scepter + Ender Pearl -> Scepter`, chisel variant tables, charging a flux capacitor).
+`Scepter + Ender Pearl -> Scepter`, charging a flux capacitor).
+
+**A variant TABLE scores as a no-op and is not one, which is #110.** Chisel and Unlimited Chisel
+Works publish one entry per material listing every variant in BOTH columns -- 37 slots in, the same
+37 stacks out -- meaning "any one of these becomes any other one". Flattened it reads as "all 37 in,
+all 37 out". All 341 tables were dropped, leaving 6,856 variant keys with zero producers and
+therefore seeded at `BASE_RAW_COST`, so `chisel:lapis:1` priced BELOW the `minecraft:lapis_block` it
+is chiselled from. `index.expand_interconversion` now emits one conversion per member taking any
+OTHER member as a single AMBIGUOUS slot -- ambiguous both because that is what the table says and
+because it is what stops the no-op test dropping the expansion on its next pass.
+
+**The shape alone does not identify a table**, so the documentation categories had to go into
+`NON_RECIPE_CATEGORY_PATTERNS` first (`booklet`, `manual`, `blockpattern`). An Actually Additions
+manual page listing all six crystal colours is bit-for-bit the same shape and is not a conversion.
+Before that filter the structural test matched 354 entries, 13 of them documentation. Those 386
+booklet and manual pages had only ever been caught BY ACCIDENT, by the no-op test, which stopped
+being harmless the moment a two-sided entry started reading as a conversion.
+
+**Expanding without `cost._settle_reshaped` trades a cheap lie for an expensive one.** Expansion
+makes members produced keys, and `_seed` gives `BASE_RAW_COST` only to keys NOTHING produces, so a
+group with no way in becomes a closed cycle priced at infinity: 327 keys went from finite to
+unreachable, `abyssalcraft:abybrick` among them. Recipes carry a `variant` flag, `Graph.reshaped_only`
+is the keys only a reshaping makes, and after relaxation any of those still at infinity get the leaf
+price back and relaxation runs again. Final measurement: of 1,502 chisel-family keys at the false
+floor, 1,289 now price above it, 213 stay at the floor (no member of their group has any source, so
+the leaf price is what the graph honestly knows), and **zero keys anywhere went finite -> unreachable**.
+It roughly doubles a cost-cache miss (25.5s -> 48.0s), which is the price of the fix.
 
 **The obvious no-op test is wrong and drops real recipes.** "Every output is also an input"
 discarded 3,560 good recipes, including `Chest + Tripwire Hook -> Trapped Chest` (a trapped

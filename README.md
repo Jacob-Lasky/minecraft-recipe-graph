@@ -241,7 +241,7 @@ above is only needed when you want to control how it is built (`--no-guess`, a d
 
 Bound to **127.0.0.1** deliberately: the graph exposes the contents of a live base and
 there is no authentication, so widening it to `--host 0.0.0.0` has to be an explicit
-choice. The graph is loaded once at startup (a few seconds for 121k recipes) and held in
+choice. The graph is loaded once at startup (a few seconds for ~124k recipes) and held in
 memory, which is why this is a long-running server rather than a per-request script.
 
 ## Asking the graph questions
