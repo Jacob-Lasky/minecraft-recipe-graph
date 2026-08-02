@@ -19,7 +19,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from recipegraph import cost, multiblocks  # noqa: E402
-from recipegraph.model import Graph  # noqa: E402
+from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 
 INF = float("inf")
 
@@ -610,6 +610,91 @@ class TheCacheSeesTheStructuresTest(unittest.TestCase):
                                     "moving cost.%s does not invalidate the cache" % name)
             finally:
                 setattr(cost, name, was)
+
+
+class WhichBlocksDidTheBlockingTest(unittest.TestCase):
+    """#100: the ordinal ranked 166 structures and no output named a single blocking block.
+
+    So the claim behind the ranking could not be checked, and the one named false negative it
+    was known to rest on -- chisel variants with no producers, fixed by #110 -- could only be
+    counted by hand. `blocking_keys` and `blocked_reason` are what
+    `tools/entry-census.py --blocking-keys` prints, and the reason split is the finding: on the
+    reference graph 95.7% of blocked positions are keys the pack DOES have a recipe for.
+    """
+
+    def entry(self, *groups):
+        return {"name": "M", "controller": "mod:ctrl", "slots": 1, "blind": 0,
+                "parts": [list(g) for g in groups]}
+
+    def test_a_placeable_structure_blocks_on_nothing(self):
+        got = multiblocks.blocking_keys(self.entry([4, ["mod:brick"]]), {"mod:brick": 1.0})
+        self.assertEqual(got, {})
+
+    def test_the_blocking_key_is_named_with_its_position_count(self):
+        got = multiblocks.blocking_keys(
+            self.entry([4, ["mod:brick"]], [9, ["mod:nope"]]), {"mod:brick": 1.0})
+        self.assertEqual(got, {"mod:nope": 9})
+
+    def test_positions_are_counted_not_part_groups(self):
+        """The same unit `blocked_fraction` uses: 6,456 galaxy conduits are not one conduit."""
+        got = multiblocks.blocking_keys(
+            self.entry([6456, ["mod:nope"]], [1, ["mod:nope"]]), {})
+        self.assertEqual(got, {"mod:nope": 6457})
+
+    def test_every_candidate_for_a_blocked_position_is_named(self):
+        """Any one of them would have satisfied it, so all of them are suspects."""
+        got = multiblocks.blocking_keys(self.entry([2, ["mod:a", "mod:b"]]), {})
+        self.assertEqual(got, {"mod:a": 2, "mod:b": 2})
+
+    def test_a_position_one_candidate_can_fill_is_not_blocked(self):
+        got = multiblocks.blocking_keys(self.entry([2, ["mod:a", "mod:b"]]), {"mod:b": 3.0})
+        self.assertEqual(got, {})
+
+    def test_it_agrees_with_blocked_fraction(self):
+        """Two readings of "blocked" that disagreed would be a contradiction nothing reports."""
+        entry = self.entry([7, ["mod:brick"]], [3, ["mod:nope"]])
+        costs = {"mod:brick": 1.0}
+        blocked = sum(multiblocks.blocking_keys(entry, costs).values())
+        self.assertAlmostEqual(multiblocks.blocked_fraction(entry, costs), 3 / 10.0)
+        self.assertEqual(blocked, 3)
+
+    def test_an_empty_structure_blocks_on_nothing(self):
+        self.assertEqual(multiblocks.blocking_keys({"parts": []}, {}), {})
+
+    def _graph(self):
+        g = Graph()
+        g.add(Recipe("r", "t", [("mod:made", 1)], [Ingredient(["mod:in"], 1)],
+                     category="minecraft.crafting"))
+        return g
+
+    def test_a_key_with_a_recipe_is_the_model_s_failure_not_the_pack_s(self):
+        """The distinction the whole audit turns on. 95.7% of positions land here."""
+        self.assertEqual(multiblocks.blocked_reason(self._graph(), "mod:made", {}),
+                         "produced, never priced")
+
+    def test_a_key_with_no_recipe_is_the_pack_s(self):
+        self.assertEqual(multiblocks.blocked_reason(self._graph(), "mod:absent", {}),
+                         "nothing makes it")
+
+    def test_both_reasons_are_declared(self):
+        """The census iterates BLOCKED_REASONS, so a third one added here must be listed."""
+        g = self._graph()
+        for key in ("mod:made", "mod:absent"):
+            self.assertIn(multiblocks.blocked_reason(g, key, {}),
+                          multiblocks.BLOCKED_REASONS)
+
+    def test_an_oredict_sibling_does_not_unblock_a_position(self):
+        """MM matches the BLOCK at a position, so a sibling sharing a group is not placeable.
+
+        Answering #100's "is a position satisfied by an oredict sibling really blocked" with
+        no rather than a measurement: the pack's own alias table is the only substitution that
+        is real, and `parse` has already applied it by the time a position reaches here.
+        """
+        g = self._graph()
+        g.ore_members = {"blockIron": ["mod:nope", "mod:cheap"]}
+        entry = self.entry([2, ["mod:nope"]])
+        self.assertEqual(multiblocks.blocking_keys(entry, {"mod:cheap": 1.0}),
+                         {"mod:nope": 2})
 
 
 if __name__ == "__main__":

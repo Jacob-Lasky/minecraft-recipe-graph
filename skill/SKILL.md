@@ -896,7 +896,8 @@ have 1.0 < priced [40.0, 110.0) < unpriced item 111.0
 ```
 
 Blocked structures are ordered by `multiblocks.blocked_fraction`, the share of block POSITIONS with
-no obtainable candidate. That is an ORDINAL, not a cost: `structure_cost` still returns `inf` the
+no PRICED candidate -- which is a weaker statement than "no obtainable candidate", and #100 below
+measures how much weaker. That is an ORDINAL, not a cost: `structure_cost` still returns `inf` the
 moment one position is unsatisfiable, so a machine that cannot be placed never reads as merely
 expensive, and the whole slice stays above every priced machine. The 117-way tie became 76 distinct
 values; the 23 unpriced items sit alone at 111.0.
@@ -912,13 +913,22 @@ chisel-family multiblock part keys were absent from the cost table and are now a
 positions fell from 44.45% to 37.92% of 69,181, 8 structures went from partly blocked to clean, and
 ZERO blocked positions still involve a chisel key.
 
-**#110 did not move the ordering, and neither should you without the audit.** What was measured is
-that one named false-negative family is gone, not that the remaining 37.92% is sound. It is
-dominated by endgame ContentTweaker parts (6,456 Galaxy Conduit positions, 1,562 Hyperuranion
-Casing) that are plausibly TRUE negatives and unaudited, and `biomesoplenty:flesh` (844 positions)
-is a produced key whose own chain never prices -- a different failure wearing the same face.
-Promoting blocked above `unknown` rebuilds the 40%-of-the-pack wall `unknown` exists to avoid.
-Still #95's call.
+**#100 IS THAT AUDIT, AND IT ARGUES THE ORDERING FAR HARDER THAN CHISEL DID.** Run
+`python3 tools/entry-census.py --blocking-keys 30`: it names every blocking block and says why.
+Of 26,236 blocked positions, **25,109 (95.7%) are keys the pack DOES have a recipe for** -- 190 of
+the 250 distinct blocking keys. Only 1,127 positions (4.3%, 60 keys) are "nothing makes it".
+Galaxy Conduit has a 7x7 Extended Crafting recipe; `nuclearcraft:heat_exchanger_frame` (1,475
+positions, 25 structures) is ordinary crafting; `biomesoplenty:flesh` (844) is four flesh chunks and
+a chunk is a mob drop with no terminator (#50).
+
+So the blocked slice mostly reports **this model's coverage, not the pack's content**, and "needs a
+block nothing makes" is unsupported for 19 positions in 20. Promoting blocked above `unknown`
+rebuilds the 40%-of-the-pack wall `unknown` exists to avoid. What would actually earn the promotion
+is pricing those 190 chains, not reclassifying them.
+
+An oredict sibling does NOT unblock a position, and that is deliberate: MM matches the block at a
+position, not an oredict group, and the pack's own `regex.txt` aliases are already applied by
+`parse`.
 
 **Going from #93's flat price to structure-derived was visible in plans, and a session once told
 Jake to expect otherwise.** Measured when the deployed graph was first rebuilt with `multiblocks`

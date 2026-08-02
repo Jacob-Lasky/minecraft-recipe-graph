@@ -142,15 +142,29 @@ BUILD_KNEE = BUILD_SPREAD / BUILD_SLOPE
 #
 # THE ORDERING DOES NOT MOVE ON THAT EVIDENCE, and #110 deliberately did not move it. What
 # was measured is that ONE named false-negative family is gone, not that the remaining 37.92%
-# is sound. The rest is dominated by endgame ContentTweaker parts -- 6,456 Galaxy Conduit
-# positions, 1,562 Hyperuranion Casing -- which are plausibly true negatives and have not been
-# audited as such, and at least one entry (`biomesoplenty:flesh`, 844 positions) is a produced
-# key whose own chain never prices, which is a different failure wearing the same face.
-# Ranking blocked above `unknown` -- let alone at the `unavailable` wall -- would put real
-# recipes behind a verdict this tool still cannot stand behind, which is the 40%-of-the-pack
-# failure the `unknown` figure was chosen to avoid. The ordinal is safe BECAUSE the whole slice
-# is bounded; the individual fractions inside it inherit that same unreliability and are a
-# ranking, never a claim. Moving it is #95's call and wants that audit first.
+# is sound.
+#
+# #100 IS THAT AUDIT, AND IT ARGUES FOR THE ORDERING FAR MORE STRONGLY THAN CHISEL EVER DID.
+# `tools/entry-census.py --blocking-keys` now names every blocking block and says why, and
+# the split is lopsided: of 26,236 blocked positions, **25,109 (95.7%) are keys the pack DOES
+# have a recipe for**, across 190 of the 250 distinct blocking keys. Only 1,127 positions
+# (4.3%, 60 keys) are "nothing makes it". `contenttweaker:galaxy_conduit` at 6,456 positions
+# has a 7x7 Extended Crafting recipe; `nuclearcraft:heat_exchanger_frame` at 1,475 is an
+# ordinary crafting recipe; `biomesoplenty:flesh` at 844 is four flesh chunks, and a chunk is
+# a mob drop this graph has no terminator for (#50).
+#
+# So the blocked slice is overwhelmingly reporting THIS MODEL'S COVERAGE, not the pack's
+# content, and "the pack says this needs an unobtainable block" is a sentence the evidence
+# does not support for 19 positions in every 20. Ranking blocked above `unknown` -- let alone
+# at the `unavailable` wall -- would put real recipes behind a verdict that is mostly a
+# statement about unpriced chains, which is the 40%-of-the-pack failure the `unknown` figure
+# was chosen to avoid. The ordinal is safe BECAUSE the whole slice is bounded; the individual
+# fractions inside it inherit that same unreliability and are a ranking, never a claim.
+#
+# WHAT WOULD ACTUALLY MOVE IT is pricing those chains, not reclassifying them. Every one of
+# the 190 is a real recipe the model gave up on, so the honest route to a stronger verdict is
+# to find out why and fix that -- at which point the keys left blocking are the 60, and the
+# claim becomes one the tool can stand behind.
 PRICED_CEILING = MACHINE_COST["buildable"] + BUILD_SPREAD
 UNPRICED_MACHINE_COST = PRICED_CEILING + 1.0
 BLOCKED_FLOOR = UNPRICED_MACHINE_COST + 1.0

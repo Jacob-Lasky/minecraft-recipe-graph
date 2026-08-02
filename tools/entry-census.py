@@ -11,6 +11,7 @@ defect was that no two of them could be told apart. Run BOTH when touching the b
     python3 tools/entry-census.py                       # the graph's own machine states
     python3 tools/entry-census.py --have data/ae2_have.json --machines data/machines.json
     python3 tools/entry-census.py --blocked 12          # the least-blocked structures
+    python3 tools/entry-census.py --blocking-keys 30    # and WHICH blocks did the blocking
 
 USE --have AND --machines TO REPRODUCE A SERVER. Machine states differ between a bare graph
 and a running instance -- a placed machine is `have` and drops out of the census entirely --
@@ -101,6 +102,8 @@ def main():
     ap.add_argument("--tokens", help="tokens.json")
     ap.add_argument("--blocked", type=int, default=8,
                     help="how many least-blocked structures to list")
+    ap.add_argument("--blocking-keys", type=int, default=12,
+                    help="how many blocking BLOCKS to list, worst first (0 to skip)")
     args = ap.parse_args()
 
     graph = Graph.load(args.graph)
@@ -158,6 +161,41 @@ def main():
         for f, bad, total, reg, e in rows[-2:]:
             print("  %-42s %6.2f%% blocked (%6d/%6d)  entry %7.3f"
                   % (reg[:42], f * 100, bad, total, e if e is not None else -1))
+
+    if args.blocking_keys:
+        blocking_keys(graph, costs, args.blocking_keys)
+
+
+def blocking_keys(graph, costs, limit):
+    """WHICH blocks did the blocking, and on what grounds.
+
+    #100: the census could rank 166 structures by how blocked they are and could not name a
+    single blocking block, so nothing downstream could check whether the ordinal rested on
+    anything. The reason split is the part that matters -- see `multiblocks.blocked_reason`
+    for why "produced, never priced" is a claim about this model rather than about the pack.
+    """
+    positions = collections.Counter()
+    structures = collections.Counter()
+    for entry in (graph.multiblocks or {}).values():
+        for key, count in multiblocks_mod.blocking_keys(entry, costs).items():
+            positions[key] += count
+            structures[key] += 1
+    if not positions:
+        print("\nno blocked positions: every structure can be placed")
+        return
+
+    reasons = {k: multiblocks_mod.blocked_reason(graph, k, costs) for k in positions}
+    total = sum(positions.values())
+    print("\nblocking blocks: %d distinct over %d positions" % (len(positions), total))
+    for reason in multiblocks_mod.BLOCKED_REASONS:
+        keys = [k for k, r in reasons.items() if r == reason]
+        pos = sum(positions[k] for k in keys)
+        print("  %-24s %4d keys  %7d positions  %5.1f%%"
+              % (reason, len(keys), pos, 100.0 * pos / total))
+
+    print("\n  %-46s %8s %7s  %s" % ("block", "positions", "structs", "why"))
+    for key, count in positions.most_common(limit):
+        print("  %-46s %8d %7d  %s" % (key[:46], count, structures[key], reasons[key]))
 
 
 if __name__ == "__main__":
