@@ -37,6 +37,14 @@ public interface PlannerActions {
      * NOT A "NULL OBJECT SO THE TESTS PASS": the alternative is a null check at four call
      * sites inside widget construction, which would be four chances to forget one and get an
      * NPE inside a resize pass that swallows it.
+     *
+     * DO NOT MAKE {@link #nodeActions} RETURN {@link NodeActionsHolder#actions()}. It looks
+     * like the obvious improvement -- the harness would then photograph the real menu -- and
+     * it would put GLOBAL, MUTABLE state underneath every layout test in this package: a test
+     * that installed a `NodeActions` would silently change the geometry another test asserts,
+     * because an installed one adds an icon widget and two menu entries. The harness gets the
+     * real holder through its own `PlannerShot.SHOT_ACTIONS`, which is where that coupling
+     * belongs, and this one stays inert so the geometry tests stay independent.
      */
     PlannerActions NONE = new PlannerActions() {
         @Override
