@@ -1701,7 +1701,23 @@ class Handler(BaseHTTPRequestHandler):
         if cache:
             self.send_header("Cache-Control", cache)
         self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError):
+            # The caller hung up mid-response. That is NORMAL, not an error: a browser
+            # navigating away mid-load does it, and so does every `curl ... | head`, which is
+            # how these pages get inspected from the terminal.
+            #
+            # WHY THIS IS WORTH CATCHING RATHER THAN IGNORING. Uncaught, it reaches
+            # `socketserver` and prints a 20-line traceback naming `_send_bytes`, which looks
+            # exactly like a server fault in a page renderer. That is not merely untidy: the
+            # health check for this container is "grep the log for a traceback", so one
+            # truncated curl poisons the signal that is supposed to reveal real failures.
+            # Caught here, a genuine renderer exception still gets its traceback.
+            #
+            # There is nothing to report to: the socket that would carry an error page is the
+            # one that just closed.
+            pass
 
     def _send(self, body, status=200, ctype="text/html; charset=utf-8"):
         raw = body.encode("utf-8")
