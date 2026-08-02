@@ -399,6 +399,49 @@ public class MachinesTest {
     }
 
     @Test
+    public void availabilityRankKeepsBuildableAndUnknownTogether() {
+        // NOT the inverse of the state constant. The constants are ordered by COST, where
+        // `unknown` sits above `buildable`; the rank puts them BOTH at 1, because an
+        // unidentified machine is not evidence the player cannot use it. A caller inverting
+        // the constants would separate exactly the pair that must stay together, which is the
+        // 40%-of-the-graph failure in a new place.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "a", "minecraft.crafting", "Crafting", "mod:a");
+        recipe(b, "b", "mystery.one", null, "mod:b");
+        recipe(b, "c", "mod.ghost", "Ghost", "mod:c");
+        recipe(b, "d", "mod.press", "Press", "mod:d");
+        recipe(b, "make", "minecraft.crafting", "Crafting", "mod:press");
+        b.beginCatalyst("mod.ghost");
+        b.catalystKey(b.key("mod:ghost_machine"));
+        b.endCatalyst();
+        b.beginCatalyst("mod.press");
+        b.catalystKey(b.key("mod:press"));
+        b.endCatalyst();
+        RecipeGraph graph = b.build();
+        MachineStates states = Machines.resolve(graph, new Evidence());
+
+        assertEquals(2, states.availabilityRank(graph.categoryId("minecraft.crafting")));
+        assertEquals(1, states.availabilityRank(graph.categoryId("mod.press")));
+        assertEquals(1, states.availabilityRank(graph.categoryId("mystery.one")));
+        assertEquals(0, states.availabilityRank(graph.categoryId("mod.ghost")));
+        // Silence is not evidence of absence: an undescribed category ranks with buildable,
+        // never with proven-unavailable.
+        assertEquals(1, states.availabilityRank(-1));
+    }
+
+    @Test
+    public void handCraftingIsAskableByCategoryIdWithoutLeavingIntSpace() {
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "a", "minecraft.crafting", "Crafting", "mod:a");
+        recipe(b, "b", "techreborn.wire_mill", "Wire Mill", "mod:b");
+        RecipeGraph graph = b.build();
+        assertTrue(Machines.isHandCrafting(graph, graph.categoryId("minecraft.crafting")));
+        assertFalse(Machines.isHandCrafting(graph, graph.categoryId("techreborn.wire_mill")));
+        // The -1 an unknown-category lookup returns is an ordinary answer, not an error.
+        assertFalse(Machines.isHandCrafting(graph, -1));
+    }
+
+    @Test
     public void theSummaryCountsEveryDescribedCategoryExactlyOnce() {
         GraphBuilder b = new GraphBuilder();
         recipe(b, "a", "minecraft.crafting", "Crafting", "mod:a");

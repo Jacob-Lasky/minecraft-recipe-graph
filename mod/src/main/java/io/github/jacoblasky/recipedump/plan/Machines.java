@@ -143,6 +143,20 @@ public final class Machines {
         return false;
     }
 
+    /**
+     * {@link #isHandCrafting(String)} by category id, for callers already in int space.
+     *
+     * Decodes the category name per call rather than caching a bitset, and that is a measured
+     * decision rather than laziness: the hot caller scores a few tens of thousands of
+     * candidates per plan, and decoding a short category string that many times is
+     * milliseconds. A cache here would be a second thing to invalidate for no gain anybody
+     * can observe.
+     */
+    public static boolean isHandCrafting(RecipeGraph graph, int categoryId) {
+        return categoryId >= 0 && categoryId < graph.categoryCount()
+                && isHandCrafting(graph.categoryName(categoryId));
+    }
+
     /** True when a category has no machine by nature rather than none we could find. */
     public static boolean needsNoMachine(String category, List<String> extra, int schema) {
         String cat = (category == null ? "" : category).toLowerCase();

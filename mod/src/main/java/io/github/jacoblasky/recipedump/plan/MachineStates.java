@@ -74,6 +74,33 @@ public final class MachineStates {
                 && (state == MachineInfo.BUILDABLE || state == MachineInfo.UNKNOWN);
     }
 
+    /**
+     * 2 = machine on hand, 1 = buildable OR unidentified, 0 = proven unavailable.
+     *
+     * NOT the inverse of the state constant, and that is the whole reason this exists rather
+     * than being left for a caller to derive. `buildable` and `unknown` BOTH rank 1: an
+     * unidentified machine is not evidence the player cannot use it, and ranking it with
+     * `unavailable` walls off 40% of the graph. The state constants are ordered by COST,
+     * where `unknown` sits above `buildable`, so a caller inverting them would separate
+     * exactly the pair that must stay together.
+     *
+     * AN UNDESCRIBED CATEGORY RANKS 1, not 0. Same argument: silence is not evidence of
+     * absence, and a category with no verdict must not be treated as proven out of reach.
+     */
+    public int availabilityRank(int categoryId) {
+        switch (state(categoryId)) {
+            case MachineInfo.HAVE:
+                return 2;
+            case MachineInfo.BUILDABLE:
+            case MachineInfo.UNKNOWN:
+                return 1;
+            case MachineInfo.UNAVAILABLE:
+                return 0;
+            default:
+                return 1;
+        }
+    }
+
     /** Category ids in first-appearance-in-recipes order. */
     public int[] describedCategories() {
         return categories.clone();
