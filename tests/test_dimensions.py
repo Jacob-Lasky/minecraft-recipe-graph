@@ -21,6 +21,7 @@ about the dimension: `DIM-1` holds 42 region files on the reference save, becaus
 a dimension generates it.
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -426,6 +427,51 @@ class TheOtherIdForTheSameOreTest(unittest.TestCase):
         g = shadow_graph()
         del g.names[HOLDER]
         self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+    def test_the_plan_tells_you_where_the_holder_key_is_mined(self):
+        """The note has to reach the key the branch actually walks, not just its twin."""
+        from recipegraph.solve import Solver
+        g = shadow_graph()
+        g.dimension_ores.update(dimensions.shadow_ores(g, g.dimension_ores))
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        node = Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve(HOLDER, 1)["tree"]
+        self.assertEqual(node["dimension"], "Sedna")
+        self.assertIn("Sedna", node["note"])
+
+
+class BuildWiresTheShadowsInTest(unittest.TestCase):
+    """One line in `index.build`, and dropping it is silent.
+
+    Nothing raises and no other test fails: the gate simply goes back to naming a key the
+    recipes do not use, which is #117 exactly. Same shape as the `index.build` wiring test
+    `tests/test_multiblocks.py` keeps for the multiblock line.
+    """
+
+    def _instance(self):
+        d = tempfile.mkdtemp()
+        cfg = os.path.join(d, "config", "advRocketry")
+        os.makedirs(cfg)
+        with open(os.path.join(cfg, "planetDefs.xml"), "w") as fh:
+            fh.write(PLANET_XML)
+        dump = os.path.join(d, "mc-recipe-dump")
+        os.makedirs(dump)
+        with open(os.path.join(dump, "recipes.ndjson"), "w") as fh:
+            fh.write(json.dumps({"cat": "minecraft.crafting",
+                                 "in": [[{"i": HOLDER, "c": 1}]],
+                                 "out": [{"i": "mod:ingot", "c": 1}]}) + "\n")
+        with open(os.path.join(dump, "oredict.json"), "w") as fh:
+            json.dump({"oreSednanite": [SEDNANITE, HOLDER]}, fh)
+        with open(os.path.join(dump, "names.json"), "w") as fh:
+            json.dump({SEDNANITE: "Sednanite Ore", HOLDER: "Sednanite Ore"}, fh)
+        return d
+
+    def test_a_built_graph_gates_both_ids(self):
+        from recipegraph import index
+        g = index.build(self._instance(), quiet=True)
+        self.assertEqual(sorted(g.dimension_ores), sorted([SEDNANITE, HOLDER]))
+        self.assertEqual(g.dimension_ores[HOLDER], g.dimension_ores[SEDNANITE])
 
 
 if __name__ == "__main__":
