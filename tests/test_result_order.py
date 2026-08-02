@@ -141,5 +141,50 @@ class ProducerOrderIsStableBecauseTieBreakingRidesOnIt(unittest.TestCase):
                          "filtering a container transfer must not reorder the survivors")
 
 
+class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
+    """`ore_members` values decide oredict ties, and the same first-wins rule applies.
+
+    THE SIBLING OF THE CLASS ABOVE, for the other list a tie falls through to.
+    `Solver.resolve_ore` picks with `max(members, key=...)` and `cost.input_cost` scans them
+    keeping the first strictly-cheaper one, so with nothing in stock -- which is when the
+    interesting plans are computed -- two equally priced members are separated by nothing but
+    the order `oredict.from_json` built the list in. That is a list comprehension over the
+    dump's own JSON, so it is insertion-ordered and stable across processes.
+
+    Untested until `tests/fixtures/plan/*.json` started freezing whole solver results (#19):
+    `plan-same-name` and `plan-fluid-chain` between them hold 27 resolved oredict slots, so
+    a set here would reshuffle real fixtures. Same failure shape as the producer list, same
+    invisibility -- the plan stays plausible and simply names a different member.
+    """
+
+    def _graph(self):
+        g = Graph()
+        # Members whose insertion order and alphabetical order DISAGREE, per this file's
+        # header: with equal cost, a sorted implementation picks `mod:a` and the correct one
+        # picks `mod:z`, so the assertion can actually fail.
+        g.names = {"mod:z": "Zed Plate", "mod:a": "Aye Plate", "mod:target": "Target"}
+        g.ore_members = {"plateStuff": ["mod:z", "mod:a"]}
+        return g
+
+    def test_members_keep_the_order_the_dump_listed_them_in(self):
+        self.assertEqual(self._graph().ore_members["plateStuff"], ["mod:z", "mod:a"])
+
+    def test_an_untied_oredict_slot_resolves_to_the_first_member(self):
+        # No stock and no costs, so every member ties on availability and on price, and the
+        # choice falls through to order alone -- which is exactly the state #61 showed the
+        # interesting plans are computed in.
+        g = self._graph()
+        node = Solver(g).resolve_ore("ore:plateStuff", 1, frozenset(), 0)
+        self.assertEqual(node["resolved_to"], "mod:z",
+                         "an oredict tie must resolve by member order, not alphabetically")
+
+    def test_a_stocked_member_still_wins_over_an_earlier_one(self):
+        # Guards the guard: if order beat availability the test above would pass for the
+        # wrong reason, and `resolve_ore`'s documented three-tier rule would be broken.
+        g = self._graph()
+        node = Solver(g, have={"mod:a": 64}).resolve_ore("ore:plateStuff", 1, frozenset(), 0)
+        self.assertEqual(node["resolved_to"], "mod:a")
+
+
 if __name__ == "__main__":
     unittest.main()
