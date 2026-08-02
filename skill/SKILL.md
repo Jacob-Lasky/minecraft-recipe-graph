@@ -618,28 +618,41 @@ measured in chromium, `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px w
 per-character advances in it were measured off the rendered SVG; re-measure with
 `getBBox()` if the fonts change.
 
-## The cost model prices MACHINES, never PROGRESSION
+## The cost model prices ITEM gates, and still cannot see a PLACE
 
-**Nothing about world progress is in the cost, and the error only runs one way: gated routes
-are systematically underpriced.** Worth stating because the model looks like it handles this and
-does not -- `MACHINE_COST` has an `unavailable` state at 5000.0, which is about whether you can
-build the BLOCK, not whether you can reach the PLACE.
+Half of this is fixed and half is not, and the halves are easy to conflate. Know which is which
+before answering "do I need to unlock X for this plan".
 
-* **A locked quest chapter is priced at 1.0, the same as a cobblestone.** The pack's 11 GATE
-  tokens (`contenttweaker:chapter_1` gates 38 recipes, `space_station` 32, `hunter_level_20` 20)
-  are consumed by recipes and produced by nothing, and `cost.py` never mentions tokens, so they
-  fall through to `BASE_RAW_COST = 1.0` -- "an item with no recipe: assume it can be obtained
-  somehow". Gating is a REPORTING concept only: `solve.py` badges the node "locked" and lists it
-  under "locked behind progress". Nothing steers the planner away from the route.
-* **Dimension access is not modelled at all**, not even as a token. Travelling is not a recipe,
-  so the graph cannot see it. `contenttweaker:sednanite_ore` has exactly two producers, both the
-  Plasmatic Condenser; the "mine it on Sedna" route does not exist in the model. The tool will
-  never warn about the trip AND will never present the condenser as the alternative to it -- it
-  believes the condenser is the only way there is.
+**PRICED (#105): a gate the pack states AS AN ITEM.** `cost.TOKEN_COST` maps each
+`tokens.py` kind to a price, and `estimate`, `estimate_cached`, `_seed` and `fingerprint` all
+take `token_kinds`. Until #105 `cost.py` never mentioned tokens, so all 11 GATE placeholders
+fell through `BASE_RAW_COST` and a locked quest chapter cost what a cobblestone costs -- and the
+error ran ONE WAY, so a gated route was always at least as cheap as the ungated one beside it.
 
-So when Jake asks "do I need to unlock X for this plan", the plan cannot answer it. Read the
-`tokens_needed` / "locked behind progress" rollup, and say plainly that the price does not
-reflect it.
+    HINT = METHOD = 1.0  <  LOOT 200.0  <  GATE 1000.0  <<  MACHINE_COST["unavailable"] 5000.0
+
+**The ordering is the claim, not the magnitudes**, and all four properties are asserted in
+`tests/test_progression.py`: GATE > LOOT > raw; GATE > `MACHINE_COST["unknown"]` so an ungated
+route through ANY machine wins; both < `unavailable` so a gate stays finite and is still chosen
+when it is the only route; and LOOT != GATE, per #95's lesson that one shared number destroys
+the ordering among both claims. HINT and METHOD stay at a raw leaf on purpose -- neither is a
+thing to obtain, and METHOD would double-count the machine `category_entry_cost` already charged.
+
+**NOT PRICED: a dimension.** Travelling is not a recipe, so the graph cannot see it, and a plan
+will still route you to another planet without mentioning the trip. Do not claim otherwise.
+
+**AND THERE IS NO STRUCTURAL SIGNAL FOR ONE, WHICH IS THE THING TO KNOW BEFORE TRYING.** The
+obvious sweep -- a world ore with no producers and many consumers -- returns **122 keys on the
+reference graph**, and the overwhelming majority are ordinary overworld variants:
+`forestry:resources:1 Copper Ore` and `railcraft:ore_metal_poor:3 Poor Tin Ore` sit in exactly
+the same bucket as Sednanite. Nothing in the graph distinguishes "on another planet" from
+"a second mod's copper". The pack's own planet ores DO share a `contenttweaker:sub_block_holder_*`
+prefix (23 keys, 22 of them ores), but whether all 23 are off-world is not answerable from the
+graph either. So this needs a CURATED map, the same shape as `tokens.DEFAULT_TOKENS`, and that
+is data authoring rather than code. Tracked in #112.
+
+The reporting half has always worked: read the `tokens_needed` / "locked behind progress" rollup
+for what a plan is gated on, and remember it covers items, never places.
 
 ## The cost model is load-bearing, and it fails silently
 

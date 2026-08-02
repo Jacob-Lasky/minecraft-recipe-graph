@@ -160,6 +160,17 @@ The solver handles the three things that make this harder than it looks:
   lists them.
 - **Stock is consumed, not just checked.** The inventory pool is drawn down as the tree
   is built, so two branches cannot both claim the same 5 redstone.
+- **Progress is priced.** The pack expresses "you have not unlocked this yet" as a
+  placeholder item in the recipe, and there are eleven of them. They used to cost what a
+  cobblestone costs, so a route behind a locked quest chapter was always at least as cheap
+  as the ungated one beside it. A gate now outweighs any machine, so an ungated route wins
+  whenever one exists — while staying finite, so a gated route is still chosen when it is
+  the only one there is. Same for "go and kill a boss", priced lower than a lock and higher
+  than picking something up.
+
+  Only gates the pack states **as an item** are priced. A dimension you have to travel to
+  is not one: travelling is not a recipe, so the graph cannot see it, and a plan will
+  still route you to another planet without mentioning the trip.
 
 ### Explore — search before you plan
 

@@ -237,11 +237,15 @@ def cmd_plan(args):
     if not args.ignore_machines:
         states, _ov, machine_items = _machine_states(g, args.have, args.machines)
     free = {} if args.ignore_sources else _free_sources(args.have, args.sources)
+    # Resolved ONCE and handed to both the cost table and the solver. Two calls would be two
+    # reads of data/tokens.json, and a plan whose prices disagreed with its own badges.
+    token_kinds = _token_kinds(args)
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
-                                         free_sources=free, machine_items=machine_items)
+                                         free_sources=free, machine_items=machine_items,
+                                         token_kinds=token_kinds)
     # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
     # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
     pinned, pin_notes = ({}, {})
@@ -252,7 +256,7 @@ def cmd_plan(args):
             print("pin on %s: %s" % (g.bare_name(pin_key), why), file=sys.stderr)
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
                     costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
-                    free_sources=free, token_kinds=_token_kinds(args), pinned=pinned)
+                    free_sources=free, token_kinds=token_kinds, pinned=pinned)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
