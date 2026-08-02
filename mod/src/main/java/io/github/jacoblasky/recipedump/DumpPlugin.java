@@ -1,9 +1,12 @@
 package io.github.jacoblasky.recipedump;
 
+import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
+import io.github.jacoblasky.recipedump.client.jei.PlannerGuiHandler;
 import mezz.jei.api.IJeiRuntime;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.IModRegistry;
 import mezz.jei.api.JEIPlugin;
+import mezz.jei.api.ingredients.IIngredientRegistry;
 
 /**
  * Captures the JEI runtime so the dump command can reach the recipe registry.
@@ -33,7 +36,7 @@ public class DumpPlugin implements IModPlugin {
      * populations differ: an item nothing crafts and nothing consumes appears here and
      * nowhere in the recipe stream, and #50's whole subject is drop-only items.
      */
-    public static mezz.jei.api.ingredients.IIngredientRegistry ingredients;
+    public static IIngredientRegistry ingredients;
 
     /**
      * The ingredient registry has to be taken HERE, not off the runtime, because
@@ -51,12 +54,21 @@ public class DumpPlugin implements IModPlugin {
         // A GLOBAL handler, not an advanced one. `IAdvancedGuiHandler` is bounded to
         // `GuiContainer` and the planner opens a plain `GuiScreen`, so an advanced handler
         // would register and never fire. See PlannerGuiHandler for the javap evidence.
-        registry.addGlobalGuiHandlers(
-                new io.github.jacoblasky.recipedump.client.jei.PlannerGuiHandler());
+        registry.addGlobalGuiHandlers(new PlannerGuiHandler());
     }
 
     @Override
     public void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
         runtime = jeiRuntime;
+        // HERE AND NOT IN `register`, because this is the callback that proves a runtime
+        // exists -- and a NodeActions installed without one would answer true to
+        // `canShowInRecipeViewer` and then open nothing.
+        //
+        // NO_GRAPH IS THE LIVE WIRING, NOT A PLACEHOLDER LEFT BY MISTAKE. Nothing on the
+        // client loads a RecipeGraph yet, so the two recipe-viewer entries stay hidden; the
+        // planner draws no entry rather than a dead one. Installing anyway is what proves the
+        // registration path works before the graph lands instead of after. Swapping in the
+        // real holder is this one argument.
+        JeiNodeActions.install(JeiNodeActions.NO_GRAPH);
     }
 }
