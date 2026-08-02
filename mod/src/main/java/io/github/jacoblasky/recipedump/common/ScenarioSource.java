@@ -111,11 +111,18 @@ public enum ScenarioSource {
          * Reading did not happen or refused. `why` is shown to the player verbatim.
          *
          * MAKE IT SAY WHAT TO DO. "AE2 stock is not read yet" tells a player nothing they can
-         * act on; "no wireless terminal in inventory" tells them exactly what to go and get.
+         * act on; "no wireless access point in range" tells them to walk toward their base.
          * That difference is the whole reason this takes a string rather than a boolean.
+         *
+         * AN EMPTY REASON IS REPLACED WITH SOMETHING THAT READS AS WRONG, deliberately, and
+         * graphmodel asked for it that way. A reader returning no reason is a bug in the
+         * reader; a tidy filler like "not available" hides it behind ordinary-looking UI and
+         * nobody reports it, where "reason not given" reads as a fault and gets raised. The
+         * alternative -- rendering the empty string -- draws a blank line under the caveat,
+         * which looks like a rendering fault rather than a missing input.
          */
         public static Status unavailable(String why) {
-            return new Status(false, why == null || why.isEmpty() ? "not available" : why);
+            return new Status(false, why == null || why.isEmpty() ? NO_REASON_GIVEN : why);
         }
 
         public boolean live() {
@@ -126,6 +133,12 @@ public enum ScenarioSource {
             return note;
         }
     }
+
+    /**
+     * Shown when a reader refuses without saying why. Phrased to read as a FAULT rather than
+     * as ordinary UI -- see {@link Status#unavailable}.
+     */
+    static final String NO_REASON_GIVEN = "reason not given";
 
     /** Answers for a source that can only know at runtime whether it read anything. */
     public interface Reader {

@@ -254,11 +254,17 @@ public class ScenarioSourceTest {
     }
 
     @Test
-    public void anUnavailableStatusWithNoReasonStillSaysSomething() {
-        // An empty note would render as "planned without: have" with a blank line under it,
-        // which reads as a rendering fault rather than a missing input.
-        assertFalse(ScenarioSource.Status.unavailable("").note().isEmpty());
-        assertFalse(ScenarioSource.Status.unavailable(null).note().isEmpty());
+    public void anUnavailableStatusWithNoReasonSaysSoRatherThanFillingIn() {
+        // An empty note renders as a blank line under the caveat, which looks like a
+        // rendering fault. A TIDY filler would be worse: a reader that refuses without a
+        // reason is a bug in the reader, and "not available" reads as ordinary UI so nobody
+        // reports it. This is worded to read as a fault. graphmodel's argument, and right.
+        assertEquals(ScenarioSource.NO_REASON_GIVEN,
+                     ScenarioSource.Status.unavailable("").note());
+        assertEquals(ScenarioSource.NO_REASON_GIVEN,
+                     ScenarioSource.Status.unavailable(null).note());
+        assertFalse("the placeholder must not read as an ordinary state",
+                    ScenarioSource.NO_REASON_GIVEN.equals("not available"));
     }
 
     @Test
