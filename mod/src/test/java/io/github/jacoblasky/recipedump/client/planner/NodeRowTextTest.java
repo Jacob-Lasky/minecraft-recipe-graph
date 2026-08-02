@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.plan.PlanNode;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

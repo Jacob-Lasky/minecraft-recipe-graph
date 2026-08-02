@@ -52,7 +52,7 @@ public class FlowLayoutTest {
         FlowLayout.Laid laid = FlowLayout.of(root);
         Set<Integer> rows = new HashSet<Integer>();
         for (FlowLayout.Box box : laid.boxes) {
-            if (box.node.children == null) {
+            if (!box.node.hasChildren()) {
                 assertTrue("two leaves overlap at y=" + box.y, rows.add(box.y));
             }
         }
@@ -74,7 +74,7 @@ public class FlowLayoutTest {
         int top = Integer.MAX_VALUE;
         int bottom = Integer.MIN_VALUE;
         for (FlowLayout.Box box : laid.boxes) {
-            if (box.node.children == null) {
+            if (!box.node.hasChildren()) {
                 top = Math.min(top, box.y);
                 bottom = Math.max(bottom, box.y);
             }
@@ -153,14 +153,14 @@ public class FlowLayoutTest {
     private static List<String> keysOf(FlowLayout.Laid laid) {
         List<String> keys = new ArrayList<String>();
         for (FlowLayout.Box box : laid.boxes) {
-            keys.add(box.node.key);
+            keys.add(box.node.key());
         }
         return keys;
     }
 
     private static int rowOf(FlowLayout.Laid laid, String key) {
         for (FlowLayout.Box box : laid.boxes) {
-            if (key.equals(box.node.key)) {
+            if (key.equals(box.node.key())) {
                 return box.y;
             }
         }

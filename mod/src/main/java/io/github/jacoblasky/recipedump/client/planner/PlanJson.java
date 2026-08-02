@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.plan.PlanNode;
+
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -107,43 +109,71 @@ public final class PlanJson {
      * too deep to read.
      */
     public static PlanNode readNode(JsonObject json) {
-        PlanNode.Builder builder = new PlanNode.Builder();
-        builder.key = string(json, "key");
-        builder.kind = has(json, "kind") ? string(json, "kind") : "item";
-        builder.label = string(json, "label");
-        builder.name = has(json, "name") ? string(json, "name") : builder.label;
-        builder.need = number(json, "need", 1L);
-        builder.status = has(json, "status") ? string(json, "status") : NodeStatus.CRAFT;
-
-        builder.category = optional(json, "category");
-        builder.machine = optional(json, "machine");
-        builder.machineState = optional(json, "machine_state");
-        builder.machineWhy = optional(json, "machine_why");
-        builder.recipe = optional(json, "recipe");
-        builder.runs = number(json, "runs", 0L);
-        builder.perRun = number(json, "per_run", 0L);
-
-        builder.alternatives = (int) number(json, "alternatives", 0L);
-        builder.altCount = (int) number(json, "alt_count", 0L);
-        builder.note = optional(json, "note");
-        builder.resolvedTo = optional(json, "resolved_to");
-        builder.dimension = optional(json, "dimension");
-        builder.tokenKind = optional(json, "token_kind");
-        builder.fromStock = number(json, "from_stock", 0L);
-        builder.pinned = bool(json, "pinned");
-        builder.unsourced = bool(json, "unsourced");
+        // ABSENT STAYS ABSENT. This reader used to default every optional number to 0 and
+        // every flag to false, which was harmless while it fed a renderer-only class -- the
+        // panel draws the same row either way. It feeds the SHARED class now, the one
+        // `plan.PlanJson` writes from, so a 0 substituted for a missing key would make the
+        // emitter start writing `"runs": 0` where Python omits it and every golden fixture
+        // would disagree. `longOrNull` and friends exist for that and for nothing else.
+        PlanNode.Builder builder = new PlanNode.Builder()
+                .key(string(json, "key"))
+                .kind(has(json, "kind") ? string(json, "kind") : "item")
+                .label(string(json, "label"))
+                .need(number(json, "need", 1L))
+                .status(has(json, "status") ? string(json, "status") : NodeStatus.CRAFT)
+                .category(optional(json, "category"))
+                .machine(optional(json, "machine"))
+                .machineState(optional(json, "machine_state"))
+                .machineWhy(optional(json, "machine_why"))
+                .recipe(optional(json, "recipe"))
+                .runs(longOrNull(json, "runs"))
+                .perRun(longOrNull(json, "per_run"))
+                .alternatives(intOrNull(json, "alternatives"))
+                .altCount(intOrNull(json, "alt_count"))
+                .note(optional(json, "note"))
+                .resolvedTo(optional(json, "resolved_to"))
+                .dimension(optional(json, "dimension"))
+                .tokenKind(optional(json, "token_kind"))
+                .fromStock(longOrNull(json, "from_stock"))
+                .pinned(boolOrNull(json, "pinned"))
+                .unsourced(boolOrNull(json, "unsourced"));
+        // `name` IS THE ONE FIELD THAT KEEPS A FALLBACK, and it is safe where the others
+        // were not. It is present on all 571 nodes across the fixtures and `PlanJson` writes
+        // it unconditionally, so it is not an optional key -- the fallback covers hand-written
+        // or partial JSON only. Making it strict would be worse than the disease: the writer
+        // does not null-guard it, so an absent name would come back out as `"name": null`,
+        // which no fixture carries either.
+        builder.name(has(json, "name") ? string(json, "name") : string(json, "label"));
 
         JsonArray kids = json.getAsJsonArray("children");
-        if (kids == null || kids.size() == 0) {
-            builder.children = Collections.emptyList();
-        } else {
+        if (kids != null && kids.size() > 0) {
             List<PlanNode> children = new ArrayList<PlanNode>(kids.size());
             for (JsonElement kid : kids) {
                 children.add(readNode(kid.getAsJsonObject()));
             }
-            builder.children = children;
+            builder.children(children);
         }
         return builder.build();
+    }
+
+    /** The value, or null when the key is absent. See {@link #readNode} for why null. */
+    private static Long longOrNull(JsonObject json, String field) {
+        return has(json, field) ? Long.valueOf(json.get(field).getAsLong()) : null;
+    }
+
+    private static Integer intOrNull(JsonObject json, String field) {
+        return has(json, field) ? Integer.valueOf(json.get(field).getAsInt()) : null;
+    }
+
+    /**
+     * TRUE OR NULL, never `Boolean.FALSE`.
+     *
+     * Python writes these flags only when they are true, so "present and false" is a state
+     * the wire format does not have. Returning FALSE for an absent key would round-trip into
+     * `"pinned": false` and disagree with every fixture.
+     */
+    private static Boolean boolOrNull(JsonObject json, String field) {
+        return has(json, field) && json.get(field).getAsBoolean() ? Boolean.TRUE : null;
     }
 
     private static JsonObject parse(InputStream in) {

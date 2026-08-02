@@ -203,18 +203,16 @@ public final class FlowLayout {
             nodes.add(node);
             parents.add(parent);
             depths.add(depth);
-            List<PlanNode> children = node.children;
+            List<PlanNode> children = node.children();
 
             // Pushed in REVERSE so the stack pops them left to right, which keeps the
             // diagram's row order the same as the tree's child order. A diagram that
             // silently reverses siblings against the list beside it is a diagram nobody
             // trusts.
-            if (children != null) {
-                for (int c = children.size() - 1; c >= 0; c--) {
-                    pending.add(children.get(c));
-                    pendingParent.add(index);
-                    pendingDepth.add(depth + 1);
-                }
+            for (int c = children.size() - 1; c >= 0; c--) {
+                pending.add(children.get(c));
+                pendingParent.add(index);
+                pendingDepth.add(depth + 1);
             }
         }
     }

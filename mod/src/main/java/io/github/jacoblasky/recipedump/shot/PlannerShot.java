@@ -6,7 +6,7 @@ import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
-import io.github.jacoblasky.recipedump.client.planner.PlanNode;
+import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
