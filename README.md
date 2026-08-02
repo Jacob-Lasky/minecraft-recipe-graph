@@ -535,6 +535,23 @@ Forge's maven no longer publishes the `userdev` artifact FG2 requires, only the 
 `userdev3`. See [docs/BUILD.md](docs/BUILD.md) for the evidence and the reobfuscation
 check.
 
+### Screenshotting a GUI without launching the game
+
+The mod is growing an in-game planner UI, and a GUI change you cannot see is a GUI change you
+cannot review. `harness/` runs the client **headlessly** in a container (Xvfb plus mesa's
+llvmpipe, a small dev mod set rather than the whole pack), opens one named screen, writes a
+PNG and exits:
+
+```bash
+harness/shot.sh                 # the fixture panel
+harness/shot.sh <screen> [name] # any screen registered in ShotScreens
+```
+
+About a minute and a half per screenshot on a warm cache, against a manual pack launch.
+Adding a screen to it is one line. It renders GUIs and not the world, and seven mods is not
+410, so it replaces the launch-per-iteration loop rather than the live acceptance run.
+[harness/README.md](harness/README.md) has the knobs, the costs and the limits.
+
 ### Machines — route through what you actually have
 
 ```bash

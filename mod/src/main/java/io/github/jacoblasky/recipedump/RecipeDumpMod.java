@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump;
 
+import io.github.jacoblasky.recipedump.shot.ShotHarness;
 import mezz.jei.api.IJeiRuntime;
 import net.minecraftforge.client.ClientCommandHandler;
 import net.minecraftforge.fml.common.Mod;
@@ -62,5 +63,8 @@ public class RecipeDumpMod {
     @SideOnly(Side.CLIENT)
     public void init(FMLInitializationEvent event) {
         ClientCommandHandler.instance.registerCommand(new DumpCommand());
+        // Does nothing at all unless `-Dmcrecipedump.shot` was passed, which only the
+        // headless screenshot harness does. See ShotHarness and harness/README.md (#124).
+        ShotHarness.arm();
     }
 }
