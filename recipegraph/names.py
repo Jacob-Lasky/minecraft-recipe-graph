@@ -62,24 +62,3 @@ def build_reverse(names):
     for key, label in names.items():
         rev.setdefault(label.lower(), []).append(key)
     return rev
-
-
-def resolve(query, names, reverse=None):
-    """Resolve a user query (id or display name, case-insensitive) to item keys."""
-    q = query.strip()
-    if q in names:
-        return [q]
-    nk = norm_key(q)
-    if nk in names:
-        return [nk]
-    reverse = reverse if reverse is not None else build_reverse(names)
-    low = q.lower()
-    if low in reverse:
-        return list(reverse[low])
-    # substring fallback, shortest names first so "Borax" beats "Borax Singularity"
-    hits = [(label, keys) for label, keys in reverse.items() if low in label]
-    hits.sort(key=lambda t: (len(t[0]), t[0]))
-    out = []
-    for _label, keys in hits[:12]:
-        out.extend(keys)
-    return out

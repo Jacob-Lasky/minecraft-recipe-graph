@@ -13,7 +13,7 @@ that admits to it.
 
 import collections
 
-from .model import merge_slots, split_key
+from .model import merge_slots, norm_key, split_key
 from .names import build_reverse
 
 MAX_RESULTS = 60
@@ -295,6 +295,35 @@ def describe(graph, key, have=None):
         "used_in": [_recipe_brief(graph, r, have, "used") for r in consumers[:MAX_CONSUMERS]],
         "used_in_total": len(consumers),
     })
+
+
+def resolve_query(graph, query, have=None, limit=MAX_RESULTS):
+    """Keys for a query typed at a terminal: an exact key first, then the ranked search.
+
+    WHY THIS EXISTS RATHER THAN `names.resolve`. That one was handed `graph.names`, which is
+    items only, so the exact-key branch could never fire for a fluid, an essentia aspect or
+    an oredict entry -- 1,198 fluids are in `labels` and zero are in `names`. `plan
+    fluid:nethengeic_fluid` answered "no item matched" while the server planned the same key
+    in 48ms. See #107.
+
+    THE EXACT KEY IS TRIED FIRST AND RETURNS ALONE, which is the half that stops a correct
+    answer losing to a fuzzy one. It also has to bypass the ranked search below, because that
+    filters to `live_keys`: a key you name exactly is a key you meant, and answering "no
+    match" for one the graph holds is worse than planning something dead.
+
+    Everything else defers to `rank_matches`, so the CLI and the web UI agree about what
+    "strong mythic essence" means. They did not: `names.resolve` sorted substring hits by
+    LABEL LENGTH, so the query planned `forestry:can:1#049547d397a6` (Strong Mythic Essence
+    Can) after one line of preamble -- a confident plan for an item nobody asked about, and
+    the same shape as #101, a tie among same-named keys broken by something carrying no
+    information. `rank_matches` breaks it on stock, then consumers, then producers.
+    """
+    have = have or {}
+    q = query.strip()
+    for candidate in (q, norm_key(q)):
+        if candidate and (candidate in graph.labels or candidate in have):
+            return [candidate]
+    return rank_matches(graph, q, have, limit).results
 
 
 def name_hints(graph, query, limit=10):
