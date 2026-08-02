@@ -6,8 +6,7 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 
-import io.github.jacoblasky.recipedump.client.PlannerScreen;
-import io.github.jacoblasky.recipedump.client.planner.PlanJson;
+import io.github.jacoblasky.recipedump.client.PlannerEntry;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
@@ -79,26 +78,21 @@ final class LivePlanShot {
         PlanBook book = new PlanBook();
         book.setTodo(target, qty());
 
-        if (!awaitGraph()) {
+        if (awaitGraph()) {
             log("graph: " + GraphService.get().describe());
-            PlannerScreen.open(book);
-            return;
+            if (PlannerService.get().plan(target, qty(), Solver.DEFAULT_MAX_NODES)) {
+                awaitPlan();
+            }
+            log("plan: " + PlannerService.get().describe());
+            writeJson();
+        } else {
+            log("graph: " + GraphService.get().describe());
         }
-        log("graph: " + GraphService.get().describe());
-        if (PlannerService.get().plan(target, qty(), Solver.DEFAULT_MAX_NODES)) {
-            awaitPlan();
-        }
-        log("plan: " + PlannerService.get().describe());
-        writeJson();
-
-        String json = PlannerService.get().resultJson();
-        if (json == null) {
-            // Reached when the target is not in the graph or the solve threw. The empty
-            // planner still says what went wrong, via `PlannerService.describe`.
-            PlannerScreen.open(book);
-            return;
-        }
-        PlannerScreen.openPlan(PlanJson.readResult(json), book);
+        // THROUGH THE SAME CHOOSER THE ITEM USES, so the picture is of what a player gets
+        // rather than of what the harness decided to draw. Without a graph that is the
+        // failure panel naming the path it looked in, which is the second shot in
+        // docs/shots/ and is worth photographing for exactly that reason.
+        PlannerEntry.open(book);
     }
 
     private static long qty() {
