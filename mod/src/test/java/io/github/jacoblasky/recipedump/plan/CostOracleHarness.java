@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.plan;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.github.jacoblasky.recipedump.graph.GraphJsonReader;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import java.io.BufferedWriter;
@@ -35,26 +37,48 @@ public final class CostOracleHarness {
 
     public static void main(String[] args) throws IOException {
         if (args.length < 2) {
-            System.err.println("usage: CostOracleHarness <graph.json> <out-prefix>");
+            System.err.println(
+                    "usage: CostOracleHarness <graph.json> <out-prefix> [scenario.json]");
             System.exit(2);
         }
         long started = System.nanoTime();
         RecipeGraph graph = GraphJsonReader.read(new File(args[0]));
         System.out.printf("loaded          %.2f s%n", (System.nanoTime() - started) / 1e9);
 
-        // NO WORLD STATE AT ALL, on purpose. Stock, placed blocks and dimension visits are
-        // the half that differs between two machines, and the point here is to compare the
-        // arithmetic rather than to reproduce one save. Every code path that matters is still
-        // exercised: machine identification runs off the graph's own catalysts, and the two
-        // relaxation passes run because build targets exist.
+        // WITH NO SCENARIO, no world state at all: stock, placed blocks and dimension visits
+        // are the half that differs between two machines, and the bare run compares the
+        // arithmetic rather than reproducing one save. Every path that matters still runs --
+        // identification reads the graph's own catalysts, and both relaxation passes run
+        // because build targets exist.
+        //
+        // WITH ONE, the seeding paths are covered too: `have`, `freeSource`, `token`,
+        // `dimensionGated` and `emcAvailable`. Until a scenario could be passed those were
+        // unit-tested on each side and never DIFFED against each other, which is a weaker
+        // claim than this file's headline and was worth being able to close on demand.
+        //
+        // The scenario is resolved by `ScenarioInputs`, the same class the golden gate uses,
+        // rather than by a second reading of the same JSON. A private derivation here would
+        // be a third spelling of "what a scenario means" and the drift would be invisible.
+        JsonObject scenario = args.length > 2 ? scenarioFrom(args[2]) : null;
         started = System.nanoTime();
-        MachineStates states = Machines.resolve(graph, new Evidence());
-        System.out.printf("resolve         %.2f s%n", (System.nanoTime() - started) / 1e9);
-
-        started = System.nanoTime();
-        CostTable table = Cost.estimate(graph, new CostInputs()
-                .machineStates(states)
-                .machineItemsFrom(states));
+        MachineStates states;
+        CostTable table;
+        if (scenario == null) {
+            states = Machines.resolve(graph, new Evidence());
+            System.out.printf("resolve         %.2f s%n",
+                    (System.nanoTime() - started) / 1e9);
+            started = System.nanoTime();
+            table = Cost.estimate(graph, new CostInputs()
+                    .machineStates(states)
+                    .machineItemsFrom(states));
+        } else {
+            ScenarioInputs.Resolved resolved = ScenarioInputs.resolve(graph, scenario);
+            states = resolved.machineStates;
+            System.out.printf("resolve         %.2f s%n",
+                    (System.nanoTime() - started) / 1e9);
+            started = System.nanoTime();
+            table = ScenarioInputs.price(graph, resolved);
+        }
         System.out.printf("estimate        %.2f s%n", (System.nanoTime() - started) / 1e9);
         System.out.println("priced keys     " + table.pricedCount());
         int[] summary = states.summarise();
@@ -66,6 +90,18 @@ public final class CostOracleHarness {
         writeCosts(graph, table, new File(args[1] + ".cost.tsv"));
         writeMachines(graph, states, new File(args[1] + ".machines.tsv"));
         System.out.println("wrote           " + args[1] + ".{cost,machines}.tsv");
+    }
+
+    /** The `scenario` block of a plan fixture, or a bare scenario document. */
+    private static JsonObject scenarioFrom(String path) throws IOException {
+        java.io.Reader reader = new java.io.InputStreamReader(
+                new java.io.FileInputStream(path), "UTF-8");
+        try {
+            JsonObject doc = new JsonParser().parse(reader).getAsJsonObject();
+            return doc.has("scenario") ? doc.getAsJsonObject("scenario") : doc;
+        } finally {
+            reader.close();
+        }
     }
 
     /**

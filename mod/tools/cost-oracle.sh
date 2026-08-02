@@ -9,7 +9,12 @@
 #
 # Usage, from the repository root:
 #
-#   mod/tools/cost-oracle.sh <graph.json> <output-dir>
+#   mod/tools/cost-oracle.sh <graph.json> <output-dir> [scenario.json]
+#
+# With a scenario -- a plan fixture, or a bare scenario document -- both sides seed the cost
+# model from it, which extends the diff to cover `have`, `freeSource`, `token`,
+# `dimensionGated` and `emcAvailable`. Without one, no world state is applied and the diff
+# covers the arithmetic alone.
 #
 # Environment: JDK8 (a Java 8 home), GSON (path to the gson 2.8.0 jar), PYTHON (default
 # `python3`), XMX (default 4g).
@@ -25,8 +30,9 @@
 # range, Math.log1p agrees with python bit for bit on both 8 and 25.
 set -e
 
-GRAPH=${1:?usage: cost-oracle.sh <graph.json> <output-dir>}
-OUT=${2:?usage: cost-oracle.sh <graph.json> <output-dir>}
+GRAPH=${1:?usage: cost-oracle.sh <graph.json> <output-dir> [scenario.json]}
+OUT=${2:?usage: cost-oracle.sh <graph.json> <output-dir> [scenario.json]}
+SCENARIO=${3:-}
 JDK8=${JDK8:?set JDK8 to a Java 8 home}
 GSON=${GSON:?set GSON to the gson 2.8.0 jar}
 PYTHON=${PYTHON:-python3}
@@ -39,14 +45,16 @@ mkdir -p "$OUT"
 "$JDK8/bin/javac" -nowarn -d "$CLASSES" -cp "$GSON" \
   $(find "$HERE/mod/src/main/java/io/github/jacoblasky/recipedump/graph" \
          "$HERE/mod/src/main/java/io/github/jacoblasky/recipedump/plan" -name '*.java') \
-  "$HERE/mod/src/test/java/io/github/jacoblasky/recipedump/plan/CostOracleHarness.java"
+  "$HERE/mod/src/test/java/io/github/jacoblasky/recipedump/plan/CostOracleHarness.java" \
+  "$HERE/mod/src/test/java/io/github/jacoblasky/recipedump/plan/ScenarioInputs.java"
 
 echo "===== java ====="
 "$JDK8/bin/java" -Xmx"$XMX" -cp "$CLASSES:$GSON" \
-  io.github.jacoblasky.recipedump.plan.CostOracleHarness "$GRAPH" "$OUT/java"
+  io.github.jacoblasky.recipedump.plan.CostOracleHarness "$GRAPH" "$OUT/java" $SCENARIO
 
 echo "===== python ====="
-PYTHONPATH="$HERE" "$PYTHON" "$HERE/mod/tools/cost_oracle_dump.py" "$GRAPH" "$OUT/python"
+PYTHONPATH="$HERE" "$PYTHON" "$HERE/mod/tools/cost_oracle_dump.py" \
+  "$GRAPH" "$OUT/python" $SCENARIO
 
 echo "===== diff ====="
 status=0
