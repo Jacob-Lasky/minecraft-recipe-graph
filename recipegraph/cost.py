@@ -357,6 +357,38 @@ def blocked_entry_cost(fraction):
     return BLOCKED_FLOOR + (BLOCKED_CEILING - BLOCKED_FLOOR) * f
 
 
+def regions():
+    """`[(label, lo, hi)]`, the slices `machine_entry_costs` can put a category in.
+
+    HERE RATHER THAN IN THE AUDIT THAT PRINTS IT, because the boundaries are derived from the
+    two anchors above and a second copy of that derivation is a second thing to forget when
+    one of them moves. `tools/entry-census.py` re-exports these and
+    `tools/make-java-fixtures.py` censuses the band with them; both used to be answerable
+    only by the census, so nothing else could tell whether a price had landed where the
+    model intended.
+
+    A function rather than a constant because the bounds read module constants that a tuning
+    run legitimately monkeypatches (`tools/cost-probe.py` sweeps `BASE_RAW_COST`), and a
+    tuple built at import would answer for the value that was current then.
+    """
+    return [("priced", MACHINE_COST["buildable"], PRICED_CEILING),
+            ("unpriced item", UNPRICED_MACHINE_COST, UNPRICED_MACHINE_COST),
+            ("blocked structure", BLOCKED_FLOOR, BLOCKED_CEILING)]
+
+
+def region_of(value):
+    """Which slice a machine entry cost landed in, or that it landed outside the band.
+
+    "OUTSIDE THE BAND" is a real answer and not an error: a price falling through every
+    slice is exactly the defect the census exists to surface, and returning None or raising
+    would turn it into either false reassurance or a crash in an audit.
+    """
+    for label, lo, hi in regions():
+        if lo - 1e-9 <= value <= hi + 1e-9:
+            return label
+    return "OUTSIDE THE BAND"
+
+
 def machine_entry_costs(machine_items, cost, multiblocks=None):
     """{category: entry cost} for the categories whose machine has to be built.
 
@@ -519,6 +551,16 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
     infinity, so a variant with any real route keeps the price that route earned, one chisel
     above its anchor. The keys it does fire on were priced `BASE_RAW_COST` before #110 too,
     so the floor it restores is a floor that already shipped.
+
+    `graph.reshaped_only` IS A GENUINE SET (a set comprehension in `model.py`), so the order
+    of the loop below VARIES BETWEEN PROCESSES with CPython's per-process string hashing.
+    That is safe HERE and only here, because every iteration assigns the same constant to a
+    distinct key: the result is order-independent by construction, not by luck of the seed.
+    DO NOT copy this pattern into a loop whose outcome depends on which element it sees
+    first -- `tests/fixtures/plan/*.json` freezes whole solver results for the Java port
+    (#19), so an order-dependent read of a set would make those fixtures flip between runs,
+    and a flaky golden fixture is one people learn to regenerate instead of read. Sort it
+    first if the loop ever stops being idempotent.
     """
     stranded = [key for key in graph.reshaped_only
                 if math.isinf(cost.get(key, math.inf))]

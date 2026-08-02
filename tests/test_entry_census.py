@@ -9,6 +9,12 @@ wrong region -- or to nothing -- turns the audit into false reassurance.
 Loaded through importlib because `tools/` is not a package and the filename is hyphenated.
 The census itself needs the 115 MB graph and a full relaxation, which does not belong in a
 suite CI runs on every push; the pure classification and stock-reading layers are covered.
+
+`regions` and `region_of` now LIVE IN `recipegraph/cost.py`, beside the two anchors their
+boundaries are derived from, and this tool re-exports them; `tools/make-java-fixtures.py`
+censuses the same band with the same pair. Reached through `census.` here on purpose -- the
+re-export is part of the tool's surface and a test that bypassed it would keep passing after
+someone deleted it.
 """
 
 import importlib.util

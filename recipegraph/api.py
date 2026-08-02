@@ -61,17 +61,25 @@ def _finite(value):
     return value
 
 
-def _clean(payload):
+def jsonable(payload):
+    """`payload` with every non-finite float flattened, ready for `json.dumps`.
+
+    Public and separate from `dumps` because a caller can legitimately want the SAME
+    flattening with different formatting: `tools/make-java-fixtures.py` writes indented
+    fixtures and must flatten identically, or a fixture and the `/api/cost` response
+    disagree about how an unpriced key is spelled. Two spellings of "unpriced" is the sort
+    of difference a cross-language test reports as a behaviour change.
+    """
     if isinstance(payload, dict):
-        return {k: _clean(v) for k, v in payload.items()}
+        return {k: jsonable(v) for k, v in payload.items()}
     if isinstance(payload, (list, tuple)):
-        return [_clean(v) for v in payload]
+        return [jsonable(v) for v in payload]
     return _finite(payload)
 
 
 def dumps(payload):
     """JSON that `jq` will actually parse. Use this rather than `json.dumps` directly."""
-    return json.dumps(_clean(payload), sort_keys=True)
+    return json.dumps(jsonable(payload), sort_keys=True)
 
 
 # ---------------------------------------------------------------------------

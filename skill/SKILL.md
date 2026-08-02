@@ -1249,6 +1249,66 @@ across a two-minute solve froze every other page.
 | AE2 contents | world save region files | cells in drives/chests/IO ports/workbenches |
 | why a digest churned | `nbt_trace.json`, written by every dump (v0.7.0+) | #80 diagnostic; `notrace` skips it. Read by `tools/digest-churn.py`, not by `build`. READ ITS `forced` COLUMN, never `changed` |
 
+## The Python planner is an ORACLE now, and the fixtures are the contract (#19 phase 1)
+
+`tests/fixtures/plan/*.json` is written by `tools/make-java-fixtures.py` and read by both
+languages, exactly as `tests/fixtures/nbt_digest.json` is. **Regenerate it, never hand-edit
+it** -- editing an expected value to make a side pass is editing the contract.
+
+```bash
+RECIPEGRAPH_ORACLE=<oracle graph> python3 tools/make-java-fixtures.py           # ~6 min
+RECIPEGRAPH_ORACLE=<oracle graph> python3 tools/make-java-fixtures.py --check   # diff only
+```
+
+**Build a dedicated oracle outside `data/`. Do NOT point it at `data/graph.json`, even when
+that file is current.** It is the file the container serves, so it is replaced every time
+somebody redumps and rebuilds -- pinning fixtures to it makes the port's contract a function
+of the last game launch. It is also a desktop build off ~410 jars against a Tower build's
+367, a measured 1.2% of produced keys.
+
+**Use current CODE, though.** #110, #112 and #117 all work in `index.build`, so a graph built
+before them has an empty `dimension_ores` and three fixtures would assert the pre-fix
+behaviour while looking green. The generator refuses such a graph, and every fixture records
+the oracle's sha256 so "the oracle moved" and "the solver changed" can be told apart.
+
+**The dump's SCHEMA need not be current, and that is worth knowing before blocking on it.**
+A pre-schema-4 graph is unservable -- the digest format decides key strings, so no AE2 stock
+matches -- and a perfectly good oracle, because the solver logic is identical and the
+fixtures carry their own small synthetic stock rather than a `have` file. This set was first
+built on a schema-3 dump and rebuilt on schema 5 with no change of shape.
+
+**`tests/test_plan_fixtures.py` is two layers.** The regeneration test is gated on
+`$RECIPEGRAPH_ORACLE` because `cost.estimate` is about two minutes per priced scenario and
+the graph is not in git; without the variable it SKIPS and the rest still runs in
+milliseconds. Those cover the canonical form, the coverage claims re-proved against the
+stored plans, and the cost constants -- **moving a constant in `cost.py` turns the suite red
+until the fixtures are regenerated**, which is the point.
+
+**Three EMC fixtures need a SCHEMA-5 oracle and the others do not.** #50's terminator reads
+`graph.emc`, which only a schema-5 dump supplies, so on an older oracle those three would
+freeze the ABSENCE of the feature -- a fixture a port passes by implementing nothing.
+`generate` refuses an oracle with no `emc` for the same reason it refuses one with no
+`dimension_ores`. Availability is **learned AND positive value** and both clauses have a
+fixture, because `sources/emc` keeps positive values only so that absence never reads as a
+route the pack has disabled.
+
+**A claim can be negated: `!emc` asserts the status is ABSENT.** The control fixtures rest
+on it entirely -- `emc-not-learned` is only interesting because the plan does not terminate
+on EMC, and a fixture claiming only `craft` would keep passing after a port started
+terminating on every valued item.
+
+**Compare these files with numbers PARSED, never as text.** Measured over 6,012 doubles,
+Python `repr` and Java `Double.toString` differ as strings for 33% of them and in value for
+0% (`1e-09` against `1.0E-9`). A byte diff on the Java side fails on a third of the cost
+table while both implementations are bit-for-bit correct. Nothing in the fixtures is rounded,
+and `cost.json`'s digest uses `%.17e` -- injective over binary64, so it catches a one-ULP
+drift, where the `%.12e` it started as did not.
+
+**A fixture's claims are re-proved, not trusted.** Each declares what it covers (`cycle`,
+`dimension`, `oredict`, `craftable`, ...) and both the generator and the test re-run those
+checks, so a repricing that moves the chosen route until a fixture no longer reaches the path
+it names is an ERROR rather than a silent loss.
+
 ## Pinning a recipe choice
 
 - **A pin is stored by a FINGERPRINT, never by a recipe id.** `hei:<category>:<line>`
