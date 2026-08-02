@@ -164,4 +164,121 @@ public class GraphServiceTest {
         assertTrue(said, !said.contains("playable"));
         assertTrue(said, !said.contains("don't worry") && !said.contains("do not worry"));
     }
+
+    // -- the two properties JeiBridge depends on -----------------------------------------
+
+    @Test
+    public void graphIdentityIsStableWhileTheGraphIsUnchanged() throws Exception {
+        // THE ONE THAT COSTS PERFORMANCE SILENTLY IF IT BREAKS. `JeiBridge.indexOf` rebuilds
+        // a key-to-ItemStack index over JEI's ~35,000 stacks whenever `graph != indexed`, so
+        // an accessor returning a fresh wrapper or a defensive copy per call rebuilds it
+        // every frame and the planner drops to single-digit fps. Nothing about a getter says
+        // "must be identical", which is exactly why it is pinned here.
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        GraphService service = GraphService.get();
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        Object first = service.graph();
+        for (int i = 0; i < 100; i++) {
+            assertTrue("graph() must return the same object every call",
+                       first == service.graph());
+        }
+    }
+
+    @Test
+    public void aReloadDoesHandBackADifferentGraph() throws Exception {
+        // The other half: identity changing when the graph genuinely changes is CORRECT and
+        // wanted, because that is how the index knows to rebuild. A cached instance surviving
+        // a reload would leave JEI resolving keys against a graph nobody is planning with.
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        GraphService service = GraphService.get();
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        Object first = service.graph();
+        service.reset();
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        assertTrue("a reload must hand back a different object", first != service.graph());
+    }
+
+    @Test
+    public void nothingLoadedIsNullRatherThanAnEmptyGraph() {
+        // An empty `RecipeGraph` would answer `keyId(...) == -1` for everything, which is
+        // indistinguishable from "loaded, item absent". graphmodel needs those apart: one
+        // hides a menu entry, the other is a missing feature.
+        GraphService.get().startLoad(folder.getRoot());
+        assertEquals(GraphService.State.MISSING, GraphService.get().state());
+        assertNull(GraphService.get().graph());
+    }
+
+    @Test
+    public void aListenerIsToldBeforeTheGraphIsPublishedAsReady() throws Exception {
+        // The index walk has to be off the render thread and has to happen once. Firing
+        // after READY would race the first frame that reads the graph -- the frame this is
+        // meant to keep fast.
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        final java.util.concurrent.atomic.AtomicReference<GraphService.State> seen =
+                new java.util.concurrent.atomic.AtomicReference<GraphService.State>();
+        final java.util.concurrent.atomic.AtomicInteger calls =
+                new java.util.concurrent.atomic.AtomicInteger();
+        GraphService service = GraphService.get();
+        service.onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(io.github.jacoblasky.recipedump.graph.RecipeGraph graph) {
+                seen.set(service.state());
+                calls.incrementAndGet();
+            }
+        });
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        assertEquals(1, calls.get());
+        assertTrue("the listener must run before READY is published, saw " + seen.get(),
+                   seen.get() != GraphService.State.READY);
+        service.onLoad(null);
+    }
+
+    @Test
+    public void aListenerRegisteredAfterTheLoadStillGetsTheGraph() throws Exception {
+        // `ClientProxy.init` runs after `CommonProxy.preInit` starts the load, so on a fast
+        // disk the graph can be READY before anything subscribes. A listener that silently
+        // missed its one event is a stack index that never gets built.
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        GraphService service = GraphService.get();
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        final java.util.concurrent.atomic.AtomicInteger calls =
+                new java.util.concurrent.atomic.AtomicInteger();
+        service.onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(io.github.jacoblasky.recipedump.graph.RecipeGraph graph) {
+                calls.incrementAndGet();
+            }
+        });
+        assertEquals(1, calls.get());
+        service.onLoad(null);
+    }
+
+    @Test
+    public void aThrowingListenerDoesNotLoseTheGraph() throws Exception {
+        // The listener is client code doing something optional -- an index for a context
+        // menu. Letting it turn a successful 5 s load into FAILED trades a missing menu
+        // entry for no planner at all.
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        GraphService service = GraphService.get();
+        service.onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(io.github.jacoblasky.recipedump.graph.RecipeGraph graph) {
+                throw new IllegalStateException("JEI is not here");
+            }
+        });
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        assertNotNull(service.graph());
+        service.onLoad(null);
+    }
 }

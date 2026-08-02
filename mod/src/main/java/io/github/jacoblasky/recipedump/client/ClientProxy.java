@@ -1,17 +1,13 @@
 package io.github.jacoblasky.recipedump.client;
 
-import java.util.List;
-
 import io.github.jacoblasky.recipedump.DumpCommand;
-import io.github.jacoblasky.recipedump.client.planner.PlanJson;
-import io.github.jacoblasky.recipedump.common.GraphService;
-import io.github.jacoblasky.recipedump.common.PlannerService;
-import io.github.jacoblasky.recipedump.plan.Solver;
 import io.github.jacoblasky.recipedump.common.CommonProxy;
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.PlanTargetKeybind;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.common.PlanBookCapability;
-import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
 import io.github.jacoblasky.recipedump.shot.ShotHarness;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
@@ -47,6 +43,20 @@ public class ClientProxy extends CommonProxy {
         // binding ends up registered twice. Safe without JEI -- the key resolves nothing and
         // says nothing, which is what an unbound feature should do.
         PlanTargetKeybind.register();
+        // BUILD JEI'S STACK INDEX WHEN THE GRAPH LANDS, on the loader thread, so the first
+        // context menu does not pay for a walk of ~35,000 item stacks. `indexFor` is
+        // null-safe and does nothing useful without JEI, so this is unconditional; the
+        // listener runs before `GraphService` publishes READY, which is what keeps it off
+        // the frame that first reads the graph. See graphmodel's note on `JeiBridge.indexOf`,
+        // which rebuilds whenever the graph's IDENTITY changes -- `GraphService.graph()` is a
+        // plain field read and returns the same object until a reload, which is the property
+        // that makes that comparison cheap rather than a per-frame rebuild.
+        GraphService.get().onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(RecipeGraph graph) {
+                JeiBridge.indexFor(graph);
+            }
+        });
     }
 
     /**
@@ -66,26 +76,6 @@ public class ClientProxy extends CommonProxy {
                 if (book != null) {
                     book.deserializeNBT(payload);
                 }
-            }
-        });
-    }
-
-    /**
-     * Hold the latest snapshot the server sent, for whatever asked.
-     *
-     * ON THE CLIENT THREAD, for the reason `applyPlanBookSync` records directly above: this
-     * arrives on a netty IO thread and the planner reads it while rendering.
-     *
-     * REPLACED WHOLE, never merged into what was there. A snapshot is what the network held
-     * at one instant; merging a new read into an old one would invent a state the network was
-     * never in, and the item that quietly persisted is the one the player already used.
-     */
-    @Override
-    public void applyStockSnapshot(final NBTTagCompound payload) {
-        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
-            @Override
-            public void run() {
-                LiveStock.accept(StockSnapshot.deserializeNBT(payload));
             }
         });
     }
@@ -114,75 +104,11 @@ public class ClientProxy extends CommonProxy {
             tell(player, "plan book unavailable: the capability is not registered");
             return;
         }
-        // Ask the server for the network the moment the window opens, so the reply is in
-        // flight while the player is still reading the first screen. NOT on a timer and not
-        // per frame -- see LiveStock for why a planner is one question rather than a window.
-        LiveStock.request();
         try {
-            openWithPlan(book);
+            PlannerEntry.open(book);
         } catch (Throwable missing) {
             tell(player, "the planner needs ModularUI 3.1.5, which is not installed");
         }
-    }
-
-    /**
-     * Open the tree if a plan is ready, the plan book if not, and start a plan either way.
-     *
-     * THE JSON ROUND TRIP IS THE SEAM, NOT A SHORTCUT. `client.planner.PlanJson.readResult`
-     * was written against `tests/fixtures/plan/*.json`, and `PlanJson.toJson` is the exact
-     * text `PlanFixtureTest` compares against those fixtures -- so rendering through it means
-     * the in-game panel draws from bytes provably identical to the ones the golden gate
-     * proves match Python. An adapter mapping `PlanResult` to `PlanView` field by field would
-     * be a fourth place the plan shape lives, and the way it fails is a dropped field
-     * rendering as a blank row rather than as an error. Agreed with the panel's author before
-     * either side was written.
-     *
-     * The plan is started AFTER the window opens rather than before, because opening is
-     * instant and planning is not: the first frame shows the book, and the next use of the
-     * item shows the tree. A player who right-clicks and waits several seconds for a window
-     * has been given a slow tool, which is the same argument that put the graph load on its
-     * own thread.
-     */
-    private static void openWithPlan(PlanBook book) {
-        PlannerService planner = PlannerService.get();
-        String json = planner.state() == PlannerService.State.DONE ? planner.resultJson() : null;
-        if (json != null) {
-            PlannerScreen.openPlan(PlanJson.readResult(json), book);
-        } else {
-            PlannerScreen.open(book);
-        }
-        planFirstTodo(book);
-    }
-
-    /**
-     * Start planning the book's first entry, if there is one and nothing is already running.
-     *
-     * Deliberately silent about every reason it might not run. An empty book, a graph still
-     * loading and a plan already in flight are all ordinary, and none of them is worth a line
-     * of chat every time the item is used. A MISSING or FAILED graph is the exception,
-     * because a player who has not installed `graph.json` has no other way to find out -- and
-     * `GraphService.describe` names the paths it tried, which is the difference between
-     * fixing it and filing a bug.
-     *
-     * THE FIRST TODO IS THE TARGET, which is a placeholder rule rather than a design. #19
-     * Phase 3 gives the panel a target picker and #145 already sets one from JEI; what this
-     * buys today is that the whole path -- graph, scenario, cost table, solver, JSON, panel --
-     * runs against real pack data on a real client rather than only in a JUnit gate.
-     */
-    private static void planFirstTodo(PlanBook book) {
-        GraphService graphs = GraphService.get();
-        if (graphs.state() == GraphService.State.MISSING
-                || graphs.state() == GraphService.State.FAILED) {
-            return;
-        }
-        List<String> todo = book.todoKeys();
-        String target = !todo.isEmpty() ? todo.get(0)
-                : (book.favourites().isEmpty() ? null : book.favourites().get(0));
-        if (target == null) {
-            return;
-        }
-        long qty = !todo.isEmpty() ? book.todoQuantity(target) : 1L;
-        PlannerService.get().plan(target, Math.max(1L, qty), Solver.DEFAULT_MAX_NODES);
     }
 
     private static void tell(EntityPlayer player, String message) {

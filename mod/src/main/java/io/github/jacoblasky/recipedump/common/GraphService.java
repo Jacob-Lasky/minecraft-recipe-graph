@@ -72,7 +72,29 @@ public final class GraphService {
         return state;
     }
 
-    /** The loaded graph, or null unless {@link #state} is READY. */
+    /**
+     * The loaded graph, or null unless {@link #state} is READY.
+     *
+     * NULL RATHER THAN AN EMPTY GRAPH, because an empty one answers `keyId(...) == -1` for
+     * every key, which is indistinguishable from "loaded, and this item is not in it". One
+     * hides a JEI menu entry correctly; the other hides it because nothing is loaded yet.
+     *
+     * THE SAME OBJECT EVERY CALL while the graph is unchanged, and a DIFFERENT one after a
+     * reload. That is a contract, not an implementation detail: `JeiBridge.indexOf` rebuilds
+     * a key-to-ItemStack index over JEI's ~35,000 stacks whenever the graph differs BY
+     * IDENTITY, so a defensive copy or a fresh wrapper here rebuilds it every frame and the
+     * planner drops to single-digit fps. Nothing about a getter says "must be identical",
+     * which is exactly why `graphIdentityIsStableWhileTheGraphIsUnchanged` pins it.
+     *
+     * DO NOT ADD AN ACCESSOR FOR JEI'S STACK INDEX BESIDE THIS ONE. It reads as an obvious
+     * convenience and it reintroduces a bug that has already been fixed once: the index and
+     * the graph it was built for have to be published TOGETHER, and `JeiBridge` now keeps
+     * them welded behind a single volatile pair for that reason. Two accessors here would
+     * let a caller take a fresh graph and a stale index -- at which point every key resolves,
+     * to the WRONG item, which is a plausible icon and a plausible recipe screen rather than
+     * a visible failure. If something in `common` ever needs the index, ask for it to be
+     * handed over already paired.
+     */
     public RecipeGraph graph() {
         return graph;
     }
@@ -126,6 +148,43 @@ public final class GraphService {
     private String name() {
         File file = source;
         return file == null ? GraphSource.FILE_NAME : file.getName();
+    }
+
+    /**
+     * Called on the loader thread the moment a graph is installed, before READY is published.
+     *
+     * WHY A LISTENER AND NOT A DIRECT CALL. The one thing that wants to know today is
+     * `client.jei.JeiBridge`, which builds a key-to-`ItemStack` index by walking JEI's whole
+     * item list -- about 35,000 stacks. That walk has to happen OFF the render thread, and it
+     * has to happen once rather than on the first menu open. But `common` may not name
+     * anything under `client`: this class loads on a dedicated server, JEI does not exist
+     * there, and `CommonSideSafetyTest` reads the bytes and fails the build for it. So the
+     * client installs a listener and the common side calls it without knowing what it is.
+     */
+    public interface Listener {
+        /** `graph` is fully built. Runs on the loader thread; do not touch the world. */
+        void graphLoaded(RecipeGraph graph);
+    }
+
+    private volatile Listener listener;
+
+    /**
+     * Register the one thing to notify when a graph lands. Replaces any previous listener.
+     *
+     * ONE, not a list. There is one client and one JEI bridge, and a list would be a
+     * registration order to reason about plus a way to leak a listener across a reload for a
+     * subscriber that does not exist.
+     */
+    public void onLoad(Listener newListener) {
+        this.listener = newListener;
+        RecipeGraph loaded = graph;
+        // Late registration still gets the callback. `ClientProxy.init` runs after
+        // `CommonProxy.preInit` started the load, so on a fast disk the graph can be READY
+        // before anything has subscribed -- and a listener that silently missed its one
+        // event is a stack index that is never built.
+        if (newListener != null && loaded != null && state == State.READY) {
+            newListener.graphLoaded(loaded);
+        }
     }
 
     /**
@@ -192,6 +251,7 @@ public final class GraphService {
                 // `graph` BEFORE `state`: a reader that sees READY must see the graph. See
                 // the note on the class.
                 graph = loaded;
+                notifyLoaded(loaded);
                 state = State.READY;
             } catch (IOException e) {
                 fail(e);
@@ -207,6 +267,27 @@ public final class GraphService {
                 // tells the player to raise -Xmx where "could not read" sends them looking
                 // at the file.
                 fail(e);
+            }
+        }
+
+        /**
+         * BEFORE `state` GOES READY, and on this thread. The listener's work is the 35,000
+         * stack walk described on {@link Listener}; running it after READY would race the
+         * first frame that reads the graph, which is the frame this exists to keep fast.
+         *
+         * A THROWING LISTENER MUST NOT LOSE THE GRAPH. It is client code doing something
+         * optional -- an index for a context menu -- and letting it turn a successful 5 s
+         * load into FAILED would trade a missing menu entry for no planner at all.
+         */
+        private void notifyLoaded(RecipeGraph loaded) {
+            Listener target = listener;
+            if (target == null) {
+                return;
+            }
+            try {
+                target.graphLoaded(loaded);
+            } catch (Throwable listenerBroke) {
+                detail = "graph loaded; a listener threw: " + listenerBroke;
             }
         }
 
