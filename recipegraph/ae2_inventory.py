@@ -110,40 +110,55 @@ def classify(entry):
     if "FluidName" in entry:
         return "fluid", entry["FluidName"], count
     if "id" in entry and isinstance(entry["id"], str):
-        dmg = entry.get("Damage", 0)
-        key = entry["id"] if not dmg else "%s:%s" % (entry["id"], dmg)
-        # An NBT-bearing stack is a distinct item for crafting purposes, so it must not
-        # unify with the bare item. The suffix is the DUMP MOD'S DIGEST of the same NBT,
-        # because that is the only key shape the recipe side speaks: schema 3 named a
-        # Forest drone `forestry:bee_drone_ge#a3f19c02b8d1`, and stock that says anything
-        # else matches nothing. See #21 and recipegraph.nbt_digest.
-        #
-        # DO NOT reinstate the old `#perditio` decode of the `Aspect` tag. It was more
-        # readable, and it was measurably wrong: the dump calls that stack
-        # `thaumadditions:vis_pod#03c878f080d5` and names it "Aqua Vis Pod", so all 52
-        # vis-pod keys on the reference network matched nothing at all. Readability comes
-        # from names.json, which is keyed by the discriminated id for exactly this
-        # reason.
-        #
-        # ` (+nbt)` survives as the fallback for NBT the mod itself does not serialise
-        # reproducibly. It matches no recipe, which is the conservative direction: it
-        # over-reports what you need rather than claiming you own something you do not.
-        # A None digest is NOT that case: it means the mod gave this stack no suffix
-        # either, so the bare key is the right answer and a renamed pickaxe stays one
-        # pickaxe. See nbt_digest.digest.
-        tag = entry.get("tag")
-        if isinstance(tag, dict) and tag:
-            try:
-                suffix = nbt_digest(tag)
-            except OpaqueTag:
-                key += OPAQUE_MARKER
-            else:
-                if suffix:
-                    key += "#" + suffix
-        elif tag:
-            key += OPAQUE_MARKER
-        return "item", key, count
+        return "item", stack_key(entry), count
     return None
+
+
+def stack_key(entry):
+    """The graph key for an ItemStack compound out of a save: `id[:meta][#digest]`.
+
+    EXTRACTED SO EVERY WORLD-SAVE READER SPELLS A KEY THE SAME WAY. `classify` reads AE2
+    cells and `projecte.read_knowledge` reads a player's transmutation knowledge, and both
+    have to produce the string the recipe side uses or they match nothing at all and report
+    a healthy count while doing it -- which is #21 exactly, and it took 1.47 million
+    stranded items to notice the first time. A second copy of this is a second chance to
+    drift.
+
+    Assumes `entry["id"]` is present and a string; the callers check.
+    """
+    dmg = entry.get("Damage", 0)
+    key = entry["id"] if not dmg else "%s:%s" % (entry["id"], dmg)
+    # An NBT-bearing stack is a distinct item for crafting purposes, so it must not
+    # unify with the bare item. The suffix is the DUMP MOD'S DIGEST of the same NBT,
+    # because that is the only key shape the recipe side speaks: schema 3 named a
+    # Forest drone `forestry:bee_drone_ge#a3f19c02b8d1`, and stock that says anything
+    # else matches nothing. See #21 and recipegraph.nbt_digest.
+    #
+    # DO NOT reinstate the old `#perditio` decode of the `Aspect` tag. It was more
+    # readable, and it was measurably wrong: the dump calls that stack
+    # `thaumadditions:vis_pod#03c878f080d5` and names it "Aqua Vis Pod", so all 52
+    # vis-pod keys on the reference network matched nothing at all. Readability comes
+    # from names.json, which is keyed by the discriminated id for exactly this
+    # reason.
+    #
+    # ` (+nbt)` survives as the fallback for NBT the mod itself does not serialise
+    # reproducibly. It matches no recipe, which is the conservative direction: it
+    # over-reports what you need rather than claiming you own something you do not.
+    # A None digest is NOT that case: it means the mod gave this stack no suffix
+    # either, so the bare key is the right answer and a renamed pickaxe stays one
+    # pickaxe. See nbt_digest.digest.
+    tag = entry.get("tag")
+    if isinstance(tag, dict) and tag:
+        try:
+            suffix = nbt_digest(tag)
+        except OpaqueTag:
+            key += OPAQUE_MARKER
+        else:
+            if suffix:
+                key += "#" + suffix
+    elif tag:
+        key += OPAQUE_MARKER
+    return key
 
 
 def scan(paths, sample=False):

@@ -10,8 +10,12 @@
 // lives behind package.json so its one dependency is pinned rather than whatever the
 // machine happened to have.
 //
-//     corepack enable pnpm && pnpm install && pnpm run browsers
+//     corepack enable pnpm && pnpm install
 //     pnpm run audit:mobile http://127.0.0.1:8765
+//
+// It drives a SYSTEM Chromium when there is one and falls back to the bundled download;
+// `pnpm run browsers` is only needed on a machine with neither. See tools/browser.js for
+// why, which is that the bundled build does not run on Arch and the audit is mandatory.
 //
 // Two things it checks that are easy to get wrong by hand:
 //
@@ -23,7 +27,7 @@
 //   author `display` rule, so a filter can set the attribute on 499 rows, report the
 //   right count, and leave all of them on screen.
 
-const { chromium } = require('playwright');
+const { launch } = require('./browser');
 
 const BASE = process.argv[2] || 'http://127.0.0.1:8765';
 const WIDTH = Number(process.argv[3] || 390);
@@ -75,7 +79,7 @@ async function measure(page, label) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   const ctx = await browser.newContext({
     viewport: { width: WIDTH, height: 844 }, isMobile: true, hasTouch: true,
   });
@@ -122,9 +126,18 @@ async function measure(page, label) {
   // Filtering must actually hide rows, not just set the attribute.
   await page.goto(BASE + '/machines', { waitUntil: 'load', timeout: 180000 });
   await page.waitForTimeout(800);
-  const chip = await page.$('.chip-btn[data-state=unavailable]');
+  const chip = await page.$('.chip-btn[data-state=unavailable]:not([disabled])');
   if (chip) {
-    await chip.click();
+    // A SHORT TIMEOUT AND A CATCH, because a chip that cannot be clicked must not end the
+    // run. On a graph with no unavailable machines the chip renders disabled, and the
+    // default 30s click timeout then threw and took every later check down with it --
+    // losing the audit's whole verdict over one absent fixture.
+    try {
+      await chip.click({ timeout: 5000 });
+    } catch (e) {
+      console.log('  filter    chip present but not clickable; skipped');
+      return finish();
+    }
     await page.waitForTimeout(500);
     const f = await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#mbody tr[data-state]')];
@@ -148,8 +161,15 @@ async function measure(page, label) {
     }
   }
 
-  if (errors.length) { failures++; console.log('\n  console errors:', errors); }
-  console.log(failures ? `\n${failures} PROBLEM(S)\n` : '\nall clear\n');
-  await browser.close();
-  process.exit(failures ? 1 : 0);
+  return finish();
+
+  // The verdict, and the ONE place the run ends. Extracted so a step that has to bail --
+  // an absent or disabled fixture -- still reports what it measured rather than throwing
+  // the whole audit away, which is what a bare `return` in the middle would do.
+  async function finish() {
+    if (errors.length) { failures++; console.log('\n  console errors:', errors); }
+    console.log(failures ? `\n${failures} PROBLEM(S)\n` : '\nall clear\n');
+    await browser.close();
+    process.exit(failures ? 1 : 0);
+  }
 })();

@@ -366,14 +366,38 @@ than two. After installing it the order is `/recipedump`, then `recipegraph buil
 `recipegraph have` -- skipping the last strands every discriminated key, and `have` now says
 so rather than leaving it to be noticed.
 
+**#90, #118, #55, #50 and #36 are written and compiled as of v0.9.0 (dump schema 5), for the
+same reason at a larger scale.** Five mod-side issues in one jar, against one schema number:
+the expensive step is a launch of a 410-mod pack, not the code, and five increments would only
+buy a partial revert nobody can exercise, since reverting half a jar still costs the launch.
+
+**Schema 5 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the keys the
+reader computes and AE2 stock still matches. Upgrading 4 -> 5 is `/recipedump` then `build`,
+with **no re-run of `have`** -- the opposite of 3 -> 4, and why `nbt_digest.DIGEST_FORMAT_SCHEMA`
+deliberately stayed at 4. Moving it for a bump that did not touch the digest would make the
+loud "your stock reads as zero" warning fire on a graph that is fine, and a warning that cries
+wolf gets trained away before the one time it matters.
+
+Two things about the new files that are easy to get wrong:
+
+* **`IJeiRuntime` has no `getIngredientRegistry`** in HadEnoughItems 4.28.1 -- six getters, and
+  none of them it. The registry comes from `IModRegistry` in `IModPlugin.register`, which
+  `DumpPlugin` stashes. Taking it that early is safe because the registry is live and goes on
+  filling up afterwards.
+* **The icon phase runs LAST, after every other file is closed**, and must stay there.
+  Rendering tens of thousands of arbitrary modded stacks offscreen touches code paths never
+  written to run outside a GUI frame; a total failure of that phase has to cost icons and
+  nothing else.
+
 **A DUMP FROM AN UNCHANGED JAR BUYS NOTHING, AND COSTS THE CHURN.** Before asking for a
 launch, check that the installed jar emits something the last one did not. Re-running
 `/recipedump` on the same mod version against the same pack re-rolls #80's ~11,353 digests
 for no new data, which re-strands AE2 stock and forces a `have` re-run: strictly negative.
 `mod_version` is stamped into `summary.json` and shown in the UI footer, so it is the thing
 to compare. v0.6.0 is the first jar that can write `nbt_trace.json`; v0.7.0 writes it by
-default; v0.8.0 changes the digest itself, so it is the one jar whose redump is worth a
-launch right now.
+default; v0.8.0 changes the digest itself. v0.9.0 adds four
+files and the icon atlas without touching the digest, so it is the jar whose redump is worth a
+launch right now -- and unlike v0.8.0's, that redump does not re-strand AE2 stock.
 
 ### Installing a built jar
 
@@ -556,10 +580,26 @@ The two phone blocks sit LAST in `render.CSS` and in `server.HOME_CSS` because t
 cascade order. They use different breakpoints on purpose, 640 and 700, and the comment
 says why.
 
-**Item icons are not available and cannot be faked from the id.** A registry id does not map
-to a texture path by any convention; the mapping lives in each mod's models and blockstate
-JSON. Real icons need a sprite sheet rendered by the dump mod. The diagram uses a per-mod hue
-plus an initial, which is a real signal rather than a placeholder imitating an icon.
+**ITEM ICONS EXIST SINCE SCHEMA 5, AND THIS PARAGRAPH USED TO SAY THEY COULD NOT.** The old
+claim was that a registry id does not map to a texture path by any convention -- correct about
+the jars, and it read as a wall. `mod/.../IconAtlas.java` draws every item into an offscreen
+framebuffer while the game's own model system is loaded and writes `icons-N.png` plus
+`icons.json`.
+
+**Two delivery shapes, in `iconset.py`, and picking the wrong one is invisible until it
+ships.** The SERVER serves atlas pages at `/icons/N.png` and positions them with CSS. A
+STANDALONE document -- `plan --html`, anything published under a strict CSP -- must inline
+`data:` URIs instead, because that policy blocks every off-host request, so a served-shape
+icon draws a broken image in every row and only once published. The renderer cannot know
+which context it is in, so the CALLER passes an `icon=` resolver; a renderer that forgets to
+ask gets no icons rather than broken ones. `png.py` is the stdlib codec that cutting a sprite
+needs, and it implements all five PNG filter types deliberately -- the atlas is written by
+Java's ImageIO, which picks them adaptively, and a wrong filter returns static rather than
+raising.
+
+**The DIAGRAM keeps the per-mod hue plus an initial, and that is not leftover.** A flow
+diagram is scanned for structure, and "these six boxes are all one mod" is what a colour says
+at a glance and a 16x16 sprite cannot.
 
 **Presentation lives in `present.py`, keyed by the constants themselves.** Node statuses and
 machine states are rendered by four different components; each used to keep its own dict of

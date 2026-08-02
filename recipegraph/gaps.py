@@ -185,7 +185,14 @@ def analyse(summary, skips):
 
     return {
         "recipes": summary.get("recipes", 0),
-        "skipped": summary.get("skipped", 0),
+        # `threw` since schema 5; `skipped` before it, where the field was spelled that way
+        # and counted this anyway -- 0 on a dump whose skipped.ndjson held 22,188 lines. The
+        # compatibility read is for dumps ALREADY ON DISK, of which there are four in the
+        # reference instance, and it costs one `or`. #90
+        "threw": summary.get("threw", summary.get("skipped", 0)),
+        # Absent before schema 5, and `len(skips)` is the same number for any dump whose
+        # skipped.ndjson was read, so the fallback loses nothing.
+        "skip_lines": summary.get("skip_lines", len(skips)),
         "categories": len(cats),
         "blind_categories": blind,
         "partial_categories": partial[:20],
@@ -198,11 +205,12 @@ def analyse(summary, skips):
 def report(a):
     out = []
     empty = dict(a["reasons"]).get("no outputs", 0)
-    threw = a["skipped"]
     out.append("dumped %s recipes across %d categories"
                % ("{:,}".format(a["recipes"]), a["categories"]))
-    out.append("  %s wrappers threw, %s entries produced nothing usable"
-               % ("{:,}".format(threw), "{:,}".format(empty)))
+    out.append("  %s wrappers threw, %s entries produced nothing usable, "
+               "%s lines in skipped.ndjson"
+               % ("{:,}".format(a["threw"]), "{:,}".format(empty),
+                  "{:,}".format(a["skip_lines"])))
 
     if a["reasons"]:
         out.append("\nwhy things were skipped")

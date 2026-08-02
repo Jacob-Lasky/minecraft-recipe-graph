@@ -24,7 +24,7 @@
 //   THE SELECTION SURVIVES THE REORDER. `appendChild` MOVES a node, so reordering the
 //   options can silently drop the chosen mod and quietly widen the table.
 
-const { chromium } = require('playwright');
+const { launch } = require('./browser');
 
 const BASE = process.argv[2] || 'http://127.0.0.1:8765';
 
@@ -44,7 +44,7 @@ const shownCount = (page) =>
   page.$eval('#mshown', (el) => Number(el.textContent.replace(/,/g, '')));
 
 async function run() {
-  const browser = await chromium.launch();
+  const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await page.goto(`${BASE}/machines`, { waitUntil: 'networkidle' });
 

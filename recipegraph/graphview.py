@@ -92,11 +92,16 @@ KIND_MARK = {"fluid": "F", "essentia": "E", "ore": "*"}
 def _hue(key):
     """A stable hue per mod, so items from one mod read as a family.
 
-    This is the honest substitute for real item textures. A registry id does not map to a
-    texture path by any convention -- the mapping lives in each mod's models and its
-    blockstate JSON -- so drawing the actual icon needs a sprite sheet rendered by the dump
-    mod. Until then a per-mod colour plus an initial is a real signal rather than a
-    decorative placeholder pretending to be an icon.
+    THE DIAGRAM KEEPS THE HUE EVEN THOUGH REAL ICONS NOW EXIST (#36 renders an atlas, and
+    the tree, the tables and the search rows all draw it). The two answer different
+    questions and the diagram wants this one: a flow diagram is scanned for STRUCTURE, and
+    "these six boxes are all Thermal Expansion" is the thing a colour can say at a glance
+    and a 16x16 sprite cannot. The initial stays for the same reason -- it is legible at the
+    size a box label is drawn, where an icon would be one more small picture among fifty.
+
+    DO NOT swap this for `iconset` on the grounds that the icons are available now. If a
+    diagram ever wants both, they go side by side; the hue is not a placeholder waiting to
+    be replaced, which is what it was before the atlas existed.
     """
     modid = str(key).split(":")[0]
     h = 0

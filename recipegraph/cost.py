@@ -252,13 +252,38 @@ DIMENSION_COST = 800.0
 TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
               HINT: BASE_RAW_COST, METHOD: BASE_RAW_COST}
 
+# What a transmutation costs, for an item the ProjectE network has LEARNED and the pack gives
+# an EMC value. Issue #50.
+#
+# BETWEEN STOCK AND A RAW LEAF, and both bounds are the claim. Above stock (0.0) and above an
+# infinite generator's SOURCE_COST, because EMC is finite and fungible: it is spent, a
+# collector has to earn it back, and a route that burns it is not as good as one that draws
+# on a pile you already have. Below BASE_RAW_COST, because the alternative to transmuting a
+# learned item is going and farming the dungeon it drops in, and the whole report behind #50
+# is that a player with a working network does not do that.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, exactly as for DIMENSION_COST. Nobody has
+# measured what an afternoon of EMC is worth against an afternoon of mining, and the graph
+# carries nothing that could. What is asserted, and pinned in `tests/test_emc.py`, is
+#
+#     0.0 (stock)  <  SOURCE_COST  <  EMC_COST  <  BASE_RAW_COST
+#
+# NOT SCALED BY THE ITEM'S EMC VALUE, and that was considered. A Nether Star is 139,264 EMC
+# and a cobblestone is 1, so scaling looks obviously right -- and it would make the number a
+# QUANTITY, which every docstring in this module says these are not. The estimate is a
+# ranking, its units are already a mixture of machine entries and ingredient counts, and
+# feeding a five-order-of-magnitude spread into it would let one expensive transmutation
+# outrank an `unavailable` machine wall. Availability is what #50 asked for; affordability is
+# open question 1 in that issue and is unanswered.
+EMC_COST = 0.5
+
 # Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
 # The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
 # formula change moves none of them, so without this a machine holding `.cost-cache.json`
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 8
+FORMULA_VERSION = 9
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -443,7 +468,8 @@ def _cheapest_alternative(cost, ingredient, ore_members):
 
 
 def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None,
-             machine_items=None, token_kinds=None, dimension_gates=None):
+             machine_items=None, token_kinds=None, dimension_gates=None,
+             emc_available=None):
     """{item key: estimated cost}. Lower is easier to get.
 
     With `machine_items` (`{category: (machine item key, ...)}` from
@@ -461,7 +487,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
     machine price this relaxation used instead of re-deriving a flat one.
     """
-    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates)
+    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates, emc_available)
     cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
                             passes, machine_states, None)
     if not machine_items:
@@ -503,7 +529,8 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
     return _relax(graph, cost, passes, machine_states, machine_entry)
 
 
-def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None):
+def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
+          emc_available=None):
     """Starting costs, before any recipe is considered. Shared by both relaxation passes."""
     from .generators import SOURCE_COST
 
@@ -573,6 +600,25 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None):
         floor = BASE_RAW_COST + (DIMENSION_COST if key in gates else 0.0)
         cost[key] = min(cost.get(key, math.inf), floor)
 
+    # AND EVERY KEY THE TRANSMUTATION NETWORK CAN MAKE, for the same reason and by the same
+    # mechanism as the world ores above: it counts as produced, so the leaf rule never sees
+    # it, and its recipes may all price at infinity while the player can simply make one.
+    # `erebus:materials` is the reported case -- its only "recipe" is a pseudo-item saying
+    # it drops in a dungeon, so the solver dead-ends there while the network already makes it.
+    #
+    # `min`, so this only ever LOWERS a price: stock (0.0) and an infinite generator
+    # (SOURCE_COST) both still win, and a genuinely cheaper crafted route still wins after
+    # `_relax`. It is a ceiling on what a learned item can cost, not a claim that transmuting
+    # is the best route.
+    #
+    # THE MEMBERSHIP TEST IS DONE BY THE CALLER, and that is the safety property. What
+    # arrives here is already "learned AND carrying a positive EMC value" -- see
+    # `projecte.available`. An item the pack has DISABLED has an EMC of 0, so it never
+    # reaches this loop, and #50's stated worst case (asserting a route the pack blocked)
+    # cannot happen here even if the knowledge file is wrong.
+    for key in emc_available or ():
+        cost[key] = min(cost.get(key, math.inf), EMC_COST)
+
     # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
     # rule above answers "how cheaply can this be had"; a token answers "what does the
     # player have to go and do", and the generic leaf rule has already given it 1.0.
@@ -641,7 +687,8 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
 
 
 def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None,
-                multiblocks=None, token_kinds=None, dimension_gates=None):
+                multiblocks=None, token_kinds=None, dimension_gates=None,
+                emc_available=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -673,6 +720,12 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     # keeps charging for it forever.
     for key, dim in sorted((dimension_gates or {}).items()):
         h.update(("%s@%s;" % (key, dim)).encode())
+    h.update(b"\x00")
+    # Beside the gates, for the same reason: what the player has LEARNED moves without the
+    # graph, the stock or any constant moving. A cache written before an item was learned
+    # would go on pricing it as a dungeon drop forever, which reads as "#50 does not work".
+    for key in sorted(emc_available or ()):
+        h.update(("%s;" % key).encode())
     h.update(b"\x00")
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
@@ -731,7 +784,7 @@ def cache_beside(graph_path):
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
                     cache_path=None, passes=PASSES, machine_items=None, token_kinds=None,
-                    dimension_gates=None):
+                    dimension_gates=None, emc_available=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
     `cache_path` defaults to `cache_beside(graph_path)`; see there for why it is not the
@@ -763,7 +816,8 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     """
     cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
-                        getattr(graph, "multiblocks", None), token_kinds, dimension_gates)
+                        getattr(graph, "multiblocks", None), token_kinds, dimension_gates,
+                        emc_available)
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:
@@ -778,7 +832,8 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
 
     cost = estimate(graph, have=have, machine_states=machine_states, passes=passes,
                     token_kinds=token_kinds, dimension_gates=dimension_gates,
-                    free_sources=free_sources, machine_items=machine_items)
+                    free_sources=free_sources, machine_items=machine_items,
+                    emc_available=emc_available)
     if cache_path:
         try:
             os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)

@@ -43,7 +43,12 @@ STOCK_IS_DECISIVE = 64
 # A plain list was the old shape and it had nowhere to put the count, which is how the
 # suppression would have become silent. Named fields so `hits.results` reads at the call
 # site and a stale `for x in hits` cannot quietly iterate a two-tuple.
-Matches = collections.namedtuple("Matches", "results hidden")
+# `collapsed` counts damage variants folded away by `_collapse_damage`, and it is REPORTED
+# rather than applied silently, for the same reason `hidden` is: a search that removes 45 of
+# 46 rows without saying so is indistinguishable from a broken one. It DEFAULTS so a caller
+# building a Matches out of nothing needs no third argument -- but every caller that has a
+# real count passes it, because relying on the default is how the number goes quiet.
+Matches = collections.namedtuple("Matches", "results hidden collapsed", defaults=(0,))
 
 
 def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
@@ -119,8 +124,57 @@ def rank_matches(graph, query, have=None, limit=MAX_RESULTS):
             continue
         seen.add(row[3])
         uniq.append(row)
+    uniq, collapsed = _collapse_damage(graph, uniq, have)
     _break_name_ties(graph, uniq, have, limit)
-    return Matches([row[3] for row in uniq[:limit]], hidden)
+    return Matches([row[3] for row in uniq[:limit]], hidden, collapsed)
+
+
+def _collapse_damage(graph, rows, have):
+    """One row per damageable item instead of one per durability value. #118
+
+    Reported as: "there are like 25 iron axes and it shows i have 1. shouldn't they be
+    combined?" On the reference graph 46 keys are called Iron Axe, one per damage value the
+    axe has ever been seen at, and almost every family has its stock sitting on exactly one
+    of them. 804 families do this, covering 9,579 keys.
+
+    THE FAMILY IS `graph.damage_base`, WHICH IS PACK DATA, not a rule about the shape of the
+    key. Every structural rule anyone proposed also matched the nine `chisel:lapis` blocks
+    and the 286-meta Spell Book, which are genuinely that many different things. See
+    sources/damageable and #110.
+
+    THE SURVIVOR IS THE MEMBER WITH THE MOST STOCK, not the undamaged one, and that is the
+    whole reason this is not two lines in the loop above. Rows arrive sorted, and the
+    undamaged key sorts first because its label is shorter -- so keeping the first would show
+    "Iron Axe, 0 in stock" to a player whose axes are all half-worn, which is a new wrong
+    answer in place of the old noisy one. Position comes from the best-ranked member and the
+    KEY from the best-stocked one, so the row lands where the reader expects and describes
+    something they own.
+
+    STOCK IS NOT SUMMED ACROSS THE FAMILY, which is #118's open question 2 and is a
+    judgement rather than a measurement. Two fresh axes and one at half durability is
+    arguably three axes, and the row would then describe a quantity no single key holds and
+    no recipe can ask for -- while the surviving key stays a real key that `producers`,
+    `plan` and the item page all agree about. Showing a real number for a real key is the
+    conservative half of that trade, and it is the half that cannot mislead.
+    """
+    if not graph.max_damage:
+        return rows, 0
+    best = {}
+    for index, row in enumerate(rows):
+        key = row[3]
+        family = graph.damage_base(key)
+        stock = have.get(key, 0)
+        current = best.get(family)
+        if current is None:
+            best[family] = [index, row, stock]
+        else:
+            current[0] = min(current[0], index)
+            if stock > current[2]:
+                current[1], current[2] = row, stock
+    if len(best) == len(rows):
+        return rows, 0
+    ordered = sorted(best.values(), key=lambda entry: entry[0])
+    return [entry[1] for entry in ordered], len(rows) - len(best)
 
 
 def _canonical_first(graph, key, have):
@@ -193,14 +247,19 @@ def suggest(graph, query, have=None, limit=25):
         row["makes"] = len(graph.real_producers(key))
         row["uses"] = len(graph.consumers(key))
         out.append(row)
-    return Matches(out, hits.hidden)
+    # `hits.collapsed` carried through, NOT dropped by relying on the default. The typeahead
+    # is the surface where the fold is most visible -- it is what a player is looking at
+    # while typing "iron axe" -- so it is the last place the count should go quiet. The
+    # default exists for callers building a Matches from nothing, not for this one.
+    return Matches(out, hits.hidden, hits.collapsed)
 
 
 def search(graph, query, have=None, limit=MAX_RESULTS):
     """Full detail for every item matching `query`."""
     have = have or {}
     hits = rank_matches(graph, query, have, limit)
-    return Matches([describe(graph, key, have) for key in hits.results], hits.hidden)
+    return Matches([describe(graph, key, have) for key in hits.results], hits.hidden,
+                   hits.collapsed)
 
 
 def identity(graph, key):

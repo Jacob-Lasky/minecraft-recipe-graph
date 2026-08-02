@@ -130,6 +130,17 @@ flex:0 0 auto;font-size:12.5px}
    break. Registry ids and machine names have no spaces to break at, so without this a
    single long one pushes the row past the viewport however narrow the column gets. */
 .nm{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+/* The item icon (#36), in both delivery shapes: a <span> whose background is a served
+   atlas page, or an inlined <img>. ONE rule for both, so a plan looks the same on the
+   server and in a published artifact.
+   `image-rendering:pixelated` is load-bearing rather than a nicety: these are 16x16
+   sprites and a browser's default smoothing turns Minecraft pixel art into mush at any
+   scale, including 1:1 on a fractional-DPI display.
+   `flex:0 0 auto` because the row is a flex container and the icon must never be the
+   thing that shrinks; `vertical-align:-3px` sits it on the text baseline in the table
+   rows, which are not flex. */
+.ico{display:inline-block;flex:0 0 auto;margin-right:6px;vertical-align:-3px;
+image-rendering:pixelated;background-repeat:no-repeat}
 .badge{flex:0 0 auto;font:600 10.5px/1.7 var(--mono);padding:1px 8px;border-radius:99px;
 letter-spacing:.03em;white-space:nowrap}
 .ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}
@@ -227,17 +238,28 @@ def kind_chip(kind):
     return '<span class="t t-%s">%s</span>' % (kind, label)
 
 
-def named(entry):
-    """Escaped display name with a type chip in front, for HTML.
+def named(entry, icon=None):
+    """Escaped display name with a type chip in front, and an item icon when there is one.
 
     Reads the `kind` and `label` the solver and explorer now put on every node, so no
     renderer needs a Graph in hand. On an older payload that has only `name`, it degrades
     to the bracketed text form rather than losing the type entirely.
+
+    THE ICON IS A CALLABLE PASSED IN, NOT A MODULE-LEVEL SETTING, and the server is why: it
+    is threaded, and a "current delivery shape" global would let one request's plan borrow
+    another's. It is also what keeps `render_html` usable for both the standalone document
+    and the served fragment, which have incompatible constraints. See iconset.resolver.
+
+    The icon goes BEFORE the type chip, so a column of rows has its pictures aligned on one
+    edge; and it never replaces the chip, because "this is a fluid" is a distinction the
+    picture cannot draw and the chip exists for. `kind_chip` returns "" for a plain item, so
+    on the common row the two are simply adjacent.
     """
     label = entry.get("label")
+    art = icon(entry.get("key") or "") if (icon and entry.get("key")) else ""
     if label is None:
-        return _esc(entry.get("name") or entry.get("key") or "")
-    return kind_chip(entry.get("kind")) + _esc(label)
+        return art + _esc(entry.get("name") or entry.get("key") or "")
+    return art + kind_chip(entry.get("kind")) + _esc(label)
 
 JS = """
 function setAll(open){document.querySelectorAll('.tree details')
@@ -378,7 +400,7 @@ def _recipes_bit(node, back):
             % (urllib.parse.quote(node["key"]), urllib.parse.quote(back), text))
 
 
-def _node_html(node, depth=0, back=""):
+def _node_html(node, depth=0, back="", icon=None):
     """One tree row. `back` is where a pin control should return to, empty for a static
     render: `recipegraph plan --html` produces a file that outlives the server, and a
     button posting to a server that is not there is worse than no button."""
@@ -389,7 +411,7 @@ def _node_html(node, depth=0, back=""):
 
     bits = [
         '<span class="qty">%s&times;</span>' % "{:,}".format(node.get("need", 1)),
-        '<span class="nm">%s' % named(node),
+        '<span class="nm">%s' % named(node, icon),
     ]
     blocked = is_roadblock(node.get("machine_state"))
     extra = []
@@ -434,7 +456,7 @@ def _node_html(node, depth=0, back=""):
         '<summary><span class="tw">&#9656;</span>%s</summary>'
         '<div class="kids">%s</div></details>'
         % (need_flag, block_flag, open_attr, inner,
-           "".join(_node_html(k, depth + 1, back) for k in kids))
+           "".join(_node_html(k, depth + 1, back, icon) for k in kids))
     )
 
 
@@ -470,7 +492,7 @@ def _machines_html(machines):
             '</div>' % (len(machines), rows, note))
 
 
-def _rows(entries, limit=200):
+def _rows(entries, limit=200, icon=None):
     if not entries:
         return '<tr><td class="meta">none</td></tr>'
     return "".join(
@@ -480,13 +502,13 @@ def _rows(entries, limit=200):
            # the quantity. Never converted to buckets: recipes are authored in mB and
            # rounding would misreport a partial-bucket step.
            " mB" if e.get("kind") == "fluid" else "",
-           named(e),
+           named(e, icon),
            (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else "")
         for e in entries[:limit]
     )
 
 
-def _sources_html(entries):
+def _sources_html(entries, icon=None):
     """Draw from infinite generators.
 
     Its own panel, and always shown when non-empty, because "free" must not mean
@@ -498,7 +520,33 @@ def _sources_html(entries):
     total = sum(e["qty"] for e in entries)
     return ('<div class="card"><h2><span>Drawn from infinite sources</span>'
             '<span class="c">%s</span></h2><div class="scroll"><table>%s</table></div>'
-            '</div>' % ("{:,}".format(total), _rows(entries)))
+            '</div>' % ("{:,}".format(total), _rows(entries, icon=icon)))
+
+
+def _emc_html(entries, icon=None):
+    """Items the ProjectE network transmutes rather than crafts. #50
+
+    ITS OWN PANEL, beside the infinite sources and for the same reason: these are not things
+    to go and get, so putting them in "You still need" would tell a player to farm a dungeon
+    for an item their network already makes -- which is the exact report #50 was opened on.
+    Kept apart from the sources panel too, because the two claims differ: a generator is
+    infinite and free, EMC is finite and fungible.
+
+    The EMC VALUE IS SHOWN, not just the fact of it, so the claim stays checkable. "From EMC"
+    on its own is something a reader has to trust; "EMC 2,048" is something they can look up
+    in their own transmutation table.
+    """
+    if not entries:
+        return ""
+    total = sum(e["qty"] for e in entries)
+    rows = []
+    for e in entries:
+        rows.append('<tr><td class="q">%s</td><td>%s</td><td class="c">EMC %s</td></tr>'
+                    % ("{:,}".format(e["qty"]), named(e, icon),
+                       "{:,}".format(e.get("emc", 0))))
+    return ('<div class="card"><h2><span>Made by transmutation</span>'
+            '<span class="c">%s</span></h2><div class="scroll"><table>%s</table></div>'
+            '</div>' % ("{:,}".format(total), "".join(rows)))
 
 
 def _tokens_html(entries):
@@ -577,7 +625,8 @@ def _truncation_note(result, deeper):
             % (_esc(result.get("target_name") or ""), url, "{:,}".format(cap)))
 
 
-def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
+def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
+                icon=None):
     tree = result["tree"]
     # BOTH orientations, shipped together. The alternative is a round trip, and a round
     # trip re-solves: a plan can take two minutes (defaults.MAX_NODES_CEILING), which is an
@@ -638,8 +687,9 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
       aria-pressed="false">Turn it %s</button></div>
     <div class="meta" style="margin-top:9px">A box is filled by what the plan does with
       that item, per the key above. The small SWATCH inside each box is a different axis:
-      its colour groups items by mod and the letter stands in for the icon, because real
-      item textures need a sprite sheet the dump mod does not render yet. Click any box to
+      its colour groups items by mod and the letter is the item's initial. The diagram keeps
+      those rather than the item icons the rows carry, because it is scanned for structure
+      and a hue says &ldquo;these six are all one mod&rdquo; at a glance. Click any box to
       plan that item on its own.</div>
   </div>
   <div class="cols" id="cols">
@@ -655,7 +705,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
       <div class="card">
         <h2><span>Drawn from AE2 stock</span><span class="c">%d</span></h2>
         <div class="scroll"><table>%s</table></div>
-      </div>%s%s%s
+      </div>%s%s%s%s
     </div>
   </div>
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
@@ -680,12 +730,13 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None):
         diagram_svg_td,
         _esc(ORIENTATION_LABEL[TD]),
         "{:,}".format(result["nodes"]),
-        _node_html(tree, back=back),
+        _node_html(tree, back=back, icon=icon),
         len(need),
-        _rows(need),
+        _rows(need, icon=icon),
         len(used),
-        _rows(used),
-        _sources_html(result.get("from_sources")),
+        _rows(used, icon=icon),
+        _sources_html(result.get("from_sources"), icon),
+        _emc_html(result.get("from_emc"), icon),
         _tokens_html(result.get("tokens_needed")),
         _machines_html(result.get("machines_to_build")),
         JS.replace("%%DIRS%%", script_json(ORIENTATION_LABEL)),
@@ -792,7 +843,7 @@ def _used_html(item):
     return "".join(out)
 
 
-def _res_html(item):
+def _res_html(item, icon=None):
     stock = item.get("stock", 0)
     chips = []
     chips.append('<span class="chip %s">%s in stock</span>'
@@ -813,16 +864,16 @@ def _res_html(item):
     <div class="sect"><h4><span>Used in</span><span>%d</span></h4>%s</div>
   </div>
 </div>""" % (
-        _esc(hay), named(item), _esc(item["key"]), "".join(chips),
+        _esc(hay), named(item, icon), _esc(item["key"]), "".join(chips),
         item["makes_total"], _makes_html(item),
         item["used_in_total"], _used_html(item),
     )
 
 
-def render_explore_html(payload, coverage_note=None):
+def render_explore_html(payload, coverage_note=None, icon=None):
     results = payload["results"]
     warn = ('<div class="warnbar">%s</div>' % _esc(coverage_note)) if coverage_note else ""
-    dead = hidden_note(payload.get("hidden", 0))
+    dead = hidden_note(payload.get("hidden", 0), payload.get("collapsed", 0))
     return """<style>%s%s</style>
 <div class="wrap">
   <div class="eyebrow">Item explorer</div>
@@ -857,6 +908,6 @@ def render_explore_html(payload, coverage_note=None):
         sum(1 for r in results if r.get("stock")),
         sum(1 for r in results if r["makes_total"]),
         sum(1 for r in results if not r["makes_total"]),
-        "".join(_res_html(r) for r in results),
+        "".join(_res_html(r, icon) for r in results),
         EXPLORE_JS,
     )

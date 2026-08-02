@@ -8,6 +8,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -21,6 +22,7 @@ import mezz.jei.api.recipe.IRecipeWrapper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTBase;
 import net.minecraft.nbt.NBTPrimitive;
@@ -39,8 +41,21 @@ import net.minecraftforge.oredict.OreDictionary;
 
 /**
  * `/recipedump` -- writes recipes.ndjson, catalysts.json, oredict.json, names.json,
- * skipped.ndjson, summary.json and nbt_trace.json into &lt;gamedir&gt;/mc-recipe-dump/.
- * `/recipedump notrace` skips the last of those.
+ * damageable.json, emc.json, machine_names.json, skipped.ndjson, summary.json,
+ * nbt_trace.json and the icons-N.png / icons.json atlas into
+ * &lt;gamedir&gt;/mc-recipe-dump/. `/recipedump notrace noicons` skips the last two of
+ * those.
+ *
+ * IT RUNS IN THREE PHASES, and which phase a file comes out of is the thing to know:
+ *
+ *   1. CATEGORIES -- walk every JEI recipe category and its wrappers. Fills
+ *      recipes.ndjson, catalysts.json, names.json and the NBT trace.
+ *   2. ITEMS -- walk JEI's complete ingredient list. Fills emc.json (#50) and
+ *      machine_names.json's blueprint half (#55), and decides what the atlas renders.
+ *      A SEPARATE POPULATION, not an optimisation: an item nothing crafts and nothing
+ *      consumes never appears in phase 1, and drop-only items are exactly #50's subject.
+ *   3. ICONS -- render the atlas (#36). LAST, after every other file is closed, because
+ *      it is the one phase that can plausibly fail; see IconAtlas.
  *
  * The dump is SPREAD ACROSS CLIENT TICKS rather than run inline. It is only about a
  * second of work, but a second spent inside a command handler is a second the render
@@ -72,8 +87,9 @@ public class DumpCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/recipedump [" + NO_TRACE_ARG + "] -- dump all JEI recipes for offline "
-                + "crafting-tree tools; " + NO_TRACE_ARG + " skips nbt_trace.json (#80)";
+        return "/recipedump [" + NO_TRACE_ARG + "] [" + NO_ICONS_ARG + "] -- dump all JEI "
+                + "recipes for offline crafting-tree tools; " + NO_TRACE_ARG + " skips "
+                + "nbt_trace.json (#80), " + NO_ICONS_ARG + " skips the icon atlas (#36)";
     }
 
     /**
@@ -99,17 +115,37 @@ public class DumpCommand extends CommandBase {
      */
     static final String NO_TRACE_ARG = "notrace";
 
+    /**
+     * Argument that SUPPRESSES the item icon atlas. Issue #36's icons are ON by default,
+     * for the same asymmetry that decided `notrace`: producing them costs a launch of the
+     * game, and nothing about them can be reconstructed from a dump on disk.
+     *
+     * The atlas is the largest thing a dump writes after recipes.ndjson and the slowest
+     * phase to produce, so the flag exists for a dump taken to answer a recipe question in
+     * a hurry. It fails safe the same way -- a mistyped `noicons` renders them anyway.
+     */
+    static final String NO_ICONS_ARG = "noicons";
+
     /** True unless `args` asks to suppress the trace. Unknown args are ignored, as before. */
     static boolean wantsTrace(String[] args) {
+        return !suppressed(args, NO_TRACE_ARG);
+    }
+
+    /** True unless `args` asks to suppress the icon atlas. */
+    static boolean wantsIcons(String[] args) {
+        return !suppressed(args, NO_ICONS_ARG);
+    }
+
+    private static boolean suppressed(String[] args, String flag) {
         if (args == null) {
-            return true;
+            return false;
         }
         for (String a : args) {
-            if (a != null && NO_TRACE_ARG.equalsIgnoreCase(a.trim())) {
-                return false;
+            if (a != null && flag.equalsIgnoreCase(a.trim())) {
+                return true;
             }
         }
-        return true;
+        return false;
     }
 
     @Override
@@ -148,7 +184,7 @@ public class DumpCommand extends CommandBase {
         boolean traceNbt = wantsTrace(args);
         Runner runner;
         try {
-            runner = new Runner(sender, dir, registry, categories, traceNbt);
+            runner = new Runner(sender, dir, registry, categories, traceNbt, wantsIcons(args));
         } catch (IOException e) {
             reply(sender, "cannot open output file: " + e);
             return;
@@ -156,6 +192,15 @@ public class DumpCommand extends CommandBase {
         active = runner;
         MinecraftForge.EVENT_BUS.register(runner);
         reply(sender, String.format("dumping %d recipe categories...", categories.size()));
+        // Name what the optional mods contribute BEFORE the walk starts, so a dump that
+        // silently has no emc.json says why at the moment it can still be acted on -- the
+        // alternative is finding the file missing after the launch is over.
+        if (!ProjectEBridge.available()) {
+            reply(sender, "  no emc.json: " + ProjectEBridge.absence());
+        }
+        if (!ModularMachineryBridge.available()) {
+            reply(sender, "  no machine_names.json: " + ModularMachineryBridge.absence());
+        }
         if (traceNbt) {
             // Say it up front either way. The trace being DEFAULT is the surprising half
             // now, and a player who does not know it is being written cannot choose to
@@ -202,6 +247,14 @@ public class DumpCommand extends CommandBase {
         private final Map<String, List<String>> catalysts =
                 new LinkedHashMap<String, List<String>>();
 
+        /** {discriminated key: ProjectE EMC value}, phase 2. Empty without ProjectE. #50 */
+        private final Map<String, Long> emc = new LinkedHashMap<String, Long>();
+        /** {discriminated blueprint key: machine registry name}, phase 2. #55 */
+        private final Map<String, String> blueprints = new LinkedHashMap<String, String>();
+        /** {base key: the stack to draw for it}, phase 2, consumed by phase 3. #36 */
+        private final Map<String, ItemStack> iconTargets =
+                new LinkedHashMap<String, ItemStack>();
+
         private int catIndex = -1;
         private Iterator<?> wrappers;
         private String uid = "";
@@ -210,33 +263,74 @@ public class DumpCommand extends CommandBase {
         private int[] tally;
         private int wrapperIndex;
 
+        private boolean categoriesDone;
+        /** Set when recipes.ndjson can no longer be written to; stops the walk. */
+        private boolean fatal;
+        /** finish() is reachable from two paths and must only run once. */
+        private boolean finished;
+        /** Phase 2's cursor; null until the item walk starts. */
+        private Iterator<ItemStack> items;
+        private int itemsSeen;
+        private int itemsTotal;
+
         private int recipes;
         private int failed;
+        private final boolean icons;
         private int nextProgressPercent = 25;
         private final long startedAt = System.nanoTime();
 
         Runner(ICommandSender sender, File dir, IRecipeRegistry registry,
-               List<IRecipeCategory> categories, boolean traceNbt) throws IOException {
+               List<IRecipeCategory> categories, boolean traceNbt, boolean icons)
+                throws IOException {
             this.sender = sender;
             this.dir = dir;
             this.registry = registry;
             this.categories = categories;
+            this.icons = icons;
             this.sink = new KeySink(traceNbt);
             this.writer = new BufferedWriter(new OutputStreamWriter(
                     Files.newOutputStream(new File(dir, "recipes.ndjson").toPath()),
                     StandardCharsets.UTF_8));
         }
 
+        /**
+         * One slice of whichever phase is current.
+         *
+         * The two phases are separate methods against a shared deadline rather than one
+         * loop with a mode flag, because they iterate different things and their
+         * termination conditions have nothing to do with each other. A leftover slice of
+         * budget rolls straight into the next phase, so finishing the categories mid-tick
+         * does not waste the rest of that tick.
+         */
         @SubscribeEvent
         public void onClientTick(TickEvent.ClientTickEvent event) {
             if (event.phase != TickEvent.Phase.END) {
                 return;
             }
             long deadline = System.nanoTime() + BUDGET_NANOS;
-            while (System.nanoTime() < deadline) {
+            if (!categoriesDone) {
+                walkCategories(deadline);
+                if (fatal) {
+                    // recipes.ndjson is truncated, so nothing downstream of it is worth
+                    // producing. Go straight to finish so summary.json records the failure.
+                    finish();
+                    return;
+                }
+                if (!categoriesDone) {
+                    reportProgress();
+                    return;
+                }
+            }
+            if (walkItems(deadline)) {
+                finish();
+            }
+        }
+
+        private void walkCategories(long deadline) {
+            while (!fatal && System.nanoTime() < deadline) {
                 if (wrappers == null || !wrappers.hasNext()) {
                     if (!nextCategory()) {
-                        finish();
+                        categoriesDone = true;
                         return;
                     }
                     continue;
@@ -245,7 +339,110 @@ public class DumpCommand extends CommandBase {
                 wrapperIndex++;
                 handle(obj);
             }
-            reportProgress();
+        }
+
+        /**
+         * Phase 2: walk JEI's complete item list. True when it is finished.
+         *
+         * @see RecipeDumpMod#ingredients for why this population is not the recipe walk's
+         */
+        private boolean walkItems(long deadline) {
+            if (items == null) {
+                List<ItemStack> all = itemList();
+                itemsTotal = all.size();
+                items = all.iterator();
+                reply(sender, String.format(
+                        "  %,d recipes; now scanning %,d items for EMC, blueprints and icons",
+                        recipes, itemsTotal));
+            }
+            while (System.nanoTime() < deadline) {
+                if (!items.hasNext()) {
+                    return true;
+                }
+                recordItem(items.next());
+                itemsSeen++;
+            }
+            return false;
+        }
+
+        /** JEI's every registered ItemStack, or an empty list if it cannot be reached. */
+        private List<ItemStack> itemList() {
+            try {
+                if (RecipeDumpMod.ingredients == null) {
+                    skips.add(skipLine("", "", -1, null, null,
+                                       "JEI ingredient registry unavailable"));
+                    return Collections.emptyList();
+                }
+                Collection<ItemStack> all =
+                        RecipeDumpMod.ingredients.getAllIngredients(VanillaTypes.ITEM);
+                return new ArrayList<ItemStack>(all);
+            } catch (Throwable t) {
+                skips.add(skipLine("", "", -1, null, t, "getAllIngredients failed"));
+                return Collections.emptyList();
+            }
+        }
+
+        /**
+         * Everything phase 2 wants to know about one stack.
+         *
+         * Keyed the same way `stack()` keys a recipe ingredient -- `id[:meta][#digest]` --
+         * so emc.json and machine_names.json join names.json and recipes.ndjson by
+         * construction rather than by a reader's convention.
+         */
+        private void recordItem(ItemStack stack) {
+            if (stack == null || stack.isEmpty()) {
+                return;
+            }
+            Item item = stack.getItem();
+            ResourceLocation id = item.getRegistryName();
+            if (id == null) {
+                return;
+            }
+            int meta = stack.getItemDamage();
+            String base = meta == 0 ? id.toString() : id + ":" + meta;
+            String nbt = discriminator(stack);
+            String key = nbt == null ? base : base + "#" + nbt;
+
+            long value = ProjectEBridge.emc(stack);
+            if (value > 0L) {
+                emc.put(key, value);
+            }
+            String machine = ModularMachineryBridge.machineOf(stack);
+            if (machine != null) {
+                blueprints.put(key, machine);
+            }
+            addIconTarget(item, id, meta);
+        }
+
+        /**
+         * Remember one stack to draw, unless something equivalent is already remembered.
+         *
+         * TWO COLLAPSES, both of which cut work AND cut wrong output:
+         *
+         *   * The DIGEST is dropped, because the atlas is keyed by base key. An icon per
+         *     NBT variant would be 261,095 sprites for a pack with about 40,000 pictures in
+         *     it, and the stack rebuilt here carries no NBT anyway. The cost is that an
+         *     item whose appearance is NBT-driven (a bee, a Tinkers tool) draws its default
+         *     look, which is the honest meaning of "the icon for this item".
+         *   * DAMAGE metas collapse to meta 0, on `damageable`, which is the same predicate
+         *     #118 writes into damageable.json. 46 keys called Iron Axe are 46 pictures of
+         *     one axe; a chisel:lapis meta is a genuinely different block and keeps its own.
+         *     Sharing the predicate is what keeps the atlas keyed the way the python side
+         *     will collapse the names.
+         *
+         * The WILDCARD meta is skipped outright: 32767 means "any damage" in a recipe, not
+         * an item, and `new ItemStack(item, 1, 32767)` draws whatever the model system makes
+         * of a nonsense damage value.
+         */
+        private void addIconTarget(Item item, ResourceLocation id, int meta) {
+            if (!icons || meta == OreDictionary.WILDCARD_VALUE) {
+                return;
+            }
+            int drawn = damageable(item) ? 0 : meta;
+            String key = drawn == 0 ? id.toString() : id + ":" + drawn;
+            if (!iconTargets.containsKey(key)) {
+                iconTargets.put(key, new ItemStack(item, 1, drawn));
+            }
         }
 
         /** Advance to the next category; false when every category is done. */
@@ -347,9 +544,16 @@ public class DumpCommand extends CommandBase {
                 }
             } catch (IOException io) {
                 // Losing the output stream is fatal to the dump, unlike a bad wrapper.
+                //
+                // A FLAG RATHER THAN CALLING finish() FROM HERE. It used to call it inline,
+                // and control then returned into the walk loop, which went on handing
+                // wrappers to a closed writer until the tick budget ran out -- every one of
+                // them throwing and re-entering finish(), so summary.json and the rest were
+                // written dozens of times over. The flag stops the walk at its own loop
+                // condition, which is the only place that can stop it cleanly.
                 failed++;
                 skips.add(skipLine(uid, modName, wrapperIndex, obj, io, "write failed"));
-                finish();
+                fatal = true;
             } catch (Throwable t) {
                 failed++;
                 tally[1]++;
@@ -369,8 +573,11 @@ public class DumpCommand extends CommandBase {
         }
 
         private void finish() {
+            if (finished) {
+                return;
+            }
+            finished = true;
             MinecraftForge.EVENT_BUS.unregister(this);
-            active = null;
             try {
                 writer.close();
             } catch (IOException ignored) {
@@ -379,10 +586,14 @@ public class DumpCommand extends CommandBase {
 
             writeLines(new File(dir, "skipped.ndjson"), skips);
             writeSummary(new File(dir, "summary.json"), perCategory, categoryMod,
-                         recipes, failed);
+                         recipes, failed, skips.size());
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
             int ores = writeOreDict(new File(dir, "oredict.json"), sink.names());
             writeNames(new File(dir, "names.json"), sink.names());
+            int damageables = writeDamageable(new File(dir, "damageable.json"));
+            Map<String, String> machines = ModularMachineryBridge.machines();
+            writeMachineNames(new File(dir, "machine_names.json"), machines, blueprints);
+            writeEmc(new File(dir, "emc.json"), emc);
             // Diagnostic, so it is written LAST and its absence is normal: every dump
             // that did not ask for it simply has no such file, exactly like a
             // pre-0.4.0 dump has no catalysts.json.
@@ -395,30 +606,65 @@ public class DumpCommand extends CommandBase {
                             + "%s oredict entries, %s names -> %s",
                     ms / 1000.0, formatCount(recipes), perCategory.size(), catalysts.size(),
                     formatCount(ores), formatCount(sink.names().size()), dir.getName()));
+            // TWO NUMBERS, BECAUSE THEY ANSWER TWO QUESTIONS AND ONLY ONE OF THEM IS THE
+            // SIZE OF THE FILE. This line used to read "N skipped, all recorded in
+            // skipped.ndjson" with N = the wrapper-failure count, which is 0 on a healthy
+            // pack -- while skipped.ndjson held 22,188 lines. It asserted a relationship
+            // that does not hold, and a player who opened the file after being told 0 found
+            // 22,188. "Did anything break" and "how much did JEI decline to give us" are
+            // different questions; see #90.
             reply(sender, String.format(
-                    "%s skipped, all recorded in skipped.ndjson (per-category counts in summary.json)",
-                    formatCount(failed)));
+                    "%s wrappers threw; %s entries recorded in skipped.ndjson "
+                            + "(per-category counts in summary.json)",
+                    formatCount(failed), formatCount(skips.size())));
+            reply(sender, String.format(
+                    "%s items scanned: %s with EMC, %s blueprints across %s machines, "
+                            + "%s damageable item types",
+                    formatCount(itemsSeen), formatCount(emc.size()),
+                    formatCount(blueprints.size()), formatCount(machines.size()),
+                    formatCount(damageables)));
             if (sink.tracing()) {
                 reply(sender, String.format(
                         "nbt_trace.json: %s keys with identifying NBT", formatCount(traced)));
             }
-            // The files are useless on their own, and in-game chat is the only place the
-            // player is looking at this moment, so name the next step and the URL.
-            //
-            // ONE step, not two: `serve` builds the graph itself when the dump is newer,
-            // so telling anyone to run `build` first is telling them to do work the tool
-            // already did. Keep this in step with cli.ensure_graph.
-            //
-            // The port matches recipegraph.server.DEFAULT_PORT; it cannot be shared across
-            // the language boundary, so changing one means grepping 8765 for the others.
-            //
-            // Phrased as an instruction, NOT as "open http://localhost:8765" on its own: the
-            // planner is a separate program that may not be installed or running, and
-            // pointing at a dead URL is worse than saying nothing. DO NOT reduce this to
-            // just the link.
-            reply(sender, "next: run `recipegraph serve` and open http://localhost:8765 "
-                    + "-- it will load this dump on the way up");
+
+            if (icons && !iconTargets.isEmpty()) {
+                // `active` stays set until the atlas is done, so a second /recipedump
+                // during the render is still refused rather than writing over a live page.
+                new IconAtlas(sender, dir, iconTargets, new Runnable() {
+                    @Override
+                    public void run() {
+                        active = null;
+                        nextStep(sender);
+                    }
+                }).start();
+            } else {
+                active = null;
+                nextStep(sender);
+            }
         }
+    }
+
+    /**
+     * The last line of a dump: what to do with the files.
+     *
+     * The files are useless on their own, and in-game chat is the only place the player is
+     * looking at this moment, so name the next step and the URL.
+     *
+     * ONE step, not two: `serve` builds the graph itself when the dump is newer, so telling
+     * anyone to run `build` first is telling them to do work the tool already did. Keep this
+     * in step with cli.ensure_graph.
+     *
+     * The port matches recipegraph.server.DEFAULT_PORT; it cannot be shared across the
+     * language boundary, so changing one means grepping 8765 for the others.
+     *
+     * Phrased as an instruction, NOT as "open http://localhost:8765" on its own: the planner
+     * is a separate program that may not be installed or running, and pointing at a dead URL
+     * is worse than saying nothing. DO NOT reduce this to just the link.
+     */
+    private static void nextStep(ICommandSender sender) {
+        reply(sender, "next: run `recipegraph serve` and open http://localhost:8765 "
+                + "-- it will load this dump on the way up");
     }
 
     private static String formatCount(int n) {
@@ -1039,6 +1285,15 @@ public class DumpCommand extends CommandBase {
      *   3  adds the NBT discriminator `n` on stacks; names.json keys by the discriminated id
      *   4  CHANGES HOW `n` IS COMPUTED: `SORTED_LIST_TAGS` sorts named lists, and `ench`
      *      joins `COSMETIC_TAGS`. Every discriminated key in the pack moves. See #80, #63.
+     *   5  summary.json's `skipped` becomes `threw` and gains `skip_lines`; adds
+     *      damageable.json, emc.json, machine_names.json and the icons-N.png atlas with
+     *      icons.json. See #90, #118, #50, #55, #36.
+     *
+     * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
+     * expensive step is a launch of the game, not the code, and five increments on one
+     * branch would only buy a partial revert nobody can exercise -- reverting half of a jar
+     * still costs the launch. One number is also the number the reader can verify straight
+     * out of the class constant pool.
      *
      * THE SECOND CLAUSE IS WHY 4 EXISTS, and it is the subtler half of the rule. Schema 4
      * moves no file's shape and adds no field: recipes.ndjson still carries `n`, spelled the
@@ -1066,11 +1321,16 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 4;
+    static final int SCHEMA = 5;
 
+    /**
+     * @param threw      wrapper failures -- things that went wrong
+     * @param skipLines  lines in skipped.ndjson -- everything JEI declined to give us,
+     *                   failures included
+     */
     private static void writeSummary(File file, Map<String, int[]> perCategory,
                                      Map<String, String> categoryMod,
-                                     int recipes, int failed) {
+                                     int recipes, int threw, int skipLines) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             // Stamp what produced this. Without it a dump is undatable: the only signal
@@ -1078,7 +1338,12 @@ public class DumpCommand extends CommandBase {
             // because the category list genuinely had none, was its absence.
             w.write("{\n \"mod_version\": \"" + safe(RecipeDumpMod.version()) + "\""
                     + ",\n \"schema\": " + SCHEMA);
-            w.write(",\n \"recipes\": " + recipes + ",\n \"skipped\": " + failed
+            // `threw` was spelled `skipped` through schema 4 while counting nothing of the
+            // sort -- 0 on a dump whose skipped.ndjson had 22,188 lines. It now matches the
+            // per-category tally beside it, and matches what gaps.py has always called it.
+            // The line count it was mistaken for is its own field. #90
+            w.write(",\n \"recipes\": " + recipes + ",\n \"threw\": " + threw
+                    + ",\n \"skip_lines\": " + skipLines
                     + ",\n \"categories\": {");
             boolean first = true;
             for (Map.Entry<String, int[]> e : perCategory.entrySet()) {
@@ -1157,6 +1422,177 @@ public class DumpCommand extends CommandBase {
         return count;
     }
 
+    /**
+     * Whether this item's METADATA IS ITS DURABILITY rather than a subtype. Issue #118.
+     *
+     * THIS IS THE WHOLE ANSWER TO "ARE THESE 46 ROWS ONE ITEM". On the reference graph 46
+     * keys are called Iron Axe -- `minecraft:iron_axe`, `:1`, `:2` ... `:250`, plus the
+     * 32767 wildcard -- because every durability value the axe has ever been seen at
+     * becomes its own key with its own stock count. 804 families do this, covering 9,579
+     * keys, and the reported symptom is a search listing dozens of identical rows with the
+     * count sitting on exactly one.
+     *
+     * THE TEMPTING DETECTOR IS WRONG AND #110 IS THE PROOF. "Same base id, same display
+     * name, different meta, therefore the same thing" also matches `chisel:lapis:0` through
+     * `:8`, nine decorative blocks that are genuinely nine different blocks all called Lapis
+     * Lazuli Block, and `ebwizardry:spell_book`, whose 286 metas are 286 different spells.
+     * Collapsing those would undo the distinction #110 established. Nothing in a dump could
+     * separate them, which is why this predicate needs the item registry and therefore
+     * needs the game.
+     *
+     * BOTH CLAUSES ARE LOAD-BEARING. `maxDamage > 0` alone would merge an item that has
+     * durability AND subtypes, and vanilla's own `Item#isDamageable` is not usable here
+     * because it lets `hasSubtypes` through on any stack-size-1 item -- which is most tools,
+     * so it would answer "damageable" for exactly the ambiguous case this has to refuse.
+     *
+     * THE DEPRECATED NO-ARG `getMaxDamage()` IS THE RIGHT ONE HERE, and Forge's suggested
+     * replacement is the wrong question. `getMaxDamage(ItemStack)` asks "how much damage can
+     * THIS stack take", which a mod may answer from the stack's own NBT; the question being
+     * asked is "does meta mean damage for this ITEM", which is a property of the registered
+     * item and has no stack to ask about. Handing it a synthesised stack invites every
+     * override in 410 mods to read NBT that is not there. DO NOT "fix" this to the
+     * stack-sensitive overload.
+     */
+    @SuppressWarnings("deprecation")
+    static boolean damageable(Item item) {
+        return item != null && item.getMaxDamage() > 0 && !item.getHasSubtypes();
+    }
+
+    /**
+     * `damageable.json`: {registry id: {"d": maxDamage, "s": hasSubtypes}}.
+     *
+     * ONLY items with a positive maxDamage are written, which is what keeps the file small:
+     * maxDamage 0 means the meta is a subtype, and that is the default the reader assumes
+     * for everything absent. `s` is carried even though every entry could be filtered on it
+     * here, because a reader that can see both fields can say WHY it declined to collapse a
+     * family; one handed a pre-filtered list can only say that it did.
+     *
+     * @return how many entries were written, for the chat summary
+     */
+    @SuppressWarnings("deprecation")  // see damageable(Item) for why the no-arg getter
+    private static int writeDamageable(File file) {
+        int count = 0;
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n");
+            boolean first = true;
+            for (Item item : Item.REGISTRY) {
+                if (item == null) {
+                    continue;
+                }
+                ResourceLocation id = item.getRegistryName();
+                int max;
+                boolean subtypes;
+                try {
+                    max = item.getMaxDamage();
+                    subtypes = item.getHasSubtypes();
+                } catch (Throwable t) {
+                    // A modded item that throws on a registry getter is not worth losing
+                    // the other 35,000 over; absent means "meta is a subtype", which is the
+                    // conservative answer and the one that changes no behaviour.
+                    continue;
+                }
+                if (id == null || max <= 0) {
+                    continue;
+                }
+                if (!first) {
+                    w.write(",\n");
+                }
+                first = false;
+                w.write(" \"" + safe(id.toString()) + "\": {\"d\": " + max + ", \"s\": "
+                        + subtypes + "}");
+                count++;
+            }
+            w.write(first ? "}\n" : "\n}\n");
+        } catch (IOException ignored) {
+            // Losing this costs the meta collapse in search, not correctness: without it
+            // every damage value stays its own row, which is exactly today's behaviour.
+        }
+        return count;
+    }
+
+    /**
+     * `machine_names.json`: Modular Machinery's own answer to "which machine is this".
+     * Issue #55.
+     *
+     * <pre>
+     * {"machines":   {"modularmachinery:dragonfire_crucible": "Dragonfire Crucible"},
+     *  "blueprints": {"modularmachinery:itemblueprint#010c58f252c0":
+     *                 "modularmachinery:dragonfire_crucible"}}
+     * </pre>
+     *
+     * TWO MAPS RATHER THAN ONE FLATTENED {blueprint key: display name}, because they go
+     * stale independently and because the machine id is worth having on its own. A
+     * blueprint's key changes with every redump that moves the digest; a machine's registry
+     * name does not, and the python side links `modularmachinery.recipes.&lt;reg&gt;` and
+     * `modularmachinery:&lt;reg&gt;_controller` by exactly that string already.
+     *
+     * A SEPARATE FILE RATHER THAN OVERRIDES MERGED INTO names.json, which #55 left open.
+     * names.json is {key: display name} and has nowhere to put the machine id, so merging
+     * would have thrown away the durable half to save a file. It also makes the staleness
+     * legible: a dump with an empty `machines` map was taken on a pack without Modular
+     * Machinery, and that is visibly different from a name that merely looks wrong.
+     */
+    private static void writeMachineNames(File file, Map<String, String> machines,
+                                          Map<String, String> blueprints) {
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n \"machines\": {");
+            boolean first = true;
+            for (Map.Entry<String, String> e : machines.entrySet()) {
+                w.write((first ? "\n" : ",\n") + "  \"" + safe(e.getKey()) + "\": \""
+                        + safe(e.getValue()) + "\"");
+                first = false;
+            }
+            w.write(first ? "}," : "\n },");
+            w.write("\n \"blueprints\": {");
+            first = true;
+            for (Map.Entry<String, String> e : blueprints.entrySet()) {
+                w.write((first ? "\n" : ",\n") + "  \"" + safe(e.getKey()) + "\": \""
+                        + safe(e.getValue()) + "\"");
+                first = false;
+            }
+            w.write(first ? "}\n}\n" : "\n }\n}\n");
+        } catch (IOException ignored) {
+            // Losing this costs a label. Plans through these keys stay correct; they just
+            // go on saying "1 Machine Blueprint" without saying which.
+        }
+    }
+
+    /**
+     * `emc.json`: {discriminated key: ProjectE EMC value}. Issue #50.
+     *
+     * ONLY POSITIVE VALUES ARE WRITTEN, and that is the file's whole safety property. 0 is
+     * ProjectE's answer for "no EMC, cannot be transmuted", and it is also what
+     * {@link ProjectEBridge#emc} returns when the lookup throws -- so absence from this
+     * file always means "this tool has no evidence of a transmutation route", never "there
+     * probably is one". #50's stated worst case is asserting a route the pack has actually
+     * disabled, which would be worse than the dead end it replaces.
+     *
+     * PACK DATA ONLY. What the player has LEARNED and how much EMC they hold is world
+     * state, belongs in the have file, and is read from playerdata rather than from here --
+     * the same split #112 drew between `graph.dimension_ores` and a visited dimension. Bake
+     * a player's knowledge into a graph and it is wrong the moment they learn something.
+     */
+    private static void writeEmc(File file, Map<String, Long> emc) {
+        try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
+            w.write("{\n");
+            boolean first = true;
+            for (Map.Entry<String, Long> e : emc.entrySet()) {
+                if (!first) {
+                    w.write(",\n");
+                }
+                first = false;
+                w.write(" \"" + safe(e.getKey()) + "\": " + e.getValue());
+            }
+            w.write(first ? "}\n" : "\n}\n");
+        } catch (IOException ignored) {
+            // Losing this costs the EMC terminator, and a drop-only item goes back to
+            // dead-ending on its loot token, which is where it was before #50.
+        }
+    }
+
     private static void writeNames(File file, Map<String, String> names) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
@@ -1212,8 +1648,14 @@ public class DumpCommand extends CommandBase {
         return written;
     }
 
-    /** Minimal JSON string escaping; avoids depending on a JSON library. */
-    private static String safe(String s) {
+    /**
+     * Minimal JSON string escaping; avoids depending on a JSON library.
+     *
+     * Package-visible so {@link IconAtlas} escapes its keys the same way every other file
+     * does. A second copy would be a second chance to disagree about a key that has to join
+     * across files.
+     */
+    static String safe(String s) {
         if (s == null) {
             return "";
         }
