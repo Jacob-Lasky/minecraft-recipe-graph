@@ -143,8 +143,32 @@ Verify a row before relying on it; that is the whole lesson above. Commands are 
 | Serve the UI as a container | yes, this is where it runs | not where it lives |
 | Get the HEI jar `checkHeiJar` demands | yes, from the AMP server instance | yes |
 | Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
-| `recipegraph build` into a graph | prerequisites are present, jar parity is not | yes, authoritative |
+| `recipegraph build` into a graph | yes, at a measured 1.2% gap (see below) | yes, authoritative |
 | **Run the game and `/recipedump`** | **no, and never** | **yes, and only here** |
+
+**THE JAR-PARITY GAP IS 1.2%, NOT A WALL, AND IT HAD NEVER BEEN MEASURED.** "Tower cannot
+build" has functioned as a blocker for months on an unquantified claim -- the exact shape this
+file warns about two sections up. Measured 2026-08-01:
+
+```
+desktop graph.json            117,681 recipes   45,552 produced keys
+client dump (hei_dump) alone  114,231 recipes   52,518 produced keys
+keys only jar_json supplies                        802
+...the SERVER's 364 jars recover                   263
+a Tower build would MISS                           539   = 1.2% of 45,552
+```
+
+Missing by mod: plustic 219, aoa3 131, twilightforest 44, contenttweaker 28, divinerpg 24.
+Everything else a build reads is already on Tower: 364 jars, a 2.5 MB `items.csv`,
+`planetDefs.xml`, 260 Modular Machinery configs, and the CLIENT's own recipe dump, which
+carries full 410-mod parity because it was taken on the client. Only `jar_json`, which reads
+jars off disk, is degraded.
+
+That matters because every build-time change is stranded until the desktop runs -- #110 and
+#112 both merged, deployed, and stayed invisible in the served data. Copying the ~46
+client-only jars to Tower would close the gap outright. Tracked in #119, which also records
+the odder finding: `jar_json` supplies 802 keys the client's own HEI dump does not, including
+`advancedrocketry:lathe`, which may be a dump gap rather than a parity one.
 
 The last row is the only permanent asymmetry, and it is Jake's hands on a keyboard rather
 than either machine's. Anything that needs a fresh dump ends there no matter who wrote the
