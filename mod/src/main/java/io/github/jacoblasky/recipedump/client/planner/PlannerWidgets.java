@@ -5,6 +5,7 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
 import java.util.List;
 
 import com.cleanroommc.modularui.api.drawable.IKey;
+import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.utils.Alignment;
 import com.cleanroommc.modularui.widget.ParentWidget;
@@ -134,6 +135,23 @@ public final class PlannerWidgets {
             widest = Math.max(widest, NodeStatus.tokenBadge(kind).length());
         }
         return widest * NodeRowText.CHAR_WIDTH;
+    }
+
+    /**
+     * A panel wrapping the flow diagram, sized to the screen.
+     *
+     * Here rather than in `client.flow` so the diagram keeps its one dependency on this
+     * package pointing the same way as everything else: `flow` calls `planner`, never the
+     * reverse. A panel is chrome, and chrome lives with the rest of the chrome.
+     */
+    public static ModularPanel flowPanel(IWidget canvas) {
+        // NEARLY THE WHOLE SCREEN, unlike the tree panel. A diagram is only useful at the
+        // width it can show a couple of columns in, and a node is 214px because that is what
+        // a full row needs -- a 360px panel shows one column and half of the next, which is a
+        // list with extra steps. 620x380 fits a 1280x800 client at the default 2x GUI scale.
+        ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow", 620, 380);
+        panel.child(canvas);
+        return panel;
     }
 
     /** A parent that positions its children absolutely. Concrete because `ParentWidget` is
