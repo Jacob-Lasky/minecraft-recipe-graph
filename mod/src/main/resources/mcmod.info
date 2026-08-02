@@ -2,11 +2,10 @@
   {
     "modid": "mcrecipedump",
     "name": "Recipe Dump",
-    "description": "Client-side utility: dumps every recipe HEI/JEI knows about to NDJSON, plus the ore dictionary and display names, for offline crafting-tree tools. Adds one command, /recipedump. Changes no gameplay.",
+    "description": "In-game crafting planner, plus the recipe dumper the offline tools are built on. On a client with JEI it adds /recipedump, which writes every recipe JEI knows about to NDJSON along with the ore dictionary and display names. Loads on servers too, because the planner's item and per-player state have to. Changes no other gameplay.",
     "version": "${version}",
     "mcversion": "${mcversion}",
     "url": "https://github.com/Jacob-Lasky/minecraft-recipe-graph",
-    "authorList": ["Jacob Lasky"],
-    "dependencies": ["jei"]
+    "authorList": ["Jacob Lasky"]
   }
 ]

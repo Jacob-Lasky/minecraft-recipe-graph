@@ -1,0 +1,20 @@
+{
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "jecalculation" },
+    { "type": "forge:mod_loaded", "modid": "appliedenergistics2" }
+  ],
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " P ",
+    "SCR"
+  ],
+  "key": {
+    "C": { "item": "jecalculation:item_calculator", "data": 0 },
+    "P": { "item": "appliedenergistics2:material", "data": 23 },
+    "S": { "item": "appliedenergistics2:material", "data": 35 },
+    "R": { "item": "appliedenergistics2:material", "data": 41 }
+  },
+  "result": {
+    "item": "mcrecipedump:calculator"
+  }
+}

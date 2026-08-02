@@ -73,7 +73,7 @@ public final class HeadlessLayout {
             // The two-argument constructor on purpose: the single-argument one hardcodes the
             // owner to "modularui" and warns about it, and it reads `ModularUI.isDev` to
             // decide whether to warn, which drags in the mod class.
-            super("mcrecipedump", panel);
+            super(RecipeDumpMod.MODID, panel);
         }
 
         @Override
@@ -86,25 +86,17 @@ public final class HeadlessLayout {
      * Wraps the widgets in a panel of the given size, lays it out on the reference screen,
      * prints the resolved tree and returns the panel.
      *
-     * This is the entry point a layout test should use. It takes the roots rather than a
-     * ready-made panel so that no test has to repeat the open-a-screen-and-resize dance, and
-     * so the dump below is never accidentally left out of a failing run.
+     * This is the entry point a layout test should use when it is building a tree by hand. It
+     * takes the roots rather than a ready-made panel so that no test has to repeat the
+     * open-a-screen-and-resize dance, and so the dump is never left out of a failing run. A
+     * test holding a panel some production code built calls {@link #layOut} instead.
      */
     public static ModularPanel layOutPanel(String name, int width, int height,
                                            IWidget... roots) {
         return layOutPanelOnScreen(name, width, height, SCREEN_WIDTH, SCREEN_HEIGHT, roots);
     }
 
-    /**
-     * The same, on a screen of a stated size, for asserting what a panel does when the window
-     * is not the reference one.
-     *
-     * `onResize` is the whole entry point into ModularUI: it updates the context's screen
-     * area, opens the main panel (which is what links every widget's resizer to its parent's),
-     * checks the resize tree for cycles, and only then runs `WidgetTree.resizeInternal`.
-     * Calling the sizer directly instead would skip the panel opening and resize an unlinked
-     * tree, which fails silently rather than loudly -- see `dump` below.
-     */
+    /** The same, on a screen of a stated size. */
     public static ModularPanel layOutPanelOnScreen(String name, int width, int height,
                                                    int screenWidth, int screenHeight,
                                                    IWidget... roots) {
@@ -113,8 +105,28 @@ public final class HeadlessLayout {
         for (IWidget root : roots) {
             panel.child(root);
         }
-        new OverlayLikeScreen(panel).onResize(screenWidth, screenHeight);
+        layOut(panel, screenWidth, screenHeight);
         System.out.println(name + ":\n" + dump(panel));
+        return panel;
+    }
+
+    /** Lay a ready-made panel out on the reference screen. */
+    public static ModularPanel layOut(ModularPanel panel) {
+        return layOut(panel, SCREEN_WIDTH, SCREEN_HEIGHT);
+    }
+
+    /**
+     * The primitive: open the panel on a screen of the given size and run the resize pass,
+     * exactly as `GuiScreenWrapper.initGui` does in game.
+     *
+     * `onResize` is the whole entry point into ModularUI: it updates the context's screen
+     * area, opens the main panel (which is what links every widget's resizer to its parent's),
+     * checks the resize tree for cycles, and only then runs `WidgetTree.resizeInternal`.
+     * Calling the sizer directly instead would skip the panel opening and resize an unlinked
+     * tree, which fails silently rather than loudly -- see `dump` below.
+     */
+    public static ModularPanel layOut(ModularPanel panel, int screenWidth, int screenHeight) {
+        new OverlayLikeScreen(panel).onResize(screenWidth, screenHeight);
         return panel;
     }
 

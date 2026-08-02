@@ -160,7 +160,7 @@ public class DumpCommand extends CommandBase {
             reply(sender, "a dump is already running; wait for it to finish.");
             return;
         }
-        if (RecipeDumpMod.runtime == null) {
+        if (DumpPlugin.runtime == null) {
             reply(sender, "JEI runtime not available yet -- open the recipe GUI once, then retry.");
             return;
         }
@@ -172,7 +172,7 @@ public class DumpCommand extends CommandBase {
             return;
         }
 
-        IRecipeRegistry registry = RecipeDumpMod.runtime.getRecipeRegistry();
+        IRecipeRegistry registry = DumpPlugin.runtime.getRecipeRegistry();
         List<IRecipeCategory> categories;
         try {
             categories = new ArrayList<IRecipeCategory>(registry.getRecipeCategories());
@@ -368,13 +368,13 @@ public class DumpCommand extends CommandBase {
         /** JEI's every registered ItemStack, or an empty list if it cannot be reached. */
         private List<ItemStack> itemList() {
             try {
-                if (RecipeDumpMod.ingredients == null) {
+                if (DumpPlugin.ingredients == null) {
                     skips.add(skipLine("", "", -1, null, null,
                                        "JEI ingredient registry unavailable"));
                     return Collections.emptyList();
                 }
                 Collection<ItemStack> all =
-                        RecipeDumpMod.ingredients.getAllIngredients(VanillaTypes.ITEM);
+                        DumpPlugin.ingredients.getAllIngredients(VanillaTypes.ITEM);
                 return new ArrayList<ItemStack>(all);
             } catch (Throwable t) {
                 skips.add(skipLine("", "", -1, null, t, "getAllIngredients failed"));
