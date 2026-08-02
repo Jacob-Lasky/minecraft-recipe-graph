@@ -328,6 +328,11 @@ CHECKS = {
                                if n.get("note") == "AE2 can autocraft"),
     "machine_have": lambda r: sum(1 for n in _walk(r["tree"])
                                   if n.get("machine_state") == "have"),
+    # #139's display-only mark: a node resting on an NBT STATE the graph has no route to,
+    # naming the plain item it CAN make. A field on the node rather than a status, so a port
+    # can drop it and still produce a structurally valid tree -- which is exactly why it
+    # needs a claim of its own.
+    "unsourced": lambda r: sum(1 for n in _walk(r["tree"]) if n.get("unsourced")),
     "emc": lambda r: _statuses(r).get("emc"),
     "from_emc": lambda r: len(r["from_emc"]),
 }
@@ -608,13 +613,18 @@ TARGETS = [
             "exists."),
     Target(
         "variant-table", "chisel:concrete_brown:1",
-        expect=("craft", "raw", "not_truncated"),
+        expect=("craft", "raw", "unsourced", "not_truncated"),
         why="#110. Chisel publishes one entry per material listing all 37 variants in BOTH "
             "columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so "
             "all 341 tables were dropped and 6,856 variant keys were left with no producer "
             "at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is "
             "chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` "
-            "are both build-time and both invisible except in a plan like this one."),
+            "are both build-time and both invisible except in a plan like this one.\n\n"
+            "It also carries exactly one #139 `unsourced` mark, on a chicken spawn egg -- a "
+            "node resting on an NBT state the graph has no route to, naming the plain item "
+            "it CAN make. That is a FIELD rather than a status, so a port could omit it and "
+            "still produce a structurally valid tree; one mark in a small plan is the "
+            "cheapest place to pin it."),
     Target(
         "same-name", "thermalfoundation:material:32",
         expect=("craft", "raw", "oredict", "not_truncated"),

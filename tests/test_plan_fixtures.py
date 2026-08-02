@@ -60,7 +60,7 @@ REQUIRED_COVERAGE = ("have", "partial", "from_stock", "craft", "craftable", "raw
                      "depth", "truncated", "token", "tokens_needed", "source",
                      "from_sources", "oredict", "alternatives", "fluid", "dimension",
                      "machine", "machine_have", "machine_to_build", "pinned",
-                     "emc", "from_emc")
+                     "emc", "from_emc", "unsourced")
 
 
 def fixture_names():
