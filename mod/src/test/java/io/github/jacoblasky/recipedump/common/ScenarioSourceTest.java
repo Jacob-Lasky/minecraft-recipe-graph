@@ -149,4 +149,131 @@ public class ScenarioSourceTest {
                    ScenarioSource.HAVE.note().contains("own nothing"));
         assertTrue(ScenarioSource.missingNotes().contains(ScenarioSource.HAVE.note()));
     }
+
+    // -- the runtime reader, which is how Phase 5 fills these in --------------------------
+
+    @org.junit.After
+    public void dropReaders() {
+        // GLOBAL STATE, so it has to be undone. A reader left installed by one test makes the
+        // next one assert against a source nobody wired -- and because every assertion here
+        // is about what the planner SAYS, the failure would read as a wording change.
+        ScenarioSource.resetReaders();
+    }
+
+    @Test
+    public void withNoReaderASourceAnswersItsDeclaredConstant() {
+        assertFalse(ScenarioSource.HAVE.live());
+        assertTrue(ScenarioSource.HAVE.note().contains("own nothing"));
+        assertTrue(ScenarioSource.PINS.live());
+        assertTrue(ScenarioSource.PINS.note().isEmpty());
+    }
+
+    @Test
+    public void aReaderCanReportTheInputAsLiveAndTheCaveatDrops() {
+        // What Phase 5 lands: the grid read succeeded, so `have` stops being a warning and
+        // the summary stops naming it. Nothing else about the source changes.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available();
+            }
+        });
+        assertTrue(ScenarioSource.HAVE.live());
+        assertTrue(ScenarioSource.HAVE.note().isEmpty());
+        assertFalse(ScenarioSource.summary(),
+                    ScenarioSource.summary().contains(ScenarioSource.HAVE.field()));
+    }
+
+    @Test
+    public void aReaderCanSayWHICHRefusalHappened() {
+        // THE POINT OF THE WHOLE SEAM. "AE2 stock is not read yet" tells a player nothing
+        // they can act on. `StockSnapshot` knows the difference between an empty network, no
+        // network in range, and no wireless terminal, and only it knows -- a caller flipping
+        // a boolean afterwards would be re-deriving that from outside and getting it wrong
+        // the first time a read failed.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.unavailable("no wireless terminal in inventory");
+            }
+        });
+        assertFalse(ScenarioSource.HAVE.live());
+        assertEquals("no wireless terminal in inventory", ScenarioSource.HAVE.note());
+        assertTrue(ScenarioSource.missingNotes()
+                                 .contains("no wireless terminal in inventory"));
+    }
+
+    @Test
+    public void theReaderIsAskedEveryTimeRatherThanCached() {
+        // A grid can go out of range between two plans, so a status resolved once at install
+        // would keep claiming a read that no longer happens.
+        final java.util.concurrent.atomic.AtomicInteger calls =
+                new java.util.concurrent.atomic.AtomicInteger();
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return calls.incrementAndGet() > 1
+                        ? ScenarioSource.Status.unavailable("out of range")
+                        : ScenarioSource.Status.available();
+            }
+        });
+        assertTrue(ScenarioSource.HAVE.live());
+        assertFalse(ScenarioSource.HAVE.live());
+        assertEquals("out of range", ScenarioSource.HAVE.note());
+    }
+
+    @Test
+    public void aNullReaderRestoresTheDeclaredConstant() {
+        // What a world unload does. A reader that outlived its world would go on answering
+        // for a grid nobody is near.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available();
+            }
+        });
+        assertTrue(ScenarioSource.HAVE.live());
+        ScenarioSource.HAVE.readBy(null);
+        assertFalse(ScenarioSource.HAVE.live());
+        assertTrue(ScenarioSource.HAVE.note().contains("own nothing"));
+    }
+
+    @Test
+    public void aReaderReturningNullFallsBackRatherThanClaimingALiveRead() {
+        // A broken reader must not be read as success. Defaulting to live would silently
+        // assert the planner accounted for stock it never saw, which is the one outcome this
+        // whole enum exists to prevent.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return null;
+            }
+        });
+        assertFalse(ScenarioSource.HAVE.live());
+        assertTrue(ScenarioSource.HAVE.note().contains("own nothing"));
+    }
+
+    @Test
+    public void anUnavailableStatusWithNoReasonStillSaysSomething() {
+        // An empty note would render as "planned without: have" with a blank line under it,
+        // which reads as a rendering fault rather than a missing input.
+        assertFalse(ScenarioSource.Status.unavailable("").note().isEmpty());
+        assertFalse(ScenarioSource.Status.unavailable(null).note().isEmpty());
+    }
+
+    @Test
+    public void everySourceGoingLiveEmptiesTheCaveatEntirely() {
+        // The end state Phase 5 is heading for, asserted now so the caveat disappears rather
+        // than degrading into an empty "planned without: ".
+        for (ScenarioSource source : ScenarioSource.values()) {
+            source.readBy(new ScenarioSource.Reader() {
+                @Override
+                public ScenarioSource.Status status() {
+                    return ScenarioSource.Status.available();
+                }
+            });
+        }
+        assertTrue(ScenarioSource.summary(), ScenarioSource.summary().isEmpty());
+        assertTrue(ScenarioSource.missingNotes().isEmpty());
+    }
 }
