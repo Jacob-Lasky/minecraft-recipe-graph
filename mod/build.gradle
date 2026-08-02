@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.PathSensitivity
+
 // 1.12.2 Forge mod build, on RetroFuturaGradle rather than ForgeGradle 2.3.
 //
 // WHY NOT ForgeGradle 2.3 (the "classic" 1.12.2 plugin): it resolves Forge from
@@ -193,6 +195,15 @@ processResources {
 
 test {
     testLogging { events 'passed', 'failed', 'skipped' }
+    // THE SHARED FIXTURES ARE AN INPUT, and Gradle cannot work that out for itself: they
+    // live outside `mod/`, so nothing in the default input set covers them and the test task
+    // stays UP-TO-DATE across a fixture change. Observed while adding the plan fixtures --
+    // dropping sixteen new files into `tests/fixtures/plan/` and re-running reported the
+    // previous run's results, which is the worst possible answer: a gate that says PASS
+    // without having looked. `DigestFixtureTest` reads `nbt_digest.json` from here too and
+    // had the same hole.
+    inputs.dir('../tests/fixtures').withPropertyName('sharedFixtures')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
     // Forwarded so `NbtTraceTest`'s documented regeneration path actually works. A `-D` on
     // the gradlew command line reaches the GRADLE daemon's JVM, not the forked test JVM,
     // so without this the instruction in that test's javadoc is a lie that fails with
