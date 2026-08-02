@@ -680,6 +680,28 @@ class Solver:
                 "label": self.g.bare_name(key), "qty": qty}
 
     def solve(self, key, qty=1):
+        """The whole result, as one dict. This IS the wire format.
+
+        FIVE OF THESE LISTS ARE ORDERED BY `Counter.most_common()`, AND THAT ORDER IS PART OF
+        THE CONTRACT, NOT AN ACCIDENT OF THE IMPLEMENTATION. `most_common` sorts by count
+        descending and breaks ties by INSERTION order, which here is the order the solver
+        first reached each key -- roughly the order a player would work through the tree. It
+        is deliberately NOT alphabetical and NOT by key.
+
+        Two things depend on that and would break silently if someone swapped a Counter for a
+        dict-plus-`sorted`:
+
+          - `tests/fixtures/plan/*.json` freeze this output so the Java port of the planner
+            (#19) can be asserted against it. A reordered list is a failing fixture with no
+            behavioural change to point at.
+          - Reproducing it in Java needs a STABLE sort by count descending over an
+            insertion-ordered map. `HashMap` plus `sort` gives the right multiset and the
+            wrong order; `TreeMap` gives alphabetical, which is wrong in a different way.
+
+        `machines_to_build` is the odd one out and is `sorted()` by category on purpose: it is
+        a checklist rather than a worklist, so a stable alphabetical order is easier to scan
+        than one that shuffles as the plan changes.
+        """
         tree = self.expand(key, qty)
         return {
             "target": key,
