@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.graph;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -203,6 +204,54 @@ public class RecipeGraphOrderTest {
             keys.add(graph.key(members.at(p)));
         }
         assertEquals(Arrays.asList("mod:zinc_c", "mod:zinc_a", "mod:zinc_b"), keys);
+    }
+
+    @Test
+    public void nbtVariantsComeBackInTheOrderRECIPESProducedThemNotInternOrder() {
+        // CAUGHT BY THE ORACLE DIFF, NOT BY A UNIT TEST, which is why it is pinned here now.
+        // Python builds its variant index by walking `by_output`, whose insertion order is
+        // the order each key was first seen as some recipe's OUTPUT. Interning order is the
+        // order keys were first seen anywhere -- as an ingredient, in the names section, or
+        // as a catalyst -- and the two differ whenever a variant is mentioned before it is
+        // made.
+        //
+        // Measured on the real graph, exactly three categories disagreed: `botania.orechid`,
+        // `orechid_ignem` and `pureDaisy` each named a different `botania:specialflower`
+        // variant as their craftable route. Same state, same build targets, every one of the
+        // 161,514 prices identical -- only the evidence sentence moved, which is the quietest
+        // way two implementations can drift apart.
+        GraphBuilder b = new GraphBuilder();
+        // The bare key exists as a catalyst on the real pack, which is what makes it
+        // askable; here it is simply interned first.
+        b.key("mod:flower");
+        // Interned before it is produced, as a mere ingredient would be, and produced SECOND.
+        b.key("mod:flower#bbbbbbbbbbbb");
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("mod:petal"));
+        b.endSlot();
+        b.output(b.key("mod:flower#aaaaaaaaaaaa"), 1);
+        b.endRecipe("makes-a", "crafting", null, "jar_json", false, false);
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("mod:petal"));
+        b.endSlot();
+        b.output(b.key("mod:flower#bbbbbbbbbbbb"), 1);
+        b.endRecipe("makes-b", "crafting", null, "jar_json", false, false);
+        RecipeGraph variants = b.build();
+
+        int base = variants.keyId("mod:flower");
+        int[] found = variants.variantsOf(base);
+        // An unknown key answers empty rather than throwing, since `variantsOf(keyId(name))`
+        // is the natural call shape.
+        assertEquals(0, variants.variantsOf(variants.keyId("mod:nope")).length);
+        assertEquals(2, found.length);
+        assertEquals("mod:flower#aaaaaaaaaaaa", variants.key(found[0]));
+        assertEquals("mod:flower#bbbbbbbbbbbb", variants.key(found[1]));
+        // The guard on the guard: intern order really is the other way round here, so this
+        // fixture would pass under either rule if that stopped being true.
+        assertTrue(variants.keyId("mod:flower#bbbbbbbbbbbb")
+                < variants.keyId("mod:flower#aaaaaaaaaaaa"));
     }
 
     @Test

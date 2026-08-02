@@ -328,6 +328,19 @@ public final class GraphBuilder {
         for (int group = 0; group < oreTable.size(); group++) {
             oreGroupKeyId[group] = keyTable.idOf(Keys.oreKey(oreTable.get(group)));
         }
+        // The inverse index the cost model's inner loop needs, built here because this is
+        // where both halves are already in hand. Only the groups whose `ore:` key was
+        // actually interned can appear -- a group no recipe consumes has no key to invert.
+        KeyIndex.Builder oreKeyBuilder = new KeyIndex.Builder();
+        IntArray oreKeyGroup = new IntArray();
+        for (int group = 0; group < oreTable.size(); group++) {
+            if (oreGroupKeyId[group] >= 0) {
+                oreKeyBuilder.add(oreGroupKeyId[group]);
+                oreKeyGroup.add(group);
+            }
+        }
+        int[] oreKeyOrder = oreKeyBuilder.permutation();
+
         long[] oreGuessed = Bits.ofSize(Math.max(1, oreTable.size()));
         for (int i = 0; i < oreGuessedGroups.size(); i++) {
             Bits.set(oreGuessed, oreGuessedGroups.get(i));
@@ -353,7 +366,9 @@ public final class GraphBuilder {
         return new RecipeGraph(keyTable, displayNames.build(), names, unlocalizedBits, kindOf,
                 categoryTable, machineNames.build(), sources.build(), roles.build(), store,
                 byOutput, byInput, wildcardSibling, oreTable, oreMembers, oreIndex,
-                oreGroupKeyId, oreGuessed, worldOres, liveKeys, reshapedOnly, catalysts,
+                oreGroupKeyId, oreKeyBuilder.build(oreKeyOrder),
+                permute(oreKeyGroup, oreKeyOrder), oreGuessed, worldOres, liveKeys,
+                reshapedOnly, catalysts,
                 categoryMods.build(), categoryModId,
                 dimensionOreKey.build(dimensionOrder),
                 permute(dimensionOreDimId, dimensionOrder),

@@ -36,7 +36,8 @@ public class SchemaFiveFactsTest {
             + "\"dump_schema\":5,"
             + "\"emc\":{\"minecraft:stone\":1,\"minecraft:diamond\":8192,"
             + "\"avaritia:resource:5\":422212465065984,\"mod:worthless\":0},"
-            + "\"icons\":{\"icon\":\"atlas\",\"cols\":16,\"pages\":2,"
+            + "\"icons\":{\"icon\":16,\"cols\":128,"
+            + "\"pages\":[\"icons-0.png\",\"icons-1.png\"],"
             + "\"keys\":{\"minecraft:diamond\":[1,3,4],\"minecraft:stone\":[0,0,0]}},"
             + "\"machine_names\":{"
             + "\"modularmachinery:dragonfire_crucible\":\"Dragonfire Crucible\"},"
@@ -167,17 +168,22 @@ public class SchemaFiveFactsTest {
         // The PNG pages travel beside graph.json. Base64 in the document would inflate them
         // by a third and make every graph load pay for pictures it may never draw.
         IconAtlas atlas = graph.icons();
-        assertEquals("atlas", atlas.icon());
-        assertEquals(16, atlas.columns());
-        assertEquals(2, atlas.pages());
+        // `icon` is the sprite EDGE LENGTH in pixels and `pages` is the list of PNG
+        // filenames. Both were guessed wrong from a docstring while this section was empty in
+        // every graph, which is exactly the shape of mistake a fixture with real values
+        // prevents -- these numbers come from the pack's own atlas.
+        assertEquals(16, atlas.iconSize());
+        assertEquals(128, atlas.columns());
+        assertEquals(2, atlas.pageCount());
+        assertEquals("icons-1.png", atlas.page(1));
         assertEquals(2, atlas.size());
         int diamond = id("minecraft:diamond");
-        assertEquals(1, atlas.page(diamond));
+        assertEquals(1, atlas.pageOf(diamond));
         assertEquals(3, atlas.column(diamond));
         assertEquals(4, atlas.row(diamond));
         assertTrue(atlas.has(id("minecraft:stone")));
         assertFalse(atlas.has(id("minecraft:iron_axe")));
-        assertEquals(-1, atlas.page(id("minecraft:iron_axe")));
+        assertEquals(-1, atlas.pageOf(id("minecraft:iron_axe")));
     }
 
     @Test
@@ -189,7 +195,8 @@ public class SchemaFiveFactsTest {
         assertEquals(0, old.emcCount());
         assertEquals(0, old.blueprints().blueprintCount());
         assertEquals(0, old.icons().size());
-        assertNull(old.icons().icon());
+        assertEquals(0, old.icons().iconSize());
+        assertEquals(0, old.icons().pageCount());
         assertEquals("mod:thing:3", old.damageBase("mod:thing:3"));
     }
 
