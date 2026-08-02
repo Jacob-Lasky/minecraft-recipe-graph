@@ -11,6 +11,7 @@ import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
+import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 
@@ -73,6 +74,21 @@ public final class PlannerScreen {
                 // there is nothing to deregister.
                 PlannerAreaSource.install(panel);
                 return panel;
+            }
+        });
+    }
+
+    /**
+     * The planner with no plan to draw: loading, solving, failed or idle.
+     *
+     * Same size as {@link #openPlan}'s panel, so the window does not jump when a plan
+     * arrives underneath it.
+     */
+    public static void openState(final PlannerState state) {
+        openPanel(new Function<ModularGuiContext, ModularPanel>() {
+            @Override
+            public ModularPanel apply(ModularGuiContext context) {
+                return PlannerWidgets.statePanel(state);
             }
         });
     }
