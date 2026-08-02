@@ -3,7 +3,8 @@
  "covers": [
   "craft",
   "not_truncated",
-  "raw"
+  "raw",
+  "unsourced"
  ],
  "graph": {
   "bytes": 121448519,
@@ -239,5 +240,5 @@
    ".": 1
   }
  },
- "why": "#110. Chisel publishes one entry per material listing all 37 variants in BOTH columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so all 341 tables were dropped and 6,856 variant keys were left with no producer at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` are both build-time and both invisible except in a plan like this one."
+ "why": "#110. Chisel publishes one entry per material listing all 37 variants in BOTH columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so all 341 tables were dropped and 6,856 variant keys were left with no producer at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` are both build-time and both invisible except in a plan like this one.\n\nIt also carries exactly one #139 `unsourced` mark, on a chicken spawn egg -- a node resting on an NBT state the graph has no route to, naming the plain item it CAN make. That is a FIELD rather than a status, so a port could omit it and still produce a structurally valid tree; one mark in a small plan is the cheapest place to pin it."
 }
