@@ -224,6 +224,11 @@ public final class PlannerWidgets {
         box.size(width, height);
         int badgeWidth = Math.min(BADGE, Math.max(0, width - QTY - GAP * 2));
         int x = 0;
+        // The column is RESERVED whether or not anything fills it, so installing NodeActions
+        // does not re-flow every node -- but the WIDGET is only added when there is a stack.
+        // An `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which
+        // is the sort of claim that reads identically either way in review and is only true
+        // one way round. Measured: 49 empty boxes down the left edge of the first screenshot.
         net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
         if (!stack.isEmpty()) {
             box.child(icon(stack).pos(x, 0));
@@ -513,7 +518,13 @@ public final class PlannerWidgets {
         return value == null || value.isEmpty() ? "--" : value;
     }
 
-    /** The icon column's widget. Only built when there is something to draw. */
+    /**
+     * The icon column's widget. ONLY BUILT WHEN THERE IS SOMETHING TO DRAW.
+     *
+     * `ItemDisplayWidget` holding `ItemStack.EMPTY` paints its slot frame, not nothing. Both
+     * callers guard on that and both say why, because "returns EMPTY and nothing draws" and
+     * "returns EMPTY and a slot frame draws" are indistinguishable in a code review.
+     */
     private static ItemDisplayWidget icon(net.minecraft.item.ItemStack stack) {
         ItemDisplayWidget widget = new ItemDisplayWidget();
         widget.size(ICON, ROW_HEIGHT);
