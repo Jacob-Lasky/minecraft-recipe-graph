@@ -108,11 +108,18 @@ public class FlowCullingTest {
     public void panningAwayHidesAndPanningBackShows() {
         FlowLayout.Laid laid = FlowLayout.of(PlanTrees.fan(40));
         FlowCulling culling = new FlowCulling(laid);
-        assertTrue(culling.visibleIn(0, 0, 200, 100).size() > 0);
+        // ANCHORED ON A BOX RATHER THAN ON (0,0). The origin is not a place a node reliably
+        // is: a parent is centred on its subtree's band, so the root of a 40-leaf fan sits
+        // 500px down, and a viewport at the origin narrower than the column pitch sees
+        // nothing at all. The first version of this test hardcoded 200x100 and passed only
+        // because the node happened to be 96px wide; widening it to the size a real row needs
+        // made the same assertion fail on unchanged, correct code.
+        FlowLayout.Box root = laid.boxes.get(0);
+        assertTrue(culling.visibleIn(root.x, root.y, 200, 100).size() > 0);
         assertEquals("panned far off the layout, nothing is visible",
                 0, culling.visibleIn(1_000_000, 1_000_000, 200, 100).size());
         assertTrue("panning back must restore the visible set",
-                culling.visibleIn(0, 0, 200, 100).size() > 0);
+                culling.visibleIn(root.x, root.y, 200, 100).size() > 0);
     }
 
     @Test

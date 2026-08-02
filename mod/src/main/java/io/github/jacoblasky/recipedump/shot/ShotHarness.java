@@ -43,6 +43,8 @@ public final class ShotHarness {
     public static final String PROP_SETTLE = "mcrecipedump.shotSettleFrames";
     /** Seconds to wait for the main menu before giving up. */
     public static final String PROP_TIMEOUT = "mcrecipedump.shotTimeoutSeconds";
+    /** GUI scale for the shot. 0 leaves Minecraft's auto-scaling alone. */
+    public static final String PROP_GUI_SCALE = "mcrecipedump.shotGuiScale";
     /** `true` keeps ModularUI's widget-outline overlay in the picture. */
     public static final String PROP_DEBUG_OVERLAY = "mcrecipedump.shotDebugOverlay";
     /** Frames to TIME after settling, driving the screen once per frame. 0 turns it off. */
@@ -69,6 +71,9 @@ public final class ShotHarness {
      * that sits there until someone notices.
      */
     private static final int DEFAULT_TIMEOUT_SECONDS = 600;
+
+    /** 2 is what a player runs at; Minecraft's auto-scaler picks 4 at the shot resolution. */
+    private static final int DEFAULT_GUI_SCALE = 2;
 
     /** 0 is the PNG; everything else is the harness saying, in the log, why there is not one. */
     private static final int EXIT_OK = 0;
@@ -159,6 +164,7 @@ public final class ShotHarness {
                 waitOrTimeOut(mc.currentScreen);
                 return;
             }
+            setGuiScale();
             setModularUiDebugOverlay(Boolean.getBoolean(PROP_DEBUG_OVERLAY));
             String problem = ShotScreens.open(spec);
             if (problem != null) {
@@ -255,6 +261,36 @@ public final class ShotHarness {
          * `Display.setSwapInterval(0)` as well as the settings field, because the field is
          * only read when the options screen applies it and nothing here opens that screen.
          */
+        /**
+         * Pin the GUI scale, because Minecraft's automatic one is not what anybody plays at.
+         *
+         * AUTO-SCALING PICKS 4 AT THIS RESOLUTION, giving a 320x200 logical screen -- 1280/4.
+         * That is a quarter of the area a player has at 1920x1080 on scale 2, and any panel
+         * wider than 320 silently runs off the edge. It cost real time: a diagram panel sized
+         * 620x380 came back as one flat rectangle with no border and no content, which reads
+         * as a rendering bug and was a screen four times smaller than the one being designed
+         * for. Every shot taken before this was at scale 4.
+         *
+         * Scale 2 at 1280x800 gives 640x400, which is the shape a real client has. DO NOT
+         * remove this and rely on `--width` alone: resolution and scale are separate inputs,
+         * and raising the first raises the auto scale with it.
+         */
+        private void setGuiScale() {
+            int scale = intProperty(PROP_GUI_SCALE, DEFAULT_GUI_SCALE);
+            if (scale <= 0) {
+                return;
+            }
+            try {
+                Minecraft mc = Minecraft.getMinecraft();
+                mc.gameSettings.guiScale = scale;
+                log("gui scale pinned to " + scale + "; logical screen is "
+                        + (mc.displayWidth / scale) + "x" + (mc.displayHeight / scale));
+            } catch (Throwable t) {
+                log("could not pin the gui scale (" + t + "); the picture is at whatever "
+                        + "Minecraft chose, which at this resolution is 4");
+            }
+        }
+
         private void unclamp() {
             try {
                 Minecraft mc = Minecraft.getMinecraft();

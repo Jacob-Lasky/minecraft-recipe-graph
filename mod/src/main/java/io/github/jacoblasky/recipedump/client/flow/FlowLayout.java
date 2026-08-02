@@ -29,8 +29,25 @@ import io.github.jacoblasky.recipedump.plan.PlanResult;
  */
 public final class FlowLayout {
 
-    /** Node box size, in GUI pixels. Wide enough for a name and a quantity at scale 1. */
-    public static final int NODE_WIDTH = 96;
+    /**
+     * Node box size, in GUI pixels.
+     *
+     * 209 IS NOT A ROUND NUMBER, IT IS A SUM: `ICON + GAP + QTY + GAP + MIN_LABEL + GAP +
+     * BADGE` from `PlannerWidgets` -- 10 + 3 + 52 + 3 + 48 + 3 + 90 -- the narrowest node that
+     * carries an icon, a quantity, at least eight characters of name and a full badge. Below
+     * it the row drops the badge rather than truncating it, which is right for a diagram and
+     * wrong for a default.
+     *
+     * IT WAS 214 FOR ONE COMMIT, from a hand-added figure quoted in a message, and the pin
+     * below caught it the first time it ran. That is the whole argument for the pin: five
+     * pixels is invisible in a screenshot and the number looks equally plausible either way.
+     *
+     * WRITTEN OUT RATHER THAN IMPORTED, because this class is pure geometry and reaching for
+     * `PlannerWidgets` would drag ModularUI into a file whose whole value is being testable
+     * without it. `FlowCanvasTest.theLayoutsNodeWidthIsTheSumTheRowActuallyNeeds` pins the two
+     * together, so the badge vocabulary growing fails a test rather than silently truncating.
+     */
+    public static final int NODE_WIDTH = 209;
     public static final int NODE_HEIGHT = 20;
     /** Gap between a column and the next. The edge lines are drawn across this. */
     public static final int COLUMN_GAP = 40;
