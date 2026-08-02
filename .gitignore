@@ -21,3 +21,4 @@ node_modules/
 # use. Untracked rather than deleted because they are still the live to-do list.
 ASK-JAKE.md
 .planning/
+dist/

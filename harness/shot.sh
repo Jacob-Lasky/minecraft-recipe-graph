@@ -54,6 +54,29 @@ LOCAL_SHOTS="$LOCAL_BUILD/shots"
 # `runClient` downloads on its first run.
 CACHE_NAME="${CACHE_NAME:-gradle-cache-shot}"
 
+# THE ORACLE IS OPTIONAL AND GATED ON THE SAME VARIABLE THE JAVA GOLDEN GATE USES. With it,
+# `planner-live` plans a real target against real pack data; without it the panel says there is no
+# graph and names the paths it looked in, which is a picture worth having too. Gated rather
+# than searched for, so whether a shot used real data is a decision and not a property of
+# which machine it ran on -- the same argument `PlanFixtureTest` makes.
+#
+# Mounted READ-ONLY at a fixed path, and `-Dmcrecipedump.graph` points the mod at it. The
+# path inside the container is fixed because the host path is not: only the mount source
+# varies between machines.
+ORACLE_ARGS=""
+if [ -n "$RECIPEGRAPH_ORACLE" ]; then
+    if [ ! -f "$RECIPEGRAPH_ORACLE" ]; then
+        echo "shot.sh: \$RECIPEGRAPH_ORACLE is set but names no file: $RECIPEGRAPH_ORACLE" >&2
+        exit 2
+    fi
+    # The docker daemon resolves this on the HOST. See the mount note above; the same
+    # translation applies, and getting it wrong mounts an empty path rather than failing.
+    HOST_ORACLE="${HOST_ORACLE:-$(printf '%s' "$RECIPEGRAPH_ORACLE" \
+        | sed "s|^/coding|$HOST_CODING|")}"
+    ORACLE_ARGS="-v $HOST_ORACLE:/oracle.json:ro"
+    echo "shot.sh: planning against $RECIPEGRAPH_ORACLE"
+fi
+
 IMAGE="${IMAGE:-mcrecipedump-shot:latest}"
 # 4g, and DO NOT raise it past 8g. Tower runs the household's Home Assistant and its
 # doorbell in sibling containers; an OOM here takes those with it.
@@ -105,6 +128,7 @@ docker run --rm \
     -v "$HOST_BUILD/deps:/deps:ro" \
     -v "$HOST_BUILD/$CACHE_NAME:/gradle" \
     -v "$HOST_BUILD/shots:/shots" \
+    $ORACLE_ARGS \
     -e GRADLE_USER_HOME=/gradle \
     -e XVFB_SCREEN="${SHOT_WIDTH}x${SHOT_HEIGHT}x24" \
     -w /repo/mod \
@@ -116,6 +140,8 @@ docker run --rm \
         -Dmcrecipedump.shotOut="/shots/$OUT_NAME.png" \
         -Dmcrecipedump.shotWidth="$SHOT_WIDTH" \
         -Dmcrecipedump.shotHeight="$SHOT_HEIGHT" \
+        ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.graph=/oracle.json} \
+        ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.planJsonOut=/shots/$OUT_NAME.plan.json} \
         "$@"
 STATUS=$?
 set -e

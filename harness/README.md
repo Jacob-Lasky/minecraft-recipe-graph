@@ -65,6 +65,7 @@ All are `-D` system properties on the client, forwarded from the gradle command 
 | `mcrecipedump.shotSettleFrames` | 20 | Frames between opening the screen and capturing. |
 | `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the main menu. |
 | `mcrecipedump.shotDebugOverlay` | `false` | Keep ModularUI's widget-outline overlay in the shot. |
+| `mcrecipedump.shotTimedFrames` | 0 | Time this many frames after settling, then report. See below. |
 
 The two it does not set are reachable through the pass-through tail:
 
@@ -90,6 +91,35 @@ About a minute and a half per iteration, against a manual pack launch. That is t
 that decides how usable the loop is, so re-measure it rather than quoting this line if the
 dev mod set grows.
 
+## Measuring frame cost
+
+```bash
+harness/shot.sh <screen> <name> -Dmcrecipedump.shotTimedFrames=300
+```
+
+Reports the **draw cost** per frame as percentiles, plus how many exceeded the 16.67 ms a
+60 fps budget allows. A screen that implements `ShotScreens.Animated` is driven once per
+timed frame, so a pannable canvas measures panning rather than a still picture; one that does
+not is timed sitting still and the log says so.
+
+**It reports the DRAW, not the frame period, and that is not a shortcut.** Minecraft throttles
+hard when no world is loaded, which is always true here. Measuring the gap between frames
+reports that throttle: the first version of this mode came back with `p50 = 33.23ms` for a
+screen holding four widgets, which is 30.0 fps to three figures. Disabling vsync changed
+nothing, because vsync was never the cause. Render-tick START to END brackets the render and
+excludes `Display.update` and the limiter's wait, both of which happen afterwards -- and
+"does the draw fit in 16.67 ms" is the question a 60 fps gate is actually asking. The wall
+period is still printed beside it so the gap is visible rather than hidden.
+
+Reference figure, so a later number has something to sit against: the harness fixture panel
+(one ModularUI panel, three text widgets, one button) measures **p50 1.04 ms, p99 11.65 ms,
+max 18.30 ms** over 300 frames at 1280x800, against a wall period of 33.32 ms.
+
+**A pass here implies a pass on a GPU; a miss here implies nothing.** Software rasterisation
+is far slower at fill than a card while the CPU-side widget work is comparable, so clearing
+the budget under llvmpipe on a shared host is strong evidence -- and failing to clear it could
+be the rasteriser, or another container on the box. Quote a pass; do not quote a fail.
+
 ## Limits, and what this is not
 
 * **It renders GUIs, not the world.** No world is loaded, so anything that needs a player, a
@@ -109,8 +139,8 @@ dev mod set grows.
   suppressed for the shot (see the table above), but `ModularUI.isDev` stays true and other
   dev-only branches inside ModularUI are not suppressed.
 * **llvmpipe is a software rasteriser.** Frame timings taken here are a floor, not a
-  prediction of the desktop's. That is fine for the 60 fps panning gate in the direction that
-  matters -- passing here means passing there -- and worthless in the other.
+  prediction of the desktop's -- see "Measuring frame cost" above for what that does and does
+  not license, and for why the number to read is the draw rather than the period.
 
 ## Traps worth knowing before you change this
 

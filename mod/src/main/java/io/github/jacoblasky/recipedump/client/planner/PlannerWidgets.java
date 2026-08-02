@@ -11,6 +11,7 @@ import com.cleanroommc.modularui.widgets.ListWidget;
 import com.cleanroommc.modularui.widgets.TextWidget;
 
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.common.ScenarioSource;
 
 /**
  * Every widget the planner draws, as functions of plain data.
@@ -88,6 +89,39 @@ public final class PlannerWidgets {
     private PlannerWidgets() {
     }
 
+    /**
+     * The narrowest label worth drawing, in pixels: eight characters.
+     *
+     * Below this the label is not shortened, it is GONE -- and a node showing a quantity, a
+     * full badge and no item name is the least useful of the possibilities. See
+     * {@link #badgeWidthFor}.
+     */
+    public static final int MIN_LABEL = 48;
+
+    /**
+     * How much room the badge gets: all of it, or none.
+     *
+     * A BADGE IS ALL-OR-NOTHING AND A LABEL MAY BE CUT, which is the rule the rest of this
+     * class already implies -- if a truncated badge is always a bug because the vocabulary is
+     * fixed, then the alternative to truncating is omitting, not shrinking.
+     *
+     * It took a second reader to notice that shrinking was also WRONGLY PRIORITISED. The badge
+     * was sized first and the label took what was left, so the middle of the range was worse
+     * than either end: measured by Phase 3b across the diagram's node widths, a 148px node
+     * carried a perfect 15-character "no known source" and a label of zero characters. The
+     * label is the item's name; it wins.
+     *
+     * Nothing is lost by dropping the badge on a small node. `NodeStatus.colour` is already
+     * applied to the quantity, so status keeps a channel, and the diagram puts the word in a
+     * tooltip.
+     *
+     * @param width      the whole node or row
+     * @param labelStart where the label column begins, so an indent is already accounted for
+     */
+    public static int badgeWidthFor(int width, int labelStart) {
+        return width - labelStart - GAP - BADGE >= MIN_LABEL ? BADGE : 0;
+    }
+
     /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
     private static int widestBadge() {
         int widest = NodeStatus.UNSOURCED_BADGE.length();
@@ -160,10 +194,24 @@ public final class PlannerWidgets {
             y += LINE;
         }
 
-        int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE - 2;
+        // THE CAVEAT IS ITS OWN LINE AND NOT PART OF THE FOOTER, because it is not a
+        // statistic about the plan -- it is the reason the plan may be wrong. An unread
+        // `have` is the claim "you own nothing", so a tree built on it can tell a player to
+        // fetch iron they are standing beside. Folding it in next to "15 nodes" would read as
+        // another count. See `common.ScenarioSource`.
+        //
+        // RESERVED BEFORE THE TREE IS SIZED, not appended after. The tree takes whatever is
+        // left, so a line added below it without taking its height out first is drawn past
+        // the bottom of the panel -- ModularUI neither clamps nor clips a child (#125).
+        String caveat = ScenarioSource.summary();
+        int footerLines = caveat.isEmpty() ? 1 : 2;
+        int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE * footerLines - 2;
         body.child(tree(plan, CONTENT_WIDTH, treeHeight, actions).pos(0, y));
         y += treeHeight + 2;
         body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
+        if (!caveat.isEmpty()) {
+            body.child(line(caveat, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y + LINE));
+        }
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
                 .child(body);
@@ -222,8 +270,12 @@ public final class PlannerWidgets {
     public static ParentWidget<?> planNodeContent(PlanNode node, int width, int height) {
         Group box = new Group();
         box.size(width, height);
-        int badgeWidth = Math.min(BADGE, Math.max(0, width - QTY - GAP * 2));
         int x = 0;
+        // The column is RESERVED whether or not anything fills it, so installing NodeActions
+        // does not re-flow every node -- but the WIDGET is only added when there is a stack.
+        // An `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which
+        // is the sort of claim that reads identically either way in review and is only true
+        // one way round. Measured: 49 empty boxes down the left edge of the first screenshot.
         net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
         if (!stack.isEmpty()) {
             box.child(icon(stack).pos(x, 0));
@@ -232,7 +284,8 @@ public final class PlannerWidgets {
         int colour = NodeStatus.colour(node);
         box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
         x += QTY + GAP;
-        int labelWidth = Math.max(GAP, width - badgeWidth - GAP - x);
+        int badgeWidth = badgeWidthFor(width, x);
+        int labelWidth = Math.max(GAP, width - x - (badgeWidth > 0 ? badgeWidth + GAP : 0));
         box.child(line(NodeRowText.label(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
         if (badgeWidth > 0) {
             box.child(line(NodeStatus.badge(node), badgeWidth, colour)
@@ -276,11 +329,16 @@ public final class PlannerWidgets {
         row.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
         x += QTY + GAP;
 
-        int badgeX = width - BADGE;
-        int labelWidth = Math.max(GAP, badgeX - GAP - x);
+        // The same all-or-nothing rule as the diagram node. A full-width tree row never hits
+        // it, even at the indent cap -- but a row is not always full width, and the latent
+        // version of this bug is the one that gets found by a screenshot rather than a test.
+        int badgeWidth = badgeWidthFor(width, x);
+        int labelWidth = Math.max(GAP, width - x - (badgeWidth > 0 ? badgeWidth + GAP : 0));
         row.child(line(labelAndMeta(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
-
-        row.child(line(NodeStatus.badge(node), BADGE, colour).pos(badgeX, 0));
+        if (badgeWidth > 0) {
+            row.child(line(NodeStatus.badge(node), badgeWidth, colour)
+                              .pos(width - badgeWidth, 0));
+        }
         return row;
     }
 
@@ -513,7 +571,13 @@ public final class PlannerWidgets {
         return value == null || value.isEmpty() ? "--" : value;
     }
 
-    /** The icon column's widget. Only built when there is something to draw. */
+    /**
+     * The icon column's widget. ONLY BUILT WHEN THERE IS SOMETHING TO DRAW.
+     *
+     * `ItemDisplayWidget` holding `ItemStack.EMPTY` paints its slot frame, not nothing. Both
+     * callers guard on that and both say why, because "returns EMPTY and nothing draws" and
+     * "returns EMPTY and a slot frame draws" are indistinguishable in a code review.
+     */
     private static ItemDisplayWidget icon(net.minecraft.item.ItemStack stack) {
         ItemDisplayWidget widget = new ItemDisplayWidget();
         widget.size(ICON, ROW_HEIGHT);

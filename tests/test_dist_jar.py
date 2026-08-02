@@ -1,4 +1,17 @@
-"""The prebuilt jar in `dist/` has to be the jar this source tree would produce.
+"""A jar about to go into the client has to be the jar this source tree would produce.
+
+THE JAR IS NO LONGER TRACKED IN GIT, and that changed what this file points at rather than
+what it guarantees. `dist/` held one 50 KB binary that every change under `mod/src/main/java`
+invalidated, so with several branches in flight it conflicted on essentially every merge while
+no source file conflicted at all -- a generated artifact being hand-carried through review.
+It is built now, by `mod/tools/build-jar.sh`, and these assertions moved onto the built
+artifact where they protect the thing that actually matters: the jar someone is one `cp` away
+from putting in a client.
+
+So this SKIPS when no jar has been built, and CI has none. That is not a weakening. The
+failure it exists to prevent is a stale or `-dev` jar reaching Jake's `mods/`, and that only
+happens by way of a build; a repository with no jar in it cannot ship a bad one.
+
 
 It rotted silently once and the failure mode is the worst kind: `dist/mc-recipe-dump-0.4.2.jar`
 sat in a public repo at `SCHEMA = 2`, containing none of the NBT-discrimination code, while
@@ -21,8 +34,8 @@ edited again, and every assertion here still passed. So the decisive check is
 `mod/src/main/java` against the copy `stampSourceHash` embeds in the jar at build time.
 
 Nothing here rebuilds the jar. That needs a JDK and about five minutes, so this asserts the
-committed artifact agrees with the committed source and fails loudly when it stops doing so.
-If it fails, rebuild and re-commit the jar; do not edit the numbers to match.
+built artifact agrees with the source and fails loudly when it stops doing so. If it fails,
+rebuild it with `mod/tools/build-jar.sh`; do not edit the numbers to match.
 """
 
 import hashlib
@@ -38,7 +51,10 @@ sys.path.insert(0, ROOT)
 
 from recipegraph.sources import dump_meta  # noqa: E402
 
-DIST = os.path.join(ROOT, "dist")
+# Where a built jar lands. `$MCRECIPEDUMP_JAR` overrides it so the jar already sitting in a
+# client's `mods/` can be checked in place, which is the one copy whose staleness actually
+# costs a game launch.
+DIST = os.environ.get("MCRECIPEDUMP_JAR") or os.path.join(ROOT, "mod", "build", "libs")
 JAVA_SRC = os.path.join(ROOT, "mod", "src", "main", "java", "io", "github",
                         "jacoblasky", "recipedump", "DumpCommand.java")
 GRADLE_PROPS = os.path.join(ROOT, "mod", "gradle.properties")
@@ -48,9 +64,24 @@ JAVA_8_MAJOR = 52
 
 
 def _jars():
+    """Built jars, EXCLUDING the `-dev` one, newest-version-agnostic.
+
+    `build` writes `mc-recipe-dump-<v>.jar` and `mc-recipe-dump-<v>-dev.jar` side by side,
+    within a few hundred bytes of each other. The dev jar is not reobfuscated: Forge loads it
+    and then dies on obfuscated names at runtime, in the client, after a launch. Filtering it
+    here rather than asserting against it keeps `test_it_is_not_the_dev_jar` meaningful for
+    the jar a person would actually copy.
+    """
+    if os.path.isfile(DIST):
+        return [os.path.basename(DIST)]
     if not os.path.isdir(DIST):
         return []
-    return sorted(n for n in os.listdir(DIST) if n.endswith(".jar"))
+    return sorted(n for n in os.listdir(DIST)
+                  if n.endswith(".jar") and not n.endswith("-dev.jar"))
+
+
+def _dist_dir():
+    return os.path.dirname(DIST) if os.path.isfile(DIST) else DIST
 
 
 def _readme():
@@ -119,11 +150,21 @@ def _jar_schema(path):
 
 
 class DistJarMatchesSourceTest(unittest.TestCase):
+
+    def setUp(self):
+        # SKIP rather than fail when nothing has been built. CI never builds the mod, and a
+        # repository holding no jar cannot ship a bad one -- the failure this file exists to
+        # prevent only arrives by way of a build.
+        if not _jars():
+            self.skipTest("no built jar under %s; run mod/tools/build-jar.sh "
+                          "(or set MCRECIPEDUMP_JAR to one)" % _dist_dir())
+
     def test_there_is_exactly_one_jar(self):
         # Two jars means a reader has to guess which is current, which is how the stale one
         # kept being handed out. The old 0.4.2 was removed rather than kept beside its
         # replacement for that reason.
-        self.assertEqual(len(_jars()), 1, "expected one jar in dist/, found %s" % _jars())
+        self.assertEqual(len(_jars()), 1,
+                         "expected one built jar in %s, found %s" % (_dist_dir(), _jars()))
 
     def test_the_filename_is_the_source_version(self):
         version = _source_version()
@@ -139,7 +180,7 @@ class DistJarMatchesSourceTest(unittest.TestCase):
     def test_it_is_reobfuscated(self):
         # The real check behind the filename: the prod jar references SRG names, the dev jar
         # has none at all.
-        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+        with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
         srg = re.findall(rb"func_\d+_[a-zA-Z]+|field_\d+_[a-zA-Z]+", blob)
         self.assertGreater(len(srg), 0, "no SRG references: this looks like the -dev jar")
@@ -148,12 +189,12 @@ class DistJarMatchesSourceTest(unittest.TestCase):
         # The assertion the stale jar would have failed: it carried 2 against a source of 3.
         want = _source_schema()
         self.assertIsNotNone(want, "could not read SCHEMA from DumpCommand.java")
-        self.assertEqual(_jar_schema(os.path.join(DIST, _jars()[0])), want)
+        self.assertEqual(_jar_schema(os.path.join(_dist_dir(), _jars()[0])), want)
 
     def test_it_carries_the_discrimination_code(self):
         # Coarse but decisive, and independent of the schema int: the schema-2 jar contained
         # no `nbt` or `discriminator` strings anywhere, because that code did not exist yet.
-        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+        with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
         for marker in (b"nbt", b"discriminator"):
             self.assertIn(marker, blob)
@@ -173,15 +214,15 @@ class DistJarMatchesSourceTest(unittest.TestCase):
         is recomputed from the tree.
         """
         want = _source_hash()
-        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+        with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             names = [n for n in z.namelist() if n.endswith("mcrecipedump-source.sha256")]
             self.assertEqual(len(names), 1,
                              "no source stamp in the jar: it predates stampSourceHash, so "
                              "it is certainly stale. Rebuild and re-commit.")
             got = z.read(names[0]).decode("utf-8").strip()
         self.assertEqual(got, want,
-                         "dist/ was built from different source than mod/ holds now; "
-                         "rebuild and re-commit the jar")
+                         "the built jar is from different source than mod/ holds now; "
+                         "rebuild it with mod/tools/build-jar.sh")
 
     def test_it_carries_the_nbt_trace_diagnostic(self):
         # Same rot class as the schema check above, one capability later. A jar predating
@@ -190,7 +231,7 @@ class DistJarMatchesSourceTest(unittest.TestCase):
         # clones the repo, installs a pre-0.6.0 jar and runs `/recipedump nbttrace` gets a
         # normal dump with no nbt_trace.json and no complaint, and only finds out after
         # spending a launch of the game on it.
-        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+        with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".class"))
         # The suppress-arg literal is READ FROM THE SOURCE rather than written here. The
         # assertion is "this jar carries the capability", not "the flag is spelled X" -- so a
@@ -204,18 +245,20 @@ class DistJarMatchesSourceTest(unittest.TestCase):
             self.assertIn(marker, blob, "this jar cannot write the #80 trace")
 
     def test_it_targets_java_8(self):
-        with zipfile.ZipFile(os.path.join(DIST, _jars()[0])) as z:
+        with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             name = [n for n in z.namelist() if n.endswith("DumpCommand.class")][0]
             data = z.read(name)
         self.assertEqual(struct.unpack(">H", data[6:8])[0], JAVA_8_MAJOR)
 
-    def test_the_readme_points_at_the_jar_that_exists(self):
-        # A README naming a filename that is no longer there sends people to a 404, and a
-        # README naming the OLD filename is how the stale jar stayed discoverable.
-        readme = _readme()
-        for stale in re.findall(r"mc-recipe-dump-[\d.]+\.jar", readme):
-            self.assertEqual(stale, _jars()[0],
-                             "README references %s but dist/ holds %s" % (stale, _jars()[0]))
+    def test_the_readme_names_no_jar_version_it_cannot_keep_current(self):
+        # The README used to name the exact filename, which meant every rebuild edited prose
+        # and every missed edit pointed a reader at a jar that was not there. Now that the jar
+        # is built rather than committed there is no filename for the README to be right
+        # about, so naming one is a promise it cannot keep. `<version>` is fine; a number is
+        # not.
+        for named in re.findall(r"mc-recipe-dump-[\d.]+\.jar", _readme()):
+            self.fail("README names a specific jar version (%s); the jar is built, not "
+                      "committed, so write mc-recipe-dump-<version>.jar instead" % named)
 
     def test_the_readme_states_the_schema_this_jar_actually_writes(self):
         """The version literal has a guard; the schema literal did not, and it is worse.
