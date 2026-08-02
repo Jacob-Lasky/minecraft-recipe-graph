@@ -36,6 +36,11 @@ cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
 PROPS=mod/gradle.properties
 PACK_MODS=${PACK_MODS:-/coding/.recipegraph-build/deps}
+# Overridable, because Gradle takes an EXCLUSIVE lock on GRADLE_USER_HOME: with this pinned,
+# running the script while anyone else is building dies on "Timeout waiting to lock journal
+# cache", which reads as a broken build rather than as a busy directory. Seed an alternative
+# with `cp -a` from this one to skip the ~9m fernflower decompile.
+GRADLE_CACHE=${GRADLE_CACHE:-/coding/.recipegraph-build/gradle-cache}
 
 current=$(sed -n 's/^mod_version=//p' "$PROPS")
 if [ $# -ge 1 ]; then
@@ -57,7 +62,7 @@ host_path() {
 docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
     -v "$(host_path "$ROOT")":/repo \
     -v "$(host_path "$PACK_MODS")":/deps:ro \
-    -v /mnt/user/misc/coding/.recipegraph-build/gradle-cache:/gradle \
+    -v "$(host_path "$GRADLE_CACHE")":/gradle \
     -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
     ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
 

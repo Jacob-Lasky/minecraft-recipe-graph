@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.PathSensitivity
+
 // 1.12.2 Forge mod build, on RetroFuturaGradle rather than ForgeGradle 2.3.
 //
 // WHY NOT ForgeGradle 2.3 (the "classic" 1.12.2 plugin): it resolves Forge from
@@ -193,6 +195,26 @@ processResources {
 
 test {
     testLogging { events 'passed', 'failed', 'skipped' }
+    // THE SHARED FIXTURES ARE AN INPUT, and Gradle cannot work that out for itself: they
+    // live outside `mod/`, so nothing in the default input set covers them and the test task
+    // stays UP-TO-DATE across a fixture change. Observed while adding the plan fixtures --
+    // dropping sixteen new files into `tests/fixtures/plan/` and re-running reported the
+    // previous run's results, which is the worst possible answer: a gate that says PASS
+    // without having looked. `DigestFixtureTest` reads `nbt_digest.json` from here too and
+    // had the same hole.
+    inputs.dir('../tests/fixtures').withPropertyName('sharedFixtures')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    // AND THE ORACLE SWITCH, for the same reason one level up. `PlanFixtureTest`'s golden
+    // gate is skipped unless RECIPEGRAPH_ORACLE names a graph, and an environment variable
+    // is not an input Gradle can see -- so setting it after a run without it reported the
+    // previous run's results, in 34 seconds, as a success. That is the same "PASS without
+    // having looked" this file already guards against for the fixtures themselves, and it is
+    // worse here because the whole point of setting the variable is to run the gate.
+    inputs.property('recipegraphOracle',
+            providers.environmentVariable('RECIPEGRAPH_ORACLE').orElse(''))
+    // The oracle graph is 121 MB and the gate holds it plus a cost table; the default heap
+    // is not enough and the failure is an OutOfMemoryError halfway through a fixture.
+    maxHeapSize = '6g'
     // Forwarded so `NbtTraceTest`'s documented regeneration path actually works. A `-D` on
     // the gradlew command line reaches the GRADLE daemon's JVM, not the forked test JVM,
     // so without this the instruction in that test's javadoc is a lie that fails with

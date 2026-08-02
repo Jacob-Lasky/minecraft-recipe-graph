@@ -100,7 +100,8 @@
     "kind": "item",
     "label": "Radiant Drone",
     "name": "Radiant Drone",
-    "qty": 8
+    "qty": 8,
+    "unsourced": true
    },
    {
     "key": "minecraft:gold_ore",
@@ -114,7 +115,8 @@
     "kind": "item",
     "label": "Log Chicken",
     "name": "Log Chicken",
-    "qty": 2
+    "qty": 2,
+    "unsourced": true
    },
    {
     "key": "thermalfoundation:glass:*",
@@ -128,7 +130,8 @@
     "kind": "item",
     "label": "Thermal Elemental Data Model (Basic)",
     "name": "Thermal Elemental Data Model (Basic)",
-    "qty": 2
+    "qty": 2,
+    "unsourced": true
    },
    {
     "key": "minecraft:lapis_ore",
@@ -219,7 +222,9 @@
                  "label": "Log Chicken",
                  "name": "Log Chicken",
                  "need": 2,
-                 "status": "raw"
+                 "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                 "status": "raw",
+                 "unsourced": true
                 }
                ],
                "key": "minecraft:log",
@@ -346,7 +351,9 @@
                            "label": "Thermal Elemental Data Model (Basic)",
                            "name": "Thermal Elemental Data Model (Basic)",
                            "need": 1,
-                           "status": "raw"
+                           "note": "no recipe reaches this state; the graph can only make Data Model Thermal Elemental",
+                           "status": "raw",
+                           "unsourced": true
                           },
                           {
                            "alternatives": 2,
@@ -390,7 +397,9 @@
                                "label": "Radiant Drone",
                                "name": "Radiant Drone",
                                "need": 4,
-                               "status": "raw"
+                               "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                               "status": "raw",
+                               "unsourced": true
                               }
                              ],
                              "key": "minecraft:clay_ball",
@@ -653,7 +662,9 @@
                            "label": "Thermal Elemental Data Model (Basic)",
                            "name": "Thermal Elemental Data Model (Basic)",
                            "need": 1,
-                           "status": "raw"
+                           "note": "no recipe reaches this state; the graph can only make Data Model Thermal Elemental",
+                           "status": "raw",
+                           "unsourced": true
                           },
                           {
                            "alternatives": 2,
@@ -697,7 +708,9 @@
                                "label": "Radiant Drone",
                                "name": "Radiant Drone",
                                "need": 4,
-                               "status": "raw"
+                               "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                               "status": "raw",
+                               "unsourced": true
                               }
                              ],
                              "key": "minecraft:clay_ball",

@@ -57,7 +57,8 @@
     "kind": "item",
     "label": "Sand Chicken",
     "name": "Sand Chicken",
-    "qty": 4
+    "qty": 4,
+    "unsourced": true
    },
    {
     "key": "iceandfire:frozen_gravel",
@@ -127,7 +128,9 @@
            "label": "Sand Chicken",
            "name": "Sand Chicken",
            "need": 4,
-           "status": "raw"
+           "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+           "status": "raw",
+           "unsourced": true
           }
          ],
          "key": "minecraft:sand",
