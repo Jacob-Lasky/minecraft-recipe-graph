@@ -10,7 +10,8 @@
 // RFG 2.0.2 is what CleanroomMC's own 1.12.2 template uses -- and Cleanroom is the
 // loader this pack runs on, so it is the best-supported path available.
 //
-// Build it with:  ./gradlew build -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar
+// Build it with:  ./gradlew build -Ppack_mods=/path/to/an/instance/mods
+// See `packJars` below for what it takes from there and why not from maven.
 
 plugins {
     id 'java'
@@ -37,22 +38,83 @@ minecraft {
     mcpMappingVersion.set(project.mapping_version)
 }
 
-// Compile against the HadEnoughItems jar from the pack itself, not a maven JEI
-// artifact. Two reasons this is not laziness:
-//   1. HEI 4.28.1 is published by DimensionalDevelopment, NOT under mezz.jei on
-//      progwml6, which only carries JEI up to 4.16.x for 1.12.2. The coordinate
-//      `mezz.jei:jei_1.12.2:4.28.1` does not exist and will not resolve.
+// Compile against jars FROM THE PACK, not against maven artifacts. Two reasons this is
+// not laziness, and they apply to every entry in `packJars` below:
+//   1. These versions are not on maven. HEI 4.28.1 is published by DimensionalDevelopment,
+//      NOT under mezz.jei on progwml6, which only carries JEI up to 4.16.x for 1.12.2 --
+//      `mezz.jei:jei_1.12.2:4.28.1` does not exist and will not resolve. ModularUI and
+//      AE2-UEL have the same problem: the pack runs specific builds, and the pack is the
+//      only place they are guaranteed to exist.
 //   2. A 1.12.2 mod jar already carries MCP-named references, and this mod is compiled
 //      against MCP names too, so a plain file dependency links correctly with no
 //      deobfuscation step.
-def heiJar = project.findProperty('hei_jar')
+//
+// Point `-Ppack_mods=<dir>` at any instance's `mods/` and all three resolve by glob. On a
+// machine with the client instance that is the instance itself; on Tower it is the staged
+// copy, because the AMP server's mods directory is mode 0700 uid 1000 and unreadable as
+// 99:100 (stage it with a root container, see the skill). Individual `-P<name>_jar` flags
+// override one entry without disturbing the others.
+//
+//   ./gradlew build -Ppack_mods=/coding/.recipegraph-build/deps
+//
+// GLOB, NOT A PINNED FILENAME, so a pack update that bumps ModularUI does not fail the
+// build with a path that no longer exists. It is deliberately strict about ambiguity: two
+// matches is an error, not a coin flip, because silently compiling against the older of two
+// ModularUI jars is the kind of thing that surfaces as an inexplicable NoSuchMethodError at
+// runtime rather than as a build failure.
+def packJars = [
+    hei_jar      : 'HadEnoughItems*.jar',
+    modularui_jar: 'modularui-*.jar',
+    ae2_jar      : 'ae2-uel-*.jar',
+]
+
+def resolvePackJar = { String prop, String pattern ->
+    def explicit = project.findProperty(prop)
+    if (explicit) {
+        return file(explicit)
+    }
+    def dir = project.findProperty('pack_mods')
+    if (!dir) {
+        return null
+    }
+    def matches = file(dir).listFiles()?.findAll { it.name ==~ pattern.replace('*', '.*') }
+    if (!matches) {
+        return null
+    }
+    if (matches.size() > 1) {
+        throw new GradleException(
+            "pack_mods=${dir} has ${matches.size()} jars matching ${pattern}: " +
+            "${matches*.name.sort()}. Remove one, or name the right one with -P${prop}=")
+    }
+    return matches[0]
+}
+
+def resolvedPackJars = packJars.collectEntries { prop, pattern ->
+    [(prop): resolvePackJar(prop, pattern)]
+}
+def heiJar = resolvedPackJars.hei_jar
+def modularuiJar = resolvedPackJars.modularui_jar
 
 dependencies {
-    if (heiJar && file(heiJar).exists()) {
+    if (heiJar && heiJar.exists()) {
         compileOnly files(heiJar)
         // Also at TEST runtime: DumpCommand references JEI types in its signatures, so
         // the class cannot even load without them, however little of it a test touches.
         testRuntimeOnly files(heiJar)
+    }
+    resolvedPackJars.each { prop, jar ->
+        if (prop != 'hei_jar' && jar && jar.exists()) {
+            compileOnly files(jar)
+        }
+    }
+    if (modularuiJar && modularuiJar.exists()) {
+        // ModularUI is on the TEST COMPILE classpath, not just at runtime, because the
+        // layout pass is asserted headlessly (#125): `widget/sizer/Area` and
+        // `widgets/layout/Column` reference no Minecraft and no GL symbols, and
+        // `StandardResizer` touches only `net.minecraft.inventory.Slot`, which RFG already
+        // puts on the test classpath. So widget trees can be built and resized in a plain
+        // JUnit test with no window, which is the only fast feedback loop this GUI has.
+        testImplementation files(modularuiJar)
     }
     // The NBT discriminator defines part of the dump schema (a digest that decides
     // whether two stacks are the same ingredient), and "it compiled" is not evidence
@@ -124,20 +186,49 @@ test {
 }
 
 // Fail with an actionable message rather than 40 "package mezz.jei.api does not exist"
-// errors, which is what a missing or wrong hei_jar actually looks like.
-tasks.register('checkHeiJar') {
+// errors, which is what a missing pack jar actually looks like.
+//
+// REPORT EVERY MISSING JAR AT ONCE, not the first. Failing one at a time turns a single
+// misconfigured `pack_mods` into three separate build-fix-build cycles, each ~9 minutes
+// cold, and the second failure looks like a new problem rather than the same one.
+tasks.register('checkPackJars') {
     doFirst {
-        if (!heiJar) {
-            throw new GradleException(
-                'Set -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar ' +
-                '(or add hei_jar= to gradle.properties)')
+        def problems = []
+        packJars.each { prop, pattern ->
+            def jar = resolvedPackJars[prop]
+            if (!jar) {
+                problems << "  ${prop}: no ${pattern} found"
+            } else if (!jar.exists()) {
+                problems << "  ${prop}: does not exist: ${jar}"
+            }
         }
-        if (!file(heiJar).exists()) {
-            throw new GradleException("hei_jar does not exist: ${heiJar}")
+        if (problems) {
+            throw new GradleException(
+                "Missing pack jars:\n${problems.join('\n')}\n" +
+                'Point -Ppack_mods=<dir> at an instance mods/ directory holding all of ' +
+                "${packJars.values().join(', ')}, or name one with -P<prop>=<path>.")
         }
     }
 }
-tasks.named('compileJava') { dependsOn 'checkHeiJar' }
+tasks.named('compileJava') { dependsOn 'checkPackJars' }
+
+// Put the pack jars where a `runClient` dev session will actually load them. RFG reads mods
+// from `run/mods/`, and the dev client is deliberately a SMALL mod set -- Forge, ModularUI,
+// HEI and this mod -- rather than all 410, because the point is to render our own screens
+// fast (#124), not to boot MeatballCraft.
+//
+// JEC is copied too even though nothing compiles against it: it is the reference
+// implementation for the craftable-calculator shape (#19), and having it in the dev client
+// means its GUI can be opened side by side with ours.
+tasks.register('stageDevMods', Copy) {
+    dependsOn 'checkPackJars'
+    from(resolvedPackJars.values().findAll { it != null })
+    from(project.findProperty('pack_mods') ?: '.') {
+        include 'JustEnoughCalculation-*.jar'
+    }
+    into layout.projectDirectory.dir('run/mods')
+}
+tasks.matching { it.name == 'runClient' }.configureEach { dependsOn 'stageDevMods' }
 
 processResources {
     inputs.property 'version', project.version
