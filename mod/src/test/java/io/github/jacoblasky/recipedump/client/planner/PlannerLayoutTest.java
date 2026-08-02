@@ -383,6 +383,62 @@ public class PlannerLayoutTest {
     }
 
     /**
+     * A node either carries its whole badge or none of it, and the LABEL wins.
+     *
+     * Phase 3b measured the old behaviour across the diagram's node widths and found the
+     * middle of the range worse than either end: at 148px the badge was a perfect
+     * 15-character "no known source" and the label was zero characters, because the badge was
+     * sized first and the label took what was left. An item's name is the point of the node.
+     *
+     * The widths here are the ones they measured, so a future change to `BADGE` or `QTY` is
+     * checked against the sizes a diagram actually uses rather than against a round number.
+     */
+    @Test
+    public void aNodeTooNarrowForBothDropsTheBadgeAndKeepsTheLabel() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        for (int width : new int[]{96, 120, 148, 180, 239, 388}) {
+            com.cleanroommc.modularui.widget.ParentWidget<?> box =
+                    PlannerWidgets.planNodeContent(node, width, PlannerWidgets.ROW_HEIGHT);
+            HeadlessLayout.layOutPanel("node", PlannerWidgets.PANEL_WIDTH,
+                                       PlannerWidgets.PANEL_HEIGHT, box);
+            int widest = 0;
+            for (IWidget child : box.getChildren()) {
+                widest = Math.max(widest, child.getArea().w());
+            }
+            // Whatever else it drops, the label column is never squeezed to nothing.
+            assertTrue("at " + width + "px every column collapsed; widest was " + widest,
+                       widest >= PlannerWidgets.MIN_LABEL);
+        }
+    }
+
+    @Test
+    public void theBadgeIsNeverPartiallyDrawn() {
+        // All-or-nothing. A shrunken badge is a truncated badge, and a truncated badge is
+        // always a bug because the vocabulary is fixed.
+        for (int width = 40; width <= 400; width += 4) {
+            int badge = PlannerWidgets.badgeWidthFor(width, PlannerWidgets.ICON
+                                                     + PlannerWidgets.GAP
+                                                     + PlannerWidgets.QTY
+                                                     + PlannerWidgets.GAP);
+            assertTrue("at " + width + "px the badge came out " + badge
+                       + ", which is neither nothing nor the whole vocabulary",
+                       badge == 0 || badge == PlannerWidgets.BADGE);
+        }
+    }
+
+    @Test
+    public void aFullWidthTreeRowStillCarriesItsBadgeEvenAtTheIndentCap() {
+        // The all-or-nothing rule must not cost the tree its badges, which is the case it was
+        // NOT introduced for. The deepest indent is the worst case.
+        int deepestStart = PlannerWidgets.MAX_INDENT_DEPTH * PlannerWidgets.INDENT
+                           + PlannerWidgets.ICON + PlannerWidgets.GAP
+                           + PlannerWidgets.QTY + PlannerWidgets.GAP;
+        assertEquals("a fully indented tree row must still show its badge",
+                     PlannerWidgets.BADGE,
+                     PlannerWidgets.badgeWidthFor(PlannerWidgets.CONTENT_WIDTH, deepestStart));
+    }
+
+    /**
      * The shared row seam (#19 Phase 3b): same content, caller's geometry.
      *
      * The diagram positions a couple of hundred of these at absolute coordinates, so the one
