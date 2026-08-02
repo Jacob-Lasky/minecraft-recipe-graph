@@ -13,6 +13,7 @@ import json
 import os
 import sys
 
+from . import explore as explore_mod
 from . import index
 from . import machines
 from . import pins as pins_mod
@@ -21,7 +22,6 @@ from .defaults import (DEFAULT_GRAPH, DEFAULT_HAVE, DEFAULT_HOST, DEFAULT_MACHIN
                        DEFAULT_MAX_NODES, DEFAULT_METRICS_DB, DEFAULT_PINS, DEFAULT_PORT,
                        DEFAULT_SOURCES, DEFAULT_TOKENS)
 from .model import Graph, essentia_key, fluid_key
-from .names import build_reverse, resolve
 from .sources import dump_meta
 
 
@@ -179,8 +179,10 @@ def _load_graph(path):
 
 def cmd_find(args):
     g = _load_graph(args.graph)
-    rev = build_reverse(g.names)
-    keys = resolve(args.query, g.names, rev)
+    # `explore.resolve_query`, not `names.resolve`: the latter reads `graph.names`, which is
+    # items only, so `find fluid:water` could never match its own key. See #107.
+    have, _stats, _craftables, _extra = _load_have(args.have)
+    keys = explore_mod.resolve_query(g, args.query, have, limit=args.limit)
     if not keys:
         print("no match for %r" % args.query)
         return 1
@@ -200,6 +202,16 @@ def _load_have(path):
     """
     if not path:
         return {}, {}, set(), {}
+    if not os.path.exists(path):
+        # WARN AND CONTINUE, rather than either crashing or going quiet. `--have` defaults to
+        # a path, so a checkout that has not run `have` yet made every `plan` die on a
+        # traceback -- and #107 gave `find` the same default, which is how this surfaced.
+        # Silence would be worse than the crash: a mistyped `--have` would plan against an
+        # empty network and never say so, and "you still need everything" looks like an
+        # answer. `server.State.load_all` has always guarded this; the CLI never did.
+        print("no stock file at %s -- planning against an empty network" % path,
+              file=sys.stderr)
+        return {}, {}, set(), {}
     with open(path) as fh:
         doc = json.load(fh)
     have = dict(doc.get("items", {}))
@@ -215,7 +227,11 @@ def cmd_plan(args):
     from .solve import Solver
 
     g = _load_graph(args.graph)
-    keys = resolve(args.item, g.names, build_reverse(g.names))
+    # Stock is loaded BEFORE resolution, not after, because it is a tie-break input: among
+    # keys sharing a display name, a stack in the network is the pack telling you which one
+    # you actually use. See explore._canonical_first and #101.
+    have, _stats, craftables, extra_names = _load_have(args.have)
+    keys = explore_mod.resolve_query(g, args.item, have)
     if not keys:
         print("no item matched %r -- try `find`" % args.item, file=sys.stderr)
         return 1
@@ -224,7 +240,6 @@ def cmd_plan(args):
         print("matched %s (%s); %d other candidates, use `find` to disambiguate"
               % (key, g.display(key), len(keys) - 1), file=sys.stderr)
 
-    have, _stats, craftables, extra_names = _load_have(args.have)
     if extra_names:
         # A live dump knows names for items items.csv may predate.
         for k, v in extra_names.items():
@@ -803,6 +818,9 @@ def main(argv=None):
     p = sub.add_parser("find", help="look up item ids by name")
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=20)
+    # Stock ranks the results, so `find` needs the same file `plan` reads or the two
+    # commands disagree about which of six items called "Iron Plate" you meant.
+    p.add_argument("--have", default=DEFAULT_HAVE)
     p.set_defaults(fn=cmd_find)
 
     p = sub.add_parser("plan", help="resolve a crafting tree against your stock")

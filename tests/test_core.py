@@ -13,11 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
+from recipegraph import explore  # noqa: E402
 from recipegraph.model import (  # noqa: E402
     NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, is_unlocalized,
     merge_slots, norm_key, path_of, split_discriminator,
 )
-from recipegraph.names import resolve  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
@@ -426,12 +426,19 @@ class UnlocalizedNameTest(unittest.TestCase):
         self.assertEqual(g.bare_name("mod:TBU_block"), "TBU Block")
 
     def test_name_to_key_lookup_stops_resolving_the_lang_key(self):
-        """`build_reverse` mapped the string "tile.null.name" onto 268 unrelated items."""
+        """`build_reverse` mapped the string "tile.null.name" onto 268 unrelated items.
+
+        Moved onto `explore.resolve_query` when #107 deleted `names.resolve`: the claim is
+        about relabelling, not about which resolver asks, and it has to keep holding for
+        whichever one the CLI actually calls.
+        """
         g = Graph()
         g.names = {"mod:a": "tile.null.name", "mod:b": "tile.null.name"}
+        g.add(Recipe("r", "t", [("mod:out", 1)],
+                     [Ingredient(["mod:a"], 1), Ingredient(["mod:b"], 1)]))
         g.relabel_unlocalized()
-        self.assertEqual(resolve("tile.null.name", g.names), [])
-        self.assertEqual(resolve("A", g.names), ["mod:a"])
+        self.assertEqual(explore.resolve_query(g, "tile.null.name"), [])
+        self.assertEqual(explore.resolve_query(g, "A"), ["mod:a"])
 
     def test_an_item_with_no_name_at_all_also_reads_as_its_path(self):
         """174 recipe-referenced keys have no name from any source. They used to render

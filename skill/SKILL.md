@@ -81,15 +81,20 @@ Two traps the endpoint does not remove:
 Adding a fact is one entry in `api.FIELDS`, which is read by `select`, by `order` and by the
 expression language at once. That is the extension point; a new endpoint per question is not.
 
-Two other things a cold script gets wrong that the server does not:
+One thing a cold script still gets wrong that the server does not:
 
-* **`plan` will not take a raw key.** `plan fluid:nethengeic_fluid` prints "no item matched"
-  because `names.resolve` reads `graph.names`, which is items only, while `labels` has the
-  1,198 fluids. Worse, planning it BY NAME silently plans a container ("Strong Mythic Essence
-  Can") after one line of preamble. `/plan?item=<key>` on the server is exact. See #107.
 * **Sweep results keyed by DISPLAY NAME are wrong**, because 5,095 names are shared. A sweep
   keyed that way reported `Iron Nugget` as having zero producers; `minecraft:iron_nugget` has
   94, and the hit was another mod's item wearing the label. Key sweeps by KEY. See #101.
+
+**`plan` and `find` DO take a raw key now (#107), in any namespace.** They used to answer "no
+item matched 'fluid:nethengeic_fluid'" for a key the server planned in 48ms, because
+`names.resolve` read `graph.names`, which is items only -- 1,198 fluids are in `labels` and
+zero in `names`. Worse, the same query BY NAME silently planned a container ("Strong Mythic
+Essence Can"), because substring hits were ordered by label length. Both commands now go
+through `explore.resolve_query`: an exact key returns alone and bypasses the live-key filter,
+and anything else defers to `rank_matches`, so the CLI and the web UI cannot disagree about
+what a name means. `names.resolve` is DELETED -- do not reintroduce a second resolver.
 
 ## READ THIS BEFORE SAYING ANYTHING IS BLOCKED
 

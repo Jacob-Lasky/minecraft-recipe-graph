@@ -186,6 +186,19 @@ rather than read from the game.
 Answers the question that actually comes first — *which* of the twelve things called
 "Ultimate something" did I mean, and is it even craftable in this pack.
 
+**`find` and `plan` both take a raw key as well as a name**, in any namespace:
+
+```bash
+recipegraph plan fluid:nethengeic_fluid --qty 1000   # a fluid, by key
+recipegraph find ore:ingotIron                       # an oredict entry
+recipegraph plan "strong mythic essence"             # or by name
+```
+
+An exact key wins outright, so it can never lose to something that merely reads like it.
+A name is ranked the way the web UI ranks it — exact before prefix before substring, ties
+broken on what you hold and on how connected the item is — so asking for a fluid by name
+gets you the fluid rather than the can it is bottled in.
+
 ### Track — Factorio-style production graphs
 
 ```bash
