@@ -43,7 +43,25 @@ public final class ShotScreens {
         register("planner", new Opener() {
             @Override
             public void open(String arg) {
-                PlannerShot.open();
+                PlannerShot.openTree(arg);
+            }
+        });
+        register("planner-menu", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openMenu(arg);
+            }
+        });
+        register("planner-recipes", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openRecipePicker(arg);
+            }
+        });
+        register("planner-todo", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openTodo(arg);
             }
         });
         register("jei", new Opener() {
