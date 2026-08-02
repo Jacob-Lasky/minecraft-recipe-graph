@@ -131,6 +131,28 @@ public class CostRankingTest {
     }
 
     @Test
+    public void aQuantityPastIntRangeIsNotNarrowedOnTheWayToTheCostTable() {
+        // `resolve_ore` prices a member at the computed NEED, which multiplies down a chain,
+        // and this pack has a recipe yielding 60,466,176 at once. The solver briefly clamped
+        // to Integer.MAX_VALUE because `inputCost` took an int; python has no int ceiling, so
+        // that agreed with the oracle only below 2^31 and any fixture crossing it would have
+        // diverged with nothing in the diff to say why.
+        GraphBuilder b = new GraphBuilder();
+        int ingot = b.key("mod:ingot");
+        RecipeGraph g = b.build();
+        Map<Integer, Double> prices = new LinkedHashMap<Integer, Double>();
+        prices.put(ingot, 1.0);
+        CostTable costs = table(g, prices);
+
+        long past = (long) Integer.MAX_VALUE + 1000L;
+        double priced = Cost.inputCost(costs, g, ingot, past);
+        assertEquals("a narrowed quantity would come out negative or clamped",
+                (double) past, priced, 0.0);
+        assertTrue("and it must exceed what Integer.MAX_VALUE would have priced",
+                priced > (double) Integer.MAX_VALUE);
+    }
+
+    @Test
     public void anOredictSlotIsPricedAtItsCheapestMember() {
         GraphBuilder b = new GraphBuilder();
         b.beginOreGroup("ingotCopper");
