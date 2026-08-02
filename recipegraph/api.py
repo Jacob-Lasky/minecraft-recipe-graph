@@ -33,6 +33,7 @@ import math
 from . import cost as cost_mod
 from . import explore
 from . import iconset, query
+from .model import base_key
 
 JSON_CTYPE = "application/json; charset=utf-8"
 
@@ -122,7 +123,29 @@ FIELDS = {
     # distinction #118 turns on and the one no shape of the key can express.
     "damaged": (lambda c, k: c.graph.damage_base(k) != k,
                 "whether this key is a durability variant of another item"),
+    # "how many keys would the #136 badge fire on" is a sweep question, and answering it
+    # with an ad-hoc script is what this module exists to stop. Mirrors
+    # `Solver.reachable_form`; a second spelling of the predicate is how the page and the
+    # sweep come to disagree about the same key.
+    "unsourced": (lambda c, k: bool(_reachable_form(c.graph, k)),
+                  "the graph can make the plain item but nothing reaches this state"),
 }
+
+
+def _reachable_form(graph, key):
+    """`Solver.reachable_form` without a Solver. See there for why the rule is this narrow.
+
+    Duplicated in shape rather than imported because `api` must not depend on `solve` -- the
+    sweep answers questions about a GRAPH, and a solver carries an inventory, pins and a cost
+    table it has no business needing. `tests/test_unsourced.py` pins the two against each
+    other so the copy cannot drift.
+    """
+    if graph.real_producers(key):
+        return None
+    stem = base_key(key)
+    if stem == key:
+        return None
+    return stem if graph.real_producers(stem) else None
 
 
 class Context:
