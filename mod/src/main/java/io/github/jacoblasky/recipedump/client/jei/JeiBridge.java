@@ -105,13 +105,33 @@ public final class JeiBridge {
     }
 
     public static boolean showRecipesFor(ItemStack stack) {
+        return show(stack, IFocus.Mode.OUTPUT);
+    }
+
+    /**
+     * Opens JEI showing what this key is USED IN. False when it could not.
+     *
+     * The other direction, and a genuinely different question from
+     * {@link #showRecipesFor}: "how do I get this" against "what can I do with this". Two
+     * actions rather than one with a flag, because a menu has to name them separately anyway
+     * and a boolean argument at the call site reads as neither.
+     */
+    public static boolean showUsesOf(int keyId, RecipeGraph graph) {
+        ItemStack stack = stackFor(keyId, graph);
+        return stack != null && showUsesOf(stack);
+    }
+
+    public static boolean showUsesOf(ItemStack stack) {
+        return show(stack, IFocus.Mode.INPUT);
+    }
+
+    private static boolean show(ItemStack stack, IFocus.Mode mode) {
         IJeiRuntime runtime = DumpPlugin.runtime;
         if (runtime == null || stack == null || stack.isEmpty()) {
             return false;
         }
         try {
-            IFocus<ItemStack> focus =
-                    runtime.getRecipeRegistry().createFocus(IFocus.Mode.OUTPUT, stack);
+            IFocus<ItemStack> focus = runtime.getRecipeRegistry().createFocus(mode, stack);
             runtime.getRecipesGui().show(focus);
             return true;
         } catch (Throwable failed) {

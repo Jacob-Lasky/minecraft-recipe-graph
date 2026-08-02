@@ -329,9 +329,21 @@ public strictfp final class Cost {
         return BLOCKED_FLOOR + (BLOCKED_CEILING - BLOCKED_FLOOR) * f;
     }
 
-    /** Quantity in normalised units: 1 item, or 1 bucket of fluid. */
-    static double scaledQty(RecipeGraph graph, int keyId, int qty) {
-        double q = Math.max(qty, 1) * (graph.isFluid(keyId) ? FLUID_SCALE : 1.0);
+    /**
+     * Quantity in normalised units: 1 item, or 1 bucket of fluid.
+     *
+     * A `long`, NOT an `int`, and the reason is the solver rather than any recipe. A slot's
+     * own quantity is small, but `Solver.slot_cost` passes a computed NEED -- the amount a
+     * plan wants after multiplying down a chain -- and this pack has a recipe yielding
+     * 60,466,176 at once. An int parameter makes a deep chain wrap NEGATIVE, and
+     * `Math.max(qty, 1)` then reports 1, pricing the dearest slot in a plan as the cheapest.
+     *
+     * Widening also keeps the arithmetic identical to python's, which has no int ceiling: a
+     * `long` converts to `double` exactly below 2^53 and rounds the same way beyond it.
+     * Saturating at `Integer.MAX_VALUE` instead would agree with python only up to 2^31.
+     */
+    static double scaledQty(RecipeGraph graph, int keyId, long qty) {
+        double q = Math.max(qty, 1L) * (graph.isFluid(keyId) ? FLUID_SCALE : 1.0);
         // A sub-millibucket output would divide by ~0 and manufacture a free resource.
         return Math.max(q, FLUID_SCALE);
     }
@@ -343,7 +355,7 @@ public strictfp final class Cost {
      * and a second implementation over there would be a second place for the normalisation --
      * oredict members, fluid scale -- to drift.
      */
-    public static double inputCost(CostTable cost, RecipeGraph graph, int keyId, int qty) {
+    public static double inputCost(CostTable cost, RecipeGraph graph, int keyId, long qty) {
         double best;
         if (graph.isOre(keyId)) {
             best = Double.POSITIVE_INFINITY;
