@@ -60,19 +60,13 @@ def load_stock(path):
     return have, doc.get("placed") or {}
 
 
-def regions():
-    """`[(label, lo, hi)]`, the bands `machine_entry_costs` can put a category in."""
-    return [("priced", cost_mod.MACHINE_COST["buildable"], cost_mod.PRICED_CEILING),
-            ("unpriced item", cost_mod.UNPRICED_MACHINE_COST,
-             cost_mod.UNPRICED_MACHINE_COST),
-            ("blocked structure", cost_mod.BLOCKED_FLOOR, cost_mod.BLOCKED_CEILING)]
-
-
-def region_of(value):
-    for label, lo, hi in regions():
-        if lo - 1e-9 <= value <= hi + 1e-9:
-            return label
-    return "OUTSIDE THE BAND"
+# Re-exported, not redefined. The boundaries are derived from `MACHINE_COST["buildable"]`
+# and `MACHINE_COST["unknown"]`, so they belong beside those constants; a copy here is a
+# second place to update when one of them moves, and this audit exists precisely to catch a
+# price landing where the model did not intend. `tests/test_entry_census.py` calls them
+# through this module and `tools/make-java-fixtures.py` censuses the band with the same two.
+regions = cost_mod.regions
+region_of = cost_mod.region_of
 
 
 def census(graph, have, placed, machines_path, sources_path, tokens_path=None):
