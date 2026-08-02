@@ -229,6 +229,17 @@ h1 .x{font-size:16px;margin-left:6px}
 /* These rows were 24px high. 44px is the tap-target floor, and a plan is mostly a list
    of things you are trying to tap. */
 summary,.leaf{padding-top:9px;padding-bottom:9px;gap:8px}
+
+/* THE ROW WRAPS, AND `.nm` KEEPS A FLOOR, because a flex item with `min-width:0` will
+   shrink below its own ATOMIC children and then they overflow it silently. Measured on the
+   live plan at 390px: a deep node carrying an item icon and a wide badge squeezed `.nm` to
+   a 6px content box around a 16px sprite -- `scrollWidth` 22 against `clientWidth` 6. Every
+   bounding rect looked fine and the page did not scroll, which is exactly the failure mode
+   `scrollWidth` is measured for.
+   `min-width:0` stays: it is what lets a long registry id break at all (see `.nm` above).
+   The floor is on the phone block only, because the crush needs a narrow row to happen. */
+summary,.leaf{flex-wrap:wrap}
+.nm{min-width:9em}
 .tw{flex:0 0 14px;font-size:12px}
 button{padding:9px 13px;font-size:13px;min-height:40px}
 .filter{min-height:44px}
