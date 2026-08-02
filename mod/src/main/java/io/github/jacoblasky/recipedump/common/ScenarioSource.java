@@ -84,14 +84,104 @@ public enum ScenarioSource {
      */
     PINS("pins", true, "");
 
+    /**
+     * What a source reports right now: whether it is live, and what to say when it is not.
+     *
+     * A PAIR RATHER THAN TWO LOOKUPS, so a reader cannot get "live" from one call and a
+     * stale note from another. `StockSnapshot` decides both at once -- a refusal IS the
+     * reason -- and splitting them would let the caveat name a problem the flag says does
+     * not exist.
+     */
+    public static final class Status {
+
+        private final boolean live;
+        private final String note;
+
+        private Status(boolean live, String note) {
+            this.live = live;
+            this.note = note;
+        }
+
+        /** Reading succeeded; the planner is using real data and has nothing to warn about. */
+        public static Status available() {
+            return new Status(true, "");
+        }
+
+        /**
+         * Reading did not happen or refused. `why` is shown to the player verbatim.
+         *
+         * MAKE IT SAY WHAT TO DO. "AE2 stock is not read yet" tells a player nothing they can
+         * act on; "no wireless terminal in inventory" tells them exactly what to go and get.
+         * That difference is the whole reason this takes a string rather than a boolean.
+         */
+        public static Status unavailable(String why) {
+            return new Status(false, why == null || why.isEmpty() ? "not available" : why);
+        }
+
+        public boolean live() {
+            return live;
+        }
+
+        public String note() {
+            return note;
+        }
+    }
+
+    /** Answers for a source that can only know at runtime whether it read anything. */
+    public interface Reader {
+        /** Called per plan, not cached: a grid can go out of range between two plans. */
+        Status status();
+    }
+
     private final String field;
-    private final boolean live;
-    private final String note;
+    private final Status declared;
+
+    /**
+     * The runtime reader, when something has installed one. Volatile because Phase 5's grid
+     * read is installed from a world-load event and read while a panel is drawing.
+     */
+    private volatile Reader reader;
 
     ScenarioSource(String field, boolean live, String note) {
         this.field = field;
-        this.live = live;
-        this.note = note;
+        this.declared = live ? Status.available() : Status.unavailable(note);
+    }
+
+    /**
+     * Let something answer for this source at runtime instead of the declared constant.
+     *
+     * WHY A READER RATHER THAN A FLAG THE CALLER FLIPS. Only the thing doing the reading
+     * knows whether it read anything: `StockSnapshot` distinguishes "the network is empty"
+     * from "there is no network in range" from "you have no wireless terminal", and a caller
+     * setting `live = true` after calling it would be re-deriving that from the outside and
+     * getting it wrong the first time a read failed. It also means the caveat can name WHICH
+     * refusal happened rather than restating a compile-time sentence.
+     *
+     * `null` restores the declared constant, which is what a world unload should do -- a
+     * reader that outlives its world would keep answering for a grid nobody is near.
+     */
+    public void readBy(Reader newReader) {
+        this.reader = newReader;
+    }
+
+    /** What this source reports now: the reader's answer, or the declared constant. */
+    public Status status() {
+        Reader current = reader;
+        if (current == null) {
+            return declared;
+        }
+        Status answer = current.status();
+        // A reader that returns null is a bug in the reader, and defaulting to "live" would
+        // silently claim the input was read. The declared constant is the safe answer: it
+        // says not-live, which is the truth about a reader that just failed to answer.
+        return answer == null ? declared : answer;
+    }
+
+    /** Drop every installed reader. For a world unload, and for test isolation. */
+    public static void resetReaders() {
+        for (ScenarioSource source : values()) {
+            source.reader = null;
+        }
     }
 
     /**
@@ -115,12 +205,12 @@ public enum ScenarioSource {
 
     /** True when the game supplies this for real, false when the planner is guessing. */
     public boolean live() {
-        return live;
+        return status().live();
     }
 
     /** What to tell the player, for a source that is not live. Empty when it is. */
     public String note() {
-        return note;
+        return status().note();
     }
 
     /**
@@ -147,8 +237,9 @@ public enum ScenarioSource {
     public static List<String> missingNotes() {
         List<String> out = new ArrayList<String>();
         for (ScenarioSource source : values()) {
-            if (!source.live && !source.note.isEmpty()) {
-                out.add(source.note);
+            Status now = source.status();
+            if (!now.live() && !now.note().isEmpty()) {
+                out.add(now.note());
             }
         }
         return Collections.unmodifiableList(out);
@@ -158,7 +249,7 @@ public enum ScenarioSource {
     public static String summary() {
         List<String> missing = new ArrayList<String>();
         for (ScenarioSource source : values()) {
-            if (!source.live) {
+            if (!source.live()) {
                 missing.add(source.field);
             }
         }
