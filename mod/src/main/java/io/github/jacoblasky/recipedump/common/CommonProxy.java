@@ -53,6 +53,16 @@ public class CommonProxy {
     }
 
     /**
+     * Take a stock snapshot the server read off the player's ME network.
+     *
+     * A no-op on a server for the same reason as the book sync: the server is where the grid
+     * lives and it never receives one of these. On the proxy rather than in the handler
+     * because that handler class is loaded on both sides.
+     */
+    public void applyStockSnapshot(NBTTagCompound payload) {
+    }
+
+    /**
      * Open the planner UI. A no-op on a server, which has no screens.
      *
      * The calculator item runs on both sides, so without this the item could not open

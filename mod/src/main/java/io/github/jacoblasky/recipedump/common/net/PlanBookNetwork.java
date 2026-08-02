@@ -30,6 +30,8 @@ public final class PlanBookNetwork {
      */
     private static final int ID_SYNC = 0;
     private static final int ID_EDIT = 1;
+    private static final int ID_STOCK_REQUEST = 2;
+    private static final int ID_STOCK_REPLY = 3;
 
     private static boolean registered;
 
@@ -53,6 +55,13 @@ public final class PlanBookNetwork {
                                 ID_SYNC, Side.CLIENT);
         CHANNEL.registerMessage(PlanBookEditMessage.Handler.class, PlanBookEditMessage.class,
                                 ID_EDIT, Side.SERVER);
+        // The live AE2 stock pair (#19 Phase 5). Same channel rather than a second one: a
+        // channel costs a registration on both sides and these are the same conversation
+        // between the same two parties.
+        CHANNEL.registerMessage(StockRequestMessage.Handler.class, StockRequestMessage.class,
+                                ID_STOCK_REQUEST, Side.SERVER);
+        CHANNEL.registerMessage(StockReplyMessage.Handler.class, StockReplyMessage.class,
+                                ID_STOCK_REPLY, Side.CLIENT);
     }
 
     /** Send a player their own book. Silently does nothing for a client-side player. */

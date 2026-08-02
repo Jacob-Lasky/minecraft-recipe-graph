@@ -11,6 +11,7 @@ import io.github.jacoblasky.recipedump.common.CommonProxy;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.client.jei.PlanTargetKeybind;
 import io.github.jacoblasky.recipedump.common.PlanBookCapability;
+import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
 import io.github.jacoblasky.recipedump.shot.ShotHarness;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
@@ -70,6 +71,26 @@ public class ClientProxy extends CommonProxy {
     }
 
     /**
+     * Hold the latest snapshot the server sent, for whatever asked.
+     *
+     * ON THE CLIENT THREAD, for the reason `applyPlanBookSync` records directly above: this
+     * arrives on a netty IO thread and the planner reads it while rendering.
+     *
+     * REPLACED WHOLE, never merged into what was there. A snapshot is what the network held
+     * at one instant; merging a new read into an old one would invent a state the network was
+     * never in, and the item that quietly persisted is the one the player already used.
+     */
+    @Override
+    public void applyStockSnapshot(final NBTTagCompound payload) {
+        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+            @Override
+            public void run() {
+                LiveStock.accept(StockSnapshot.deserializeNBT(payload));
+            }
+        });
+    }
+
+    /**
      * Open the planner window.
      *
      * GUARDED, because the shipped jar deliberately declares no ModularUI dependency -- the
@@ -93,6 +114,10 @@ public class ClientProxy extends CommonProxy {
             tell(player, "plan book unavailable: the capability is not registered");
             return;
         }
+        // Ask the server for the network the moment the window opens, so the reply is in
+        // flight while the player is still reading the first screen. NOT on a timer and not
+        // per frame -- see LiveStock for why a planner is one question rather than a window.
+        LiveStock.request();
         try {
             openWithPlan(book);
         } catch (Throwable missing) {
