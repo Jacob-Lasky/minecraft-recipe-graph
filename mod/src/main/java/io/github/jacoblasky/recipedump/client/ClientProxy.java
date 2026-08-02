@@ -3,7 +3,10 @@ package io.github.jacoblasky.recipedump.client;
 import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.common.CommonProxy;
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.PlanTargetKeybind;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.common.PlanBookCapability;
 import io.github.jacoblasky.recipedump.shot.ShotHarness;
 import net.minecraft.client.Minecraft;
@@ -40,6 +43,20 @@ public class ClientProxy extends CommonProxy {
         // binding ends up registered twice. Safe without JEI -- the key resolves nothing and
         // says nothing, which is what an unbound feature should do.
         PlanTargetKeybind.register();
+        // BUILD JEI'S STACK INDEX WHEN THE GRAPH LANDS, on the loader thread, so the first
+        // context menu does not pay for a walk of ~35,000 item stacks. `indexFor` is
+        // null-safe and does nothing useful without JEI, so this is unconditional; the
+        // listener runs before `GraphService` publishes READY, which is what keeps it off
+        // the frame that first reads the graph. See graphmodel's note on `JeiBridge.indexOf`,
+        // which rebuilds whenever the graph's IDENTITY changes -- `GraphService.graph()` is a
+        // plain field read and returns the same object until a reload, which is the property
+        // that makes that comparison cheap rather than a per-frame rebuild.
+        GraphService.get().onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(RecipeGraph graph) {
+                JeiBridge.indexFor(graph);
+            }
+        });
     }
 
     /**
@@ -88,7 +105,7 @@ public class ClientProxy extends CommonProxy {
             return;
         }
         try {
-            PlannerScreen.open(book);
+            PlannerEntry.open(book);
         } catch (Throwable missing) {
             tell(player, "the planner needs ModularUI 3.1.5, which is not installed");
         }
