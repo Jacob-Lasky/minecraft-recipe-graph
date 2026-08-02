@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import io.github.jacoblasky.recipedump.client.PlannerScreen;
+import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
 import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
@@ -51,6 +52,29 @@ final class PlannerShot {
         PlannerScreen.openPanel(PlannerWidgets.recipePicker(fixture(arg).tree()));
     }
 
+    /**
+     * `flow`, or `flow:<fixture>`: the plan as a pannable diagram.
+     *
+     * Registers itself as {@link ShotScreens.Animated} so a timing run measures PANNING.
+     * A static screenshot of a canvas measures redraw; the frame cost that the 60 fps gate is
+     * about is the one paid while the viewport moves and the culler re-decides what is on
+     * screen, and those are different numbers.
+     */
+    static void openFlow(String arg) {
+        final FlowCanvas canvas = new FlowCanvas(flowTree(arg));
+        canvas.pos(4, 4).size(612, 372);
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+        ShotScreens.animate(new ShotScreens.Animated() {
+            @Override
+            public void step(int frame) {
+                // A steady diagonal drift, wrapping at the layout's extent. Diagonal because
+                // the culler indexes columns and searches rows, so panning on one axis only
+                // would exercise half of it and report the cheaper half as the cost.
+                canvas.panTo(frame * 7, frame * 3);
+            }
+        });
+    }
+
     static void openTodo(String arg) {
         PlannerScreen.openPanel(PlannerWidgets.todoPanel(fixture(arg), book()));
     }
@@ -68,6 +92,58 @@ final class PlannerShot {
         book.setTodo("fluid:water", 934_400L);
         book.setTodo("thaumadditions:vis_pod#0116bb2287a7", 3L);
         return book;
+    }
+
+    /**
+     * The tree to draw: a fixture, or `synthetic:<n>` for a plan of a chosen size.
+     *
+     * THE GATE IS 4,000 NODES AND THE LARGEST FIXTURE IS 347. `DEFAULT_MAX_NODES` is 4,000,
+     * so that is the size the 60 fps claim has to be made at, and no real solved plan in the
+     * fixture set comes close. A generated tree is honest subject matter for a PERFORMANCE
+     * measurement in a way it would not be for a rendering one: what costs frames is the node
+     * count and the geometry, and both are real here. Every visual claim in this package is
+     * still made against a fixture.
+     */
+    private static PlanNode flowTree(String arg) {
+        String wanted = arg == null ? "" : arg.trim();
+        if (wanted.startsWith("synthetic:")) {
+            return synthetic(Integer.parseInt(wanted.substring("synthetic:".length())));
+        }
+        return fixture(wanted).tree();
+    }
+
+    /** A balanced tree of `nodes` nodes, shaped like a plan: a few children per level. */
+    private static PlanNode synthetic(int nodes) {
+        java.util.List<PlanNode> level = new java.util.ArrayList<PlanNode>();
+        int made = 0;
+        // Built bottom-up so the count is exact rather than approached: the deepest row is
+        // whatever is left over after the levels above have taken their share.
+        while (made < nodes) {
+            int width = Math.min(nodes - made, Math.max(1, level.isEmpty() ? nodes / 3 : 1
+                    + level.size() / 3));
+            java.util.List<PlanNode> next = new java.util.ArrayList<PlanNode>(width);
+            for (int i = 0; i < width; i++) {
+                int from = level.size() * i / width;
+                int to = Math.max(from + 1, level.size() * (i + 1) / width);
+                java.util.List<PlanNode> kids = level.subList(Math.min(from, level.size()),
+                        Math.min(to, level.size()));
+                next.add(new PlanNode.Builder()
+                        .key("synthetic:node" + made)
+                        .name("Synthetic Node " + made)
+                        .label("Synthetic Node " + made)
+                        .kind("item")
+                        .need(made + 1)
+                        .status(made % 3 == 0 ? "craft" : "raw")
+                        .children(new java.util.ArrayList<PlanNode>(kids))
+                        .build());
+                made++;
+            }
+            level = next;
+            if (width == 1) {
+                break;
+            }
+        }
+        return level.get(0);
     }
 
     private static PlanView fixture(String name) {
