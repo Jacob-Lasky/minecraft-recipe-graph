@@ -141,7 +141,7 @@ Verify a row before relying on it; that is the whole lesson above. Commands are 
 | Run the Python tool, tests, the UI | yes | yes |
 | Read the AE2 network from the world save | yes, server world is on the same host | yes |
 | Serve the UI as a container | yes, this is where it runs | not where it lives |
-| Get the HEI jar `checkHeiJar` demands | yes, from the AMP server instance | yes |
+| Get the pack jars `checkPackJars` demands | yes, from the AMP server instance | yes |
 | Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
 | `recipegraph build` into a graph | yes, at a measured 1.2% gap (see below) | yes, authoritative |
 | **Run the game and `/recipedump`** | **no, and never** | **yes, and only here** |
@@ -314,39 +314,74 @@ because no pack instance existed on Tower; see
 [the blocked section](#read-this-before-saying-anything-is-blocked) for why that was wrong
 and what it cost.
 
-`compileJava dependsOn checkHeiJar` (mod/build.gradle:77) needs `-Phei_jar` pointing at a
-HadEnoughItems jar inside a pack instance, and the AMP server on this host has one:
+`compileJava dependsOn checkPackJars` needs `-Ppack_mods` pointing at a directory holding
+HadEnoughItems, ModularUI and AE2-UEL, and the AMP server on this host has all three:
 `/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` holds 364 jars including
-`HadEnoughItems_1.12.2-4.28.1.jar`. pocket-dev has no `java`, which is a container rather
-than a wall. The instance directory is mode 0700 uid 1000, so stage the jar out with a root
-container and `chown 99:100` rather than trying to read it as 99:100.
+`HadEnoughItems_1.12.2-4.28.1.jar`, `modularui-3.1.5.jar` and `ae2-uel-v0.56.5.jar`.
+pocket-dev has no `java`, which is a container rather than a wall. The instance directory is
+mode 0700 uid 1000, so stage the jars out with a root container and `chown 99:100` rather than
+trying to read them as 99:100.
 
 ```bash
 docker run --rm --user 0:0 --memory=1g \
   -v /mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods:/mods:ro \
-  -v /mnt/user/misc/coding/.recipegraph-build/hei:/out \
-  alpine sh -c 'cp /mods/HadEnoughItems*.jar /out/ && chown -R 99:100 /out'
+  -v /mnt/user/misc/coding/.recipegraph-build/deps:/out \
+  alpine sh -c 'cp /mods/HadEnoughItems*.jar /mods/modularui-*.jar /mods/ae2-uel-*.jar /out/ \
+    && chown -R 99:100 /out'
 
 # MOUNT THE REPOSITORY ROOT, NOT `mod/`. See below.
-docker run --rm --user 99:100 --memory=4g \
+docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
   -v /mnt/user/misc/coding/minecraft-recipe-graph:/repo \
-  -v /mnt/user/misc/coding/.recipegraph-build/hei:/hei:ro \
+  -v /mnt/user/misc/coding/.recipegraph-build/deps:/deps:ro \
   -v /mnt/user/misc/coding/.recipegraph-build/gradle-cache:/gradle \
   -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
-  ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g \
-    -Phei_jar=/hei/HadEnoughItems_1.12.2-4.28.1.jar build
+  ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
 ```
 
-**Verified 2026-07-29: BUILD SUCCESSFUL, 12 of 12 tests pass, and
-`mod/build/libs/mc-recipe-dump-0.8.0.jar` comes out reobfuscated.** About 9m20s cold, since
-RFG decompiles and patches Minecraft through fernflower on first run, then about 4m45s with
-`/coding/.recipegraph-build/gradle-cache` warm. Keep that cache directory.
+**Verified 2026-08-02: BUILD SUCCESSFUL, 59 of 59 tests pass, and
+`mod/build/libs/mc-recipe-dump-0.9.0.jar` comes out reobfuscated (32 SRG references against
+the dev jar's 0).** About 9m20s cold, since RFG decompiles and patches Minecraft through
+fernflower on first run, then about 4m45s with `/coding/.recipegraph-build/gradle-cache` warm.
+Keep that cache directory. **One build at a time per `GRADLE_USER_HOME`**: two containers
+sharing it deadlock on `caches/journal-1/journal-1.lock`, and the message names a PID from
+another container's namespace, so it reads as a stale lock when it usually is not. Copy the
+cache directory (~850 MB, 40s) rather than deleting the lock.
+
+**A pack jar is SRG-named, and the test classpath is MCP-named.** Compiling against one is
+fine, because that only reads the other mod's own signatures. RUNNING one in a JUnit JVM is
+not: `modularui-3.1.5.jar` calls `ResourceLocation.func_110623_a`, which does not exist on
+RFG's MCP-named Minecraft, so the theme lookup inside `AbstractScrollWidget.beforeResize`
+throws -- and `WidgetTree.resizeInternal` swallows every Throwable, so the symptom is a scroll
+subtree silently left at 0x0 rather than an error. The ModularUI **test** dependency therefore
+goes through `rfg.deobf`; the compile-time one does not, and `run/mods` gets the raw jars
+because FML remaps them itself inside a dev workspace.
 
 **It must be JDK 25, not 21.** RetroFuturaGradle 2.0.2 ships class file version 69, so
 `eclipse-temurin:21-jdk` dies on `UnsupportedClassVersionError` loading
 `com.gtnewhorizons.retrofuturagradle.UserDevPlugin` before any of the mod's own Java is
 looked at, and produces 0 class files. The error names the plugin, not your code, which
 reads like a broken build script rather than a wrong JDK.
+
+### A GUI layout change is testable without the game
+
+`mod/src/test/java/io/github/jacoblasky/recipedump/HeadlessLayout.java` opens a
+`ModularPanel` on a `ModularScreen` and runs ModularUI's real resize pass in a plain JUnit
+JVM, so a row that does not fit, a column that does not expand or a scroll area sized against
+the wrong parent is a seconds-long test rather than a game launch. `ModularUiLayoutTest` is
+the worked example. Three things it cost, all of which will bite the next GUI change:
+
+* **`ModularScreen` cannot be linked without NeverEnoughAnimations.** `IMuiScreen` extends
+  `IAnimatedScreen` from that client-only mod, which is not in the 364-jar server pack, so the
+  test tree carries an empty placeholder at
+  `mod/src/test/java/com/cleanroommc/neverenoughanimations/api/IAnimatedScreen.java`. It is a
+  link-time requirement only -- the same call succeeds under `-Xverify:none`, which is how
+  that was established rather than assumed.
+* **The harness reports the screen as an overlay**, which is what keeps every call to the
+  absent `GuiScreen` wrapper out of the path. `isOverlay()` reaches nothing that sizes
+  anything.
+* **`ScrollWidget` never sets its own content size.** It is a viewport; `ListWidget` is the
+  one that calls `setScrollSize`, so a `ScrollWidget` over a `Column` lays out correctly and
+  has a dead scrollbar. The Phase 3 tree panel wants `ListWidget`.
 
 **Mounting only `mod/` compiles fine and then fails the tests**, which is the confusing
 shape: `:jar`, `:reobfJar` and `:assemble` all succeed, a usable jar appears in

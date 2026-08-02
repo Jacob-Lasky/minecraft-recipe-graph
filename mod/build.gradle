@@ -45,9 +45,17 @@ minecraft {
 //      `mezz.jei:jei_1.12.2:4.28.1` does not exist and will not resolve. ModularUI and
 //      AE2-UEL have the same problem: the pack runs specific builds, and the pack is the
 //      only place they are guaranteed to exist.
-//   2. A 1.12.2 mod jar already carries MCP-named references, and this mod is compiled
-//      against MCP names too, so a plain file dependency links correctly with no
-//      deobfuscation step.
+//   2. A plain file dependency is enough to COMPILE against, because compilation only reads
+//      the other mod's own signatures, which reobfuscation does not touch.
+//
+// COMPILING AGAINST A PACK JAR IS NOT THE SAME AS RUNNING ONE. A pack jar is a production
+// build, so the Minecraft calls INSIDE it are SRG (`ResourceLocation.func_110623_a`), while
+// this mod and RFG's test classpath are MCP (`getResourcePath`). In game everything is SRG
+// and FML remaps mod jars inside a dev workspace, so neither the real client nor `runClient`
+// notices -- but a plain JUnit JVM has neither, and any call from a pack jar into Minecraft
+// dies there with NoSuchMethodError. That is why the ModularUI test dependency below goes
+// through `rfg.deobf` and this one sentence is worth the space: an earlier version of this
+// comment claimed no deobfuscation step was ever needed, and #125 cost an afternoon to it.
 //
 // Point `-Ppack_mods=<dir>` at any instance's `mods/` and all three resolve by glob. On a
 // machine with the client instance that is the instance itself; on Tower it is the staged
@@ -114,7 +122,16 @@ dependencies {
         // `StandardResizer` touches only `net.minecraft.inventory.Slot`, which RFG already
         // puts on the test classpath. So widget trees can be built and resized in a plain
         // JUnit test with no window, which is the only fast feedback loop this GUI has.
-        testImplementation files(modularuiJar)
+        //
+        // DO NOT drop the `rfg.deobf` back to a plain `files(...)`. It is the SRG-vs-MCP
+        // problem described at the top of this file, and here is how it presents: a widget
+        // that never touches Minecraft does not care, so `Column` lays out either way, but
+        // `AbstractScrollWidget.beforeResize` asks the panel for its theme, the theme
+        // registry builds `ResourceLocation`s, and that throws
+        // `NoSuchMethodError: ResourceLocation.func_110623_a`. `WidgetTree.resizeInternal`
+        // CATCHES EVERY THROWABLE and only logs it, so nothing fails -- the scroll subtree is
+        // just silently left at zero size, and only an assertion notices.
+        testImplementation rfg.deobf(files(modularuiJar))
     }
     // The NBT discriminator defines part of the dump schema (a digest that decides
     // whether two stacks are the same ingredient), and "it compiled" is not evidence
