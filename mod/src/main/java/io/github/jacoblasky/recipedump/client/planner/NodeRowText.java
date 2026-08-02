@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.plan.PlanNode;
+
 import java.util.ArrayList;
 import java.util.List;
 

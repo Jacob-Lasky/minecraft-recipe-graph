@@ -17,16 +17,16 @@ final class PlanTrees {
     }
 
     static PlanNode node(String key, PlanNode... children) {
-        PlanNode node = new PlanNode();
-        node.key = key;
-        node.name = key;
-        node.label = key;
-        node.kind = "item";
-        node.need = 1;
-        if (children.length > 0) {
-            node.children = Arrays.asList(children);
-        }
-        return node;
+        // Through the Builder, because the fields are package-private to `plan` now: one
+        // class serves the solver and the widgets, and only the solver may mutate it.
+        return new PlanNode.Builder()
+                .key(key)
+                .name(key)
+                .label(key)
+                .kind("item")
+                .need(1)
+                .children(children.length == 0 ? null : Arrays.asList(children))
+                .build();
     }
 
     /** A chain `depth` deep: the shape that would blow a recursive walk's stack. */

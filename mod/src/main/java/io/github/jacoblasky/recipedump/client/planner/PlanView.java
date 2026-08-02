@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.plan.PlanNode;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -47,11 +49,14 @@ public final class PlanView {
      * than exceptional.
      */
     public static PlanView empty() {
-        PlanNode.Builder root = new PlanNode.Builder();
-        root.key = "";
-        root.label = "no plan yet";
-        root.status = NodeStatus.CRAFT;
-        return new PlanView("", "no plan yet", 0L, root.build(), false, false, 1, 0,
+        PlanNode root = new PlanNode.Builder()
+                .key("")
+                .label("no plan yet")
+                .name("no plan yet")
+                .kind("item")
+                .status(NodeStatus.CRAFT)
+                .build();
+        return new PlanView("", "no plan yet", 0L, root, false, false, 1, 0,
                             java.util.Collections.<ShoppingRow>emptyList(),
                             java.util.Collections.<MachineRow>emptyList());
     }
