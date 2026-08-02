@@ -160,11 +160,21 @@ class DistJarMatchesSourceTest(unittest.TestCase):
                           "(or set MCRECIPEDUMP_JAR to one)" % _dist_dir())
 
     def test_there_is_exactly_one_jar(self):
-        # Two jars means a reader has to guess which is current, which is how the stale one
-        # kept being handed out. The old 0.4.2 was removed rather than kept beside its
-        # replacement for that reason.
-        self.assertEqual(len(_jars()), 1,
-                         "expected one built jar in %s, found %s" % (_dist_dir(), _jars()))
+        # Two jars means a reader has to guess which is current, which is how the stale 0.4.2
+        # kept being handed out. That risk did not go away when the jar stopped being tracked:
+        # `mod/build/libs` ACCUMULATES, so anyone who has built more than once has several
+        # versions sitting there and the newest is not necessarily the one they will copy.
+        #
+        # The message names the sweep, because two agents independently read this failure as a
+        # packaging defect rather than as leftovers -- three red herrings that look exactly
+        # like a real problem. `build-jar.sh` sweeps siblings itself; this is for the
+        # directories it has not been run in.
+        self.assertEqual(
+            len(_jars()), 1,
+            "expected one built jar in %s, found %s -- these are leftovers from earlier "
+            "builds, not a packaging fault. `rm -rf mod/build/libs` and rebuild, or run "
+            "mod/tools/build-jar.sh which sweeps stale siblings itself."
+            % (_dist_dir(), _jars()))
 
     def test_the_filename_is_the_source_version(self):
         version = _source_version()
