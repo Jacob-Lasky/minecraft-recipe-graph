@@ -37,6 +37,7 @@ import os
 from . import multiblocks as multiblocks_mod
 from .defaults import DEFAULT_COST_CACHE
 from .model import FLUID_PREFIX
+from .tokens import GATE, HINT, LOOT, METHOD
 
 # What a machine costs to route through. Owning it is nearly free; building one is a real
 # but one-off expense; using one you cannot get should lose to almost anything.
@@ -160,13 +161,52 @@ FLUID_SCALE = 1.0 / 1000.0
 BASE_RAW_COST = 1.0        # an item with no recipe: assume it can be obtained somehow
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
+# What a PLACEHOLDER costs, by what it asks of the player. See `tokens.py` for the kinds.
+#
+# Until #105 this file never mentioned tokens at all, so every one of them fell through the
+# generic leaf rule above and a locked quest chapter cost exactly what a cobblestone costs.
+# Gating was a reporting concept only: `solve` badges the node "locked" and lists it under
+# "locked behind progress", and nothing steered the planner away from the route. The error
+# ran ONE WAY -- a gated route was always at least as cheap as the ungated one beside it --
+# so gated routes were systematically preferred. Asked directly as "is the dimensional gate
+# added to the cost?", and it was not.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDES. Four properties, each one asserted in
+# `tests/test_progression.py` rather than left to the reader:
+#
+#   1. GATE > LOOT > BASE_RAW_COST. Unlocking a chapter is a bigger ask than farming a boss,
+#      which is a bigger ask than picking something up.
+#   2. GATE > MACHINE_COST["unknown"]. A lock you cannot open yet is a worse obstacle than a
+#      machine this tool merely failed to identify, so an ungated route through any machine
+#      wins against a gated one.
+#   3. Both < MACHINE_COST["unavailable"]. A gate is not an impossibility -- chapters unlock
+#      and bosses die -- so a gated route must stay FINITE and still be chosen when it is the
+#      only one there is. That is the whole difference from the 5,000 wall.
+#   4. LOOT != GATE. #95 is the lesson: one shared number for two unrelated statements
+#      destroys the ordering among both.
+#
+# HINT and METHOD deliberately stay at `BASE_RAW_COST`. Neither is a thing to obtain: a HINT
+# says the recipe accepts any member of a class, so it stands in for one ordinary material,
+# and a METHOD says the work happens in a machine, which `category_entry_cost` has already
+# charged for. Pricing either as an obstacle would double-count.
+LOOT_COST = 200.0
+GATE_COST = 1000.0
+
+# Keyed by the kind rather than by the token, which is the honest granularity available. A
+# per-token number would be more truthful still -- Chapter 1 and a Sedna trip are not the
+# same afternoon -- and it needs a curated figure per id that nobody has measured. The kind
+# already encodes what the placeholder asks of the player, so it is the finest split the
+# existing data supports. See #105's open question 1.
+TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
+              HINT: BASE_RAW_COST, METHOD: BASE_RAW_COST}
+
 # Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
 # The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
 # formula change moves none of them, so without this a machine holding `.cost-cache.json`
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 5
+FORMULA_VERSION = 6
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -351,7 +391,7 @@ def _cheapest_alternative(cost, ingredient, ore_members):
 
 
 def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None,
-             machine_items=None):
+             machine_items=None, token_kinds=None):
     """{item key: estimated cost}. Lower is easier to get.
 
     With `machine_items` (`{category: (machine item key, ...)}` from
@@ -369,7 +409,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
     machine price this relaxation used instead of re-deriving a flat one.
     """
-    seed = _seed(graph, have, free_sources)
+    seed = _seed(graph, have, free_sources, token_kinds)
     cost = _relax(graph, dict(seed), passes, machine_states, None)
     if not machine_items:
         return CostTable(cost)
@@ -378,7 +418,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
                      machine_entry=entry)
 
 
-def _seed(graph, have, free_sources):
+def _seed(graph, have, free_sources, token_kinds=None):
     """Starting costs, before any recipe is considered. Shared by both relaxation passes."""
     from .generators import SOURCE_COST
 
@@ -424,6 +464,18 @@ def _seed(graph, have, free_sources):
     # because `_relax` goes on to lower it further.
     for key in graph.world_ores:
         cost[key] = min(cost.get(key, math.inf), BASE_RAW_COST)
+
+    # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
+    # rule above answers "how cheaply can this be had"; a token answers "what does the
+    # player have to go and do", and the generic leaf rule has already given it 1.0.
+    #
+    # Skipped when something already priced it below a raw leaf: that means stock or an
+    # infinite generator, and either is a stronger claim about this world than a curated
+    # list is. Nonsense for a placeholder in practice, and free to honour.
+    for key, kind in (token_kinds or {}).items():
+        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+            continue
+        cost[key] = TOKEN_COST.get(kind, BASE_RAW_COST)
     return cost
 
 
@@ -481,7 +533,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
 
 
 def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None,
-                multiblocks=None):
+                multiblocks=None, token_kinds=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -528,6 +580,13 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     # is the shape of trap #86 hit, where patching a function moved no fingerprint input.
     h.update(b"\x00")
     h.update(json.dumps(multiblocks or {}, sort_keys=True).encode())
+    # The TOKEN MAP, because it is user-editable. `data/tokens.json` can add a gate or
+    # disable one, which moves a key between 1.0 and 1,000.0 while the graph, the stock and
+    # every machine state stay exactly as they were -- so without this the edit takes effect
+    # in the badges (which read the map directly) and not in the prices, and the plan
+    # disagrees with its own annotations.
+    h.update(b"\x00")
+    h.update(json.dumps(token_kinds or {}, sort_keys=True).encode())
     return h.hexdigest()
 
 
@@ -556,7 +615,7 @@ def cache_beside(graph_path):
 
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
-                    cache_path=None, passes=PASSES, machine_items=None):
+                    cache_path=None, passes=PASSES, machine_items=None, token_kinds=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
     `cache_path` defaults to `cache_beside(graph_path)`; see there for why it is not the
@@ -578,7 +637,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     """
     cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
-                        getattr(graph, "multiblocks", None))
+                        getattr(graph, "multiblocks", None), token_kinds)
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:
@@ -592,6 +651,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
             pass
 
     cost = estimate(graph, have=have, machine_states=machine_states, passes=passes,
+                    token_kinds=token_kinds,
                     free_sources=free_sources, machine_items=machine_items)
     if cache_path:
         try:

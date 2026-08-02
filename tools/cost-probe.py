@@ -31,6 +31,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import cost as cost_mod                      # noqa: E402
+from recipegraph import tokens as tokens_mod                  # noqa: E402
 from recipegraph.defaults import DEFAULT_GRAPH                # noqa: E402
 from recipegraph import machines as machines_mod              # noqa: E402
 from recipegraph.model import Graph                           # noqa: E402
@@ -104,7 +105,7 @@ def route(graph, solver, tree_or_recipe):
     return "%-28s <- %s" % (cat[:28], ", ".join(marked) or "(nothing)")
 
 
-def sweep(graph, states, values, rank_only, items, machine_items=None):
+def sweep(graph, states, values, rank_only, items, machine_items=None, token_kinds=None):
     """`{raw cost: ({label: route}, seconds)}`.
 
     Restores `cost.BASE_RAW_COST` on the way out. The tool is a one-shot CLI so the leak
@@ -118,14 +119,17 @@ def sweep(graph, states, values, rank_only, items, machine_items=None):
             cost_mod.BASE_RAW_COST = value
             started = time.time()
             costs = cost_mod.estimate(graph, machine_states=states,
-                                      machine_items=machine_items)
-            solver = Solver(graph, machine_states=states, costs=costs)
+                                      machine_items=machine_items,
+                                      token_kinds=token_kinds)
+            solver = Solver(graph, machine_states=states, costs=costs,
+                            token_kinds=token_kinds)
             answers = {}
             for key, label in items:
                 if rank_only:
                     answers[label] = route(graph, solver, solver.pick_recipe(key))
                 else:
-                    fresh = Solver(graph, machine_states=states, costs=costs)
+                    fresh = Solver(graph, machine_states=states, costs=costs,
+                                   token_kinds=token_kinds)
                     answers[label] = route(graph, fresh, fresh.solve(key, 1)["tree"])
             rows[value] = (answers, time.time() - started)
     finally:
@@ -149,7 +153,8 @@ def report(rows, items):
           "and find one.")
 
 
-def explain(graph, states, key, limit, raw_cost=None, machine_items=None):
+def explain(graph, states, key, limit, raw_cost=None, machine_items=None,
+            token_kinds=None):
     """Every real producer of one item, best-ranked first, with the score that decided it.
 
     The view that made #61 legible. Three routes to a diamond TIE on cost at -2.0 -- a
@@ -163,8 +168,9 @@ def explain(graph, states, key, limit, raw_cost=None, machine_items=None):
         cost_mod.BASE_RAW_COST = raw_cost
     try:
         costs = cost_mod.estimate(graph, machine_states=states,
-                                  machine_items=machine_items)
-        solver = Solver(graph, machine_states=states, costs=costs)
+                                  machine_items=machine_items, token_kinds=token_kinds)
+        solver = Solver(graph, machine_states=states, costs=costs,
+                        token_kinds=token_kinds)
         candidates = graph.real_producers(key)
         print("%s: %d real producers, BASE_RAW_COST=%s\n"
               % (graph.bare_name(key), len(candidates), cost_mod.BASE_RAW_COST))
@@ -187,16 +193,21 @@ def main():
     ap.add_argument("--explain", action="store_true",
                     help="score every producer of --item rather than sweeping")
     ap.add_argument("--limit", type=int, default=12)
+    # Priced with the token map, since #105. Without it the probe scores routes with
+    # gates at 1.0 while the server charges 1,000, so the "control group" this tool is
+    # used as would disagree with production on any route touching one.
+    ap.add_argument("--tokens", help="tokens.json")
     args = ap.parse_args()
 
     graph, states, targets = load(args.graph)
+    token_kinds = tokens_mod.for_path(args.tokens)
     if args.explain:
         if not args.item:
             ap.error("--explain needs --item")
         if len(args.raw) > 1:
             ap.error("--explain takes one --raw value, got %d" % len(args.raw))
         for key in args.item:
-            explain(graph, states, key, args.limit, args.raw[0], targets)
+            explain(graph, states, key, args.limit, args.raw[0], targets, token_kinds)
         return
     items = [(k, graph.bare_name(k)) for k in args.item] or PROBES
     # SAY what was dropped. A mistyped --item, or a probe whose key a re-dump renamed, used
@@ -209,7 +220,7 @@ def main():
         print("skipping %s: no real producers" % k, file=sys.stderr)
     if not kept:
         ap.error("none of the %d requested items has a real producer" % len(items))
-    report(sweep(graph, states, args.raw, args.rank, kept, targets), kept)
+    report(sweep(graph, states, args.raw, args.rank, kept, targets, token_kinds), kept)
 
 
 if __name__ == "__main__":

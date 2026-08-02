@@ -758,10 +758,14 @@ class State:
         # behaves in the tree, and re-reading per request lets those two disagree.
         self.pins = pins_mod.load(self.pins_path)
         self.pinned, self.pin_notes = pins_mod.resolve(self.graph, self.pins)
+        # `token_kinds` is resolved just above, and the order matters: the cost table has
+        # to be priced with the SAME map the badges read, or a user edit to data/tokens.json
+        # changes what a node is labelled without changing what the route costs.
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
-            machine_items=machines_mod.build_targets(self.machine_info))
+            machine_items=machines_mod.build_targets(self.machine_info),
+            token_kinds=self.token_kinds)
         # The two search indexes, built here rather than on first use. Between them they
         # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while

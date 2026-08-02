@@ -32,6 +32,7 @@ from recipegraph import cost as cost_mod                      # noqa: E402
 from recipegraph import generators as generators_mod          # noqa: E402
 from recipegraph import machines as machines_mod              # noqa: E402
 from recipegraph import multiblocks as multiblocks_mod        # noqa: E402
+from recipegraph import tokens as tokens_mod                  # noqa: E402
 from recipegraph.defaults import DEFAULT_GRAPH                # noqa: E402
 from recipegraph.model import Graph                           # noqa: E402
 
@@ -73,7 +74,7 @@ def region_of(value):
     return "OUTSIDE THE BAND"
 
 
-def census(graph, have, placed, machines_path, sources_path):
+def census(graph, have, placed, machines_path, sources_path, tokens_path=None):
     info = machines_mod.describe(
         graph, placed, have, overrides=machines_mod.load_overrides(machines_path),
         no_machine=machines_mod.load_no_machine(machines_path))
@@ -84,7 +85,8 @@ def census(graph, have, placed, machines_path, sources_path):
     # Uncached on purpose: a census exists to describe the constants in this working tree, and
     # a warm .cost-cache.json would answer for whichever ones were current when it was written.
     costs = cost_mod.estimate(graph, have=have, machine_states=states,
-                              free_sources=free, machine_items=targets)
+                              free_sources=free, machine_items=targets,
+                              token_kinds=tokens_mod.for_path(tokens_path))
     return states, targets, costs, dict(getattr(costs, "machine_entry", None) or {})
 
 
@@ -94,13 +96,17 @@ def main():
     ap.add_argument("--have", help="a `have` output, to price against real stock")
     ap.add_argument("--machines", help="machines.json, for manual state overrides")
     ap.add_argument("--sources", help="sources.json")
+    # Priced with the token map too, since #105: a census that left it out would report
+    # entry costs the running server does not charge.
+    ap.add_argument("--tokens", help="tokens.json")
     ap.add_argument("--blocked", type=int, default=8,
                     help="how many least-blocked structures to list")
     args = ap.parse_args()
 
     graph = Graph.load(args.graph)
     have, placed = load_stock(args.have)
-    states, targets, costs, entry = census(graph, have, placed, args.machines, args.sources)
+    states, targets, costs, entry = census(graph, have, placed, args.machines,
+                                           args.sources, args.tokens)
 
     by_state = collections.Counter(s[0] for s in states.values())
     print("machine states: %s" % dict(by_state.most_common()))
