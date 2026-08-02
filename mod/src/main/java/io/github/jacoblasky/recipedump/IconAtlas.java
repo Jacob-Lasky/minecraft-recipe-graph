@@ -119,11 +119,17 @@ final class IconAtlas {
 
     void start() {
         MinecraftForge.EVENT_BUS.register(this);
-        // SAY THAT THIS TAKES MINUTES AND THAT THE DUMP IS NOT OVER, because the first real
-        // run was closed seven seconds in. A phase that renders tens of thousands of items
-        // after a wall of completion messages needs to say it is a phase.
-        reply(String.format("rendering %,d item icons -- THIS TAKES A FEW MINUTES, leave the "
-                + "game open until the \"next:\" line appears (%s to skip next time)",
+        // SAY THAT THE DUMP IS NOT OVER, because the first real run was closed seven
+        // seconds in. A phase that starts after a wall of completion messages has to say it
+        // is a phase, and has to name the line that really ends the run.
+        //
+        // NO TIME ESTIMATE. The first version of this said "THIS TAKES A FEW MINUTES", which
+        // was a guess extrapolated from a run that was killed -- measured, 35,675 icons
+        // render in 8.3 seconds. A wrong estimate in the reassuring direction is how the
+        // first run was lost; a wrong one in the other direction is a tool that cries wolf,
+        // and the honest instruction ("wait for this line") needs no number at all.
+        reply(String.format("rendering %,d item icons -- NOT DONE YET, leave the game open "
+                + "until the \"next:\" line appears (%s to skip next time)",
                 targets.size(), DumpCommand.NO_ICONS_ARG));
         reply(String.format("  written %,d at a time, so a run cut short still keeps the "
                 + "pages it finished", PER_PAGE));
