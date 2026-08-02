@@ -4,10 +4,15 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+
 import net.minecraft.init.Blocks;
 import net.minecraft.init.Bootstrap;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -109,13 +114,53 @@ public class SchemaFiveTest {
         // "no emc.json: " in the player's chat.
         assertFalse(ProjectEBridge.available());
         assertFalse(ProjectEBridge.absence().isEmpty());
-        assertEquals(0L, ProjectEBridge.emc(new net.minecraft.item.ItemStack(Items.STICK)));
+        assertEquals(0L, ProjectEBridge.emc(new ItemStack(Items.STICK)));
 
         assertFalse(ModularMachineryBridge.available());
         assertFalse(ModularMachineryBridge.absence().isEmpty());
         assertTrue(ModularMachineryBridge.machines().isEmpty());
         assertEquals(null,
-                ModularMachineryBridge.machineOf(new net.minecraft.item.ItemStack(Items.STICK)));
+                ModularMachineryBridge.machineOf(new ItemStack(Items.STICK)));
+    }
+
+    /**
+     * WRITTEN BY THE REAL WRITER, and this is #123's follow-up in one assertion.
+     *
+     * On the first real run the icon phase announced 35,675 sprites, filled and wrote page
+     * 0 -- 16,361 of 16,384, verified good -- and the game was closed seven seconds later.
+     * `icons.json` was only written in the terminal branch, so a complete 3.6 MB atlas page
+     * survived with nothing to say which item was where, which makes it worth exactly as
+     * much as no page at all. The index is now rewritten after every flush.
+     *
+     * What has to hold for that to be worth anything is that a PARTIAL index is VALID: it
+     * names only the pages on disk, and carries only entries pointing into them.
+     *
+     */
+    @Test
+    public void aPartialIndexNamesOnlyThePagesThatWereFlushed() throws Exception {
+        IconAtlas atlas = new IconAtlas(null, new File("."),
+                new java.util.LinkedHashMap<String, ItemStack>(), new Runnable() {
+                    @Override
+                    public void run() {
+                    }
+                });
+        atlas.pages.add("icons-0.png");
+        atlas.placed.put("minecraft:stone", new int[] {0, 3, 7});
+        atlas.placed.put("minecraft:dirt", new int[] {0, 4, 7});
+
+        File out = File.createTempFile("icons", ".json");
+        out.deleteOnExit();
+        atlas.writeIndex(out);
+        String json = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+
+        assertTrue(json, json.contains("\"icon\": " + IconAtlas.ICON_PX));
+        assertTrue(json, json.contains("\"cols\": " + IconAtlas.COLS));
+        assertTrue(json, json.contains("[\"icons-0.png\"]"));
+        assertTrue(json, json.contains("\"minecraft:stone\": [0,3,7]"));
+        // The page still being rendered contributes nothing, because nothing was ever put
+        // in `placed` for it. A reader that met an entry naming a page that is not in
+        // `pages` would have to drop it; this is why it never has to.
+        assertFalse(json, json.contains("[1,"));
     }
 
     @Test
