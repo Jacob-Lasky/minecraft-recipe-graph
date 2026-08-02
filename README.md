@@ -605,9 +605,18 @@ its planets as ordinary dimensions, and the same rule would price the Nether if 
 declared an ore exclusive to it.
 
 The surcharge is a **floor**, not a verdict: every crafted route still competes, and one
-cheaper than the trip wins. On the reference pack 8 ores are gated and only 3 end up
-actually paying for the trip; Uranium Ore is declared on Oi but has four crafted routes, so
-it settles at 2.0 rather than 801.
+cheaper than the trip wins. On the reference pack 11 keys are gated and 6 end up actually
+paying for the trip; Uranium Ore is declared on Oi but has four crafted routes, so it
+settles at 2.0 rather than 801.
+
+**The same ore under the pack's other id is gated too.** MeatballCraft registers several of
+its ores twice — once as the block `planetDefs.xml` names, once as a ContentTweaker
+MaterialSystem part packed into a shared holder block — and the recipes overwhelmingly
+consume the holder. Gating only the declared key produced a plan that said "mined on Sedna,
+and you have not been there" above a price that had not moved. A key is treated as the same
+ore when it shares **both** the display name and an `ore*` group with a gated one; needing
+both is what declines `tardis:power_cell`, a Trionic Power Cell that is in `oreUranium`
+without being an ore. The two keys stay separate nodes and are only priced alike.
 
 Nothing is gated when the stock file has no dimension record, which is every file written
 before this feature and any written by `tools/ae2_dump.lua`. Rescanning after a trip lifts

@@ -160,6 +160,19 @@ def is_item_key(key):
     return not key.startswith(NON_ITEM_PREFIXES)
 
 
+# Forge's convention for "a block you find in the world and hit": `oreDiamond`, `oreLapis`.
+# ONE definition of the test, because `Graph.world_ores` and `dimensions.shadow_ores` have
+# to agree on it exactly -- see `world_ores` for why the prefix is load-bearing and what
+# accepting `block*` too would readmit. A shadow key matched through `blockDiamond` would
+# pull a decorative block into a dimension gate, which is the same failure in a new place.
+WORLD_ORE_GROUP_PREFIX = "ore"
+
+
+def is_world_ore_group(ore):
+    """True for an oredict group name that means "mined", not "made of"."""
+    return ore.startswith(WORLD_ORE_GROUP_PREFIX)
+
+
 def split_discriminator(key):
     """Return (key_without_discriminator, discriminator_or_None).
 
@@ -478,7 +491,7 @@ class Graph:
         if self._world_ores is None:
             self._world_ores = {
                 member
-                for ore, members in self.ore_members.items() if ore.startswith("ore")
+                for ore, members in self.ore_members.items() if is_world_ore_group(ore)
                 for member in members
             }
         return self._world_ores
