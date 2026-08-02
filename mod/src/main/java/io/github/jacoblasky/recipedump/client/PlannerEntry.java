@@ -77,12 +77,15 @@ public final class PlannerEntry {
             // `PlanResult` to `PlanView` field by field fails by dropping a field and
             // rendering a blank row rather than by erroring.
             //
-            // s1harness is converging the two `PlanNode` classes, after which this becomes a
-            // `PlanView` built straight from the `PlanResult` with no serialise/parse at all.
-            // That is strictly better and keeps the same property -- the object the gate
-            // tested is the object the panel draws -- so this call site is expected to lose
-            // the round trip rather than keep it. `readResult` is a public entry point and
-            // s2layout has undertaken to keep it working or say if it moves.
+            // #158 CONVERGED `PlanNode` AND THIS ROUND TRIP SURVIVED IT, which is worth
+            // recording because the plan was that it would not. One `PlanNode` removed the
+            // duplicated node class; `PlanView` still has no constructor over a
+            // `PlanResult`, so `readResult` remains the only door and the serialise/parse is
+            // still here. Removing it needs a `PlanView.of(PlanResult)`, and the property to
+            // preserve when someone adds one is the one the round trip is standing in for:
+            // the object the golden gate tested must be the object the panel draws, with no
+            // second representation in between. Do NOT replace this with a field-by-field
+            // adapter, which is the third thing and fails by rendering a blank row.
             PlannerScreen.openPlan(PlanJson.readResult(planner.resultJson()), book);
         } else {
             PlannerScreen.openState(state);

@@ -33,14 +33,37 @@ import net.minecraft.item.ItemStack;
 public final class JeiBridge {
 
     /**
-     * The key-to-stack index, rebuilt whenever a graph is loaded.
+     * A graph and the index built FOR it, as ONE object behind ONE volatile field.
      *
      * Held statically because there is exactly one graph and exactly one JEI item list in a
      * client, and threading it through a keybind handler and a widget callback would be
      * ceremony around a singleton that genuinely is one.
+     *
+     * DO NOT SPLIT THESE BACK INTO TWO FIELDS. They were two, and that was safe only while
+     * every writer and reader was the client thread. It stopped being true when
+     * `GraphService` started building the index from its LOADER thread, so the item-list walk
+     * stays off the render path: with two non-volatile fields there is no ordering between
+     * them, so the client thread can observe the NEW graph reference beside the OLD index and
+     * serve the previous graph's stacks for this one. Every key would resolve, TO THE WRONG
+     * ITEM -- a plausible icon and a plausible recipe screen rather than a visible failure,
+     * per-session and unreproducible, and unreachable by any single-threaded test. One
+     * immutable pair behind one volatile reference makes the mismatch unrepresentable rather
+     * than unlikely.
      */
-    private static StackIndex index = StackIndex.empty();
-    private static RecipeGraph indexed;
+    private static final class Indexed {
+
+        final RecipeGraph graph;
+        final StackIndex index;
+
+        Indexed(RecipeGraph graph, StackIndex index) {
+            this.graph = graph;
+            this.index = index;
+        }
+    }
+
+    private static final Indexed NOTHING = new Indexed(null, StackIndex.empty());
+
+    private static volatile Indexed current = NOTHING;
 
     private JeiBridge() {
     }
@@ -77,16 +100,29 @@ public final class JeiBridge {
      * `IIngredientRegistry`, which tests the fake.
      */
     public static void indexFor(RecipeGraph graph, Collection<ItemStack> stacks) {
-        indexed = graph;
-        index = graph == null ? StackIndex.empty() : StackIndex.build(graph, stacks);
+        current = graph == null ? NOTHING
+                : new Indexed(graph, StackIndex.build(graph, stacks));
     }
 
-    /** The index built for `graph`, building it first if this is a different graph. */
+    /**
+     * The index built for `graph`, building it first if this is a different graph.
+     *
+     * The lazy rebuild is a FALLBACK, not the main path: `GraphService` builds the index
+     * eagerly on its loader thread as soon as a graph is ready, so the first menu to open
+     * pays nothing. This covers the orders that wiring cannot -- a test, the screenshot
+     * harness, or a graph that arrived without anyone announcing it.
+     *
+     * Two threads racing here both build a correct index for their own graph and the later
+     * write wins, so the cost of the race is duplicated work rather than a wrong answer.
+     * Locking to save that would put a lock on a path the render thread walks.
+     */
     public static StackIndex indexOf(RecipeGraph graph) {
-        if (graph != indexed) {
+        Indexed held = current;
+        if (held.graph != graph) {
             indexFor(graph);
+            held = current;
         }
-        return index;
+        return held.index;
     }
 
     private static Collection<ItemStack> allItemStacks() {
