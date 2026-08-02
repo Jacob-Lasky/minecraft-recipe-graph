@@ -61,9 +61,24 @@ public final class JeiBridge {
      * which is the same answer a key with no item behind it gives anyway.
      */
     public static void indexFor(RecipeGraph graph) {
+        indexFor(graph, allItemStacks());
+    }
+
+    /**
+     * The same, from a population handed in rather than asked of JEI.
+     *
+     * THE SEAM {@link StackIndex} ALREADY DOCUMENTS, one level up. That class takes its stacks
+     * as an argument "so it can be unit-tested against hand-built ones with no runtime --
+     * which is the only way any of Phase 4 gets tested at all", and then this class went and
+     * put the untestable call back in front of it. Without this overload, every path that
+     * needs a NON-EMPTY index -- which is every interesting answer {@link JeiNodeActions}
+     * gives -- is reachable only from a live client, so the whole true branch of the node menu
+     * would ship asserted by nothing. The alternative was a 21-method fake
+     * `IIngredientRegistry`, which tests the fake.
+     */
+    public static void indexFor(RecipeGraph graph, Collection<ItemStack> stacks) {
         indexed = graph;
-        index = graph == null ? StackIndex.empty()
-                : StackIndex.build(graph, allItemStacks());
+        index = graph == null ? StackIndex.empty() : StackIndex.build(graph, stacks);
     }
 
     /** The index built for `graph`, building it first if this is a different graph. */
