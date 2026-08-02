@@ -108,9 +108,16 @@ def modularuiJar = resolvedPackJars.modularui_jar
 dependencies {
     if (heiJar && heiJar.exists()) {
         compileOnly files(heiJar)
-        // Also at TEST runtime: DumpCommand references JEI types in its signatures, so
-        // the class cannot even load without them, however little of it a test touches.
-        testRuntimeOnly files(heiJar)
+        // On the TEST COMPILE classpath, not merely at test runtime, and for the same
+        // reason ModularUI is below. Two things need it. DumpCommand references JEI types in
+        // its signatures, so the class cannot load without them however little of it a test
+        // touches -- that was the original reason and it still holds. And since #19 Phase 4
+        // there is JEI-FACING code worth asserting headlessly: `JeiBridge` and
+        // `PlannerGuiHandler` must degrade cleanly when no runtime exists, which is a state
+        // real clients are in now that the mod declares `after:jei` rather than
+        // `required-after`, and a test cannot construct either without the API to compile
+        // against.
+        testImplementation files(heiJar)
     }
     resolvedPackJars.each { prop, jar ->
         if (prop != 'hei_jar' && jar && jar.exists()) {

@@ -44,6 +44,11 @@ register("planner", new Opener() {
 ```
 
 `harness/shot.sh planner` then shoots it, and `harness/shot.sh planner:someArg` passes `arg`.
+
+`jei` is the one screen that is not ours: it asks `JeiBridge` to open JEI's own recipe page,
+so the picture is evidence that the runtime was captured, a focus was created and the GUI was
+shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
+names another item.
 Keep it to one line: the moment adding a screen costs more than that, people stop adding them
 and the harness stops being used.
 

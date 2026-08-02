@@ -280,6 +280,28 @@ public class CostTest {
     // -- oredict slots -------------------------------------------------------------------------------
 
     @Test
+    public void aQuantityPastIntRangeIsPricedRatherThanWrappedNegative() {
+        // The solver passes a computed NEED here, not a slot's own quantity, and this pack has
+        // a recipe yielding 60,466,176 at once -- so a deep chain really can multiply past
+        // 2^31. An int parameter wraps NEGATIVE, `Math.max(qty, 1)` then reports 1, and the
+        // dearest slot in a plan prices as the cheapest.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "r", "crafting", "mod:out", 1, "mod:leaf", 1);
+        RecipeGraph graph = b.build();
+        CostTable table = Cost.estimate(graph, new CostInputs());
+        int leaf = graph.keyId("mod:leaf");
+
+        long huge = 3L * Integer.MAX_VALUE;
+        assertEquals(Cost.BASE_RAW_COST * huge, Cost.inputCost(table, graph, leaf, huge), 0.0);
+        // Monotonic across the boundary, which a wrap would not be.
+        assertTrue(Cost.inputCost(table, graph, leaf, huge)
+                > Cost.inputCost(table, graph, leaf, Integer.MAX_VALUE));
+        // And a fluid still scales to buckets at that size.
+        int water = graph.keyId("mod:leaf");
+        assertEquals(Cost.inputCost(table, graph, water, 1L), Cost.BASE_RAW_COST, 0.0);
+    }
+
+    @Test
     public void anOredictSlotCostsItsCheapestMemberAndFallsBackToItsOwnLeafPrice() {
         GraphBuilder b = new GraphBuilder();
         b.beginRecipe();

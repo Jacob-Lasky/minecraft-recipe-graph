@@ -48,6 +48,11 @@ public class DumpPlugin implements IModPlugin {
     @Override
     public void register(IModRegistry registry) {
         ingredients = registry.getIngredientRegistry();
+        // A GLOBAL handler, not an advanced one. `IAdvancedGuiHandler` is bounded to
+        // `GuiContainer` and the planner opens a plain `GuiScreen`, so an advanced handler
+        // would register and never fire. See PlannerGuiHandler for the javap evidence.
+        registry.addGlobalGuiHandlers(
+                new io.github.jacoblasky.recipedump.client.jei.PlannerGuiHandler());
     }
 
     @Override

@@ -46,6 +46,12 @@ public final class ShotScreens {
                 PlannerShot.open();
             }
         });
+        register("jei", new Opener() {
+            @Override
+            public void open(String arg) {
+                JeiRecipeShot.open(arg);
+            }
+        });
     }
 
     private ShotScreens() {
