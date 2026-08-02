@@ -260,3 +260,38 @@ class TheTwoPredicatesAgreeTest(unittest.TestCase):
 
         self.assertTrue(api.FIELDS["unsourced"][0](_Ctx(), SUPERIOR))
         self.assertFalse(api.FIELDS["unsourced"][0](_Ctx(), "minecraft:cobblestone"))
+
+
+class TheTreeRowDoesNotCrushItsIconTest(unittest.TestCase):
+    """A flex item with `min-width:0` shrinks below its own ATOMIC children.
+
+    Measured on the live plan at 390px: a deep node carrying an item icon and a wide badge
+    squeezed `.nm` to a 6px content box around a 16px sprite -- `scrollWidth` 22 against
+    `clientWidth` 6. Every bounding rect looked correct and the page did not scroll
+    horizontally, which is why this repo measures `scrollWidth` rather than geometry.
+
+    Asserted as CSS rather than by driving a browser because the suite is stdlib-only and
+    has no Playwright; the browser measurement is the artifact on the PR. What can be pinned
+    here is that the two rules which prevent it are present and in the phone block.
+    """
+
+    def _phone_block(self):
+        from recipegraph.render import CSS
+        # The last @media block in the sheet is the phone one; the file's own comment says
+        # the phone blocks sit last so they win by cascade order.
+        return CSS[CSS.rindex("@media"):]
+
+    def test_the_row_may_wrap(self):
+        self.assertIn("flex-wrap:wrap", self._phone_block())
+
+    def test_the_name_keeps_a_floor(self):
+        block = self._phone_block()
+        self.assertRegex(block, r"\.nm\{min-width:\d")
+
+    def test_min_width_zero_survives_for_long_ids(self):
+        # The floor must not undo what `min-width:0` buys in the base rule: an unbreakable
+        # registry id has to be able to break, which needs the base `.nm` untouched.
+        from recipegraph.render import CSS
+        base = CSS[:CSS.rindex("@media")]
+        self.assertIn("min-width:0", base)
+        self.assertIn("overflow-wrap:anywhere", base)
