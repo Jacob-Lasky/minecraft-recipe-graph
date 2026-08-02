@@ -190,28 +190,32 @@
     "kind": "item",
     "label": "Nether Quartz Chicken",
     "name": "Nether Quartz Chicken",
-    "qty": 161
+    "qty": 161,
+    "unsourced": true
    },
    {
     "key": "chickens:spawn_egg#f48705dff91c",
     "kind": "item",
     "label": "Yellow Chicken",
     "name": "Yellow Chicken",
-    "qty": 161
+    "qty": 161,
+    "unsourced": true
    },
    {
     "key": "chickens:spawn_egg#8007a5b9df3a",
     "kind": "item",
     "label": "Ink Black Chicken",
     "name": "Ink Black Chicken",
-    "qty": 124
+    "qty": 124,
+    "unsourced": true
    },
    {
     "key": "chickens:spawn_egg#79d20a22828a",
     "kind": "item",
     "label": "Log Chicken",
     "name": "Log Chicken",
-    "qty": 124
+    "qty": 124,
+    "unsourced": true
    },
    {
     "key": "twilightforest:twilight_plant:8",
@@ -274,7 +278,8 @@
     "kind": "item",
     "label": "Soul Sand Chicken",
     "name": "Soul Sand Chicken",
-    "qty": 32
+    "qty": 32,
+    "unsourced": true
    },
    {
     "key": "minecraft:iron_ore",
@@ -288,7 +293,8 @@
     "kind": "item",
     "label": "Void Metal Seeds",
     "name": "Void Metal Seeds",
-    "qty": 24
+    "qty": 24,
+    "unsourced": true
    },
    {
     "key": "erebus:ore_encrusted_diamond",
@@ -323,7 +329,8 @@
     "kind": "item",
     "label": "Helplessness Drone",
     "name": "Helplessness Drone",
-    "qty": 12
+    "qty": 12,
+    "unsourced": true
    },
    {
     "key": "railcraft:ore_metal_poor:1",
@@ -379,14 +386,16 @@
     "kind": "item",
     "label": "Ender Dragon Data Model (Basic)",
     "name": "Ender Dragon Data Model (Basic)",
-    "qty": 8
+    "qty": 8,
+    "unsourced": true
    },
    {
     "key": "forestry:bee_drone_ge#438f0076b188",
     "kind": "item",
     "label": "Radiant Drone",
     "name": "Radiant Drone",
-    "qty": 8
+    "qty": 8,
+    "unsourced": true
    },
    {
     "key": "minecraft:quartz_ore",
@@ -421,7 +430,8 @@
     "kind": "item",
     "label": "Vazbee Drone",
     "name": "Vazbee Drone",
-    "qty": 4
+    "qty": 4,
+    "unsourced": true
    },
    {
     "key": "aoa3:varsium_ore",
@@ -442,7 +452,8 @@
     "kind": "item",
     "label": "Forest Drone",
     "name": "Forest Drone",
-    "qty": 3
+    "qty": 3,
+    "unsourced": true
    },
    {
     "key": "minecraft:lapis_ore",
@@ -456,7 +467,8 @@
     "kind": "item",
     "label": "Meadows Drone",
     "name": "Meadows Drone",
-    "qty": 2
+    "qty": 2,
+    "unsourced": true
    },
    {
     "key": "erebus:materials:21",
@@ -491,35 +503,40 @@
     "kind": "item",
     "label": "Deep Learner Drone",
     "name": "Deep Learner Drone",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "forestry:bee_drone_ge#ff209f95a0e4",
     "kind": "item",
     "label": "Crepuscular Drone",
     "name": "Crepuscular Drone",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "deepmoblearning:data_model_twilight_forest#c7bccd46ac55",
     "kind": "item",
     "label": "Forest creature Data Model (Basic)",
     "name": "Forest creature Data Model (Basic)",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "forestry:bee_drone_ge#c3e057183678",
     "kind": "item",
     "label": "Modest Drone",
     "name": "Modest Drone",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "forestry:bee_drone_ge#fe694d7cc286",
     "kind": "item",
     "label": "Mystical Drone",
     "name": "Mystical Drone",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "contenttweaker:passive_extended_crafting",
@@ -533,7 +550,8 @@
     "kind": "item",
     "label": "Blaze Data Model (Superior)",
     "name": "Blaze Data Model (Superior)",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    }
   ],
   "target": "fluid:nethengeic_fluid",
@@ -1194,7 +1212,9 @@
                        "label": "Nether Quartz Chicken",
                        "name": "Nether Quartz Chicken",
                        "need": 16,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "key": "chickens:spawn_egg#f48705dff91c",
@@ -1202,7 +1222,9 @@
                        "label": "Yellow Chicken",
                        "name": "Yellow Chicken",
                        "need": 16,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                       "status": "raw",
+                       "unsourced": true
                       }
                      ],
                      "key": "chickens:spawn_egg#75d470b52c69",
@@ -1357,7 +1379,9 @@
                "label": "Nether Quartz Chicken",
                "name": "Nether Quartz Chicken",
                "need": 1,
-               "status": "raw"
+               "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+               "status": "raw",
+               "unsourced": true
               },
               {
                "key": "chickens:spawn_egg#f48705dff91c",
@@ -1365,7 +1389,9 @@
                "label": "Yellow Chicken",
                "name": "Yellow Chicken",
                "need": 1,
-               "status": "raw"
+               "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+               "status": "raw",
+               "unsourced": true
               }
              ],
              "key": "chickens:spawn_egg#75d470b52c69",
@@ -1794,7 +1820,9 @@
                                  "label": "Ink Black Chicken",
                                  "name": "Ink Black Chicken",
                                  "need": 36,
-                                 "status": "raw"
+                                 "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                 "status": "raw",
+                                 "unsourced": true
                                 },
                                 {
                                  "key": "chickens:spawn_egg#79d20a22828a",
@@ -1802,7 +1830,9 @@
                                  "label": "Log Chicken",
                                  "name": "Log Chicken",
                                  "need": 36,
-                                 "status": "raw"
+                                 "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                 "status": "raw",
+                                 "unsourced": true
                                 }
                                ],
                                "key": "chickens:spawn_egg#c46730e61a53",
@@ -1990,7 +2020,9 @@
                                      "label": "Nether Quartz Chicken",
                                      "name": "Nether Quartz Chicken",
                                      "need": 48,
-                                     "status": "raw"
+                                     "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                     "status": "raw",
+                                     "unsourced": true
                                     },
                                     {
                                      "key": "chickens:spawn_egg#f48705dff91c",
@@ -1998,7 +2030,9 @@
                                      "label": "Yellow Chicken",
                                      "name": "Yellow Chicken",
                                      "need": 48,
-                                     "status": "raw"
+                                     "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                     "status": "raw",
+                                     "unsourced": true
                                     }
                                    ],
                                    "key": "chickens:spawn_egg#75d470b52c69",
@@ -2286,7 +2320,9 @@
                        "label": "Helplessness Drone",
                        "name": "Helplessness Drone",
                        "need": 4,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 7,
@@ -2520,7 +2556,9 @@
                        "label": "Ender Dragon Data Model (Basic)",
                        "name": "Ender Dragon Data Model (Basic)",
                        "need": 8,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Data Model Dragon",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 2,
@@ -2564,7 +2602,9 @@
                            "label": "Radiant Drone",
                            "name": "Radiant Drone",
                            "need": 4,
-                           "status": "raw"
+                           "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                           "status": "raw",
+                           "unsourced": true
                           }
                          ],
                          "key": "minecraft:clay_ball",
@@ -2681,7 +2721,9 @@
                        "label": "Soul Sand Chicken",
                        "name": "Soul Sand Chicken",
                        "need": 32,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                       "status": "raw",
+                       "unsourced": true
                       }
                      ],
                      "key": "minecraft:soul_sand",
@@ -2727,7 +2769,9 @@
                          "label": "Ink Black Chicken",
                          "name": "Ink Black Chicken",
                          "need": 16,
-                         "status": "raw"
+                         "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                         "status": "raw",
+                         "unsourced": true
                         },
                         {
                          "key": "chickens:spawn_egg#79d20a22828a",
@@ -2735,7 +2779,9 @@
                          "label": "Log Chicken",
                          "name": "Log Chicken",
                          "need": 16,
-                         "status": "raw"
+                         "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                         "status": "raw",
+                         "unsourced": true
                         }
                        ],
                        "key": "chickens:spawn_egg#c46730e61a53",
@@ -2775,7 +2821,9 @@
                        "label": "Vazbee Drone",
                        "name": "Vazbee Drone",
                        "need": 4,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                       "status": "raw",
+                       "unsourced": true
                       }
                      ],
                      "key": "minecraft:wool:9",
@@ -3278,7 +3326,9 @@
                          "label": "Void Metal Seeds",
                          "name": "Void Metal Seeds",
                          "need": 24,
-                         "status": "raw"
+                         "note": "no recipe reaches this state; the graph can only make Void Metal Seeds",
+                         "status": "raw",
+                         "unsourced": true
                         },
                         {
                          "alternatives": 1,
@@ -3827,7 +3877,9 @@
                                "label": "Ink Black Chicken",
                                "name": "Ink Black Chicken",
                                "need": 72,
-                               "status": "raw"
+                               "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                               "status": "raw",
+                               "unsourced": true
                               },
                               {
                                "key": "chickens:spawn_egg#79d20a22828a",
@@ -3835,7 +3887,9 @@
                                "label": "Log Chicken",
                                "name": "Log Chicken",
                                "need": 72,
-                               "status": "raw"
+                               "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                               "status": "raw",
+                               "unsourced": true
                               }
                              ],
                              "key": "chickens:spawn_egg#c46730e61a53",
@@ -4023,7 +4077,9 @@
                                    "label": "Nether Quartz Chicken",
                                    "name": "Nether Quartz Chicken",
                                    "need": 96,
-                                   "status": "raw"
+                                   "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                   "status": "raw",
+                                   "unsourced": true
                                   },
                                   {
                                    "key": "chickens:spawn_egg#f48705dff91c",
@@ -4031,7 +4087,9 @@
                                    "label": "Yellow Chicken",
                                    "name": "Yellow Chicken",
                                    "need": 96,
-                                   "status": "raw"
+                                   "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+                                   "status": "raw",
+                                   "unsourced": true
                                   }
                                  ],
                                  "key": "chickens:spawn_egg#75d470b52c69",
@@ -4319,7 +4377,9 @@
                      "label": "Helplessness Drone",
                      "name": "Helplessness Drone",
                      "need": 8,
-                     "status": "raw"
+                     "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                     "status": "raw",
+                     "unsourced": true
                     },
                     {
                      "alternatives": 7,
@@ -4609,7 +4669,9 @@
                      "label": "Deep Learner Drone",
                      "name": "Deep Learner Drone",
                      "need": 1,
-                     "status": "raw"
+                     "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                     "status": "raw",
+                     "unsourced": true
                     },
                     {
                      "alt_count": 4,
@@ -4618,7 +4680,9 @@
                      "label": "Crepuscular Drone",
                      "name": "Crepuscular Drone",
                      "need": 1,
-                     "status": "raw"
+                     "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                     "status": "raw",
+                     "unsourced": true
                     }
                    ],
                    "key": "forestry:bee_drone_ge#4259c259997c",
@@ -4700,7 +4764,9 @@
                "label": "Forest creature Data Model (Basic)",
                "name": "Forest creature Data Model (Basic)",
                "need": 1,
-               "status": "raw"
+               "note": "no recipe reaches this state; the graph can only make Data Model Twilight Forest",
+               "status": "raw",
+               "unsourced": true
               },
               {
                "alternatives": 2,
@@ -4744,7 +4810,9 @@
                    "label": "Radiant Drone",
                    "name": "Radiant Drone",
                    "need": 4,
-                   "status": "raw"
+                   "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                   "status": "raw",
+                   "unsourced": true
                   }
                  ],
                  "key": "minecraft:clay_ball",
@@ -4872,7 +4940,9 @@
                    "label": "Forest Drone",
                    "name": "Forest Drone",
                    "need": 1,
-                   "status": "raw"
+                   "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                   "status": "raw",
+                   "unsourced": true
                   },
                   {
                    "alt_count": 4,
@@ -4881,7 +4951,9 @@
                    "label": "Meadows Drone",
                    "name": "Meadows Drone",
                    "need": 1,
-                   "status": "raw"
+                   "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                   "status": "raw",
+                   "unsourced": true
                   }
                  ],
                  "key": "forestry:bee_drone_ge#e1904b1a26ba",
@@ -4908,7 +4980,9 @@
                    "label": "Modest Drone",
                    "name": "Modest Drone",
                    "need": 1,
-                   "status": "raw"
+                   "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                   "status": "raw",
+                   "unsourced": true
                   },
                   {
                    "alt_count": 4,
@@ -4922,7 +4996,9 @@
                      "label": "Mystical Drone",
                      "name": "Mystical Drone",
                      "need": 1,
-                     "status": "raw"
+                     "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                     "status": "raw",
+                     "unsourced": true
                     },
                     {
                      "alt_count": 4,
@@ -4941,7 +5017,9 @@
                          "label": "Forest Drone",
                          "name": "Forest Drone",
                          "need": 1,
-                         "status": "raw"
+                         "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                         "status": "raw",
+                         "unsourced": true
                         },
                         {
                          "alt_count": 4,
@@ -4950,7 +5028,9 @@
                          "label": "Meadows Drone",
                          "name": "Meadows Drone",
                          "need": 1,
-                         "status": "raw"
+                         "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                         "status": "raw",
+                         "unsourced": true
                         }
                        ],
                        "key": "forestry:bee_drone_ge#e1904b1a26ba",
@@ -4972,7 +5052,9 @@
                        "label": "Forest Drone",
                        "name": "Forest Drone",
                        "need": 1,
-                       "status": "raw"
+                       "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                       "status": "raw",
+                       "unsourced": true
                       }
                      ],
                      "key": "forestry:bee_drone_ge#9cd0196d9f2a",
@@ -5249,7 +5331,9 @@
          "label": "Blaze Data Model (Superior)",
          "name": "Blaze Data Model (Superior)",
          "need": 1,
-         "status": "raw"
+         "note": "no recipe reaches this state; the graph can only make Data Model Blaze",
+         "status": "raw",
+         "unsourced": true
         }
        ],
        "key": "fluid:lifeessence",

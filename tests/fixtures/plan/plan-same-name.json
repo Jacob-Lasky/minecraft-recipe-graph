@@ -50,14 +50,16 @@
     "kind": "item",
     "label": "Ink Black Chicken",
     "name": "Ink Black Chicken",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    },
    {
     "key": "chickens:spawn_egg#79d20a22828a",
     "kind": "item",
     "label": "Log Chicken",
     "name": "Log Chicken",
-    "qty": 1
+    "qty": 1,
+    "unsourced": true
    }
   ],
   "target": "thermalfoundation:material:32",
@@ -123,7 +125,9 @@
            "label": "Ink Black Chicken",
            "name": "Ink Black Chicken",
            "need": 1,
-           "status": "raw"
+           "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+           "status": "raw",
+           "unsourced": true
           },
           {
            "key": "chickens:spawn_egg#79d20a22828a",
@@ -131,7 +135,9 @@
            "label": "Log Chicken",
            "name": "Log Chicken",
            "need": 1,
-           "status": "raw"
+           "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
+           "status": "raw",
+           "unsourced": true
           }
          ],
          "key": "chickens:spawn_egg#c46730e61a53",

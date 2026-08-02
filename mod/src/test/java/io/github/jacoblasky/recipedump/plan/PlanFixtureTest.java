@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,9 @@ import java.util.TreeSet;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
+import io.github.jacoblasky.recipedump.graph.GraphJsonReader;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 
 import org.junit.Assume;
 import org.junit.Test;
@@ -95,6 +99,7 @@ public class PlanFixtureTest {
         node.altCount = 2;
         node.dimension = "The End";
         node.tokenKind = Tokens.kindName(Tokens.GATE);
+        node.unsourced = Boolean.TRUE;
         return node;
     }
 
@@ -103,6 +108,7 @@ public class PlanFixtureTest {
         entry.why = "why";
         entry.tokenKind = Tokens.kindName(Tokens.GATE);
         entry.emc = 2048L;
+        entry.unsourced = Boolean.TRUE;
         return entry;
     }
 
@@ -165,6 +171,80 @@ public class PlanFixtureTest {
             assertTrue(fixture.getName() + " request has no item", request.has("item"));
             assertTrue(fixture.getName() + " request has no qty", request.has("qty"));
         }
+    }
+
+    // -- the golden gate ------------------------------------------------------------------
+
+    /**
+     * Every fixture, solved in Java and compared field for field with the Python oracle.
+     *
+     * ORACLE-GATED, exactly as `tests/test_plan_fixtures.py` is and for the same reasons: the
+     * graph is 121 MB, is not in git, and CI will never have it. Point
+     * `$RECIPEGRAPH_ORACLE` at it to run this. The fixtures record the sha256 of the graph
+     * they were generated against and this REFUSES a graph that does not match -- a plan
+     * compared against a different graph fails for reasons that have nothing to do with the
+     * port, and the natural response to that is to weaken the comparison.
+     *
+     * Reports EVERY disagreeing fixture with its path, not just the first. Sixteen plans and
+     * a single "expected ... but was ..." would mean sixteen runs to learn the shape of the
+     * problem.
+     */
+    @Test
+    public void everyFixturePlansExactlyAsThePythonOracleDoes() throws IOException {
+        String oracle = System.getenv("RECIPEGRAPH_ORACLE");
+        Assume.assumeTrue("set RECIPEGRAPH_ORACLE to the oracle graph to run the golden gate",
+                oracle != null && new File(oracle).isFile());
+        List<File> fixtures = planFixtures();
+        Assume.assumeFalse("no plan fixtures", fixtures.isEmpty());
+
+        RecipeGraph graph = GraphJsonReader.read(new File(oracle));
+        Map<String, CostTable> priced = new LinkedHashMap<String, CostTable>();
+        List<String> failures = new ArrayList<String>();
+
+        for (File fixture : fixtures) {
+            JsonObject doc = read(fixture);
+            String want = doc.getAsJsonObject("graph").get("sha256").getAsString();
+            JsonObject request = doc.getAsJsonObject("request");
+
+            ScenarioInputs.Resolved resolved =
+                    ScenarioInputs.resolve(graph, doc.getAsJsonObject("scenario"));
+            String signature = resolved.costSignature();
+            CostTable costs = priced.get(signature);
+            if (costs == null) {
+                costs = ScenarioInputs.price(graph, resolved);
+                priced.put(signature, costs);
+            }
+            int maxNodes = request.has("max_nodes")
+                    ? request.get("max_nodes").getAsInt() : Solver.DEFAULT_MAX_NODES;
+            int target = graph.keyId(request.get("item").getAsString());
+            if (target < 0) {
+                failures.add(fixture.getName() + ": the oracle graph has no key "
+                        + request.get("item").getAsString() + " (graph sha " + want + ")");
+                continue;
+            }
+            PlanResult plan = ScenarioInputs.solverFor(graph, resolved, costs, maxNodes)
+                    .solve(target, request.get("qty").getAsLong());
+
+            String why = JsonCompare.describe(doc.get("result"),
+                    new JsonParser().parse(PlanJson.toJson(plan)));
+            if (why != null) {
+                failures.add(fixture.getName() + ": " + why);
+            }
+        }
+        assertTrue(failures.size() + " of " + fixtures.size()
+                + " fixtures disagree with the oracle:\n  "
+                + join(failures, "\n  "), failures.isEmpty());
+    }
+
+    private static String join(List<String> parts, String separator) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) {
+                sb.append(separator);
+            }
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
     }
 
     // -- the comparison itself, proven before anything depends on it ----------------------

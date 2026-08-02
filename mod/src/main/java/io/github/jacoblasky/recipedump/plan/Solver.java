@@ -423,10 +423,9 @@ public final class Solver {
                 cyclic++;
             }
         }
-        String category = g.categoryName(store.categoryId(recipeId));
         // Simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines.
         double simple = 1.0 / (1 + slots.size());
-        double plain = Machines.isHandCrafting(category) ? 0.1 : 0.0;
+        double plain = Machines.isHandCrafting(g, store.categoryId(recipeId)) ? 0.1 : 0.0;
         int avail = availabilityRank(recipeId);
         // Order matters. A container transfer is never production. After that, the ESTIMATED
         // TOTAL COST dominates: it already accounts for machine availability and for how
@@ -517,25 +516,16 @@ public final class Solver {
     /**
      * 2 = machine on hand, 1 = buildable or unidentified, 0 = proven unavailable.
      *
-     * AN UNDESCRIBED CATEGORY RANKS 1, NOT 0, and that is the whole reason this reads
-     * `state < 0` rather than treating a missing entry as unavailable. Machine identity is
-     * guessed from a JEI display title, which is usually the recipe TYPE rather than the
-     * machine, and the heuristic misses about two categories in three; refusing to plan
-     * through a machine merely because it could not be identified once walled off 40% of
-     * the graph.
+     * DELEGATED, NOT DERIVED FROM THE STATE CONSTANT, and graphmodel added the method for
+     * exactly this reason. The constants are ordered by COST -- HAVE 0, BUILDABLE 1, UNKNOWN
+     * 2, UNAVAILABLE 3 -- so `unknown` sits ABOVE `buildable` there, while this rank has to
+     * put BOTH at 1. Any arithmetic inversion of the constants separates precisely the pair
+     * that must stay together, which is the collapse-`unknown` failure in a new place, and it
+     * would pass every type check. An undescribed category is 1, not 0.
      */
     int availabilityRank(int recipeId) {
-        int state = machineState(g.recipes().categoryId(recipeId));
-        if (state < 0) {
-            return 1;
-        }
-        if (state == MachineInfo.HAVE) {
-            return 2;
-        }
-        if (state == MachineInfo.BUILDABLE || state == MachineInfo.UNKNOWN) {
-            return 1;
-        }
-        return 0;
+        int categoryId = g.recipes().categoryId(recipeId);
+        return machineStates == null ? 1 : machineStates.availabilityRank(categoryId);
     }
 
     /** The category's state, or -1 when nothing describes it. */
