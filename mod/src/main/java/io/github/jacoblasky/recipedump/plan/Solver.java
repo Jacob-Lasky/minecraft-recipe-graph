@@ -259,7 +259,14 @@ public final class Solver {
         if (costs == null) {
             return 0.0;
         }
-        return Cost.inputCost(costs, g, keyId, clampQty(qty));
+        // PASSED AS A LONG, AND `Cost.inputCost` TAKES ONE. It briefly did not, and the
+        // narrowing this method used to do was hiding a divergence rather than smoothing a
+        // signature: `resolve_ore` calls this with a computed NEED, not a slot's own
+        // quantity, so it multiplies down a chain -- and python has no int ceiling, so
+        // saturating at Integer.MAX_VALUE agreed with the oracle only up to 2^31. A fixture
+        // that ever crossed it would have failed with the cause invisible in the diff. DO NOT
+        // reintroduce a cast here.
+        return Cost.inputCost(costs, g, keyId, qty);
     }
 
     /**
@@ -351,20 +358,6 @@ public final class Solver {
             return pickAlternative(slot);
         }
     };
-
-    /**
-     * A long quantity narrowed for `Cost.inputCost`, which takes an int.
-     *
-     * SATURATES RATHER THAN WRAPPING. Quantities reach into the millions here -- one recipe
-     * in the pack yields 60,466,176 -- and a deep chain can in principle multiply past
-     * int range, where a cast would come out NEGATIVE and price the dearest slot in the plan
-     * as the cheapest. Saturating is safe because this number is only ever a RANKING input:
-     * anything at that scale is already astronomically priced and its exact value cannot
-     * change which route wins.
-     */
-    private static int clampQty(long qty) {
-        return qty > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) qty;
-    }
 
     private double estimatedCost(int recipeId) {
         if (costs == null) {
