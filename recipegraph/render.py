@@ -73,7 +73,13 @@ h1{font-size:27px;line-height:1.15;margin:0;letter-spacing:-.022em;font-weight:6
 text-wrap:balance}
 h1 .x{font-family:var(--mono);font-size:19px;font-weight:500;color:var(--dim);
 letter-spacing:0;margin-left:8px}
-.id{font:12.5px/1 var(--mono);color:var(--dim);margin-top:8px;word-break:break-all}
+/* `overflow-wrap:anywhere`, NOT `word-break:break-all`. Both break an unbreakable registry
+   id, which is what this rule is for -- but `break-all` breaks EVERYTHING, and this element
+   also carries the search page's prose note, which came out as "47 hidd/en" and "read fro/m
+   display names" at 390px. `anywhere` breaks only when there is no other opportunity, so a
+   long id still breaks and a sentence still breaks at its spaces. Same property `.nm` uses
+   for the same reason. */
+.id{font:12.5px/1 var(--mono);color:var(--dim);margin-top:8px;overflow-wrap:anywhere}
 
 /* Summary before detail: the four numbers that decide whether to read further. */
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);
@@ -794,7 +800,7 @@ box.addEventListener('input',function(){
 """
 
 
-def _ing_html(ing):
+def _ing_html(ing, icon=None):
     alts = ing["alts"]
     first = alts[0]
     have = first.get("stock", 0)
@@ -807,33 +813,34 @@ def _ing_html(ing):
             ing["alt_total"] - 1, (": " + others) if others else "")
     unit = " mB" if ing.get("role") == "fluid" or first.get("kind") == "fluid" else ""
     return '<div class="ing"><span class="q">%s%s</span>%s<span>%s%s</span></div>' % (
-        "{:,}".format(ing["qty"]), unit, pill, named(first), extra)
+        "{:,}".format(ing["qty"]), unit, pill, named(first, icon), extra)
 
 
-def _makes_html(item):
+def _makes_html(item, icon=None):
     if not item["makes"]:
         return '<div class="empty">No known recipe in this graph.</div>'
     out = []
     for rec in item["makes"]:
         via = rec.get("machine") or rec["category"]
         yields = ", ".join(
-            "%s&times; %s" % ("{:,}".format(o["qty"]), named(o))
+            "%s&times; %s" % ("{:,}".format(o["qty"]), named(o, icon))
             for o in rec["outputs"][:3])
         out.append('<div class="rec"><div class="via">%s &rarr; %s</div>%s</div>'
-                   % (_esc(via), yields, "".join(_ing_html(i) for i in rec["inputs"])))
+                   % (_esc(via), yields,
+                      "".join(_ing_html(i, icon) for i in rec["inputs"])))
     if item["makes_total"] > len(item["makes"]):
         out.append('<div class="alt">+%d more recipes not shown</div>'
                    % (item["makes_total"] - len(item["makes"])))
     return "".join(out)
 
 
-def _used_html(item):
+def _used_html(item, icon=None):
     if not item["used_in"]:
         return '<div class="empty">Not an input to anything in this graph.</div>'
     out = []
     for rec in item["used_in"]:
         via = rec.get("machine") or rec["category"]
-        outs = ", ".join(named(o) for o in rec["outputs"][:2]) or "?"
+        outs = ", ".join(named(o, icon) for o in rec["outputs"][:2]) or "?"
         out.append('<div class="ing"><span class="q">&rarr;</span>'
                    '<span>%s <span class="alt">via %s</span></span></div>'
                    % (outs, _esc(via)))
@@ -865,8 +872,8 @@ def _res_html(item, icon=None):
   </div>
 </div>""" % (
         _esc(hay), named(item, icon), _esc(item["key"]), "".join(chips),
-        item["makes_total"], _makes_html(item),
-        item["used_in_total"], _used_html(item),
+        item["makes_total"], _makes_html(item, icon),
+        item["used_in_total"], _used_html(item, icon),
     )
 
 

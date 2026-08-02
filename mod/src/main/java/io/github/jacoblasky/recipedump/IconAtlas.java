@@ -90,9 +90,16 @@ final class IconAtlas {
     private final List<Map.Entry<String, ItemStack>> targets;
     private final Runnable done;
 
-    /** {key: [page, column, row]} for every sprite that actually drew something. */
-    private final Map<String, int[]> placed = new LinkedHashMap<String, int[]>();
-    private final List<String> pages = new ArrayList<String>();
+    /**
+     * {key: [page, column, row]} for every sprite that actually drew something, and the
+     * page files written so far.
+     *
+     * Package-visible so `SchemaFiveTest` can build the one state no unit test could
+     * otherwise reach -- a flushed page plus a half-rendered one -- and hand the real
+     * writer's output to the python reader. Rendering itself needs a GL context.
+     */
+    final Map<String, int[]> placed = new LinkedHashMap<String, int[]>();
+    final List<String> pages = new ArrayList<String>();
 
     private Framebuffer page;
     private int pageIndex;
@@ -100,6 +107,7 @@ final class IconAtlas {
     private int cursor;
     private int blank;
     private int threw;
+    private int nextProgressPercent = 25;
     private final long startedAt = System.nanoTime();
 
     IconAtlas(ICommandSender sender, File dir, Map<String, ItemStack> targets, Runnable done) {
@@ -111,8 +119,20 @@ final class IconAtlas {
 
     void start() {
         MinecraftForge.EVENT_BUS.register(this);
-        reply(String.format("rendering %,d item icons -> icons.json (%s to skip next time)",
+        // SAY THAT THE DUMP IS NOT OVER, because the first real run was closed seven
+        // seconds in. A phase that starts after a wall of completion messages has to say it
+        // is a phase, and has to name the line that really ends the run.
+        //
+        // NO TIME ESTIMATE. The first version of this said "THIS TAKES A FEW MINUTES", which
+        // was a guess extrapolated from a run that was killed -- measured, 35,675 icons
+        // render in 8.3 seconds. A wrong estimate in the reassuring direction is how the
+        // first run was lost; a wrong one in the other direction is a tool that cries wolf,
+        // and the honest instruction ("wait for this line") needs no number at all.
+        reply(String.format("rendering %,d item icons -- NOT DONE YET, leave the game open "
+                + "until the \"next:\" line appears (%s to skip next time)",
                 targets.size(), DumpCommand.NO_ICONS_ARG));
+        reply(String.format("  written %,d at a time, so a run cut short still keeps the "
+                + "pages it finished", PER_PAGE));
     }
 
     @SubscribeEvent
@@ -168,9 +188,44 @@ final class IconAtlas {
         }
         endPage();
         unbind();
+        reportProgress();
 
         if (slot >= PER_PAGE) {
             flushPage();
+            // THE INDEX IS REWRITTEN AFTER EVERY PAGE, NOT ONCE AT THE END, AND THAT IS THE
+            // WHOLE DIFFERENCE BETWEEN A SHORT RUN BEING USEFUL AND BEING WASTE.
+            //
+            // Measured, on the first real run of this code: the phase announced 35,675
+            // icons, filled and wrote page 0 -- 16,361 of 16,384 sprites, verified good --
+            // and the game was closed seven seconds later. `icons.json` was written only in
+            // the terminal branch, so a complete, correct 3.6 MB atlas page was left on disk
+            // with nothing to say which item was where, which makes it exactly as useful as
+            // no page at all. Writing here costs one rewrite of a ~1.5 MB JSON file per
+            // page and makes every completed page survive.
+            //
+            // AFTER `flushPage`, not before: `placed` still holds entries for the page being
+            // rendered until the flush settles them, and `dropBlanks` runs inside the flush.
+            // Written earlier, the index would name sprites on a page that does not exist.
+            writeIndex();
+        }
+    }
+
+    /**
+     * A percentage every quarter, matching the recipe walk's.
+     *
+     * NOT decoration. This phase runs for minutes after a line that used to say "done", and
+     * a player watching a still screen with no output has no way to tell rendering from
+     * hung -- which is a reason to close the game, and closing the game is precisely what
+     * cost the first run its icons.
+     */
+    private void reportProgress() {
+        int percent = (int) (100L * cursor / Math.max(targets.size(), 1));
+        if (percent >= nextProgressPercent && percent < 100) {
+            reply(String.format("  icons %d%% -- %,d of %,d", percent, cursor,
+                                targets.size()));
+            while (nextProgressPercent <= percent) {
+                nextProgressPercent += 25;
+            }
         }
     }
 
@@ -317,7 +372,21 @@ final class IconAtlas {
      * dangling reference.
      */
     private void writeIndex() {
-        File file = new File(dir, "icons.json");
+        writeIndex(new File(dir, "icons.json"));
+    }
+
+    /**
+     * The file-taking form, so a test can write a PARTIAL index -- one flushed page, with
+     * entries for it and none for the page still being rendered -- and hand the result to
+     * the python reader. That partial case is the whole point of #123's follow-up and it is
+     * the one shape no unit test could otherwise reach, because rendering needs a GL
+     * context and a running game.
+     *
+     * Package-visible for the same reason `writeNbtTrace` is: the python side is then tested
+     * against bytes this writer actually produced, rather than against a hand-typed guess at
+     * its shape. Two mocks agreeing with each other is the failure mode.
+     */
+    void writeIndex(File file) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             w.write("{\n \"icon\": " + ICON_PX + ",\n \"page\": " + PAGE_PX

@@ -601,9 +601,17 @@ public class DumpCommand extends CommandBase {
                     ? writeNbtTrace(new File(dir, "nbt_trace.json"), sink.trace()) : 0;
 
             long ms = (System.nanoTime() - startedAt) / 1_000_000L;
+            boolean drawing = icons && !iconTargets.isEmpty();
+            // "done" ONLY WHEN IT IS DONE. This line used to open with "done in 14.9s"
+            // whether or not a multi-minute icon phase was about to start, and on the first
+            // real run that is exactly how it was read: the player saw four completion
+            // messages and closed the game seven seconds into the render, losing it. The
+            // recipe walk finishing is not the dump finishing, and only one of those two
+            // sentences may use the word.
             reply(sender, String.format(
-                    "done in %.1fs: %s recipes from %d categories, %d with a known machine, "
+                    "%s %.1fs: %s recipes from %d categories, %d with a known machine, "
                             + "%s oredict entries, %s names -> %s",
+                    drawing ? "recipes and items done in" : "done in",
                     ms / 1000.0, formatCount(recipes), perCategory.size(), catalysts.size(),
                     formatCount(ores), formatCount(sink.names().size()), dir.getName()));
             // TWO NUMBERS, BECAUSE THEY ANSWER TWO QUESTIONS AND ONLY ONE OF THEM IS THE
@@ -628,7 +636,7 @@ public class DumpCommand extends CommandBase {
                         "nbt_trace.json: %s keys with identifying NBT", formatCount(traced)));
             }
 
-            if (icons && !iconTargets.isEmpty()) {
+            if (drawing) {
                 // `active` stays set until the atlas is done, so a second /recipedump
                 // during the render is still refused rather than writing over a live page.
                 new IconAtlas(sender, dir, iconTargets, new Runnable() {

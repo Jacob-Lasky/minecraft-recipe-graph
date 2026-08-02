@@ -299,7 +299,7 @@ wrong, so it is worth reading once.
 | Piece | What it is | Where it goes | Version |
 | --- | --- | --- | --- |
 | **The tool** | `recipegraph/` — the CLI, the renderers and the web server, one Python package | anywhere with Python 3.8+; on a server, the Docker image below | git commit, printed in the page footer |
-| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.9.0.jar` |
+| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | prebuilt as `dist/mc-recipe-dump-0.9.2.jar` |
 | **The data** | `mc-recipe-dump/` from the mod, then `graph.json` and `ae2_have.json` built from it | the `/data` mount the tool reads | a `schema` number, recorded in every file and checked on read |
 
 **The web UI is not a separate piece.** Pages are server-rendered by the same renderers the
@@ -501,7 +501,7 @@ and rendered recipe GUIs to scrape them, which is both slow and broken across th
 **A prebuilt jar ships in `dist/`**, so you do not have to build it to try this:
 
 ```bash
-cp dist/mc-recipe-dump-0.9.0.jar '/path/to/instance/minecraft/mods/'
+cp dist/mc-recipe-dump-0.9.2.jar '/path/to/instance/minecraft/mods/'
 ```
 
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the

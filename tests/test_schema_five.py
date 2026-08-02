@@ -712,3 +712,82 @@ class SweepVocabularyTest(unittest.TestCase):
         for name, (fn, doc) in api.FIELDS.items():
             self.assertTrue(callable(fn), name)
             self.assertTrue(doc and doc.strip(), name)
+
+
+class IconsReachEveryRowTest(unittest.TestCase):
+    """An icon on the card heading and none on the ingredients is half the feature.
+
+    The first live render shipped exactly that: `named()` took an `icon` at the explore
+    card's `<h3>`, in the plan tree and in the plan's tables, but `_ing_html`, `_makes_html`
+    and `_used_html` built their rows without one -- so "Diamond" had a picture and the nine
+    Diamond Nuggets that make it did not. The ingredient column is where an icon earns the
+    most, because that is the list a player reads while gathering.
+    """
+
+    def _payload(self):
+        return {"query": "diamond", "searched": 1, "named": 1, "hidden": 0, "collapsed": 0,
+                "results": [{
+                    "key": "minecraft:diamond", "name": "Diamond", "label": "Diamond",
+                    "kind": "item", "stock": 3, "oredicts": [], "oredict_guessed": [],
+                    "makes_total": 1, "used_in_total": 1,
+                    "makes": [{"id": "r1", "category": "crafting", "machine": None,
+                               "source": "test",
+                               "outputs": [{"key": "minecraft:diamond", "name": "Diamond",
+                                            "label": "Diamond", "kind": "item", "qty": 1}],
+                               "inputs": [{"qty": 9, "alt_total": 1, "role": "item",
+                                           "alts": [{"key": "minecraft:diamond_nugget",
+                                                     "name": "Diamond Nugget",
+                                                     "label": "Diamond Nugget",
+                                                     "kind": "item", "stock": 0}]}]}],
+                    "used_in": [{"id": "r2", "category": "crafting", "machine": None,
+                                 "source": "test",
+                                 "outputs": [{"key": "minecraft:diamond_block",
+                                              "name": "Block of Diamond",
+                                              "label": "Block of Diamond",
+                                              "kind": "item", "qty": 1}]}],
+                }]}
+
+    def test_the_resolver_is_asked_for_the_ingredient_and_the_output_too(self):
+        from recipegraph.render import render_explore_html
+        asked = []
+
+        def icon(key):
+            asked.append(key)
+            return '<span class="ico" data-k="%s"></span>' % key
+
+        html = render_explore_html(self._payload(), icon=icon)
+        for key in ("minecraft:diamond", "minecraft:diamond_nugget",
+                    "minecraft:diamond_block"):
+            self.assertIn(key, asked, "no icon was requested for %s" % key)
+            self.assertIn('data-k="%s"' % key, html)
+
+    def test_no_resolver_renders_exactly_as_before(self):
+        # Every icon hook is opt-in: a caller that passes none gets the pre-#36 page rather
+        # than an empty box where a picture would be.
+        from recipegraph.render import render_explore_html
+        self.assertNotIn('class="ico"', render_explore_html(self._payload()))
+
+
+class ProseDoesNotBreakMidWordTest(unittest.TestCase):
+    """`.id` carries BOTH a registry key and the search page's prose note.
+
+    It used `word-break:break-all`, which breaks an unbreakable id -- what it is for -- and
+    also chops ordinary sentences, which at 390px rendered "47 hidd/en" and "read fro/m
+    display names". `overflow-wrap:anywhere` breaks only when there is no other opportunity,
+    so the id still breaks and the sentence breaks at its spaces. `.nm` two rules away has
+    always used the right one.
+    """
+
+    def test_no_id_rule_uses_word_break_all(self):
+        """Checked across EVERY `.id` rule, not just the first.
+
+        There are two -- the base one and the phone block's `margin-top` override -- and the
+        cascade means either could reintroduce the chopping. Asserting only the first would
+        pass while a later rule undid it.
+        """
+        from recipegraph.render import CSS
+        rules = [ln for ln in CSS.splitlines() if ln.startswith(".id{")]
+        self.assertGreaterEqual(len(rules), 1)
+        for rule in rules:
+            self.assertNotIn("word-break:break-all", rule, rule)
+        self.assertEqual(sum("overflow-wrap:anywhere" in r for r in rules), 1, rules)
