@@ -1268,3 +1268,57 @@ across a two-minute solve froze every other page.
 
 `/meatballcraft` skill covers pack performance tuning, crash triage, and the Tower server
 operating playbook. This skill is only about recipes and inventory.
+
+## Dimensions have a price now (#112)
+
+**A planet is not a special kind of place, and a session once scoped this as though it were.**
+Advanced Rocketry registers its planets as ordinary dimensions with ordinary ids -- Sedna is
+DIM147 -- and the save stores them exactly as it stores the Nether. Use `dimension` throughout.
+
+**#112 recorded that the Nether cannot be detected. That is FALSE and it cost a scoping
+question.** The issue's reasoning was that a vanilla nether portal has no tile entity, so
+`ae2_inventory.scan` (tile entities only) cannot see one, and a block-level region scan would
+be needed. True about the portal, irrelevant about the dimension: entering a dimension
+GENERATES it, so `<save>/DIM-1/region/*.mca` is the evidence -- 42 files on the reference save.
+Visited-ness reads identically for vanilla, modded and planet dimensions, with no portal, no
+block scan and no per-mod knowledge. Do not reach for portal evidence again.
+
+**The source is `config/advRocketry/planetDefs.xml`,** on the AMP server instance at
+`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/config/advRocketry/planetDefs.xml`
+(mode 0700 uid 1000, so stage it out with a root container). 33 dimensions carry a DIMID, each
+with an `<OreGen>` block naming the blocks that generate there. Pack data, read back, not a
+name guess -- the `tokens.DEFAULT_TOKENS` rule.
+
+**Two sources, kept apart, and the split is the whole design.** What only grows there is pack
+data and lives in `graph.dimension_ores`; whether you have been there is world state and lives
+in the have file's `dimensions`. So the gate lifts by itself after a trip and a rescan.
+
+**GENERATING SOMEWHERE IS NOT GENERATING ONLY THERE**, and planetDefs cannot tell you which.
+It puts `minecraft:iron_block` on Osiris and `minecraft:bone_block` on Hator; those obviously
+exist on Earth too, and pricing a rocket into every iron block would be far worse than the bug.
+Two things bound it, and neither is a guess:
+
+* Intersect with `Graph.world_ores`, the pack's own `ore*` registration. 17 exclusive
+  declarations become 8; every `block*` entry drops by construction.
+* Apply it as a FLOOR under `min` in `_seed`. An ore with a crafted route keeps that route.
+  Measured: all 8 have 1 to 6 producers, and only 3 end up paying the 801 -- Uranium Ore is
+  declared on Oi and settles at 2.0.
+
+**The leaf rule runs BEFORE the world-ore rule and both need the surcharge.** `_seed` prices a
+key nothing produces at `BASE_RAW_COST` first, and the world-ore pass is a `min`, so a gated ore
+with no producer kept 1.0: the gate computed, the plan's note appeared, and no price moved. That
+is the strongest gate case silently doing nothing. Pinned by
+`test_an_ore_nothing_produces_is_still_gated`.
+
+**THE GATE DOES NOT REACH THE SEDNANITE PLAN, AND THAT IS A DIFFERENT BUG.** There are two keys
+named Sednanite Ore -- `contenttweaker:sednanite_ore` (which planetDefs names, now 801.0) and
+`contenttweaker:sub_block_holder_1:2` (which it does not, still 1.0) -- and BOTH are registered
+`oreSednanite`, so both are world ores. A plan for a Sednanite Ingot takes the cheap duplicate.
+Spreading the gate across the oredict group fixes 4 cases and breaks one: `oreUranium` also holds
+`tardis:power_cell`, which is not an ore you mine on Oi. So the duplicate registration is filed
+separately rather than papered over with a rule that is wrong 1 time in 5.
+
+**DIMENSION_COST = 800, between LOOT (200) and GATE (1000).** A trip is a construction project
+you can decide to do this afternoon; a locked chapter is not. Distinct from both by #95's rule
+that one number for two statements destroys both orderings. The ordering is the claim, the
+magnitude is a judgement nobody has measured.

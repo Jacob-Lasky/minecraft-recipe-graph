@@ -3,7 +3,7 @@
 import os
 import sys
 
-from . import multiblocks
+from . import dimensions, multiblocks
 from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
@@ -137,6 +137,26 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # set, so parsing earlier would resolve blockstate metas against keys this graph no longer
     # has.
     g.multiblocks = multiblocks.parse(instance_dir, known=multiblocks.known_keys(g), say=say)
+
+    # AFTER the oredict is settled, because `world_ores` is what makes this sound. The
+    # pack's planetDefs also names blocks the overworld plainly has -- `minecraft:iron_block`
+    # on Osiris, `minecraft:bone_block` on Hator -- and generating somewhere is not the same
+    # as generating ONLY there. Intersecting with the pack's own `ore*` registration is the
+    # same structural filter #61 and #106 already rely on, and it removes every one of those
+    # by construction: they are `block*` entries, not `ore*`. Measured on the reference pack,
+    # 17 exclusive declarations become 8 ores.
+    defs = dimensions.load_planet_defs(instance_dir)
+    if defs:
+        exclusive = dimensions.exclusive_keys(defs)
+        by_name = {name: dim for dim, (name, _ores) in defs.items()}
+        g.dimension_ores = {key: [by_name[name], name] for key, name in exclusive.items()
+                            if key in g.world_ores and name in by_name}
+        say("dimensions: %d declared, %d ores generate in exactly one of them "
+            "(%d after the ore* filter)"
+            % (len(defs), len(exclusive), len(g.dimension_ores)))
+    else:
+        say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
+            "dimension is not priced, which is the pre-#112 behaviour")
 
     say("graph: %d recipes, %d produced item keys, %d/%d oredict resolved"
         % (len(g.recipes), len(g.by_output),

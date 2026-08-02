@@ -70,7 +70,7 @@ class Solver:
                  max_depth=24, max_nodes=DEFAULT_MAX_NODES, craftables=None,
                  branch_tries=4,
                  work_budget=None, machine_states=None, costs=None, free_sources=None,
-                 token_kinds=None):
+                 token_kinds=None, dimension_gates=None):
         self.g = graph
         self.pool = collections.Counter(have or {})
         self._by_base = _index_pool(self.pool)
@@ -94,6 +94,10 @@ class Solver:
         self.pinned = {k: frozenset(v) for k, v in (pinned or {}).items()}
         self.max_depth = max_depth
         self.max_nodes = max_nodes
+        # `{ore key: dimension name}` for an ore only an unvisited dimension generates.
+        # Reporting only: `cost` has already priced the trip, and this is what lets the
+        # plan say which one. Empty gates behave exactly as before #112.
+        self.dimension_gates = dimension_gates or {}
         self.branch_tries = branch_tries
         self.nodes = 0
         # Monotonic work counter. `nodes` is REWOUND when a backtrack discards a subtree,
@@ -484,7 +488,15 @@ class Solver:
         # STOCK, which `take` above has already spent.
         if key in self.g.world_ores:
             node["status"] = STATUS_RAW
-            node["note"] = "mined, not crafted"
+            # WHERE, when the graph knows the ore only generates somewhere you have never
+            # been (#112). The cost model already charges `DIMENSION_COST` for it, and a
+            # route that got dearer without saying why is worse than one that never
+            # mentioned the trip: the number is invisible and the plan just looks wrong.
+            dim = self.dimension_gates.get(key)
+            node["note"] = ("mined on %s, and you have not been there" % dim
+                            if dim else "mined, not crafted")
+            if dim:
+                node["dimension"] = dim
             self.leaf_totals[key] += remainder
             return node
 
