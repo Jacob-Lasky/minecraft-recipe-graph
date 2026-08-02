@@ -46,9 +46,12 @@ BUILD_DIR=$(dirname "$ORACLE")
 
 want_python=1
 want_java=1
+# A no-argument run is the PRE-MERGE gate and behaves differently from the iteration flags:
+# it builds a missing jar rather than warning about one. See the jar block below.
+full_run=1
 case "${1:-}" in
-    --python) want_java=0 ;;
-    --java) want_python=0 ;;
+    --python) want_java=0; full_run=0 ;;
+    --java) want_python=0; full_run=0 ;;
     "") ;;
     *) echo "usage: tools/check.sh [--python|--java]" >&2; exit 2 ;;
 esac
@@ -74,15 +77,70 @@ fi
 
 fail=0
 
+PYLOG=$(mktemp)
+trap 'rm -f "$PYLOG"' EXIT
+
+# COUNT THE PYTHON SKIPS AND SAY SO, exactly as the java arm below already does. `unittest -q`
+# prints `OK (skipped=N)` and exits 0, so a run whose most important assertions all skipped is
+# indistinguishable from a clean one in this script's output -- which is the failure this file
+# exists to prevent, one level up from the gate it was written for.
+report_python_skips() {
+    skipped=$(sed -n 's/^OK (skipped=\([0-9]*\))$/\1/p' "$PYLOG")
+    [ -n "$skipped" ] || skipped=0
+    echo "python: $skipped skipped"
+    if [ "$skipped" -gt 0 ] && [ -n "$jar_warning" ]; then
+        echo "!! those skips include test_dist_jar; build the jar or they prove nothing"
+    fi
+}
+
+# SAY WHEN THERE IS NO JAR TO CHECK, for the same reason as the oracle warning below.
+# `test_dist_jar` calls `skipTest` when `mod/build/libs` holds no jar, so an unbuilt worktree
+# turns its eleven assertions into eleven silent skips -- and `unittest` exits 0 on a skip, so
+# this script printed "all green" over them. Measured, not imagined: the same tree gave three
+# failures with stale jars present and a clean "all green" after `rm -rf mod/build/libs`, and
+# the second reads as the better result. Deleting the artifact an assertion inspects is a way
+# of passing it.
+#
+# A WARNING IS NOT ENOUGH FOR THE FULL RUN, so it builds the jar instead. A `!!` line in a
+# fourteen-minute run scrolls past, and the run would still end in "all green" over an
+# unasserted contract -- relying on the reader noticing, which is the exact habit this whole
+# family of bugs is about not relying on. The right move is the one this finding itself
+# argues for: change the artifact rather than look harder at it. Three minutes on top of
+# fourteen is nothing for a pre-merge gate, and it leaves behind a current verified jar,
+# which is what someone needs before installing one anyway.
+#
+# THE ITERATION FLAGS DELIBERATELY DO NOT BUILD. `--java` and `--python` are for the inner
+# loop, where an unbuilt `libs` is the normal state and a three-minute build every time would
+# teach people to stop running this at all. That asymmetry is intentional; do not "fix" it.
+jar_warning=""
+if [ -n "$version" ] && [ ! -f "mod/build/libs/mc-recipe-dump-$version.jar" ]; then
+    if [ "$full_run" -eq 1 ]; then
+        echo "== jar =="
+        echo "no mc-recipe-dump-$version.jar; building it so test_dist_jar has something to check"
+        if GRADLE_CACHE="$GRADLE_CACHE" PACK_MODS="$PACK_MODS" mod/tools/build-jar.sh; then
+            :
+        else
+            echo "!! build-jar.sh failed; test_dist_jar will SKIP and prove nothing" >&2
+            jar_warning="build failed, so there is no jar -- test_dist_jar will SKIP"
+            fail=1
+        fi
+    else
+        jar_warning="no mc-recipe-dump-$version.jar in mod/build/libs -- test_dist_jar will SKIP"
+    fi
+fi
+
 if [ "$want_python" -eq 1 ]; then
     echo "== python =="
+    [ -z "$jar_warning" ] || echo "!! $jar_warning"
     if [ -f "$ORACLE" ]; then
-        RECIPEGRAPH_ORACLE="$ORACLE" python3 -m unittest discover -s tests -q || fail=1
+        RECIPEGRAPH_ORACLE="$ORACLE" python3 -m unittest discover -s tests -q 2>"$PYLOG" || fail=1
+        report_python_skips
     else
         echo "!! no oracle at $ORACLE -- the fixture regeneration test will SKIP."
         echo "!! build one with: python3 -m recipegraph.cli build --dump-dir data/mc-recipe-dump \\"
         echo "!!                  --graph $ORACLE"
-        python3 -m unittest discover -s tests -q || fail=1
+        python3 -m unittest discover -s tests -q 2>"$PYLOG" || fail=1
+        report_python_skips
     fi
 fi
 

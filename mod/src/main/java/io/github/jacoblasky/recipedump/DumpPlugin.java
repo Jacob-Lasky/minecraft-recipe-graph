@@ -1,6 +1,8 @@
 package io.github.jacoblasky.recipedump;
 
 import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.client.jei.PlannerGuiHandler;
 import mezz.jei.api.IJeiRuntime;
 import mezz.jei.api.IModPlugin;
@@ -64,11 +66,20 @@ public class DumpPlugin implements IModPlugin {
         // exists -- and a NodeActions installed without one would answer true to
         // `canShowInRecipeViewer` and then open nothing.
         //
-        // NO_GRAPH IS THE LIVE WIRING, NOT A PLACEHOLDER LEFT BY MISTAKE. Nothing on the
-        // client loads a RecipeGraph yet, so the two recipe-viewer entries stay hidden; the
-        // planner draws no entry rather than a dead one. Installing anyway is what proves the
-        // registration path works before the graph lands instead of after. Swapping in the
-        // real holder is this one argument.
-        JeiNodeActions.install(JeiNodeActions.NO_GRAPH);
+        // THE REAL HOLDER, which is the one argument #157 said this would become. It answers
+        // null until the graph is READY -- exactly what NO_GRAPH did -- so the two
+        // recipe-viewer entries stay hidden during the 5.47 s load and appear afterwards
+        // without anything re-installing.
+        //
+        // A STATIC GETTER RATHER THAN A CACHED GRAPH. `GraphService.graph()` must be called
+        // per invocation, not resolved once here: `onRuntimeAvailable` fires long before the
+        // load finishes, so a value captured now would be null for the rest of the session.
+        // It is a volatile field read, which is what makes calling it per frame free.
+        JeiNodeActions.install(new JeiNodeActions.GraphSource() {
+            @Override
+            public RecipeGraph graph() {
+                return GraphService.get().graph();
+            }
+        });
     }
 }

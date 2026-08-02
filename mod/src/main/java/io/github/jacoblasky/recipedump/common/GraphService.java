@@ -72,7 +72,29 @@ public final class GraphService {
         return state;
     }
 
-    /** The loaded graph, or null unless {@link #state} is READY. */
+    /**
+     * The loaded graph, or null unless {@link #state} is READY.
+     *
+     * NULL RATHER THAN AN EMPTY GRAPH, because an empty one answers `keyId(...) == -1` for
+     * every key, which is indistinguishable from "loaded, and this item is not in it". One
+     * hides a JEI menu entry correctly; the other hides it because nothing is loaded yet.
+     *
+     * THE SAME OBJECT EVERY CALL while the graph is unchanged, and a DIFFERENT one after a
+     * reload. That is a contract, not an implementation detail: `JeiBridge.indexOf` rebuilds
+     * a key-to-ItemStack index over JEI's ~35,000 stacks whenever the graph differs BY
+     * IDENTITY, so a defensive copy or a fresh wrapper here rebuilds it every frame and the
+     * planner drops to single-digit fps. Nothing about a getter says "must be identical",
+     * which is exactly why `graphIdentityIsStableWhileTheGraphIsUnchanged` pins it.
+     *
+     * DO NOT ADD AN ACCESSOR FOR JEI'S STACK INDEX BESIDE THIS ONE. It reads as an obvious
+     * convenience and it reintroduces a bug that has already been fixed once: the index and
+     * the graph it was built for have to be published TOGETHER, and `JeiBridge` now keeps
+     * them welded behind a single volatile pair for that reason. Two accessors here would
+     * let a caller take a fresh graph and a stale index -- at which point every key resolves,
+     * to the WRONG item, which is a plausible icon and a plausible recipe screen rather than
+     * a visible failure. If something in `common` ever needs the index, ask for it to be
+     * handed over already paired.
+     */
     public RecipeGraph graph() {
         return graph;
     }
