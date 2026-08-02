@@ -148,9 +148,11 @@ class AMissingStockFileDoesNotKillTheCommandTest(unittest.TestCase):
         return result, err.getvalue()
 
     def test_a_missing_file_reads_as_an_empty_network(self):
-        (have, _stats, craftables, names), _err = self.load(
+        (have, _stats, craftables, names, dims), _err = self.load(
             "/nonexistent/ae2_have.json")
-        self.assertEqual((have, craftables, names), ({}, set(), {}))
+        # `dims` empty is load-bearing, not incidental: it is what makes a missing stock
+        # file gate no dimension rather than every one. See dimensions.gates_for.
+        self.assertEqual((have, craftables, names, dims), ({}, set(), {}, {}))
 
     def test_and_says_so_on_stderr(self):
         # Going quiet would be worse than the crash: a mistyped --have would plan against

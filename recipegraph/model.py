@@ -337,6 +337,13 @@ class Graph:
         # never match `industrialforegoing:plant_gatherer`, and machine identification must
         # keep using `machines.same_mod` on the uid. See sources/dump_meta.category_mods.
         self.category_mods = {}
+        # item key -> [dimension id, dimension name] for an ore exactly one dimension
+        # generates, from the pack's own planetDefs.xml. PACK DATA, not a name guess, and
+        # the static half of #112: what only grows THERE cannot change without the pack
+        # changing. Whether you have BEEN there is world state and lives in the have file,
+        # so the two never have to be rebuilt together. Empty for a pack with no
+        # Advanced Rocketry, which behaves exactly as before.
+        self.dimension_ores = {}
         # Which dump schema produced this graph, 0 for none. Recorded because some
         # judgements are only SAFE once the data supports them: see
         # machines.SPECIES_SCHEMA, where "bee breeding needs no machine" has to wait for
@@ -899,6 +906,7 @@ class Graph:
             "dump_version": self.dump_version,
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
+            "dimension_ores": self.dimension_ores,
         }
 
     def save(self, path):
@@ -923,6 +931,8 @@ class Graph:
         # Machinery. An empty map means "priced by the controller recipe alone", which is the
         # pre-#93 behaviour, so an old graph.json keeps working rather than failing to load.
         g.multiblocks = d.get("multiblocks") or {}
+        # Absent before #112; empty means "no dimension is priced", the pre-#112 behaviour.
+        g.dimension_ores = d.get("dimension_ores") or {}
         # Here rather than only in `index.build`, so an ALREADY BUILT graph.json is fixed
         # without a rebuild. Rebuilding needs the game running and a fresh dump; the 115 MB
         # file on disk is what every surface reads today.

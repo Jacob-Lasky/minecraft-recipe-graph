@@ -206,6 +206,30 @@ TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefe
 LOOT_COST = 200.0
 GATE_COST = 1000.0
 
+# What MINING costs when the ore only generates somewhere you have never been. #112, and
+# the half of #105 that could not ship then: #105 priced the pack's gate ITEMS and could
+# not price a PLACE, because travelling is not a recipe.
+#
+# A DISTINCT NUMBER FROM GATE_COST, and #95 is the reason it has to be. Two unrelated
+# statements sharing one figure destroys the ordering among both, and these are unrelated:
+# a locked chapter is a lock, and there is nothing to build that opens it ahead of the
+# story. A dimension is a construction project -- a rocket, a suit, fuel -- so it is
+# something you can decide to go and do this afternoon. That makes it the SMALLER ask, and
+# the ordering claim is therefore:
+#
+#     BASE_RAW_COST < LOOT_COST < DIMENSION_COST < GATE_COST < MACHINE_COST["unavailable"]
+#
+# Below GATE because a trip can be worked towards and a chapter cannot; above LOOT because
+# an afternoon of fighting a boss you can already reach is less than an afternoon of
+# building the thing that gets you somewhere new; finite because the trip is possible, and
+# a gated route must still be chosen when it is the only one. Asserted in
+# `tests/test_dimensions.py` rather than left to the reader, exactly as #105's four
+# properties are.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE. Whether a Sedna trip is 800 afternoons or
+# 8 is not knowable from the graph, and no one has measured it.
+DIMENSION_COST = 800.0
+
 # Keyed by the kind rather than by the token, which is the honest granularity available. A
 # per-token number would be more truthful still -- Chapter 1 and a Sedna trip are not the
 # same afternoon -- and it needs a curated figure per id that nobody has measured. The kind
@@ -220,7 +244,7 @@ TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 7
+FORMULA_VERSION = 8
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -405,7 +429,7 @@ def _cheapest_alternative(cost, ingredient, ore_members):
 
 
 def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None,
-             machine_items=None, token_kinds=None):
+             machine_items=None, token_kinds=None, dimension_gates=None):
     """{item key: estimated cost}. Lower is easier to get.
 
     With `machine_items` (`{category: (machine item key, ...)}` from
@@ -423,7 +447,7 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
     machine price this relaxation used instead of re-deriving a flat one.
     """
-    seed = _seed(graph, have, free_sources, token_kinds)
+    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates)
     cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
                             passes, machine_states, None)
     if not machine_items:
@@ -465,7 +489,7 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
     return _relax(graph, cost, passes, machine_states, machine_entry)
 
 
-def _seed(graph, have, free_sources, token_kinds=None):
+def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None):
     """Starting costs, before any recipe is considered. Shared by both relaxation passes."""
     from .generators import SOURCE_COST
 
@@ -483,12 +507,20 @@ def _seed(graph, have, free_sources, token_kinds=None):
         cost[key] = min(cost.get(key, math.inf), SOURCE_COST)
 
     # Seed every produced key as unreachable, and every leaf (no recipe) as cheap-ish.
+    #
+    # A LEAF BEHIND A DIMENSION IS NOT CHEAP, AND THIS RUNS FIRST, so the surcharge has to
+    # be applied here too rather than only in the world-ore loop below. "No recipe, so
+    # assume you can go and get one" is precisely the assumption #112 exists to qualify:
+    # you cannot go and get it, you have never been where it is. Left to the loop below,
+    # `min` would already be holding BASE_RAW_COST from this pass and would keep it -- the
+    # gate would compute, appear in the plan's note, and change no price at all.
     produced = graph.by_output
+    gates = dimension_gates or {}
     for r in graph.recipes:
         for ing in r.inputs:
             for alt in ing.alternatives:
                 if alt not in cost and alt not in produced:
-                    cost[alt] = BASE_RAW_COST
+                    cost[alt] = BASE_RAW_COST + (DIMENSION_COST if alt in gates else 0.0)
 
     # AND EVERY WORLD ORE, WHETHER OR NOT SOMETHING PRODUCES IT. The loop above prices a
     # leaf as obtainable only when NO recipe outputs it, which quietly assumes the only way
@@ -509,8 +541,23 @@ def _seed(graph, have, free_sources, token_kinds=None):
     # infinite generator (SOURCE_COST). Mining is a ceiling on what an ore can cost, not a
     # claim that mining is the best route: a genuinely cheaper crafted route still wins,
     # because `_relax` goes on to lower it further.
+    #
+    # AND MINING COSTS WHAT THE TRIP COSTS, which is #112. The line above says "you go and
+    # get this" and charges the same for a cobblestone and for an ore that only generates
+    # on Sedna, a planet the reference save has never been to. `dimension_gates` raises the
+    # FLOOR for exactly those keys -- see `dimensions.gates` for how they are identified --
+    # and raises nothing else.
+    #
+    # RAISING A FLOOR IS WHY A WRONG ENTRY HERE IS SURVIVABLE. `min` is still `min`, so a
+    # gated ore with any crafted route keeps that route's price; all this can do is stop
+    # MINING from being the cheap answer. Measured on the reference graph, all 8 gated ores
+    # have between 1 and 6 producers, so the worst a misclassification does is decline to
+    # discount an ore that had another way in anyway. The failure that would matter is a
+    # terrestrial ore with NO producer wrongly declared exclusive to a planet, and
+    # `tests/test_dimensions.py` asserts the reference set contains none.
     for key in graph.world_ores:
-        cost[key] = min(cost.get(key, math.inf), BASE_RAW_COST)
+        floor = BASE_RAW_COST + (DIMENSION_COST if key in gates else 0.0)
+        cost[key] = min(cost.get(key, math.inf), floor)
 
     # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
     # rule above answers "how cheaply can this be had"; a token answers "what does the
@@ -580,7 +627,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
 
 
 def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None,
-                multiblocks=None, token_kinds=None):
+                multiblocks=None, token_kinds=None, dimension_gates=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -606,6 +653,13 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
               % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST, TRANSFER_PENALTY, PASSES,
                  FORMULA_VERSION, BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE, BUILD_SLOPE,
                  UNPRICED_MACHINE_COST, BLOCKED_FLOOR, BLOCKED_CEILING)).encode())
+    # Beside the stock rather than with the constants: a gate depends on which dimensions
+    # the SAVE has terrain for, so it moves when the player flies somewhere without the
+    # graph or any tuning constant changing. Miss it and a cache written before the trip
+    # keeps charging for it forever.
+    for key, dim in sorted((dimension_gates or {}).items()):
+        h.update(("%s@%s;" % (key, dim)).encode())
+    h.update(b"\x00")
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
     h.update(b"\x00")
@@ -662,7 +716,8 @@ def cache_beside(graph_path):
 
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
-                    cache_path=None, passes=PASSES, machine_items=None, token_kinds=None):
+                    cache_path=None, passes=PASSES, machine_items=None, token_kinds=None,
+                    dimension_gates=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
     `cache_path` defaults to `cache_beside(graph_path)`; see there for why it is not the
@@ -694,7 +749,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     """
     cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
-                        getattr(graph, "multiblocks", None), token_kinds)
+                        getattr(graph, "multiblocks", None), token_kinds, dimension_gates)
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:
@@ -708,7 +763,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
             pass
 
     cost = estimate(graph, have=have, machine_states=machine_states, passes=passes,
-                    token_kinds=token_kinds,
+                    token_kinds=token_kinds, dimension_gates=dimension_gates,
                     free_sources=free_sources, machine_items=machine_items)
     if cache_path:
         try:

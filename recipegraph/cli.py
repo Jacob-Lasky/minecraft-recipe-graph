@@ -13,6 +13,7 @@ import json
 import os
 import sys
 
+from . import dimensions
 from . import explore as explore_mod
 from . import index
 from . import machines
@@ -55,18 +56,31 @@ def cmd_have(args):
         print("no region files matched", file=sys.stderr)
         return 2
     items, fluids, essentia, stats, _s, placed = scan(paths)
+    # Which dimensions the save has terrain for, which is #112's evidence that you have
+    # BEEN somewhere. A directory listing beside the region walk, not part of it: it reads
+    # no chunk data and costs nothing, and it deliberately looks at the whole save rather
+    # than at `paths`, which name the overworld's region files only.
+    #
+    # A PORTAL WAS THE OBVIOUS SIGNAL AND IT IS THE WRONG ONE. #112 proposed reading placed
+    # portal blocks and noted that a vanilla nether portal has no tile entity, so `placed`
+    # above cannot see one -- true, and beside the point. Entering a dimension GENERATES
+    # it, so the terrain is the evidence, and it works identically for the Nether, the End,
+    # a planet and a mod dimension with no portal at all.
+    world_dir = _world_dir(paths)
+    visited = dimensions.visited(world_dir) if world_dir else {}
     # `reader` stamps WHICH scanner wrote this, because an unmatched NBT key means
     # "rescan" on a pre-#21 file and "the dump cannot digest this stack" on a current
     # one. See ae2_inventory.READER and gaps.stock_coverage.
     payload = {"stats": stats, "reader": ae2_inventory.READER, "items": dict(items),
                "fluids": dict(fluids), "essentia": dict(essentia),
-               "placed": dict(placed)}
+               "placed": dict(placed), "dimensions": visited}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as fh:
         json.dump(payload, fh, indent=1, sort_keys=True)
     print("wrote %s: %d items, %d fluids, %d essentia aspects from %d cells; "
-          "%d placed machine types"
-          % (args.out, len(items), len(fluids), len(essentia), stats["cells"], len(placed)))
+          "%d placed machine types; %d dimensions visited"
+          % (args.out, len(items), len(fluids), len(essentia), stats["cells"], len(placed),
+             len(visited)))
     # Reconcile against the graph while both are in hand. A scan that writes 3,321 keys
     # looks like a success even when 320 of them name nothing any recipe uses, and that
     # silence is what let #21 sit unnoticed: the stock was there, the plans ignored it.
@@ -79,6 +93,23 @@ def cmd_have(args):
     print(gaps.stock_report(gaps.stock_coverage(Graph.load(graph_path), items,
                                                 reader=ae2_inventory.READER)))
     return 0
+
+
+def _world_dir(region_paths):
+    """The save root, from any of its overworld region files, or None.
+
+    `<save>/region/r.0.0.mca` -> `<save>`, which is where the per-dimension folders live.
+    Derived rather than asked for as a flag: `have` is already given the region files and a
+    second path that had to agree with them is a second thing to get wrong.
+    """
+    for path in region_paths:
+        region = os.path.dirname(os.path.abspath(path))
+        if os.path.basename(region) != "region":
+            continue
+        root = os.path.dirname(region)
+        if os.path.isdir(root):
+            return root
+    return None
 
 
 def _resolve_graph(graph_path, beside_path):
@@ -181,7 +212,7 @@ def cmd_find(args):
     g = _load_graph(args.graph)
     # `explore.resolve_query`, not `names.resolve`: the latter reads `graph.names`, which is
     # items only, so `find fluid:water` could never match its own key. See #107.
-    have, _stats, _craftables, _extra = _load_have(args.have)
+    have, _stats, _craftables, _extra, _dims = _load_have(args.have)
     keys = explore_mod.resolve_query(g, args.query, have, limit=args.limit)
     if not keys:
         print("no match for %r" % args.query)
@@ -201,7 +232,7 @@ def _load_have(path):
     as optional rather than assuming one producer.
     """
     if not path:
-        return {}, {}, set(), {}
+        return {}, {}, set(), {}, {}
     if not os.path.exists(path):
         # WARN AND CONTINUE, rather than either crashing or going quiet. `--have` defaults to
         # a path, so a checkout that has not run `have` yet made every `plan` die on a
@@ -211,7 +242,7 @@ def _load_have(path):
         # answer. `server.State.load_all` has always guarded this; the CLI never did.
         print("no stock file at %s -- planning against an empty network" % path,
               file=sys.stderr)
-        return {}, {}, set(), {}
+        return {}, {}, set(), {}, {}
     with open(path) as fh:
         doc = json.load(fh)
     have = dict(doc.get("items", {}))
@@ -220,7 +251,8 @@ def _load_have(path):
     for aspect, amount in (doc.get("essentia") or {}).items():
         have[essentia_key(aspect)] = amount
     craftables = set(doc.get("craftables") or ())
-    return have, doc.get("stats", {}), craftables, doc.get("names") or {}
+    return (have, doc.get("stats", {}), craftables, doc.get("names") or {},
+            doc.get("dimensions") or {})
 
 
 def cmd_plan(args):
@@ -230,7 +262,7 @@ def cmd_plan(args):
     # Stock is loaded BEFORE resolution, not after, because it is a tie-break input: among
     # keys sharing a display name, a stack in the network is the pack telling you which one
     # you actually use. See explore._canonical_first and #101.
-    have, _stats, craftables, extra_names = _load_have(args.have)
+    have, _stats, craftables, extra_names, visited = _load_have(args.have)
     keys = explore_mod.resolve_query(g, args.item, have)
     if not keys:
         print("no item matched %r -- try `find`" % args.item, file=sys.stderr)
@@ -255,12 +287,15 @@ def cmd_plan(args):
     # Resolved ONCE and handed to both the cost table and the solver. Two calls would be two
     # reads of data/tokens.json, and a plan whose prices disagreed with its own badges.
     token_kinds = _token_kinds(args)
+    # Same rule as the tokens above: resolved once, so the price a route is ranked at and
+    # the trip the plan reports are derived from one answer.
+    gates = dimensions.gates_for(g, visited)
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
                                          free_sources=free, machine_items=machine_items,
-                                         token_kinds=token_kinds)
+                                         token_kinds=token_kinds, dimension_gates=gates)
     # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
     # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
     pinned, pin_notes = ({}, {})
@@ -271,7 +306,8 @@ def cmd_plan(args):
             print("pin on %s: %s" % (g.bare_name(pin_key), why), file=sys.stderr)
     solver = Solver(g, have=have, craftables=craftables, machine_states=states,
                     costs=costs, max_depth=args.depth, max_nodes=args.max_nodes,
-                    free_sources=free, token_kinds=token_kinds, pinned=pinned)
+                    free_sources=free, token_kinds=token_kinds, pinned=pinned,
+                    dimension_gates=gates)
     result = solver.solve(key, args.qty)
     if craftables:
         print("(%d items treated as satisfied because AE2 can autocraft them; "
@@ -348,7 +384,7 @@ def cmd_explore(args):
     from .render import render_explore_html
 
     g = _load_graph(args.graph)
-    have, _stats, craftables, extra_names = _load_have(args.have)
+    have, _stats, craftables, extra_names, visited = _load_have(args.have)
     for k, v in (extra_names or {}).items():
         g.names.setdefault(k, v)
 
@@ -413,7 +449,7 @@ def cmd_track(args):
             have[fluid_key(name)] = amount
         source, power, names = "save", None, None
     else:
-        have, st, _craftables, names = _load_have(args.have)
+        have, st, _craftables, names, _dims = _load_have(args.have)
         with open(args.have) as fh:
             doc = json.load(fh)
         source = doc.get("source", "save")

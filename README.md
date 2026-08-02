@@ -97,6 +97,13 @@ to build in game, no mod required, read-only — safe against a live server.
 On the reference network this reads **3,321 distinct items across 467 cells in 195
 holders** in about a minute.
 
+It also records **which dimensions the save has terrain for**, which is how a plan knows
+whether an ore is somewhere you can actually reach. Entering a dimension generates it, so
+a `DIM<id>/region/` directory holding `.mca` files is the evidence — no portal to find, and
+it reads the same for the Nether, the End, a mod dimension and an Advanced Rocketry planet.
+The reference save has been to 14 and to none of the 14 planets, which is why Sednanite Ore
+is priced as a trip rather than as a cobblestone. See "Dimensions" below.
+
 A stack whose NBT decides what it is (a bee's species, a potion's effect, a vis pod's
 aspect) gets the same `#digest` suffix the dump mod puts on it, so it matches the recipes
 that use it. The scan finishes by reporting how much of your stock the graph cannot see and
@@ -577,6 +584,39 @@ back to **inferring** membership from display names (`ingotIron` → "Iron Ingot
 recovers 233 of 548 referenced entries on the reference pack. That fallback is a
 labelled heuristic, never presented as ground truth — `recipegraph build --no-guess`
 disables it. `/ct oredict` in game is the other exact source.
+
+## Dimensions
+
+An ore you can only mine on another planet is not as easy to get as a cobblestone, and
+until this it was priced as though it were. Travelling is not a recipe, so the graph could
+not see the trip.
+
+Two sources, deliberately kept apart:
+
+| What | Where it comes from | Lives in |
+| --- | --- | --- |
+| Which ores generate in which dimension | the pack's `config/advRocketry/planetDefs.xml` | `graph.json` |
+| Which dimensions you have entered | `<save>/DIM<id>/region/*.mca` | `ae2_have.json` |
+
+An ore is charged for a trip when exactly one dimension declares it, that dimension has no
+generated terrain in your save, and the ore is one the pack registered under an `ore*`
+oredict group. **A planet is not a special kind of place** — Advanced Rocketry registers
+its planets as ordinary dimensions, and the same rule would price the Nether if a config
+declared an ore exclusive to it.
+
+The surcharge is a **floor**, not a verdict: every crafted route still competes, and one
+cheaper than the trip wins. On the reference pack 8 ores are gated and only 3 end up
+actually paying for the trip; Uranium Ore is declared on Oi but has four crafted routes, so
+it settles at 2.0 rather than 801.
+
+Nothing is gated when the stock file has no dimension record, which is every file written
+before this feature and any written by `tools/ae2_dump.lua`. Rescanning after a trip lifts
+the gate with no edit to any list.
+
+**Only what the pack declares is known.** planetDefs describes the dimensions Advanced
+Rocketry adds; nothing equivalent exists for the Nether, the End or Erebus, so no ore is
+gated behind those. On this save that gap is harmless, because all three have been visited
+and a visited dimension gates nothing either way.
 
 ## Requirements
 

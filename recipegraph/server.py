@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import api as api_mod
 from . import cost as cost_mod
+from . import dimensions as dimensions_mod
 from . import explore as explore_mod
 from . import generators as generators_mod
 from . import machines as machines_mod
@@ -713,6 +714,10 @@ class State:
         self.have = {}
         self.craftables = set()
         self.placed = {}
+        # Which dimensions the save has terrain for. Empty for a stock file written before
+        # #112 or by the in-game Lua dump, and empty means "gate nothing" -- see
+        # dimensions.gates_for for why that is the safe reading of a missing field.
+        self.visited_dimensions = {}
         if self.have_path and os.path.exists(self.have_path):
             with open(self.have_path) as fh:
                 doc = json.load(fh)
@@ -723,6 +728,7 @@ class State:
                 self.have["essentia:%s" % str(aspect).lower()] = amount
             self.craftables = set(doc.get("craftables") or ())
             self.placed = doc.get("placed") or {}
+            self.visited_dimensions = doc.get("dimensions") or {}
         self.refresh_machines()
 
     def stale(self):
@@ -761,11 +767,16 @@ class State:
         # `token_kinds` is resolved just above, and the order matters: the cost table has
         # to be priced with the SAME map the badges read, or a user edit to data/tokens.json
         # changes what a node is labelled without changing what the route costs.
+        # #112's gates, resolved from the graph's static dimension map and the stock
+        # file's record of where the save has terrain. Same discipline as `token_kinds`
+        # above: one answer, so prices and labels cannot disagree.
+        self.dimension_gates = dimensions_mod.gates_for(self.graph,
+                                                        self.visited_dimensions)
         self.costs = cost_mod.estimate_cached(
             self.graph, self.graph_path, have=self.have, machine_states=self.states,
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info),
-            token_kinds=self.token_kinds)
+            token_kinds=self.token_kinds, dimension_gates=self.dimension_gates)
         # The two search indexes, built here rather than on first use. Between them they
         # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while
@@ -784,7 +795,8 @@ class State:
         return Solver(self.graph, have=self.have, craftables=self.craftables,
                       machine_states=self.states, costs=self.costs,
                       free_sources=self.free_sources, token_kinds=self.token_kinds,
-                      pinned=self.pinned, max_nodes=max_nodes)
+                      pinned=self.pinned, max_nodes=max_nodes,
+                      dimension_gates=self.dimension_gates)
 
 
 HOME_JS = """
