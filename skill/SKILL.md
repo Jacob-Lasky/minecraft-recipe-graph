@@ -1204,7 +1204,16 @@ name-match disambiguation), `--depth`, `--max-nodes`, `--json`, `--html`.
 ## Reading the output
 
 Node badges: `in stock` (covered by AE2) · `part stock` · `craft` · `NEED` (raw leaf,
-goes on the shopping list) · `loop` (cycle) · `cut off` (hit the node cap).
+goes on the shopping list) · `no known source` · `loop` (cycle) · `cut off` (hit the node cap).
+
+**`no known source` is a NEED the tool cannot back, and it is display-only.** It fires when
+the graph can make the plain item but nothing reaches the NBT state being asked for --
+"Blaze Data Model (Superior)" against a craftable "Data Model Blaze". That usually means the
+pack gets there by a MECHANIC rather than a recipe (levelling in a Simulation Chamber, a kill
+counter, charging), which no recipe dump can see. It deliberately does NOT fire on a plain key
+nothing produces: cobblestone is that too, and marking it would badge most of a shopping list.
+The price is untouched -- `cost._seed` still seeds these at `BASE_RAW_COST`, which is what
+makes them win routes they should lose, and that is #136.
 
 The `you still need` list is the answer to most questions. `drawn from your AE2 stock` is
 the audit trail showing what it assumed you have.

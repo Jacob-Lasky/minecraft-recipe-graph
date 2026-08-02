@@ -290,6 +290,7 @@ def _load_have(path):
 
 
 def cmd_plan(args):
+    from . import present
     from .solve import Solver
 
     g = _load_graph(args.graph)
@@ -369,7 +370,12 @@ def cmd_plan(args):
     print("nodes: %d%s" % (result["nodes"], cut))
     print("\n-- you still need --")
     for row in result["shopping_list"][: args.limit]:
-        print("  %14s  %s" % ("{:,}".format(row["qty"]), row["name"]))
+        # The terminal gets the same warning the HTML does. A shopping list is what someone
+        # works from, and one of these lines being unbackable is exactly the thing they need
+        # to know before setting off. See Solver.reachable_form and #136.
+        print("  %14s  %s%s" % ("{:,}".format(row["qty"]), row["name"],
+                                "  <- " + present.UNSOURCED_BADGE
+                                if row.get("unsourced") else ""))
     if not result["shopping_list"]:
         # NOT "fully covered by stock" when placeholders remain. That sentence on a plan
         # that still needs a Dungeon Drop is simply false, and it is the sentence a reader

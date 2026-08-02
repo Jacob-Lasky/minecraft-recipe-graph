@@ -30,8 +30,8 @@ $ recipegraph plan "Ultimate Crafting Table" --have data/ae2_have.json
             ...
 ```
 
-Plus an HTML view: collapsible tree, per-node "in stock / craft / NEED" badges, and a
-"show only what I need" filter.
+Plus an HTML view: collapsible tree, per-node "in stock / craft / NEED / no known source"
+badges, and a "show only what I need" filter.
 
 ## Quickstart
 

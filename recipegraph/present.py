@@ -121,17 +121,37 @@ STATE_PILL = {HAVE: "ok", BUILDABLE: "warnp", UNKNOWN: "mut", UNAVAILABLE: "no"}
 STATE_BADGE = {HAVE: "ok", BUILDABLE: "warn", UNKNOWN: "muted", UNAVAILABLE: "need"}
 
 
-def status_badge(status, token_kind=None):
-    """`(text, css class)` for a node's badge, refined by token kind where there is one.
+#: What a NEED row says when the graph can make the item but not in the state asked for.
+#: One definition, because the tree badge, the shopping-list row and the legend all show it.
+UNSOURCED_BADGE = "no known source"
+
+
+def status_badge(status, token_kind=None, unsourced=False):
+    """`(text, css class)` for a node's badge, refined by token kind or by `unsourced`.
 
     One status covers every pack placeholder, because they behave identically to the solver:
     no recipe, not stock, stop here. They do not read identically to a player, though, so
     the WORD comes from the kind. Badging a quest gate "go get" would send someone hunting
     for an item that unlocks by playing the story.
+
+    `unsourced` refines a plain NEED the same way, and for the same reason: the solver
+    resolved it identically to any other raw leaf, but a reader must not treat it
+    identically. See `Solver.reachable_form` and #136.
+
+    THE CLASS DOES NOT CHANGE, only the word. It is still something you have to obtain; what
+    changed is that the tool cannot say how. A new colour would imply a new kind of row and
+    would earn `status_legend` a swatch that means "red, but differently".
+
+    A TOKEN KIND WINS. `unsourced` never reaches a token node -- `expand` returns at the
+    token branch first, and `tests/test_unsourced.ScopeTest` pins that -- but the order has
+    to be unambiguous for a caller that passes both, and "go get" is the more specific
+    instruction of the two.
     """
     text, cls = STATUS_LABEL.get(status, (status, "muted"))
     if status == STATUS_TOKEN and token_kind in KIND_BADGE:
         return KIND_BADGE[token_kind], cls
+    if unsourced:
+        return UNSOURCED_BADGE, cls
     return text, cls
 
 

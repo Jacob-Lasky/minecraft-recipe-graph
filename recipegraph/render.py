@@ -411,7 +411,7 @@ def _node_html(node, depth=0, back="", icon=None):
     render: `recipegraph plan --html` produces a file that outlives the server, and a
     button posting to a server that is not there is worse than no button."""
     status = node.get("status", "craft")
-    label, cls = status_badge(status, node.get("token_kind"))
+    label, cls = status_badge(status, node.get("token_kind"), node.get("unsourced"))
     kids = node.get("children") or []
     need_flag = 1 if _has_need(node) else 0
 
@@ -498,6 +498,17 @@ def _machines_html(machines):
             '</div>' % (len(machines), rows, note))
 
 
+def _unsourced_badge():
+    """The #136 badge for a shopping-list row, worded AND classed by `present`.
+
+    Goes through `status_badge` rather than spelling `class="badge need"` here, so the row
+    and the tree node cannot end up different colours for the same claim -- the exact split
+    `present`'s module docstring exists to prevent.
+    """
+    text, cls = status_badge(STATUS_RAW, unsourced=True)
+    return ' <span class="badge %s">%s</span>' % (cls, _esc(text))
+
+
 def _rows(entries, limit=200, icon=None):
     if not entries:
         return '<tr><td class="meta">none</td></tr>'
@@ -509,7 +520,10 @@ def _rows(entries, limit=200, icon=None):
            # rounding would misreport a partial-bucket step.
            " mB" if e.get("kind") == "fluid" else "",
            named(e, icon),
-           (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else "")
+           # `why` and the unsourced mark share the meta slot and cannot both apply: `why`
+           # is set only on the infinite-sources list, whose rows are by definition sourced.
+           (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else
+           _unsourced_badge() if e.get("unsourced") else "")
         for e in entries[:limit]
     )
 
@@ -717,7 +731,10 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
   from the AE2 network in the world save. Items marked <b>NEED</b> have no known
   recipe in the current graph &mdash; which may mean the recipe is a machine recipe
-  not yet dumped, rather than that none exists.</div>
+  not yet dumped, rather than that none exists. <b>no known source</b> is the stronger
+  case: the graph can make the plain item but nothing reaches the state asked for, which
+  usually means the pack gets there by a mechanic rather than a recipe (levelling, charging,
+  a kill counter) and no recipe dump can see it.</div>
 </div>
 <script>%s</script>""" % (
         CSS, DIAGRAM_CSS,

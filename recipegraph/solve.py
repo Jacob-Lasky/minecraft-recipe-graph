@@ -21,7 +21,7 @@ import collections
 from .cost import input_cost, recipe_cost
 from .defaults import DEFAULT_MAX_NODES
 from .machines import is_hand_crafting
-from .model import merge_slots, split_key
+from .model import base_key, merge_slots, split_key
 
 STATUS_HAVE = "have"        # fully covered by inventory
 STATUS_PARTIAL = "partial"  # some from inventory, remainder crafted
@@ -542,6 +542,26 @@ class Solver:
                 self.tokens_needed[key] += remainder
                 return node
             node["status"] = STATUS_RAW
+            other = self.reachable_form(key)
+            if other:
+                # SAY WHAT WE CANNOT DO, rather than pricing it. #136
+                #
+                # The reported case: a plan bottomed out on "Blaze Data Model (Superior)"
+                # listed beside "128 Granite" as though it were a thing to go and fetch. It
+                # is not. Deep Mob Learning levels a model by killing mobs in a Simulation
+                # Chamber -- a kill counter, not a recipe -- so no dump can carry it and the
+                # graph has no route to that tier at all. Measured: 374 data-model keys on
+                # the reference graph, 125 with any producer, and those 125 are exactly two
+                # tiers, the craftable fresh model and Self-Aware.
+                #
+                # THE MARK IS DISPLAY-ONLY AND MUST STAY THAT WAY. The underlying defect is
+                # `cost._seed` giving an unreachable leaf `BASE_RAW_COST`, which is what made
+                # the tier the CHEAPEST thing in the plan and won it the route. Fixing that
+                # is #136 and needs both cost audits; moving a price from here would change
+                # routing with none of that scrutiny, and no test here would notice.
+                node["unsourced"] = True
+                node["note"] = ("no recipe reaches this state; the graph can only make %s"
+                                % self.g.bare_name(other))
             self.leaf_totals[key] += remainder
             return node
 
@@ -601,6 +621,37 @@ class Solver:
             self.pins_overruled[key] = (
                 "every recipe you pinned for %s loops back on its own ingredients, so "
                 "the plan uses another route" % self.g.bare_name(key))
+
+    def reachable_form(self, key):
+        """The base item, when `key` is an NBT STATE of something the graph CAN make.
+
+        None otherwise, which is the common case and the whole reason this is narrow.
+
+        WHY NOT "NOTHING PRODUCES IT", WHICH IS THE OBVIOUS RULE. Cobblestone has no producer
+        either. Marking every producerless leaf would badge most of a shopping list, and a
+        mark that fires on almost everything carries no information -- which is the failure
+        #136 measured for every rule keying on `producers == 0` alone.
+
+        WHY NOT `base_key(key) != key` ON ITS OWN. That matches 47,417 keys on the reference
+        graph, and the top of that list is every Forestry bee species -- `bee_drone_ge#...`
+        Forest Drone, consumed by 247 recipes. A Forest Drone with no producer is CORRECT and
+        unremarkable: you get one out of a hive. What makes the data-model tier different is
+        the second clause, that the graph demonstrably CAN make the plain item -- so the plan
+        is resting on a state it has no route to, and there is a specific other form to point
+        the reader at. Without something to name, the mark would just be "no recipe", which
+        the NEED badge already says.
+
+        DELIBERATELY DOES NOT COVER A PLAIN KEY NOTHING MAKES -- the Sednanite Nugget that
+        opened #136. It carries no NBT, so there is no other form to name, and #136's
+        measurement found no signal separating it from an ordinary mob drop. That half stays
+        open rather than being papered over with a rule that would fire on cobblestone.
+        """
+        if self.g.real_producers(key):
+            return None
+        stem = base_key(key)
+        if stem == key:
+            return None
+        return stem if self.g.real_producers(stem) else None
 
     def _snapshot(self):
         """Everything a discarded branch must not leave behind.
@@ -679,8 +730,31 @@ class Solver:
         return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
                 "label": self.g.bare_name(key), "qty": qty}
 
+    def _need_entry(self, key, qty):
+        """`_entry` for a SHOPPING-LIST row, which is the only list the #136 mark suits.
+
+        `_entry` feeds five lists and decorating it there put "no known source" on rows in
+        "Drawn from AE2 stock" -- a row that exists precisely BECAUSE you are holding the
+        item -- and on infinite-source and token rows, each of which already carries its own
+        and contradictory answer to "how do I get this".
+
+        Recomputed from `reachable_form` rather than copied off the tree node, so the list
+        and the tree cannot disagree about the same key. The tree is the diagnosis; this is
+        what gets acted on while gathering.
+        """
+        row = self._entry(key, qty)
+        if self.reachable_form(key):
+            row["unsourced"] = True
+        return row
+
     def solve(self, key, qty=1):
         """The whole result, as one dict. This IS the wire format.
+
+        `unsourced` is OPTIONAL and appears only where it is true: on a tree node and on a
+        `shopping_list` row whose key is a state the graph cannot reach (#136). Absent
+        everywhere else, including on the other four `_entry` lists, where it would
+        contradict the row it sat on. Readers must treat its absence as false rather than
+        expecting the key.
 
         FIVE OF THESE LISTS ARE ORDERED BY `Counter.most_common()`, AND THAT ORDER IS PART OF
         THE CONTRACT, NOT AN ACCIDENT OF THE IMPLEMENTATION. `most_common` sorts by count
@@ -709,7 +783,7 @@ class Solver:
             "pins_overruled": dict(self.pins_overruled),
             "qty": qty,
             "tree": tree,
-            "shopping_list": [self._entry(k, n)
+            "shopping_list": [self._need_entry(k, n)
                               for k, n in self.leaf_totals.most_common()],
             "used_from_stock": [self._entry(k, n)
                                 for k, n in self.used_from_stock.most_common()],
