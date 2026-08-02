@@ -1,39 +1,63 @@
 package io.github.jacoblasky.recipedump;
 
-import io.github.jacoblasky.recipedump.shot.ShotHarness;
-import mezz.jei.api.IJeiRuntime;
-import net.minecraftforge.client.ClientCommandHandler;
+import io.github.jacoblasky.recipedump.common.CommonProxy;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.common.SidedProxy;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.relauncher.Side;
-import net.minecraftforge.fml.relauncher.SideOnly;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 
 /**
- * Dumps every recipe HEI/JEI knows about to NDJSON, for offline crafting-tree tools.
+ * Dumps every recipe HEI/JEI knows about to NDJSON, for offline crafting-tree tools, and from
+ * #19 hosts the in-game planner.
  *
- * CLIENT SIDE ONLY, by necessity: JEI's recipe registry only exists on the client,
- * because that is where recipe categories are registered. Recipe *contents* are
- * identical client- and server-side, so a client dump is valid for a server world.
+ * COMMON-SIDE SINCE #19 PHASE 2, and the distinction that makes that safe is between the MOD
+ * and the DUMP. The dump is client-only by necessity -- JEI's recipe registry only exists
+ * where categories are registered, and recipe contents are identical on both sides, so a
+ * client dump is valid for a server world. The planner is not: a craftable item, a per-player
+ * capability and packets have to exist on the server Jake actually plays on. So the client
+ * half moved behind `ClientProxy` and the mod itself now loads on both sides.
+ *
+ * NOTHING IN THIS CLASS MAY REFERENCE `net.minecraft.client` OR `mezz.jei`. It is the one
+ * class a dedicated server is guaranteed to load, so a stray import here is a server that
+ * will not start -- and nobody working on this repository can launch one to find out.
+ * `CommonSideSafetyTest` reads the compiled bytes and asserts it.
  */
-@Mod(modid = RecipeDumpMod.MODID, useMetadata = true,
-     clientSideOnly = true, dependencies = "required-after:jei")
+@Mod(modid = RecipeDumpMod.MODID, useMetadata = true, dependencies = RecipeDumpMod.DEPENDENCIES)
 public class RecipeDumpMod {
 
     public static final String MODID = "mcrecipedump";
 
-    /** Set by DumpPlugin once JEI finishes loading; null before then. */
-    public static IJeiRuntime runtime;
+    /**
+     * `after`, NOT `required-after:jei`, and dropping the "required" was forced rather than
+     * chosen.
+     *
+     * 1.12.2's `@Mod` dependency string has no way to say "required on the client only", and
+     * JEI does not exist on a dedicated server. Left as `required-after` the mod would refuse
+     * to load on Jake's server, which is the environment Phase 2 exists to reach. `after` still
+     * buys the thing that actually matters -- JEI loads first, so `DumpPlugin` is registered
+     * before anything asks for a runtime.
+     *
+     * What it costs is that a CLIENT without JEI now loads this mod and has a `/recipedump`
+     * that cannot work. `DumpCommand` already handles that: it checks `DumpPlugin.runtime` for
+     * null and says "JEI runtime not available yet" rather than throwing.
+     *
+     * THIS STRING IS THE ONLY PLACE DEPENDENCIES ARE DECLARED, and mcmod.info deliberately no
+     * longer carries a `dependencies` array. It used to, and it did nothing: FML reads
+     * dependencies from the metadata only when mcmod.info sets `useDependencyInformation`,
+     * which this one never has, so `FMLModContainer.bindMetadata` parsed this annotation and
+     * ignored the JSON. Two declarations, one inert, is how they drift -- verified by
+     * disassembling `bindMetadata` rather than by reading a wiki.
+     */
+    static final String DEPENDENCIES = "after:jei";
 
     /**
-     * JEI's complete item list, captured in DumpPlugin#register; null before then.
-     *
-     * SEPARATE FROM `runtime` BECAUSE IT HAS TO BE -- see DumpPlugin#register. It is the
-     * source for every per-ITEM file (emc.json, machine_names.json's blueprint half, the
-     * icon atlas), as opposed to the per-RECIPE walk that fills recipes.ndjson. The two
-     * populations differ: an item nothing crafts and nothing consumes appears here and
-     * nowhere in the recipe stream, and #50's whole subject is drop-only items.
+     * The client half. FML never loads `ClientProxy` on a dedicated server, which is what
+     * keeps `net.minecraft.client` and JEI out of a server's class loading entirely.
      */
-    public static mezz.jei.api.ingredients.IIngredientRegistry ingredients;
+    @SidedProxy(modId = MODID,
+                clientSide = "io.github.jacoblasky.recipedump.client.ClientProxy",
+                serverSide = "io.github.jacoblasky.recipedump.common.CommonProxy")
+    public static CommonProxy proxy;
 
     /**
      * The running mod's version, read from the metadata Forge already parsed.
@@ -60,11 +84,12 @@ public class RecipeDumpMod {
     }
 
     @Mod.EventHandler
-    @SideOnly(Side.CLIENT)
+    public void preInit(FMLPreInitializationEvent event) {
+        proxy.preInit(event);
+    }
+
+    @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
-        ClientCommandHandler.instance.registerCommand(new DumpCommand());
-        // Does nothing at all unless `-Dmcrecipedump.shot` was passed, which only the
-        // headless screenshot harness does. See ShotHarness and harness/README.md (#124).
-        ShotHarness.arm();
+        proxy.init(event);
     }
 }

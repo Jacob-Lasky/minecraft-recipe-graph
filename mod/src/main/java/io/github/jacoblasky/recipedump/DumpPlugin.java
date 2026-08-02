@@ -11,9 +11,29 @@ import mezz.jei.api.JEIPlugin;
  * onRuntimeAvailable is the only sanctioned way to get an IJeiRuntime; it fires
  * after every mod's categories and recipes are registered, which is exactly when a
  * complete dump becomes possible. Dumping any earlier yields a partial registry.
+ *
+ * THE TWO CAPTURED REFERENCES LIVE HERE RATHER THAN ON `RecipeDumpMod` because their types
+ * are JEI's. Since #19 Phase 2 the mod class loads on a dedicated server, where JEI is not
+ * installed; a field typed `IJeiRuntime` on that class is a resolution failure waiting for
+ * whichever JVM decides to resolve field types eagerly. This class is only ever loaded BY
+ * JEI, so if it loads at all, JEI is present.
  */
 @JEIPlugin
 public class DumpPlugin implements IModPlugin {
+
+    /** Set by {@link #onRuntimeAvailable}; null before then, and forever without JEI. */
+    public static IJeiRuntime runtime;
+
+    /**
+     * JEI's complete item list, captured in {@link #register}; null before then.
+     *
+     * SEPARATE FROM `runtime` BECAUSE IT HAS TO BE -- see `register` below. It is the source
+     * for every per-ITEM file (emc.json, machine_names.json's blueprint half, the icon
+     * atlas), as opposed to the per-RECIPE walk that fills recipes.ndjson. The two
+     * populations differ: an item nothing crafts and nothing consumes appears here and
+     * nowhere in the recipe stream, and #50's whole subject is drop-only items.
+     */
+    public static mezz.jei.api.ingredients.IIngredientRegistry ingredients;
 
     /**
      * The ingredient registry has to be taken HERE, not off the runtime, because
@@ -27,11 +47,11 @@ public class DumpPlugin implements IModPlugin {
      */
     @Override
     public void register(IModRegistry registry) {
-        RecipeDumpMod.ingredients = registry.getIngredientRegistry();
+        ingredients = registry.getIngredientRegistry();
     }
 
     @Override
     public void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
-        RecipeDumpMod.runtime = jeiRuntime;
+        runtime = jeiRuntime;
     }
 }
