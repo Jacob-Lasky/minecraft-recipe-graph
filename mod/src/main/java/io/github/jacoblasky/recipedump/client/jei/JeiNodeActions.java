@@ -3,7 +3,7 @@ package io.github.jacoblasky.recipedump.client.jei;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
-import io.github.jacoblasky.recipedump.client.planner.PlanNode;
+import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import net.minecraft.item.ItemStack;
 import org.apache.logging.log4j.LogManager;

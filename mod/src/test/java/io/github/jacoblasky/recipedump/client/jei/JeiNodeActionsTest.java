@@ -15,7 +15,7 @@ import io.github.jacoblasky.recipedump.DumpPlugin;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanJson;
-import io.github.jacoblasky.recipedump.client.planner.PlanNode;
+import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import java.lang.reflect.InvocationHandler;
