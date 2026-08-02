@@ -46,9 +46,12 @@ BUILD_DIR=$(dirname "$ORACLE")
 
 want_python=1
 want_java=1
+# A no-argument run is the PRE-MERGE gate and behaves differently from the iteration flags:
+# it builds a missing jar rather than warning about one. See the jar block below.
+full_run=1
 case "${1:-}" in
-    --python) want_java=0 ;;
-    --java) want_python=0 ;;
+    --python) want_java=0; full_run=0 ;;
+    --java) want_python=0; full_run=0 ;;
     "") ;;
     *) echo "usage: tools/check.sh [--python|--java]" >&2; exit 2 ;;
 esac
@@ -97,9 +100,33 @@ report_python_skips() {
 # failures with stale jars present and a clean "all green" after `rm -rf mod/build/libs`, and
 # the second reads as the better result. Deleting the artifact an assertion inspects is a way
 # of passing it.
+#
+# A WARNING IS NOT ENOUGH FOR THE FULL RUN, so it builds the jar instead. A `!!` line in a
+# fourteen-minute run scrolls past, and the run would still end in "all green" over an
+# unasserted contract -- relying on the reader noticing, which is the exact habit this whole
+# family of bugs is about not relying on. The right move is the one this finding itself
+# argues for: change the artifact rather than look harder at it. Three minutes on top of
+# fourteen is nothing for a pre-merge gate, and it leaves behind a current verified jar,
+# which is what someone needs before installing one anyway.
+#
+# THE ITERATION FLAGS DELIBERATELY DO NOT BUILD. `--java` and `--python` are for the inner
+# loop, where an unbuilt `libs` is the normal state and a three-minute build every time would
+# teach people to stop running this at all. That asymmetry is intentional; do not "fix" it.
 jar_warning=""
 if [ -n "$version" ] && [ ! -f "mod/build/libs/mc-recipe-dump-$version.jar" ]; then
-    jar_warning="no mc-recipe-dump-$version.jar in mod/build/libs -- test_dist_jar will SKIP"
+    if [ "$full_run" -eq 1 ]; then
+        echo "== jar =="
+        echo "no mc-recipe-dump-$version.jar; building it so test_dist_jar has something to check"
+        if GRADLE_CACHE="$GRADLE_CACHE" PACK_MODS="$PACK_MODS" mod/tools/build-jar.sh; then
+            :
+        else
+            echo "!! build-jar.sh failed; test_dist_jar will SKIP and prove nothing" >&2
+            jar_warning="build failed, so there is no jar -- test_dist_jar will SKIP"
+            fail=1
+        fi
+    else
+        jar_warning="no mc-recipe-dump-$version.jar in mod/build/libs -- test_dist_jar will SKIP"
+    fi
 fi
 
 if [ "$want_python" -eq 1 ]; then
