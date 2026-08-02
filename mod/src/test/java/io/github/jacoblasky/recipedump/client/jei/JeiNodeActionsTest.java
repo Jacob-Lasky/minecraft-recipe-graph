@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -133,6 +134,29 @@ public class JeiNodeActionsTest {
         NodeActions actions = new JeiNodeActions(source(graphOf("minecraft:stick")));
         assertSame(ItemStack.EMPTY, actions.iconFor(null));
         assertFalse(actions.canShowInRecipeViewer(null));
+    }
+
+    @Test
+    public void anIndexBuiltForOneGraphIsNeverServedForAnother() {
+        // THE PAIRING INVARIANT, and the reason `JeiBridge` holds the graph and its index as
+        // one object behind one volatile field rather than as two. Once `GraphService` began
+        // building the index on its LOADER thread, two unordered fields let the client thread
+        // see the new graph beside the old index -- every key would resolve, to the wrong
+        // item. A single-threaded test cannot reach the interleaving; it CAN reach the
+        // invariant, which is that an index is only ever handed out for the graph it was
+        // built from.
+        ItemStack stick = new ItemStack(Items.STICK);
+        RecipeGraph built = graphOf(DumpCommand.stackKey(stick));
+        JeiBridge.indexFor(built, Collections.singletonList(stick));
+        assertSame(stick, JeiBridge.stackFor(built.keyId("minecraft:stick"), built));
+
+        // A DIFFERENT graph that gives the same key the same id, so serving the stale index
+        // would answer with the stick and look entirely correct doing it. That the two ids
+        // agree is asserted, not assumed -- if they ever diverged this would pass for the
+        // wrong reason.
+        RecipeGraph other = graphOf("minecraft:stick");
+        assertEquals(built.keyId("minecraft:stick"), other.keyId("minecraft:stick"));
+        assertNull(JeiBridge.stackFor(other.keyId("minecraft:stick"), other));
     }
 
     // -- state 2: a graph, but the node names no item ----------------------------------------
