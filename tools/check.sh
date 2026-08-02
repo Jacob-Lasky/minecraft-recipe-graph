@@ -74,15 +74,46 @@ fi
 
 fail=0
 
+PYLOG=$(mktemp)
+trap 'rm -f "$PYLOG"' EXIT
+
+# COUNT THE PYTHON SKIPS AND SAY SO, exactly as the java arm below already does. `unittest -q`
+# prints `OK (skipped=N)` and exits 0, so a run whose most important assertions all skipped is
+# indistinguishable from a clean one in this script's output -- which is the failure this file
+# exists to prevent, one level up from the gate it was written for.
+report_python_skips() {
+    skipped=$(sed -n 's/^OK (skipped=\([0-9]*\))$/\1/p' "$PYLOG")
+    [ -n "$skipped" ] || skipped=0
+    echo "python: $skipped skipped"
+    if [ "$skipped" -gt 0 ] && [ -n "$jar_warning" ]; then
+        echo "!! those skips include test_dist_jar; build the jar or they prove nothing"
+    fi
+}
+
+# SAY WHEN THERE IS NO JAR TO CHECK, for the same reason as the oracle warning below.
+# `test_dist_jar` calls `skipTest` when `mod/build/libs` holds no jar, so an unbuilt worktree
+# turns its eleven assertions into eleven silent skips -- and `unittest` exits 0 on a skip, so
+# this script printed "all green" over them. Measured, not imagined: the same tree gave three
+# failures with stale jars present and a clean "all green" after `rm -rf mod/build/libs`, and
+# the second reads as the better result. Deleting the artifact an assertion inspects is a way
+# of passing it.
+jar_warning=""
+if [ -n "$version" ] && [ ! -f "mod/build/libs/mc-recipe-dump-$version.jar" ]; then
+    jar_warning="no mc-recipe-dump-$version.jar in mod/build/libs -- test_dist_jar will SKIP"
+fi
+
 if [ "$want_python" -eq 1 ]; then
     echo "== python =="
+    [ -z "$jar_warning" ] || echo "!! $jar_warning"
     if [ -f "$ORACLE" ]; then
-        RECIPEGRAPH_ORACLE="$ORACLE" python3 -m unittest discover -s tests -q || fail=1
+        RECIPEGRAPH_ORACLE="$ORACLE" python3 -m unittest discover -s tests -q 2>"$PYLOG" || fail=1
+        report_python_skips
     else
         echo "!! no oracle at $ORACLE -- the fixture regeneration test will SKIP."
         echo "!! build one with: python3 -m recipegraph.cli build --dump-dir data/mc-recipe-dump \\"
         echo "!!                  --graph $ORACLE"
-        python3 -m unittest discover -s tests -q || fail=1
+        python3 -m unittest discover -s tests -q 2>"$PYLOG" || fail=1
+        report_python_skips
     fi
 fi
 
