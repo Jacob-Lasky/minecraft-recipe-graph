@@ -92,4 +92,15 @@ if srg == 0:
     raise SystemExit("[rebuild-dist] 0 SRG refs: this is the -dev jar, not the real one")
 PY
 
-echo "[rebuild-dist] now run: python3 -m unittest discover -s tests -q"
+git add -A dist "$PROPS" README.md
+
+# STAGED, NOT COMMITTED, AND SAYING SO IS THE POINT. This script writes three things that are
+# easy to leave behind, and leaving them behind fails in the most confusing possible place:
+# the branch's own test run is green because the working tree is right, the push carries only
+# the commits, and `test_dist_jar` goes red on MASTER after the merge, naming a hash mismatch
+# on a change that had nothing to do with the jar. Done exactly that once.
+echo
+echo "[rebuild-dist] STAGED, NOT COMMITTED. Commit before you push, or master goes red:"
+git --no-pager diff --cached --stat
+echo
+echo "[rebuild-dist] then: python3 -m unittest discover -s tests -q"
