@@ -3,6 +3,7 @@ package io.github.jacoblasky.recipedump.client;
 import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.common.CommonProxy;
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.client.jei.PlanTargetKeybind;
 import io.github.jacoblasky.recipedump.common.PlanBookCapability;
 import io.github.jacoblasky.recipedump.shot.ShotHarness;
 import net.minecraft.client.Minecraft;
@@ -34,6 +35,11 @@ public class ClientProxy extends CommonProxy {
         // Does nothing at all unless `-Dmcrecipedump.shot` was passed, which only the
         // headless screenshot harness does. See ShotHarness and harness/README.md (#124).
         ShotHarness.arm();
+        // Registered here rather than in a static initialiser: `registerKeyBinding` writes
+        // into the game settings, and doing that whenever the class happens to load is how a
+        // binding ends up registered twice. Safe without JEI -- the key resolves nothing and
+        // says nothing, which is what an unbound feature should do.
+        PlanTargetKeybind.register();
     }
 
     /**

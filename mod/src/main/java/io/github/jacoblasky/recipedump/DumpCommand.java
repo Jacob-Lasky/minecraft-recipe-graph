@@ -393,15 +393,15 @@ public class DumpCommand extends CommandBase {
             if (stack == null || stack.isEmpty()) {
                 return;
             }
-            Item item = stack.getItem();
-            ResourceLocation id = item.getRegistryName();
-            if (id == null) {
+            String key = stackKey(stack);
+            if (key == null) {
                 return;
             }
+            // The raw components, for the icon target only. NOT reassembled into a key --
+            // that string comes from `stackKey` and nowhere else.
+            Item item = stack.getItem();
+            ResourceLocation id = item.getRegistryName();
             int meta = stack.getItemDamage();
-            String base = meta == 0 ? id.toString() : id + ":" + meta;
-            String nbt = discriminator(stack);
-            String key = nbt == null ? base : base + "#" + nbt;
 
             long value = ProjectEBridge.emc(stack);
             if (value > 0L) {
@@ -502,14 +502,14 @@ public class DumpCommand extends CommandBase {
                     if (stack.isEmpty()) {
                         continue;
                     }
-                    ResourceLocation id = stack.getItem().getRegistryName();
-                    if (id == null) {
+                    // The BASE key, deliberately: a catalyst is a claim about an ITEM and
+                    // not about one NBT state of it. A wildcard-meta catalyst names the
+                    // whole family; the python side normalises 32767 to `:*`, so it passes
+                    // through unchanged.
+                    String key = baseStackKey(stack);
+                    if (key == null) {
                         continue;
                     }
-                    int meta = stack.getItemDamage();
-                    // A wildcard-meta catalyst names the whole family; the python side
-                    // normalises 32767 to `:*`, so pass it through unchanged.
-                    String key = meta == 0 ? id.toString() : id + ":" + meta;
                     if (!ids.contains(key)) {
                         ids.add(key);
                     }
@@ -828,11 +828,7 @@ public class DumpCommand extends CommandBase {
         int meta = stack.getItemDamage();
         String nbt = discriminator(stack);
         if (sink != null) {
-            String key = meta == 0 ? id.toString() : id + ":" + meta;
-            if (nbt != null) {
-                key = key + "#" + nbt;
-            }
-            sink.record(key, stack);
+            sink.record(stackKey(stack), stack);
         }
         return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
                 + ",\"c\":" + stack.getCount()
@@ -846,7 +842,9 @@ public class DumpCommand extends CommandBase {
      * ONE object rather than two threaded parameters because they are the same kind of
      * thing -- write-once-per-discriminated-key -- and because the KEY FORMAT
      * (`id[:meta][#digest]`) has to be identical in both files or they cannot be joined.
-     * Building that string in one place is what guarantees it.
+     * {@link DumpCommand#stackKey} is where that string is built, and since #19 Phase 4 it
+     * really is the only place: three sites spelled it inline before, which made this
+     * sentence a claim rather than a guarantee.
      */
     static final class KeySink {
 
@@ -1027,6 +1025,52 @@ public class DumpCommand extends CommandBase {
         StringBuilder sb = new StringBuilder();
         canonical(copy, sb);
         return fnv(sb);
+    }
+
+    /**
+     * The graph key for a stack: `id[:meta][#digest]`. Null when the stack has no identity.
+     *
+     * THE ONE PLACE THIS FORMAT IS SPELLED. `KeySink` below has always claimed that, and
+     * until #19 Phase 4 it was not true -- three sites built the string inline and the
+     * claim was aspirational. It matters more now than it did: the JEI wiring has to INVERT
+     * this to get from a planned key back to an `ItemStack`, and an inverter matched against
+     * one of three spellings is an inverter that works until it silently does not.
+     *
+     * Null for an empty stack or an item with no registry name, because a key minted for
+     * either would name nothing and would look real everywhere downstream.
+     *
+     * PUBLIC because the JEI wiring in `client.jei` inverts it. That is the whole reason it
+     * has to be one function: the inverter and the writer agreeing is not something a reader
+     * can check across three inline copies, and it is not something a test can pin either.
+     */
+    public static String stackKey(ItemStack stack) {
+        String base = baseStackKey(stack);
+        if (base == null) {
+            return null;
+        }
+        String nbt = discriminator(stack);
+        return nbt == null ? base : base + "#" + nbt;
+    }
+
+    /**
+     * {@link #stackKey} without the NBT discriminator: `id[:meta]`.
+     *
+     * A SEPARATE ENTRY POINT RATHER THAN A FLAG, because the one caller that wants it -- the
+     * catalyst walk -- wants it for a reason worth naming. A catalyst is a claim about an
+     * ITEM, not about one NBT state of it, and JEI lists the bare item while the recipes
+     * that craft it may all output a discriminated variant. Widening happens on the python
+     * side through the variant index; the dump must not pre-empt it by writing a digest here.
+     */
+    public static String baseStackKey(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        ResourceLocation id = stack.getItem().getRegistryName();
+        if (id == null) {
+            return null;
+        }
+        int meta = stack.getItemDamage();
+        return meta == 0 ? id.toString() : id + ":" + meta;
     }
 
     /**
