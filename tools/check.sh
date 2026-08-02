@@ -58,6 +58,20 @@ host_path() {
     echo "$1" | sed 's|^/coding|/mnt/user/misc/coding|'
 }
 
+# SWEEP STALE BUILDS FIRST. `mod/build/libs` accumulates a jar per build, and since the jar
+# stopped being tracked that directory is what `test_dist_jar` reads. Three leftover versions
+# produce three failures that read as a packaging defect; two people diagnosed it that way
+# before anyone noticed they were just old files. Only jars for versions OTHER than the
+# current one go, so a legitimately stale current-version jar still fails loudly, which is the
+# assertion worth keeping.
+version=$(sed -n 's/^mod_version=//p' mod/gradle.properties)
+if [ -d mod/build/libs ] && [ -n "$version" ]; then
+    swept=$(find mod/build/libs -name 'mc-recipe-dump-*.jar' \
+        ! -name "mc-recipe-dump-$version.jar" ! -name "mc-recipe-dump-$version-dev.jar" \
+        -print -delete 2>/dev/null | wc -l)
+    [ "$swept" -eq 0 ] || echo "swept $swept stale jar(s) from mod/build/libs"
+fi
+
 fail=0
 
 if [ "$want_python" -eq 1 ]; then
