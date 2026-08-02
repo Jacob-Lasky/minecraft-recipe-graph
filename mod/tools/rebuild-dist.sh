@@ -52,6 +52,26 @@ fi
 echo "[rebuild-dist] $current -> $next"
 sed -i "s/^mod_version=$current\$/mod_version=$next/" "$PROPS"
 
+# PUT THE VERSION BACK IF ANYTHING BELOW FAILS. `set -e` plus a bump before the build means a
+# container that dies -- and with several agents on one host the usual cause is Gradle's
+# exclusive lock on GRADLE_USER_HOME, nothing to do with this repository -- leaves the tree
+# claiming a version whose jar was never produced. `test_dist_jar` then fails TWO ways at once,
+# on the filename and on the source stamp, which is indistinguishable from an ordinary stale
+# jar and sends the reader looking for a code problem that is not there. Observed exactly that.
+#
+# Only the version is reverted. `dist/` and the README are not touched until after a
+# successful build, so there is nothing else to undo.
+revert_version() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        sed -i "s/^mod_version=$next\$/mod_version=$current/" "$PROPS"
+        echo "[rebuild-dist] FAILED (exit $status); reverted $PROPS to $current" >&2
+        echo "[rebuild-dist] if this was a gradle lock timeout, another build holds" >&2
+        echo "[rebuild-dist]   $GRADLE_CACHE -- pass GRADLE_CACHE=<your own copy> and retry" >&2
+    fi
+}
+trap revert_version EXIT
+
 # Host paths, because a bind mount source is resolved on the UnRAID host and not on this
 # container's view of it. Getting this wrong mounts an EMPTY directory and the build fails
 # with a missing-jar error that points at the wrong problem entirely.
