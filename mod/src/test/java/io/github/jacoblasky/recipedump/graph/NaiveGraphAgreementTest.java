@@ -44,6 +44,21 @@ public class NaiveGraphAgreementTest {
     }
 
     @Test
+    public void bothModelsReadEverySchemaFiveSection() throws IOException {
+        // Skipping a section makes the naive model look cheaper than it is by exactly what
+        // that section weighs, which flatters the compact one in the comparison this class
+        // exists to keep honest. All five were in fact being skipped once already.
+        byte[] bytes = SchemaFiveFactsTest.DOCUMENT.getBytes("UTF-8");
+        RecipeGraph small = GraphJsonReader.read(new ByteArrayInputStream(bytes), bytes.length);
+        NaiveGraph plain = NaiveGraph.read(new ByteArrayInputStream(bytes), false);
+        assertEquals(plain.maxDamageCount(), small.damageableCount());
+        assertEquals(plain.emcCount(), small.emcCount());
+        assertEquals(plain.blueprintCount(), small.blueprints().blueprintCount());
+        assertEquals(plain.machineNameCount(), small.blueprints().namedMachineCount());
+        assertEquals(plain.iconCount(), small.icons().size());
+    }
+
+    @Test
     public void bothModelsAgreeOnWhichKeysAreProducedAndConsumed() {
         assertEquals(naive.outputKeys(), producedKeys());
         assertEquals(naive.inputKeys(), consumedKeys());

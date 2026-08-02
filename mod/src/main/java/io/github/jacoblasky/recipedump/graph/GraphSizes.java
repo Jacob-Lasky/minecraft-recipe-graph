@@ -20,7 +20,15 @@ public final class GraphSizes {
     public final long names;
     /** by-output, by-input, oredict membership, wildcard siblings and the derived bitsets. */
     public final long adjacency;
-    /** Catalysts, category mods, dimension ores and multiblock structures. */
+    /**
+     * Per-item facts that are not recipes: EMC, durability, blueprint identity, icon slots.
+     *
+     * Its OWN bucket rather than folded into `other` because these all arrived at once with
+     * dump schema 5 and the dump format is still moving. A separate line makes "what did the
+     * last schema bump cost us" answerable from the report instead of by diffing two runs.
+     */
+    public final long itemFacts;
+    /** Ore group names, catalysts, category mods, dimension ores, multiblock structures. */
     public final long other;
 
     /** Part of {@link #recipes}: the dump's recipe ids. */
@@ -28,19 +36,20 @@ public final class GraphSizes {
     /** Part of {@link #keyTable}: the string-to-id lookup index. */
     public final long keyLookupIndex;
 
-    GraphSizes(long keyTable, long recipes, long names, long adjacency, long other,
-               long recipeIds, long keyLookupIndex) {
+    GraphSizes(long keyTable, long recipes, long names, long adjacency, long itemFacts,
+               long other, long recipeIds, long keyLookupIndex) {
         this.keyTable = keyTable;
         this.recipes = recipes;
         this.names = names;
         this.adjacency = adjacency;
+        this.itemFacts = itemFacts;
         this.other = other;
         this.recipeIds = recipeIds;
         this.keyLookupIndex = keyLookupIndex;
     }
 
     public long total() {
-        return keyTable + recipes + names + adjacency + other;
+        return keyTable + recipes + names + adjacency + itemFacts + other;
     }
 
     @Override
@@ -49,6 +58,7 @@ public final class GraphSizes {
                 + Sizes.row("recipes", recipes)
                 + Sizes.row("names", names)
                 + Sizes.row("adjacency indexes", adjacency)
+                + Sizes.row("item facts (emc, damage, blueprints, icons)", itemFacts)
                 + Sizes.row("other (ores, catalysts, multiblocks)", other)
                 + Sizes.row("TOTAL", total())
                 + "\n"

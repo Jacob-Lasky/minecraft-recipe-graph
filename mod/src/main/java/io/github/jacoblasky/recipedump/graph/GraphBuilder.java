@@ -74,9 +74,16 @@ public final class GraphBuilder {
     private final IntArray categoryModCategory = new IntArray();
     private final IntArray categoryModName = new IntArray();
 
-    private final IntArray dimensionOreKey = new IntArray();
+    private final KeyIndex.Builder dimensionOreKey = new KeyIndex.Builder();
     private final IntArray dimensionOreDimId = new IntArray();
     private final IntArray dimensionOreNameId = new IntArray();
+
+    private final KeyIndex.Builder damageableKey = new KeyIndex.Builder();
+    private final IntArray maxDamage = new IntArray();
+    private final KeyIndex.Builder emcKey = new KeyIndex.Builder();
+    private final LongArray emcValue = new LongArray();
+    private final Blueprints.Builder blueprints = new Blueprints.Builder();
+    private final IconAtlas.Builder icons = new IconAtlas.Builder();
 
     private final Multiblocks.Builder multiblocks = new Multiblocks.Builder();
 
@@ -243,6 +250,28 @@ public final class GraphBuilder {
         dimensionOreNameId.add(dimensionNames.add(dimensionName));
     }
 
+    // -- schema 5 per-item facts ------------------------------------------------------------
+
+    /** `stemKeyId` is the UNDAMAGED item key, which is what the registry reports against. */
+    public void damageable(int stemKeyId, int registryMaxDamage) {
+        damageableKey.add(stemKeyId);
+        maxDamage.add(registryMaxDamage);
+    }
+
+    /** A `long` because ProjectE EMC exceeds an int by four orders of magnitude. */
+    public void emc(int keyId, long value) {
+        emcKey.add(keyId);
+        emcValue.add(value);
+    }
+
+    public Blueprints.Builder blueprints() {
+        return blueprints;
+    }
+
+    public IconAtlas.Builder icons() {
+        return icons;
+    }
+
     public Multiblocks.Builder multiblocks() {
         return multiblocks;
     }
@@ -317,16 +346,47 @@ public final class GraphBuilder {
                 catalysts, wildcardSibling, names, keyCount);
         long[] reshapedOnly = buildReshapedOnly(store, byOutput, keyCount);
 
-        sortDimensionOres();
+        int[] dimensionOrder = dimensionOreKey.permutation();
+        int[] damageOrder = damageableKey.permutation();
+        int[] emcOrder = emcKey.permutation();
 
         return new RecipeGraph(keyTable, displayNames.build(), names, unlocalizedBits, kindOf,
                 categoryTable, machineNames.build(), sources.build(), roles.build(), store,
                 byOutput, byInput, wildcardSibling, oreTable, oreMembers, oreIndex,
                 oreGroupKeyId, oreGuessed, worldOres, liveKeys, reshapedOnly, catalysts,
-                categoryMods.build(), categoryModId, dimensionOreKey.trimmed(),
-                dimensionOreDimId.trimmed(), dimensionOreNameId.trimmed(),
-                dimensionNames.build(), multiblocks.build(), dumpSchema, dumpVersion,
-                instanceDir);
+                categoryMods.build(), categoryModId,
+                dimensionOreKey.build(dimensionOrder),
+                permute(dimensionOreDimId, dimensionOrder),
+                permute(dimensionOreNameId, dimensionOrder),
+                dimensionNames.build(),
+                damageableKey.build(damageOrder), permute(maxDamage, damageOrder),
+                emcKey.build(emcOrder), permute(emcValue, emcOrder),
+                blueprints.build(), icons.build(),
+                multiblocks.build(), dumpSchema, dumpVersion, instanceDir);
+    }
+
+    /**
+     * Reorders a value column to match the permutation its {@link KeyIndex} was sorted by.
+     *
+     * The keys and every parallel value column must move TOGETHER. Sorting the keys and
+     * leaving a column behind pairs each key with someone else's value, which is a graph
+     * that loads and answers confidently wrong -- the exact failure the CSR guards exist to
+     * prevent, in a different place.
+     */
+    private static int[] permute(IntArray values, int[] order) {
+        int[] out = new int[order.length];
+        for (int slot = 0; slot < order.length; slot++) {
+            out[slot] = values.get(order[slot]);
+        }
+        return out;
+    }
+
+    private static long[] permute(LongArray values, int[] order) {
+        long[] out = new long[order.length];
+        for (int slot = 0; slot < order.length; slot++) {
+            out[slot] = values.get(order[slot]);
+        }
+        return out;
     }
 
     /**
@@ -549,22 +609,4 @@ public final class GraphBuilder {
         return builder.build();
     }
 
-    /** Insertion sort by key id, so the lookup can binary-search. Eight entries, typically. */
-    private void sortDimensionOres() {
-        for (int i = 1; i < dimensionOreKey.size(); i++) {
-            int key = dimensionOreKey.get(i);
-            int dim = dimensionOreDimId.get(i);
-            int name = dimensionOreNameId.get(i);
-            int j = i - 1;
-            while (j >= 0 && dimensionOreKey.get(j) > key) {
-                dimensionOreKey.set(j + 1, dimensionOreKey.get(j));
-                dimensionOreDimId.set(j + 1, dimensionOreDimId.get(j));
-                dimensionOreNameId.set(j + 1, dimensionOreNameId.get(j));
-                j--;
-            }
-            dimensionOreKey.set(j + 1, key);
-            dimensionOreDimId.set(j + 1, dim);
-            dimensionOreNameId.set(j + 1, name);
-        }
-    }
 }

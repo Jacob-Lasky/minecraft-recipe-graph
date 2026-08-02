@@ -517,6 +517,6 @@ public class RecipeGraphTest {
         assertTrue(sizes.names > 0);
         assertTrue(sizes.adjacency > 0);
         assertEquals(sizes.keyTable + sizes.recipes + sizes.names + sizes.adjacency
-                + sizes.other, sizes.total());
+                + sizes.itemFacts + sizes.other, sizes.total());
     }
 }

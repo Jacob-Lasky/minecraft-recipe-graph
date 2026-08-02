@@ -32,6 +32,33 @@ package io.github.jacoblasky.recipedump.graph;
  * run with no game, and it is what lets the heap harness measure it in a bare JVM whose
  * baseline is not polluted by a loaded game. DO NOT reach for `ItemStack` here; convert at
  * the boundary.
+ *
+ * <h2>ITERATION ORDER IS PART OF THE CONTRACT, NOT AN IMPLEMENTATION DETAIL</h2>
+ *
+ * Every collection this class hands back -- {@link #producers}, {@link #realProducers},
+ * {@link #consumers}, {@link #byOutput}, {@link #byInput}, {@link #oreMembers},
+ * {@link #oresOf} -- comes back in the order the graph was BUILT, which is the order the
+ * dump listed things. That is the same order the python implementation produces, because
+ * python dicts are insertion-ordered and its lists obviously are.
+ *
+ * IT IS LOAD-BEARING TWICE. `solve.py` resolves cost ties with `max`/`min` over these lists,
+ * so the winner is whichever candidate iteration reached first -- measured across three
+ * PYTHONHASHSEED values, a 90-node budget-exhausted plan is byte-identical, and that rests
+ * entirely on `real_producers` returning an ordered list (#129). And `tests/fixtures/plan/`
+ * freezes whole solver results so this port can be asserted against them, where a list with
+ * the right members in the wrong order is a failing fixture with no behavioural change to
+ * point at -- and the obvious reading of that failure, "the fixture is stale, regenerate
+ * it", is the wrong one.
+ *
+ * DO NOT replace a {@link Csr} row with a {@code HashSet} to deduplicate, and DO NOT sort one
+ * to make it "canonical". Both give the right multiset and the wrong order, neither fails
+ * loudly, and the symptom is a plan choosing a different recipe with nothing pointing back at
+ * the change. {@link RecipeGraphOrderTest} pins it.
+ *
+ * The three derived SETS -- world ores, live keys, reshaped-only -- are `set` in python and
+ * therefore genuinely unordered there. They are bitsets here, so iterating one yields key-id
+ * order, which is build order and is NOT python's. Nothing may depend on that until both
+ * sides agree to impose an order deliberately; membership is all these answer.
  */
 public final class RecipeGraph {
 
@@ -93,10 +120,34 @@ public final class RecipeGraph {
     private final StringTable categoryMods;
     private final int[] categoryModId;
 
-    private final int[] dimensionOreKey;
+    private final KeyIndex dimensionOres;
     private final int[] dimensionOreDimId;
     private final int[] dimensionOreNameId;
     private final StringTable dimensionNames;
+
+    // -- schema 5 per-item facts, all five of them optional -------------------------------
+    //
+    // EVERY ONE MEANS "THE FEATURE IS OFF" WHEN ABSENT, never "something is broken": no meta
+    // collapse, no blueprint names, no EMC route, no icons. A graph built from an older dump
+    // goes on working unchanged, which is why they are read permissively rather than
+    // asserted present.
+
+    /** Item STEM -&gt; registry maxDamage, for items whose meta is durability. */
+    private final KeyIndex damageable;
+    private final int[] maxDamage;
+    /**
+     * Item -&gt; ProjectE EMC.
+     *
+     * A `long`, NOT an `int`. Measured on the reference pack the largest EMC value is
+     * 422,212,465,065,984, which is four orders of magnitude past what an int holds; a
+     * narrower column would wrap it to something small and positive and make the most
+     * expensive item in the pack look free. ProjectE's own type is a long.
+     */
+    private final KeyIndex emcKeys;
+    private final long[] emcValue;
+
+    private final Blueprints blueprints;
+    private final IconAtlas icons;
 
     private final Multiblocks multiblocks;
     private final int dumpSchema;
@@ -112,8 +163,10 @@ public final class RecipeGraph {
                 StringTable oreNames, Csr oreMembers, Csr oreIndex, int[] oreGroupKeyId,
                 long[] oreGuessed, long[] worldOres, long[] liveKeys, long[] reshapedOnly,
                 Csr catalysts, StringTable categoryMods, int[] categoryModId,
-                int[] dimensionOreKey, int[] dimensionOreDimId, int[] dimensionOreNameId,
-                StringTable dimensionNames, Multiblocks multiblocks, int dumpSchema,
+                KeyIndex dimensionOres, int[] dimensionOreDimId, int[] dimensionOreNameId,
+                StringTable dimensionNames, KeyIndex damageable, int[] maxDamage,
+                KeyIndex emcKeys, long[] emcValue, Blueprints blueprints, IconAtlas icons,
+                Multiblocks multiblocks, int dumpSchema,
                 String dumpVersion, String instanceDir) {
         this.keys = keys;
         this.displayNames = displayNames;
@@ -139,10 +192,16 @@ public final class RecipeGraph {
         this.catalysts = catalysts;
         this.categoryMods = categoryMods;
         this.categoryModId = categoryModId;
-        this.dimensionOreKey = dimensionOreKey;
+        this.dimensionOres = dimensionOres;
         this.dimensionOreDimId = dimensionOreDimId;
         this.dimensionOreNameId = dimensionOreNameId;
         this.dimensionNames = dimensionNames;
+        this.damageable = damageable;
+        this.maxDamage = maxDamage;
+        this.emcKeys = emcKeys;
+        this.emcValue = emcValue;
+        this.blueprints = blueprints;
+        this.icons = icons;
         this.multiblocks = multiblocks;
         this.dumpSchema = dumpSchema;
         this.dumpVersion = dumpVersion;
@@ -206,6 +265,18 @@ public final class RecipeGraph {
      * </ul>
      */
     public String bareName(int keyId) {
+        // BEFORE the recorded label, because a blueprint IS named -- all 259 of them are
+        // named "Machine Blueprint", which is genuinely what the game returns and what makes
+        // a plan for any multiblock read "1 of 261 possibilities". #55
+        String blueprint = blueprintName(keyId);
+        if (blueprint != null) {
+            return blueprint;
+        }
+        return bareNameOfKey(keyId);
+    }
+
+    /** {@link #bareName} minus the blueprint check, so {@link #blueprintName} can reuse it. */
+    private String bareNameOfKey(int keyId) {
         String recorded = usableName(keyId);
         if (recorded != null) {
             if (recorded.indexOf("%s") >= 0) {
@@ -238,7 +309,7 @@ public final class RecipeGraph {
             int stemId = keys.idOf(stem);
             String label = stemId >= 0 ? usableName(stemId) : null;
             if (label == null) {
-                label = stemId >= 0 ? bareName(stemId) : Keys.prettify(Keys.pathOf(stem));
+                label = stemId >= 0 ? bareNameOfKey(stemId) : Keys.prettify(Keys.pathOf(stem));
             }
             String pretty = Keys.variantLabel(discriminator);
             if (label.indexOf("%s") >= 0) {
@@ -256,7 +327,17 @@ public final class RecipeGraph {
         if (meta == 0 || meta == Keys.META_NONE) {
             return label;
         }
-        return label + " (" + (meta == Keys.META_WILDCARD ? "*" : Integer.toString(meta)) + ")";
+        if (meta == Keys.META_WILDCARD) {
+            return label + " (*)";
+        }
+        // A bare "(187)" beside an item name reads as a variant number and is in fact a
+        // durability reading, which is how 46 rows of one Iron Axe looked like 46 items.
+        // Saying what the number MEANS costs one lookup and is the smallest honest fix. #118
+        int wear = damage(keyId);
+        if (wear >= 0) {
+            return label + " (" + wear + "/" + maxDamage(keyId) + " damage)";
+        }
+        return label + " (" + meta + ")";
     }
 
     /**
@@ -520,38 +601,121 @@ public final class RecipeGraph {
 
     /** The dimension id an ore is exclusive to, or -1. */
     public int dimensionOf(int keyId) {
-        int at = indexOfDimensionOre(keyId);
-        return at < 0 ? -1 : dimensionOreDimId[at];
+        int slot = dimensionOres.slotOf(keyId);
+        return slot < 0 ? -1 : dimensionOreDimId[slot];
     }
 
     public String dimensionName(int keyId) {
-        int at = indexOfDimensionOre(keyId);
-        return at < 0 ? null : dimensionNames.get(dimensionOreNameId[at]);
+        int slot = dimensionOres.slotOf(keyId);
+        return slot < 0 ? null : dimensionNames.get(dimensionOreNameId[slot]);
     }
 
     public int dimensionOreCount() {
-        return dimensionOreKey.length;
+        return dimensionOres.size();
+    }
+
+    // -- schema 5 per-item facts -----------------------------------------------------------
+
+    /**
+     * The registry maxDamage for a key's item stem, or -1 when the item is not damageable.
+     *
+     * PACK DATA READ BACK FROM THE ITEM REGISTRY, not a guess from the shape of the key.
+     * Every structural rule anyone proposed for "is this meta a durability value" also
+     * matched the 286-meta Spell Book and the nine genuinely distinct `chisel:lapis` blocks,
+     * and getting those wrong is worse than the noise it removes. See #118.
+     */
+    public int maxDamage(int keyId) {
+        int stem = keys.idOf(Keys.itemStem(keys.get(keyId)));
+        int slot = damageable.slotOf(stem);
+        return slot < 0 ? -1 : maxDamage[slot];
+    }
+
+    /** The meta read as a durability value, or -1 when this key is not a worn tool. */
+    public int damage(int keyId) {
+        int meta = Keys.metaOf(Keys.baseKey(keys.get(keyId)));
+        if (meta <= 0 || maxDamage(keyId) < 0) {
+            return -1;
+        }
+        return meta;
     }
 
     /**
-     * Binary search rather than a map, because there are 8 of these on the reference pack.
-     * A HashMap here would cost more in its own header than the whole table.
+     * The undamaged key a worn one is a state of; `key` unchanged for everything else.
+     *
+     * `minecraft:iron_axe:187` -&gt; `minecraft:iron_axe`. `chisel:lapis:3` -&gt; itself,
+     * because chisel blocks are not damageable and their meta is a real subtype.
+     *
+     * NBT SURVIVES: a discriminated key keeps its digest, so a named or enchanted tool is
+     * still its own item and only the durability tick collapses.
+     *
+     * RETURNS A KEY, IT DOES NOT MERGE ANYTHING. Producers, consumers and stock are
+     * untouched -- `minecraft:iron_axe` really does hold the 2 in stock and really is the
+     * key recipes ask for, which is why #118 is a display defect rather than a wrong plan.
+     * The returned key MAY NOT BE INTERNED in this graph, for the same reason: nothing
+     * guarantees the pack ever named the undamaged variant, so callers take a String here
+     * rather than an id.
      */
-    private int indexOfDimensionOre(int keyId) {
-        int low = 0;
-        int high = dimensionOreKey.length - 1;
-        while (low <= high) {
-            int mid = (low + high) >>> 1;
-            int at = dimensionOreKey[mid];
-            if (at < keyId) {
-                low = mid + 1;
-            } else if (at > keyId) {
-                high = mid - 1;
-            } else {
-                return mid;
-            }
+    public String damageBase(String key) {
+        String base = Keys.baseKey(key);
+        String stem = Keys.withoutMeta(base);
+        int meta = Keys.metaOf(base);
+        if (meta == 0 || meta == Keys.META_NONE
+                || damageable.slotOf(keys.idOf(stem)) < 0) {
+            return key;
         }
-        return -1;
+        String discriminator = Keys.discriminator(key);
+        return discriminator == null ? stem : stem + "#" + discriminator;
+    }
+
+    public int damageableCount() {
+        return damageable.size();
+    }
+
+    /**
+     * This item's ProjectE EMC value, or -1 when the pack assigns it none.
+     *
+     * -1 RATHER THAN 0, because ProjectE uses 0 for "explicitly worthless" and a caller has
+     * to be able to tell that from "not in the table". PACK DATA; what the player has
+     * LEARNED is world state and lives in the have file. See #50.
+     */
+    public long emc(int keyId) {
+        int slot = emcKeys.slotOf(keyId);
+        return slot < 0 ? -1L : emcValue[slot];
+    }
+
+    public int emcCount() {
+        return emcKeys.size();
+    }
+
+    public Blueprints blueprints() {
+        return blueprints;
+    }
+
+    public IconAtlas icons() {
+        return icons;
+    }
+
+    /**
+     * "Machine Blueprint (Dragonfire Crucible)", or null when `key` is not a blueprint.
+     *
+     * THE PARENTHETICAL FORM, not "Dragonfire Crucible Blueprint", and the deciding argument
+     * is search: this exact string is what a label index holds, so the parenthetical is
+     * findable under BOTH the name the game shows and the name in the player's JEI, while
+     * the reworded form is findable under neither of the two words a player looking at a
+     * blueprint in their hand would type. See #55.
+     */
+    public String blueprintName(int keyId) {
+        String machine = blueprints.machineNameOf(keyId);
+        if (machine == null) {
+            return null;
+        }
+        // Reads the label WITHOUT going back through `bareName`, which calls this first and
+        // would recurse forever. Mirrors python reading `self.names` directly.
+        String label = usableName(keyId);
+        if (label == null && hasName(keyId)) {
+            label = bareNameOfKey(keyId);
+        }
+        return (label == null ? "Machine Blueprint" : label) + " (" + machine + ")";
     }
 
     public Multiblocks multiblocks() {
@@ -612,17 +776,20 @@ public final class RecipeGraph {
                 + oreMembers.retainedBytes() + oreIndex.retainedBytes()
                 + Sizes.bytes(oreGroupKeyId) + Sizes.bytes(worldOres)
                 + Sizes.bytes(liveKeys) + Sizes.bytes(reshapedOnly);
+        long itemFacts = damageable.retainedBytes() + Sizes.bytes(maxDamage)
+                + emcKeys.retainedBytes() + Sizes.bytes(emcValue)
+                + blueprints.retainedBytes() + icons.retainedBytes();
         long other = oreNames.retainedBytes() + Sizes.bytes(oreGuessed)
                 + catalysts.retainedBytes() + categoryMods.retainedBytes()
                 + Sizes.bytes(categoryModId)
-                + Sizes.bytes(dimensionOreKey) + Sizes.bytes(dimensionOreDimId)
+                + dimensionOres.retainedBytes() + Sizes.bytes(dimensionOreDimId)
                 + Sizes.bytes(dimensionOreNameId) + dimensionNames.retainedBytes()
                 + multiblocks.retainedBytes()
                 // Zero until something asks for a fluid's name. Counted rather than assumed
                 // away, because a running GUI derives it on the first fluid it renders and a
                 // heap figure taken before that would understate the steady state.
                 + (fluidNames == null ? 0L : fluidNames.retainedBytes());
-        return new GraphSizes(keyTable, recipeBytes, names, adjacency, other,
+        return new GraphSizes(keyTable, recipeBytes, names, adjacency, itemFacts, other,
                 recipes.ridBytes(), keys.indexBytes());
     }
 }

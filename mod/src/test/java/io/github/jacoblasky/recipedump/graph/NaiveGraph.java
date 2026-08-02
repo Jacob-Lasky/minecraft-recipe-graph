@@ -71,6 +71,15 @@ final class NaiveGraph {
     private final Map<String, List<String>> catalysts = new HashMap<String, List<String>>();
     private final Map<String, String> categoryMods = new HashMap<String, String>();
     private final Map<String, String[]> dimensionOres = new HashMap<String, String[]>();
+    // The five schema-5 sections, in the shapes `model.py` holds them. Read HERE TOO and not
+    // skipped: leaving them out would make the naive model look cheaper than it is by
+    // exactly what they weigh, and the whole value of this class is that the comparison is
+    // apples to apples.
+    private final Map<String, Integer> maxDamage = new HashMap<String, Integer>();
+    private final Map<String, Long> emc = new HashMap<String, Long>();
+    private final Map<String, String> machineNames = new HashMap<String, String>();
+    private final Map<String, String> blueprintMachines = new HashMap<String, String>();
+    private final Map<String, int[]> iconKeys = new HashMap<String, int[]>();
     private final List<Multiblock> multiblocks = new ArrayList<Multiblock>();
     private final Map<String, List<Recipe>> byOutput = new HashMap<String, List<Recipe>>();
     private final Map<String, List<Recipe>> byInput = new HashMap<String, List<Recipe>>();
@@ -145,6 +154,26 @@ final class NaiveGraph {
         return oreMembers;
     }
 
+    int maxDamageCount() {
+        return maxDamage.size();
+    }
+
+    int emcCount() {
+        return emc.size();
+    }
+
+    int blueprintCount() {
+        return blueprintMachines.size();
+    }
+
+    int machineNameCount() {
+        return machineNames.size();
+    }
+
+    int iconCount() {
+        return iconKeys.size();
+    }
+
     String census() {
         return "recipes                " + recipes.size() + "\n"
                 + "names                  " + names.size() + "\n"
@@ -154,6 +183,11 @@ final class NaiveGraph {
                 + "by-input keys          " + byInput.size() + "\n"
                 + "catalyst categories    " + catalysts.size() + "\n"
                 + "multiblocks            " + multiblocks.size() + "\n"
+                + "damageable items       " + maxDamage.size() + "\n"
+                + "emc values             " + emc.size() + "\n"
+                + "blueprints             " + blueprintMachines.size() + "\n"
+                + "machine names          " + machineNames.size() + "\n"
+                + "icon slots             " + iconKeys.size() + "\n"
                 + "canonicalised keys     " + (canonical == null ? "n/a" : canonical.size());
     }
 
@@ -244,6 +278,32 @@ final class NaiveGraph {
                 reader.endObject();
             } else if (field.equals("multiblocks")) {
                 readMultiblocks(reader);
+            } else if (field.equals("max_damage")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    maxDamage.put(key(reader.nextName()), Integer.valueOf(reader.nextInt()));
+                }
+                reader.endObject();
+            } else if (field.equals("emc")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    emc.put(key(reader.nextName()), Long.valueOf(reader.nextLong()));
+                }
+                reader.endObject();
+            } else if (field.equals("machine_names")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    machineNames.put(reader.nextName(), reader.nextString());
+                }
+                reader.endObject();
+            } else if (field.equals("blueprint_machines")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    blueprintMachines.put(key(reader.nextName()), reader.nextString());
+                }
+                reader.endObject();
+            } else if (field.equals("icons")) {
+                readIcons(reader);
             } else {
                 reader.skipValue();
             }
@@ -343,6 +403,30 @@ final class NaiveGraph {
         reader.endObject();
         ingredient.alternatives = alternatives.toArray(new String[alternatives.size()]);
         return ingredient;
+    }
+
+    private void readIcons(JsonReader reader) throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            String field = reader.nextName();
+            if (field.equals("keys")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    String iconKey = key(reader.nextName());
+                    reader.beginArray();
+                    int[] at = new int[] {reader.nextInt(), reader.nextInt(), reader.nextInt()};
+                    while (reader.hasNext()) {
+                        reader.skipValue();
+                    }
+                    reader.endArray();
+                    iconKeys.put(iconKey, at);
+                }
+                reader.endObject();
+            } else {
+                reader.skipValue();
+            }
+        }
+        reader.endObject();
     }
 
     private void readMultiblocks(JsonReader reader) throws IOException {

@@ -88,6 +88,16 @@ public final class GraphJsonReader {
                 readDimensionOres(reader, builder);
             } else if (field.equals("multiblocks")) {
                 readMultiblocks(reader, builder);
+            } else if (field.equals("max_damage")) {
+                readMaxDamage(reader, builder);
+            } else if (field.equals("emc")) {
+                readEmc(reader, builder);
+            } else if (field.equals("blueprint_machines")) {
+                readBlueprintMachines(reader, builder);
+            } else if (field.equals("machine_names")) {
+                readMachineNames(reader, builder);
+            } else if (field.equals("icons")) {
+                readIcons(reader, builder);
             } else if (field.equals("dump_schema")) {
                 builder.dumpSchema(reader.peek() == JsonToken.NULL ? zeroAfterNull(reader)
                         : reader.nextInt());
@@ -351,6 +361,102 @@ public final class GraphJsonReader {
             machines.endMachine(registryName, displayName, controller, slots, blind);
         }
         reader.endObject();
+    }
+
+    private static void readMaxDamage(JsonReader reader, GraphBuilder builder)
+            throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            // Keyed by the UNDAMAGED item, which is the key the registry reports against and
+            // the key `damageBase` collapses a worn one onto.
+            int stem = builder.key(reader.nextName());
+            builder.damageable(stem, reader.nextInt());
+        }
+        reader.endObject();
+    }
+
+    private static void readEmc(JsonReader reader, GraphBuilder builder) throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            int key = builder.key(reader.nextName());
+            // `nextLong`, not `nextInt`: the largest EMC value on the reference pack is
+            // 422,212,465,065,984. It is also not `nextDouble` -- ProjectE's EMC is integral,
+            // and reading a fractional value would be a format change worth failing on rather
+            // than silently rounding.
+            builder.emc(key, reader.nextLong());
+        }
+        reader.endObject();
+    }
+
+    private static void readBlueprintMachines(JsonReader reader, GraphBuilder builder)
+            throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            int blueprint = builder.key(reader.nextName());
+            String machine = nextStringOrNull(reader);
+            if (machine != null) {
+                builder.blueprints().blueprint(blueprint, machine);
+            }
+        }
+        reader.endObject();
+    }
+
+    private static void readMachineNames(JsonReader reader, GraphBuilder builder)
+            throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            // NOT interned as a graph key: an MM registry name is not an item id, and putting
+            // one in the key table would make it findable as an item that does not exist.
+            String machine = reader.nextName();
+            String localized = nextStringOrNull(reader);
+            if (localized != null) {
+                builder.blueprints().machineName(machine, localized);
+            }
+        }
+        reader.endObject();
+    }
+
+    /**
+     * The icon atlas INDEX. The PNG pages live beside `graph.json`, never inside it.
+     *
+     * Empty (`{}`) on every graph built so far, because the atlas needs a client launch that
+     * has not happened. Read anyway rather than skipped, so the day one appears it costs no
+     * code change -- and so the heap report prices it the first time it is real.
+     */
+    private static void readIcons(JsonReader reader, GraphBuilder builder) throws IOException {
+        String icon = null;
+        int columns = 0;
+        int pages = 0;
+        reader.beginObject();
+        while (reader.hasNext()) {
+            String field = reader.nextName();
+            if (field.equals("icon")) {
+                icon = nextStringOrNull(reader);
+            } else if (field.equals("cols")) {
+                columns = reader.nextInt();
+            } else if (field.equals("pages")) {
+                pages = reader.nextInt();
+            } else if (field.equals("keys")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    int key = builder.key(reader.nextName());
+                    reader.beginArray();
+                    int page = reader.nextInt();
+                    int column = reader.nextInt();
+                    int row = reader.nextInt();
+                    while (reader.hasNext()) {
+                        reader.skipValue();
+                    }
+                    reader.endArray();
+                    builder.icons().at(key, page, column, row);
+                }
+                reader.endObject();
+            } else {
+                reader.skipValue();
+            }
+        }
+        reader.endObject();
+        builder.icons().sheet(icon, columns, pages);
     }
 
     private static String nextStringOrNull(JsonReader reader) throws IOException {
