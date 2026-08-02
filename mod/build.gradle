@@ -217,18 +217,79 @@ tasks.named('compileJava') { dependsOn 'checkPackJars' }
 // HEI and this mod -- rather than all 410, because the point is to render our own screens
 // fast (#124), not to boot MeatballCraft.
 //
-// JEC is copied too even though nothing compiles against it: it is the reference
-// implementation for the craftable-calculator shape (#19), and having it in the dev client
-// means its GUI can be opened side by side with ours.
-tasks.register('stageDevMods', Copy) {
+// Jars staged for RUNTIME ONLY, nothing compiles against these:
+//   MixinBooter    ModularUI is a Mixin coremod (`FMLCorePlugin` in its manifest, an early
+//                  mixin config targeting GuiScreen/GuiContainer/FontRenderer) and bundles no
+//                  Mixin of its own. Without MixinBooter its accessor mixins never apply and
+//                  every ModularUI screen dies on a ClassCastException the moment it opens,
+//                  which reads as a broken screen rather than as a missing loader. DO NOT
+//                  drop it on the grounds that no ModularUI screen names it.
+//   JEC            the reference implementation for the craftable-calculator shape (#19), so
+//                  its GUI can be opened side by side with ours.
+def devOnlyJars = [
+    '*mixinbooter-*.jar',
+    'JustEnoughCalculation-*.jar',
+]
+// SYNC, NOT COPY, so `run/mods` holds exactly this set and nothing else. A Copy never
+// removes, so a pack update that renames a jar would leave both versions behind and the
+// dev client would die on a duplicate modid -- reported as a Forge startup failure that
+// says nothing about staging. A hand-dropped jar in `run/mods` does not survive this, on
+// purpose: the dev mod set is defined here, not by whatever is lying in that directory.
+tasks.register('stageDevMods', Sync) {
     dependsOn 'checkPackJars'
+    def packModsDir = project.findProperty('pack_mods')
     from(resolvedPackJars.values().findAll { it != null })
-    from(project.findProperty('pack_mods') ?: '.') {
-        include 'JustEnoughCalculation-*.jar'
+    from(packModsDir ?: '.') {
+        include devOnlyJars
     }
     into layout.projectDirectory.dir('run/mods')
+    // A Sync whose pattern matched nothing reports nothing, and a dev client silently missing
+    // MixinBooter fails much later and much less legibly. Same reasoning as `checkPackJars`:
+    // name every absent jar at once, not the first.
+    doLast {
+        def staged = layout.projectDirectory.dir('run/mods').asFile.list() ?: new String[0]
+        def missing = devOnlyJars.findAll { pattern ->
+            !staged.any { it ==~ pattern.replace('*', '.*') }
+        }
+        if (missing) {
+            throw new GradleException(
+                "stageDevMods staged no ${missing.join(', ')} from pack_mods=${packModsDir}.\n" +
+                'These are runtime-only, so the per-jar -P<name>_jar overrides do not supply ' +
+                'them; point -Ppack_mods at a mods/ directory that has them. See the comment ' +
+                'above this task for why the dev client cannot start without MixinBooter.')
+        }
+    }
 }
-tasks.matching { it.name == 'runClient' }.configureEach { dependsOn 'stageDevMods' }
+
+// The headless screenshot harness drives the dev client through this task (#124). Everything
+// below is inert without `-Dmcrecipedump.shot`, which only `harness/shot.sh` passes.
+tasks.matching { it.name == 'runClient' }.configureEach {
+    dependsOn 'stageDevMods'
+
+    // FORWARDED EXPLICITLY, because a `-D` on the gradlew command line reaches the GRADLE
+    // JVM and not the forked client -- the same trap the `test` block above documents.
+    System.properties.each { key, value ->
+        if (key.toString().startsWith('mcrecipedump.')) {
+            systemProperty(key.toString(), value.toString())
+        }
+    }
+
+    // `cmdlineJvmArgs`, NOT `maxHeapSize` and not `extraJvmArgs`. RFG assembles the client's
+    // JVM args in a doFirst as extraJvmArgs + the minecraft extension's + cmdlineJvmArgs, so
+    // its own default -Xmx overwrites anything set the other two ways; cmdlineJvmArgs is last
+    // and therefore wins. This matters on Tower, where the harness container is capped at 4g
+    // and the household's Home Assistant is a sibling: a client left on RFG's default heap
+    // can grow into the cap and take the container out.
+    cmdlineJvmArgs.add('-Xmx' + (project.findProperty('client_heap') ?: '1536m'))
+
+    // The client's window size, which is the PNG's size. Passed as game args because 1.12.2's
+    // own Main parses --width/--height; there is no system property for it.
+    def shotWidth = System.getProperty('mcrecipedump.shotWidth')
+    def shotHeight = System.getProperty('mcrecipedump.shotHeight')
+    if (shotWidth && shotHeight) {
+        extraArgs.addAll('--width', shotWidth, '--height', shotHeight)
+    }
+}
 
 processResources {
     inputs.property 'version', project.version
