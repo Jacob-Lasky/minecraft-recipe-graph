@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 /**
@@ -30,24 +31,36 @@ import com.google.gson.JsonObject;
 public enum ScenarioSource {
 
     /**
-     * AE2 network contents. THE READ EXISTS AND THE JOIN DOES NOT (#191).
-     * `Ae2StockReader` walks the live grid through `IStorageGrid` server-side and the
-     * snapshot reaches the client in `LiveStock` (#150). What is missing is two wires:
-     * nothing calls {@link #readBy} for this source, and `PlannerService.liveScenario()`
-     * never feeds `LiveStock.latest()` into the `have` field. Until both land the planner
-     * still plans against an empty pool, so this stays not-live and says so.
+     * AE2 network contents, read live off the player's ME network by `Ae2Stock` and installed
+     * from the client by `PlannerStock` (#191).
+     *
+     * THE DECLARED CONSTANT IS NOW A FAULT REPORT, not a roadmap entry. It is reached only
+     * when NOTHING has installed a reader, which since #191 means the client wiring did not
+     * run -- every ordinary not-read-yet case is a reader ANSWERING, and it names which one:
+     * nobody has asked, or no terminal, or out of range. Phrased to read as wrong for
+     * {@link Status#unavailable}'s reason: a tidy sentence here would look like ordinary UI
+     * and nobody would report it.
+     *
+     * The string this used to carry -- "AE2 stock is not read yet (#19 phase 5)" -- is the one
+     * {@link Status#unavailable} quotes as its own example of a message a player cannot act
+     * on. DO NOT put a sentence back here that only names a phase.
      */
-    HAVE("have", false, "AE2 stock is not used by this plan (#191), so it assumes you "
-            + "own nothing"),
+    HAVE("have", false, "no ME network reader is installed, so this plan assumes you own "
+            + "nothing -- the planner should have installed one when the client started"),
 
     /**
-     * AE2 autocraftable patterns. Needs the same join as {@link #HAVE} AND a read of its own:
-     * `Ae2StockReader.countsOf` deliberately SKIPS craftable-only entries, because counting a
-     * pattern as stock would tell a player they already own something they would have to
-     * make. So a craftables list is a separate pass, then the same `readBy` plus
-     * `liveScenario()` wiring.
+     * AE2 autocraftable patterns. THE JOIN {@link #HAVE} NEEDED NOW EXISTS AND THIS STILL
+     * CANNOT USE IT, which is the whole of what is left.
+     *
+     * `readBy` and `liveDocument` will carry a craftables list the moment there is one to
+     * carry; what is missing is the READ. `Ae2StockReader.countsOf` deliberately skips
+     * craftable-only entries -- AE2's list carries items the network can autocraft but does
+     * not hold, at size zero, and counting those as stock would tell a player they own
+     * something they must make -- and `StockSnapshot` has no field to put them in. So this
+     * wants a second pass over the grid and a second field on the wire, not a wire.
      */
-    CRAFTABLES("craftables", false, "AE2 autocrafting patterns are not read (#191)"),
+    CRAFTABLES("craftables", false, "AE2 autocrafting patterns are not read, so this plan "
+            + "costs everything as if you had to craft it from raw materials yourself"),
 
     /**
      * Placed tile entities, which decide machine availability and infinite sources. A world
@@ -95,26 +108,48 @@ public enum ScenarioSource {
     PINS("pins", true, "");
 
     /**
-     * What a source reports right now: whether it is live, and what to say when it is not.
+     * What a source reports right now: whether it is live, what to say when it is not, and the
+     * value it read.
      *
-     * A PAIR RATHER THAN TWO LOOKUPS, so a reader cannot get "live" from one call and a
-     * stale note from another. `StockSnapshot` decides both at once -- a refusal IS the
-     * reason -- and splitting them would let the caveat name a problem the flag says does
-     * not exist.
+     * ONE ANSWER RATHER THAN SEVERAL LOOKUPS, so a reader cannot get "live" from one call and
+     * a stale note or a stale value from another. `StockSnapshot` decides all three at once --
+     * a refusal IS the reason and a refusal holds no counts -- and splitting them would let
+     * the caveat name a problem the flag says does not exist, or let a plan be priced against
+     * numbers from a read that failed. The counts joined the pair in #191, where the planner
+     * fetched the value from one place and the flag from another and the two disagreed in the
+     * dangerous direction: the client held a snapshot of the network and the `have` field it
+     * built beside it was still `{}`.
      */
     public static final class Status {
 
         private final boolean live;
         private final String note;
+        private final JsonElement contents;
 
-        private Status(boolean live, String note) {
+        private Status(boolean live, String note, JsonElement contents) {
             this.live = live;
             this.note = note;
+            this.contents = contents;
         }
 
-        /** Reading succeeded; the planner is using real data and has nothing to warn about. */
+        /**
+         * Reading succeeded and there is nothing to contribute -- the field keeps its empty
+         * form. For a source that is live because there is genuinely nothing to read, like a
+         * setting with no UI to change it.
+         */
         public static Status available() {
-            return new Status(true, "");
+            return new Status(true, "", null);
+        }
+
+        /**
+         * Reading succeeded and produced this, which becomes the source's field in the
+         * scenario document {@link ScenarioSource#liveDocument} builds.
+         *
+         * Null collapses to the empty form rather than being written as a JSON null, which
+         * `ScenarioInputs` would not read and a fixture never contains.
+         */
+        public static Status available(JsonElement contents) {
+            return new Status(true, "", contents);
         }
 
         /**
@@ -132,7 +167,11 @@ public enum ScenarioSource {
          * which looks like a rendering fault rather than a missing input.
          */
         public static Status unavailable(String why) {
-            return new Status(false, why == null || why.isEmpty() ? NO_REASON_GIVEN : why);
+            // NO CONTENTS, AND THERE IS NO OVERLOAD THAT TAKES ANY. A refusal that carried a
+            // value would be the planner pricing a route against numbers from a read that
+            // failed, with a caveat above it saying the read did not happen -- which is worse
+            // than either half alone, because the caveat makes the wrong number look checked.
+            return new Status(false, why == null || why.isEmpty() ? NO_REASON_GIVEN : why, null);
         }
 
         public boolean live() {
@@ -141,6 +180,11 @@ public enum ScenarioSource {
 
         public String note() {
             return note;
+        }
+
+        /** What this source read, or null for the field's empty form. */
+        public JsonElement contents() {
+            return contents;
         }
     }
 
@@ -251,13 +295,40 @@ public enum ScenarioSource {
     public static JsonObject emptyDocument() {
         JsonObject out = new JsonObject();
         for (ScenarioSource source : values()) {
-            if (source.isArray()) {
-                out.add(source.field(), new JsonArray());
-            } else {
-                out.add(source.field(), new JsonObject());
-            }
+            out.add(source.field(), source.emptyForm());
         }
         return out;
+    }
+
+    /**
+     * The same document, with every field an installed reader read filled in.
+     *
+     * THIS IS WHAT THE GAME PLANS AGAINST -- see {@link PlannerService#liveScenario}. A source
+     * with no reader, or one that refused, contributes its empty form and a caveat, so the
+     * document is always the full shape and the difference between "empty" and "not read" is
+     * carried by {@link #missingNotes} rather than by a missing key.
+     *
+     * DERIVED FROM THE READERS RATHER THAN ASSEMBLED BY THE PLANNER. The planner used to add
+     * the one field it could fill by name, which meant the second field to go live was a line
+     * somebody had to remember to write -- and the failure when they did not was a plan
+     * silently costed as though the player owned nothing, which is the exact bug #191 found on
+     * `have`. Installing a reader is now the whole of wiring an input up.
+     */
+    public static JsonObject liveDocument() {
+        JsonObject out = new JsonObject();
+        for (ScenarioSource source : values()) {
+            JsonElement read = source.status().contents();
+            out.add(source.field(), read == null ? source.emptyForm() : read);
+        }
+        return out;
+    }
+
+    /** An empty `{}` or `[]`, whichever this field is. */
+    private JsonElement emptyForm() {
+        if (isArray()) {
+            return new JsonArray();
+        }
+        return new JsonObject();
     }
 
     /** The notes for every source that is not live, in declaration order. */

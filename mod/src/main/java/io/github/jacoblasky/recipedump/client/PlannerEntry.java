@@ -97,7 +97,46 @@ public final class PlannerEntry {
      */
     public static void open(PlanBook book) {
         PlannerScreen.openPlanner(book);
-        startPlan(book);
+        planWhenStockIsRead(book, firstTarget(book));
+    }
+
+    /**
+     * The same, on a target the player named rather than the book's first entry.
+     *
+     * WHAT THE `=` KEYBIND CALLS, through {@link PlanTarget}. It goes through here rather than
+     * straight to `PlannerService` so that the keybind and the calculator item reach the window
+     * by one route: the quantity rule, the already-answered check and the wait for a stock read
+     * are the same, and a second door would be a second place for them to diverge.
+     */
+    public static void openOn(PlanBook book, String key) {
+        PlannerScreen.openPlanner(book);
+        planWhenStockIsRead(book, key);
+    }
+
+    /**
+     * Plan `target`, but not until the player's ME network has been read.
+     *
+     * WHY THE PLAN WAITS. A plan priced before the stock reply lands is the "you own nothing"
+     * plan `ScenarioSource` exists to prevent, and re-solving when the reply arrives would pay
+     * for a second cost table -- the dearest part of a plan -- on every open. `PlannerStock`
+     * runs this immediately when the held read is still fresh or when there is no server to
+     * ask, so the harness and a disconnected client behave exactly as before.
+     *
+     * THE ASK IS SKIPPED WHEN THERE IS NOTHING TO PLAN. Reading the network is a megabyte on
+     * the wire; sending for it to then discover the graph is still loading is a round trip for
+     * an answer nobody will use. {@link #startPlan} re-checks both, because it is also called
+     * directly by the screenshot harness.
+     */
+    private static void planWhenStockIsRead(final PlanBook book, final String target) {
+        if (target == null || GraphService.get().state() != GraphService.State.READY) {
+            return;
+        }
+        PlannerStock.planWhenRead(new Runnable() {
+            @Override
+            public void run() {
+                startPlan(book, target);
+            }
+        });
     }
 
     /**
@@ -108,28 +147,41 @@ public final class PlannerEntry {
      * right-clicks and waits several seconds for a window has been given a slow tool, which
      * is the same argument that put the graph read on its own thread.
      *
-     * THE FIRST TODO IS THE TARGET, which is a placeholder rule rather than a design. #148's
-     * panel and #145's JEI keybind both have a better answer and wiring those together is the
-     * next piece. What this buys today is that the whole path -- graph, scenario, cost table,
-     * solver, JSON, panel -- runs against real pack data on a real client rather than only in
-     * a JUnit gate.
+     * THE FIRST TODO IS THE TARGET when nobody named one. The JEI keybind names one -- see
+     * {@link #openOn} -- and reaches {@link #startPlan(PlanBook, String)} beneath this.
      */
     static void startPlan(PlanBook book) {
+        startPlan(book, firstTarget(book));
+    }
+
+    /**
+     * The same for a named target. Does nothing when there is no graph, no target, or the
+     * service is already holding this exact answer.
+     */
+    static void startPlan(PlanBook book, String target) {
         GraphService graphs = GraphService.get();
-        if (graphs.state() != GraphService.State.READY) {
+        if (graphs.state() != GraphService.State.READY || target == null) {
             return;
         }
-        String target = firstTarget(book);
-        if (target == null) {
-            return;
-        }
-        List<String> todo = book.todoKeys();
-        long qty = Math.max(1L, todo.contains(target) ? book.todoQuantity(target) : 1L);
+        long qty = quantityFor(book, target);
         PlannerService planner = PlannerService.get();
         if (alreadyAnswered(planner, target, qty)) {
             return;
         }
         planner.plan(target, qty, Solver.DEFAULT_MAX_NODES);
+    }
+
+    /**
+     * How many to plan: what the TODO asks for, else one.
+     *
+     * ONE RULE FOR BOTH ENTRY POINTS. Pressing the keybind over an item already on the TODO
+     * asks the same question the calculator would have asked about it, rather than a plan for
+     * a single one beside a TODO saying 3,000 -- two answers to one question, differing by
+     * which control the player happened to use.
+     */
+    static long quantityFor(PlanBook book, String target) {
+        List<String> todo = book.todoKeys();
+        return Math.max(1L, todo.contains(target) ? book.todoQuantity(target) : 1L);
     }
 
     /**
