@@ -20,8 +20,24 @@ public interface PlannerActions {
     /** The Phase 4 seam. Never null; {@link NodeActions#NONE} when nothing is installed. */
     NodeActions nodeActions();
 
-    /** Clicking a tree row. */
+    /** Clicking a tree row. Implementations select the node too; see {@link #selectNode}. */
     void openNodeMenu(PlanNode node);
+
+    /**
+     * Make `node` the selection, without opening anything.
+     *
+     * SEPARATE FROM {@link #openNodeMenu} EVEN THOUGH THAT ONE ALSO SELECTS, because the two
+     * questions come apart on the diagram: `client.flow` wants to highlight every occurrence
+     * of an item as the reader moves over the canvas, and it must be able to do that without
+     * a panel appearing. Folding selection into the menu would make "show me where else this
+     * goes" cost a window.
+     *
+     * ON THIS INTERFACE RATHER THAN A DIRECT `PlanSelection.select` CALL, so a click is
+     * assertable by a test that counts what was invoked -- the same reason every other entry
+     * here is an interface method -- and so the flow package keeps its one dependency on this
+     * one pointing the same way as the rest.
+     */
+    void selectNode(PlanNode node);
 
     /** "Choose another recipe". */
     void openRecipePicker(PlanNode node);
@@ -76,6 +92,10 @@ public interface PlannerActions {
 
         @Override
         public void openNodeMenu(PlanNode node) {
+        }
+
+        @Override
+        public void selectNode(PlanNode node) {
         }
 
         @Override

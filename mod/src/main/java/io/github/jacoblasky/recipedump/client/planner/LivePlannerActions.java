@@ -54,8 +54,18 @@ public final class LivePlannerActions implements PlannerActions {
 
     @Override
     public void openNodeMenu(PlanNode node) {
+        // SELECTED FIRST, so opening a menu and highlighting the item are one click rather
+        // than two. Nothing here reads the selection, but `client.flow` draws from it and a
+        // diagram that stayed unhighlighted while its menu was open would read as a diagram
+        // that had not registered the click.
+        selectNode(node);
         current = node;
         open(menu());
+    }
+
+    @Override
+    public void selectNode(PlanNode node) {
+        PlanSelection.select(node);
     }
 
     @Override
