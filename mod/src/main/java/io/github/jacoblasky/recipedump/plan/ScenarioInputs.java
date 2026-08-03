@@ -366,15 +366,11 @@ public final class ScenarioInputs {
     }
 
     private static void resolvePins(RecipeGraph g, JsonObject pins, Resolved out) {
-        Map<String, Pins.Pin> stored = new LinkedHashMap<String, Pins.Pin>();
-        for (Map.Entry<String, JsonElement> e : pins.entrySet()) {
-            JsonObject pin = e.getValue().getAsJsonObject();
-            stored.put(e.getKey(), new Pins.Pin(
-                    pin.has("fingerprint") ? pin.get("fingerprint").getAsString() : "",
-                    pin.has("category") ? pin.get("category").getAsString() : "",
-                    pin.has("label") ? pin.get("label").getAsString() : ""));
-        }
-        Pins.Resolution resolution = Pins.resolve(g, stored);
+        // THROUGH `Pins.fromJson` AND NOT A SECOND PARSER HERE. This method used to spell the
+        // three field names again and call `getAsJsonObject()` with no guard, so a
+        // hand-edited pin file with one entry that is not an object threw from inside a plan
+        // -- while `Pins.read`, reading the same file, skipped it. One shape, one reader.
+        Pins.Resolution resolution = Pins.resolve(g, Pins.fromJson(pins));
         for (Map.Entry<String, Set<String>> e : resolution.accepted.entrySet()) {
             int keyId = g.keyId(e.getKey());
             if (keyId >= 0) {

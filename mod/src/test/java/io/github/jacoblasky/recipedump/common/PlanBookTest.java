@@ -183,4 +183,60 @@ public class PlanBookTest {
         assertEquals(Arrays.asList("fresh"), client.favourites());
         assertTrue(client.todoKeys().isEmpty());
     }
+
+    /**
+     * The revision moves when the book changes and stands still when it does not.
+     *
+     * WHAT IT IS FOR: an open planner window polls it, because the book is written by a sync
+     * packet and read by a GUI. A counter that did not move would leave "Add to TODO" looking
+     * like a control that does nothing; one that moved on a rejected edit would redraw the
+     * panel to show the same numbers.
+     */
+    @Test
+    public void theRevisionTracksRealChangesAndOnlyRealOnes() {
+        PlanBook book = new PlanBook();
+        int start = book.revision();
+
+        assertTrue(book.addFavourite("mod:plate"));
+        assertTrue("adding must move it", book.revision() > start);
+
+        int afterAdd = book.revision();
+        assertFalse("adding the same favourite twice changes nothing",
+                    book.addFavourite("mod:plate"));
+        assertEquals(afterAdd, book.revision());
+        assertFalse(book.removeFavourite("mod:never-there"));
+        assertEquals(afterAdd, book.revision());
+        assertFalse(book.setTodo("   ", 4L));
+        assertEquals(afterAdd, book.revision());
+        assertFalse("removing a row that is not there changes nothing",
+                    book.setTodo("mod:gear", 0L));
+        assertEquals(afterAdd, book.revision());
+
+        assertTrue(book.setTodo("mod:gear", 4L));
+        assertTrue(book.revision() > afterAdd);
+        int afterTodo = book.revision();
+        assertFalse("setting the same quantity again changes nothing",
+                    book.setTodo("mod:gear", 4L));
+        assertEquals(afterTodo, book.revision());
+        assertTrue(book.setTodo("mod:gear", 0L));
+        assertTrue(book.revision() > afterTodo);
+    }
+
+    @Test
+    public void aSyncLandingMovesTheRevisionEvenWhenItCarriesTheSameContents() {
+        // UNCONDITIONAL on purpose. A wholesale replacement cannot cheaply say whether
+        // anything differs, and the cost runs one way: a spurious bump redraws an identical
+        // panel, a missing one leaves a window showing a book the player has changed.
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:gear", 4L);
+        int before = book.revision();
+        book.deserializeNBT(book.serializeNBT());
+        assertTrue(book.revision() > before);
+
+        int afterSync = book.revision();
+        PlanBook other = new PlanBook();
+        other.setTodo("mod:gear", 4L);
+        book.copyFrom(other);
+        assertTrue(book.revision() > afterSync);
+    }
 }

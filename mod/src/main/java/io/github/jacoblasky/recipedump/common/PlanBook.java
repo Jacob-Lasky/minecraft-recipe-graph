@@ -57,6 +57,33 @@ public final class PlanBook implements INBTSerializable<NBTTagCompound> {
      */
     private final Map<String, Long> todo = new LinkedHashMap<String, Long>();
 
+    /**
+     * How many times this book has changed. Strictly increasing, never reset.
+     *
+     * FOR AN OPEN WINDOW TO NOTICE, and it is the same counter `PlannerService.generation`
+     * is, for the same reason: the book is written by a sync packet arriving on a netty IO
+     * thread and read by a GUI on the client thread, so the GUI polls rather than being
+     * called back. Without it, "Add to TODO" in the node menu sends its packet, the server
+     * answers with a whole-book sync, and the footer under the tree keeps showing the old
+     * count -- a control that did work and looks like it did not.
+     *
+     * BUMPED ONLY WHEN SOMETHING REALLY CHANGED. Every mutator here already returns whether
+     * it changed the book, because the server uses that to decide whether to sync; the
+     * counter follows the same answer, so a rejected edit (the book is capped) does not
+     * redraw a window to show nothing new.
+     *
+     * NOT volatile, and deliberately: the writer is `ClientProxy.applyPlanBookSync`, which
+     * hands the deserialise to `Minecraft.addScheduledTask` precisely so it runs on the
+     * client thread. One thread writes and the same thread reads. A `volatile` here would
+     * suggest otherwise and invite somebody to write from the IO thread after all.
+     */
+    private int revision;
+
+    /** See {@link #revision}. */
+    public int revision() {
+        return revision;
+    }
+
     /** Starred keys, oldest first. Unmodifiable; edit through this class. */
     public List<String> favourites() {
         return Collections.unmodifiableList(new ArrayList<String>(favourites));
@@ -71,11 +98,11 @@ public final class PlanBook implements INBTSerializable<NBTTagCompound> {
         if (isBlank(key) || favourites.size() >= MAX_FAVOURITES) {
             return false;
         }
-        return favourites.add(key);
+        return changed(favourites.add(key));
     }
 
     public boolean removeFavourite(String key) {
-        return key != null && favourites.remove(key);
+        return changed(key != null && favourites.remove(key));
     }
 
     /** TODO keys, oldest first. */
@@ -101,13 +128,21 @@ public final class PlanBook implements INBTSerializable<NBTTagCompound> {
             return false;
         }
         if (quantity <= 0L) {
-            return todo.remove(key) != null;
+            return changed(todo.remove(key) != null);
         }
         if (!todo.containsKey(key) && todo.size() >= MAX_TODO) {
             return false;
         }
         Long previous = todo.put(key, Long.valueOf(quantity));
-        return previous == null || previous.longValue() != quantity;
+        return changed(previous == null || previous.longValue() != quantity);
+    }
+
+    /** Record that the book changed, and pass the answer through. */
+    private boolean changed(boolean didChange) {
+        if (didChange) {
+            revision++;
+        }
+        return didChange;
     }
 
     public boolean isEmpty() {
@@ -120,6 +155,11 @@ public final class PlanBook implements INBTSerializable<NBTTagCompound> {
         favourites.addAll(other.favourites);
         todo.clear();
         todo.putAll(other.todo);
+        // UNCONDITIONALLY, unlike the mutators. A wholesale replacement cannot cheaply say
+        // whether anything differs, and the cost of being wrong runs one way only: a spurious
+        // bump redraws an identical panel, a missing one leaves a window showing a book the
+        // player has changed.
+        revision++;
     }
 
     @Override
@@ -154,6 +194,9 @@ public final class PlanBook implements INBTSerializable<NBTTagCompound> {
     public void deserializeNBT(NBTTagCompound root) {
         favourites.clear();
         todo.clear();
+        // Same reasoning as `copyFrom`: this IS the sync landing, and the clear above has
+        // already changed the book whatever the payload turns out to hold.
+        revision++;
         if (root == null) {
             return;
         }

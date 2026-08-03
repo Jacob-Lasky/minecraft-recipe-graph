@@ -211,4 +211,63 @@ public class PlannerServiceTest {
         assertEquals("an all-empty document must resolve exactly as an absent one",
                      bare, signature);
     }
+
+    /**
+     * The generation moves at every transition, so an open window notices all of them.
+     *
+     * NOT JUST ON A FINISHED PLAN. "Planning 64x borax" is a different thing to draw than the
+     * previous plan's tree, and a window that kept the old answer through a re-solve would be
+     * showing the route a player has just overridden with a pin. `PlannerScreen.PlannerWindow`
+     * polls this once a tick and rebuilds when it moves.
+     */
+    @Test
+    public void everyTransitionMovesTheGeneration() throws Exception {
+        loadGraph();
+        PlannerService planner = PlannerService.get();
+        long start = planner.generation();
+
+        assertTrue(planner.plan("mod:plate", 1L, Solver.DEFAULT_MAX_NODES));
+        settle();
+        assertEquals(PlannerService.State.DONE, planner.state());
+        // TWO BUMPS FOR ONE PLAN -- entering PLANNING and finishing -- asserted as a total
+        // rather than read between the two. Reading the counter after `plan` returns and
+        // again after `settle` RACES: this graph is two nodes and the worker can finish
+        // before the main thread gets its first read, at which point the two reads are equal
+        // and a perfectly correct service looks broken. Failed that way in a full-suite run
+        // and passed alone, which is the shape of every test that samples a live thread.
+        long done = planner.generation();
+        assertTrue("both entering PLANNING and finishing must be visible, saw "
+                   + (done - start) + " bump(s)", done >= start + 2);
+
+        // A refusal is not a transition and must not redraw anything.
+        planner.reset();
+        long afterReset = planner.generation();
+        assertTrue("dropping the plan must be visible too", afterReset > done);
+        assertFalse("there is nothing to repeat", planner.replan());
+        assertEquals(afterReset, planner.generation());
+    }
+
+    /**
+     * `replan` asks the SAME question again, which is what a pin needs.
+     *
+     * Keyed on the remembered target rather than re-derived from the plan book: a pin does
+     * not change what the player wants, and re-reading the book would get it wrong the moment
+     * the book's first entry stops being what is on screen.
+     */
+    @Test
+    public void replanRepeatsTheLastTargetAndQuantity() throws Exception {
+        loadGraph();
+        PlannerService planner = PlannerService.get();
+        planner.plan("mod:plate", 7L, Solver.DEFAULT_MAX_NODES);
+        settle();
+
+        long done = planner.generation();
+        assertTrue(planner.replan());
+        assertTrue(planner.generation() > done);
+        assertEquals("mod:plate", planner.targetKey());
+        assertEquals(7L, planner.targetQty());
+        settle();
+        assertEquals(PlannerService.State.DONE, planner.state());
+    }
+
 }

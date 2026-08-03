@@ -165,6 +165,13 @@ The solver handles the three things that make this harder than it looks:
   matching and the pin falls back to the category ("make it in the Alloy Smelter"), saying
   so rather than reverting in silence. Kept in `data/recipes.json`; `recipegraph pins`
   lists them.
+
+  **The in-game planner reads and writes the same file**, at
+  `config/mcrecipedump/recipes.json` — one format, two front ends, so a choice made on the
+  web page applies in game and the other way round. Copy the file between machines and the
+  pins come with it. If the solver cannot honour a pin (a pinned recipe that loops back on
+  its own ingredients is the usual case) both UIs say so rather than quietly using another
+  route.
 - **Stock is consumed, not just checked.** The inventory pool is drawn down as the tree
   is built, so two branches cannot both claim the same 5 redstone.
 - **Progress is priced.** The pack expresses "you have not unlocked this yet" as a
