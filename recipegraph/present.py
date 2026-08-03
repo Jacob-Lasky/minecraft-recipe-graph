@@ -136,7 +136,7 @@ def status_badge(status, token_kind=None, unsourced=False):
 
     `unsourced` refines a plain NEED the same way, and for the same reason: the solver
     resolved it identically to any other raw leaf, but a reader must not treat it
-    identically. See `Solver.reachable_form` and #136.
+    identically. See `Graph.reachable_form` and #136.
 
     THE CLASS DOES NOT CHANGE, only the word. It is still something you have to obtain; what
     changed is that the tool cannot say how. A new colour would imply a new kind of row and

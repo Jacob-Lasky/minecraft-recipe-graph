@@ -372,7 +372,7 @@ def cmd_plan(args):
     for row in result["shopping_list"][: args.limit]:
         # The terminal gets the same warning the HTML does. A shopping list is what someone
         # works from, and one of these lines being unbackable is exactly the thing they need
-        # to know before setting off. See Solver.reachable_form and #136.
+        # to know before setting off. See Graph.reachable_form and #136.
         print("  %14s  %s%s" % ("{:,}".format(row["qty"]), row["name"],
                                 "  <- " + present.UNSOURCED_BADGE
                                 if row.get("unsourced") else ""))

@@ -926,7 +926,7 @@ public final class Solver {
         // A BARE key nothing makes while a VARIANT of it IS made: #170's half, and the
         // third face of one subsumption rule. REPORTED, NOT REPRICED -- whether the solver
         // should ROUTE a bare demand through a produced variant is contested (#28 refused
-        // it in `producers`) and stays open. Mirrors `Solver.reachable_form` in python.
+        // it in `producers`) and stays open. Mirrors `Graph.reachable_form` in python.
         for (int variant : g.variantsOf(keyId)) {
             if (hasRealProducers(variant)) {
                 // First produced variant, which is the one the dump saw first: `variantsOf`
