@@ -24,11 +24,35 @@ public class FlowLayoutTest {
 
     @Test
     public void depthBecomesTheColumn() {
-        FlowLayout.Laid laid = FlowLayout.of(PlanTrees.chain(4));
+        // OVER `deepFan`, AND AGAINST AN INDEPENDENT DEPTH. Two things were wrong with
+        // asserting `box.x == box.depth * PITCH` over `chain(4)`. The expected value is
+        // derived from the object under test, so a walk that filed the wrong `depth` files
+        // the matching `x` and agrees with itself; and on a chain `depth` equals the DFS
+        // index anyway, so the one fixture that could have told the two apart did not.
+        //
+        // `deepFan(3, 2)` diverges: DFS order is n2, n1, leaf, leaf, leaf, n1, ... so index
+        // 2 is at depth 2 and index 5 is back at depth 1. The expected depths are written
+        // out as literals read off `PlanTrees.deepFan`'s own recursion rather than recomputed
+        // from the layout, for the reason `ModularUiLayoutTest`'s header gives: a test that
+        // rederives a number with the formula the code uses passes whenever both are wrong.
+        int[] expected = {0, 1, 2, 2, 2, 1, 2, 2, 2, 1, 2, 2, 2};
+        FlowLayout.Laid laid = FlowLayout.of(PlanTrees.deepFan(3, 2));
+        assertEquals(expected.length, laid.size());
         for (int i = 0; i < laid.size(); i++) {
             FlowLayout.Box box = laid.boxes.get(i);
+            assertEquals("box " + i + " is at the wrong depth", expected[i], box.depth);
             assertEquals("depth " + box.depth + " is in the wrong column",
-                    box.depth * (FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP), box.x);
+                    expected[i] * (FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP), box.x);
+        }
+        // The chain kept as well, because it is the shape where depth and index coincide and
+        // a layout that started indexing columns instead of reading `depth` still has to
+        // agree on it.
+        FlowLayout.Laid chain = FlowLayout.of(PlanTrees.chain(4));
+        for (int i = 0; i < chain.size(); i++) {
+            FlowLayout.Box box = chain.boxes.get(i);
+            assertEquals("chain box " + i + " is at the wrong depth", i, box.depth);
+            assertEquals("depth " + box.depth + " is in the wrong column",
+                    i * (FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP), box.x);
         }
     }
 
@@ -111,12 +135,10 @@ public class FlowLayoutTest {
 
     @Test
     public void aWideFanLaysOutWithoutCollapsing() {
-        List<PlanNode> children = new ArrayList<PlanNode>();
-        for (int i = 0; i < 2000; i++) {
-            children.add(PlanTrees.node("leaf" + i));
-        }
-        PlanNode root = PlanTrees.node("root", children.toArray(new PlanNode[0]));
-        FlowLayout.Laid laid = FlowLayout.of(root);
+        // `PlanTrees.fan`, not a hand-rolled loop building the identical shape. The helper
+        // exists for exactly this and the copy here was a second thing to fix the day
+        // `PlanNode` gains a required field -- which is the reason `PlanTrees` was extracted.
+        FlowLayout.Laid laid = FlowLayout.of(PlanTrees.fan(2000));
         assertEquals(2001, laid.size());
         assertEquals(1999 * (FlowLayout.NODE_HEIGHT + FlowLayout.ROW_GAP)
                 + FlowLayout.NODE_HEIGHT, laid.height);
@@ -141,11 +163,23 @@ public class FlowLayoutTest {
 
     @Test
     public void everyBoxKnowsItsParentSoEdgesCanBeDrawn() {
-        PlanNode root = PlanTrees.node("root", PlanTrees.node("mid", PlanTrees.node("leaf")));
+        // A BRANCHING TREE, NOT A CHAIN. The fixture here was `root -> mid -> leaf`, on which
+        // the correct parent of box `i` is always `i - 1` -- so `parent = index - 1`, the
+        // obvious wrong implementation and the one that draws every edge to the box above,
+        // passed it. The same two deep siblings `aSubtreeDoesNotCollideWithItsSibling` uses
+        // are the discriminating shape: DFS order is root, a, a1, b, b1, whose parents are
+        // -1, 0, 1, 0, 3 -- and box 3 (`b`) hangs off the ROOT rather than off box 2.
+        PlanNode root = PlanTrees.node("root",
+                PlanTrees.node("a", PlanTrees.node("a1")),
+                PlanTrees.node("b", PlanTrees.node("b1")));
         FlowLayout.Laid laid = FlowLayout.of(root);
+        assertEquals(Arrays.asList("root", "a", "a1", "b", "b1"), keysOf(laid));
         assertEquals(-1, laid.boxes.get(0).parent);
         assertEquals(0, laid.boxes.get(1).parent);
         assertEquals(1, laid.boxes.get(2).parent);
+        assertEquals("`b` hangs off the root, not off `a1` above it", 0,
+                laid.boxes.get(3).parent);
+        assertEquals(3, laid.boxes.get(4).parent);
     }
 
     // -- helpers ---------------------------------------------------------------------------

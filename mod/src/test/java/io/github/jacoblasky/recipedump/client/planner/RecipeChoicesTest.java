@@ -153,10 +153,49 @@ public class RecipeChoicesTest {
         RecipeGraph graph = threeWaysToMakeAPlate();
         for (RecipeChoice choice : RecipeChoices.forNode(graph, node("mod:plate", null), null)
                                                 .shown()) {
+            // ONLY THE FINGERPRINT, because it is the only one of the three this class can
+            // check independently. `RecipeChoice.label()` is `return pin.label` and
+            // `category()` is `return pin.category`, so asserting them against `pin()` was
+            // one field compared with itself -- true of any object, whatever the picker did.
+            // `everyChoiceCarriesTheLabelAPinWouldStore` below makes the real claim, against
+            // `Pins.label` rather than against the pin already in hand.
             assertEquals(Pins.fingerprint(graph, choice.recipeId()), choice.pin().fingerprint);
-            assertEquals(choice.label(), choice.pin().label);
-            assertEquals(choice.category(), choice.pin().category);
         }
+    }
+
+    /**
+     * The window {@link RecipeChoice}'s header describes, closed STRUCTURALLY.
+     *
+     * ASSERTED BY REFLECTION AND NOT BEHAVIOURALLY, and that is the finding rather than a
+     * shortcut. The header's guarantee is that a reload between opening the picker and
+     * clicking a row cannot move the pin, because the row holds the finished pin instead of
+     * resolving a recipe id at click time. There is no behavioural test of that: `pin()`
+     * takes no graph, so a test can only ever hand it the graph it was built with, and
+     * "the value I stored is the value I stored" passes whatever the class does. The absence
+     * of the parameter IS the guarantee, so the thing worth pinning is the absence.
+     *
+     * A field of graph type is exactly what the tidier-looking alternative needs, and adding
+     * one is the first step of reintroducing the defect. It fails here instead.
+     *
+     * WHAT IT DOES NOT REACH, said plainly rather than left to be discovered: a graph
+     * smuggled through a field typed `Object`, or reached through some other object's field,
+     * passes this. That is not the accident being guarded against -- the accident is someone
+     * adding `private final RecipeGraph graph;` while making the click path "tidier" -- and a
+     * check that pretended to cover more would be the guard-that-does-not-guard this
+     * project keeps finding.
+     */
+    @Test
+    public void aChoiceHoldsNoGraphSoAReloadCannotMoveItsPin() {
+        for (java.lang.reflect.Field field : RecipeChoice.class.getDeclaredFields()) {
+            assertFalse(field.getName() + " is a graph reference; a row that can reach a "
+                        + "graph can resolve its id at click time, which is the window "
+                        + "RecipeChoice's header exists to close",
+                        RecipeGraph.class.isAssignableFrom(field.getType()));
+        }
+        // The check must have something to look at: a class with no fields would pass the
+        // loop above having examined nothing.
+        assertTrue("RecipeChoice declares no fields; this check inspected nothing",
+                   RecipeChoice.class.getDeclaredFields().length > 0);
     }
 
     /**

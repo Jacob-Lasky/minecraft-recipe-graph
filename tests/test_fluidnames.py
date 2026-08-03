@@ -138,15 +138,26 @@ class AmbiguousEvidenceTest(unittest.TestCase):
         self.assertEqual(g.fluid_names, {})
 
     def test_the_majority_wins(self):
+        # THE MAJORITY MUST SORT LAST, and that is the whole design of this fixture. The
+        # previous names were "Right Name" (2 votes) against "Wrong Name" (1), and "Right"
+        # sorts before "Wrong" -- so `decide` ignoring the count entirely and returning
+        # `min(sorted(names))` picked the same winner and this test had no property left.
+        # Count and alphabet must DISAGREE or the count is not being asserted.
+        # `FluidNamesTest.votesAreSettledByCountAndThenAlphabetically` is the Java sibling
+        # and already had this shape.
         g = Graph()
         g.names = {"techreborn:dynamiccell": "Empty Cell",
-                   "techreborn:dynamiccell#1111": "Right Name Cell",
-                   "forestry:can:1#1111": "Right Name Can",
-                   "openblocks:tank#1111": "Wrong Name Tank"}
+                   "techreborn:dynamiccell#1111": "Zed Name Cell",
+                   "forestry:can:1#1111": "Zed Name Can",
+                   "openblocks:tank#1111": "Aye Name Tank"}
         g.add(empty("e1", "techreborn:dynamiccell#1111", "fluid:x"))
         g.add(empty("e2", "forestry:can:1#1111", "fluid:x"))
         g.add(empty("e3", "openblocks:tank#1111", "fluid:x"))
-        self.assertEqual(g.bare_name("fluid:x"), "Right Name")
+        self.assertEqual(dict(fluidnames.tally(g.recipes, g.bare_name)["fluid:x"]),
+                         {"Zed Name": 2, "Aye Name": 1},
+                         "the fixture must give the majority the LATER name, or an "
+                         "alphabetical decide passes this test")
+        self.assertEqual(g.bare_name("fluid:x"), "Zed Name")
 
     def test_a_tie_is_broken_alphabetically_and_does_not_flicker(self):
         # One fluid ties on the reference pack (`fluid:eternal_dragon_fire`, "Eternal Dragon
