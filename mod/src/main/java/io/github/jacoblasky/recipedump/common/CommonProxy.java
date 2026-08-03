@@ -65,7 +65,14 @@ public class CommonProxy {
      *
      * A no-op on a server for the same reason as the book sync: the server is where the grid
      * lives and it never receives one of these. On the proxy rather than in the handler
-     * because that handler class is loaded on both sides.
+     * because that handler class is loaded on both sides. {@code ClientProxy} hands it to
+     * `PlannerStock`, which holds it and plans against it.
+     *
+     * AN EMPTY BODY HERE IS A SEAM, and this one was unjoined until #191: the server read the
+     * grid, serialised a megabyte of it, sent it, and every reply landed in these braces with
+     * no error anywhere. `SeamInstallationTest` now asserts that every empty method on this
+     * class is overridden by {@code ClientProxy}, because nothing else can tell an
+     * unimplemented hook from a deliberate no-op.
      */
     public void applyStockSnapshot(NBTTagCompound payload) {
     }

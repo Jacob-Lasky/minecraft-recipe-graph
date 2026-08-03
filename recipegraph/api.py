@@ -32,7 +32,7 @@ import math
 
 from . import cost as cost_mod
 from . import explore
-from . import iconset, query
+from . import iconset, model, query
 
 JSON_CTYPE = "application/json; charset=utf-8"
 
@@ -99,7 +99,7 @@ FIELDS = {
     # shape of an answer, and a sweep grouping by mod would report a mod called fluid.
     "kind": (lambda c, k: c.graph.kind(k),
              "item, fluid, essentia or ore"),
-    "mod": (lambda c, k: k.split(":")[0] if c.graph.kind(k) == "item" else "",
+    "mod": (lambda c, k: model.mod_of(k),
             "the owning mod, empty for a fluid, ore or essentia key"),
     "stock": (lambda c, k: explore.stock_of(k, c.have),
               "how much the AE2 network holds"),

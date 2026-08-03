@@ -441,6 +441,210 @@ class TheOtherIdForTheSameOreTest(unittest.TestCase):
         self.assertIn("Sedna", node["note"])
 
 
+# What `oredict.removals_from_crafttweaker_log` returns for the reference pack's
+# `scripts/OreDictionary.zs:63`, in the Sednanite spelling the fixtures above use. The pair
+# is (display name, ore group) and NOT (key, group), because that is all CraftTweaker logs.
+SEDNANITE_REMOVED = {("Sednanite Ore", "oreSednanite")}
+# `scripts/TheGreatOreCleanse.zs:649`, the 134-line cross-mod unification pass. Same record
+# shape, and the reason the mod clause exists.
+IE_URANIUM = "immersiveengineering:ore:5"
+
+
+class AGroupThePackDeletedIsStillEvidenceTest(unittest.TestCase):
+    """#168: the 4th twin is in no `ore*` group, because the pack took it back out.
+
+    `contenttweaker:sub_block_holder_1:8` is Rhenium Ore, `contenttweaker:rhenium_ore` is
+    Rhenium Ore, and `scripts/OreDictionary.zs:63` registers the first into `oreRhenium` and
+    then removes it. #117's test needs a SHARED group and the finished registry has none to
+    share, so the twin kept a bare 1.0 against the real block's 2.0 and a plan for
+    `fluid:rhenium` put the block that does not generate on the shopping list.
+
+    The fixture is `shadow_graph(same_group=False)` -- the exact graph the two tests above
+    require to yield nothing -- and the ONLY thing added is the pack's removal record. That
+    pairing is the claim: this is not a looser rule over the same evidence, it is the same
+    rule over a source that had not been read.
+    """
+
+    def test_the_removal_record_finds_the_twin(self):
+        g = shadow_graph(same_group=False)
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED),
+                         {HOLDER: [147, "Sedna"]})
+
+    def test_without_the_record_the_same_graph_yields_nothing(self):
+        """The control for the test above, and #118's constraint restated as a pair."""
+        g = shadow_graph(same_group=False)
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores), {})
+
+    def test_a_block_group_is_still_not_ore_evidence_even_with_a_record(self):
+        """#61. A record for `blockSednanite` cannot gate, because it is not an `ore*` group.
+
+        The removal reader returns every group the pack deleted from -- 134 on the reference
+        pack, of which 131 are ingots, dusts and plates -- so the `ore*` filter is the only
+        thing standing between the unification pass and a gate.
+        """
+        g = shadow_graph(same_group=False)
+        self.assertEqual(
+            dimensions.shadow_ores(g, g.dimension_ores,
+                                   {("Sednanite Ore", "blockSednanite")}), {})
+
+    def test_a_record_naming_another_group_does_not_fire(self):
+        g = shadow_graph(same_group=False)
+        self.assertEqual(
+            dimensions.shadow_ores(g, g.dimension_ores,
+                                   {("Sednanite Ore", "oreRhenium")}), {})
+
+    def test_a_record_naming_another_label_does_not_fire(self):
+        """The record is keyed by label, so the label has to be the anchor's."""
+        g = shadow_graph(same_group=False)
+        self.assertEqual(
+            dimensions.shadow_ores(g, g.dimension_ores,
+                                   {("Rhenium Ore", "oreSednanite")}), {})
+
+    def test_a_differently_named_key_is_still_declined(self):
+        """#117's display-name clause, unchanged: a record cannot substitute for the name."""
+        g = shadow_graph(same_name=False, same_group=False)
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED), {})
+
+    def test_another_mods_ore_of_the_same_name_is_declined(self):
+        """The measured false positive, and why removal alone is not enough.
+
+        `immersiveengineering:ore:5` is a real Uranium Ore whose removal from `oreUranium`
+        is part of the pack's cross-mod unification. Gating it would price a trip to Oi into
+        an ore that has nothing to do with Oi -- a decoy left visible costs one confused
+        search, an ore given a false provenance costs a player a thing that exists.
+        """
+        g = shadow_graph(same_group=False)
+        g.names[IE_URANIUM] = "Sednanite Ore"
+        self.assertNotIn(IE_URANIUM,
+                         dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
+
+    def test_the_same_mods_twin_is_still_found_alongside_it(self):
+        """The mod clause declines the stranger without declining the twin beside it."""
+        g = shadow_graph(same_group=False)
+        g.names[IE_URANIUM] = "Sednanite Ore"
+        self.assertEqual(dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED),
+                         {HOLDER: [147, "Sedna"]})
+
+    def test_the_twin_is_charged_for_the_trip(self):
+        """The defect itself, priced: 1.0 before, because nothing produces it."""
+        g = shadow_graph(same_group=False)
+        g.dimension_ores.update(
+            dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        self.assertAlmostEqual(costs[HOLDER], cost.BASE_RAW_COST + cost.DIMENSION_COST,
+                               places=6)
+
+    def test_the_plan_stops_naming_the_block_that_does_not_generate(self):
+        """End to end, on the shape the live repro has: the fluid routes through the twin.
+
+        Before the fix the melt recipe's only input is the twin at 1.0 and the plan names
+        it. After, the twin costs the trip and the real block -- which the oredict slot also
+        satisfies -- is what the solver picks.
+        """
+        from recipegraph.solve import Solver
+        g = shadow_graph(same_group=False)
+        # The pack's own shape: the recipe asks for the GROUP, so both ids satisfy it, and
+        # only the price decides. `shadow_graph` adds a literal-input recipe as well, which
+        # is the case no ranking can rescue and which the gate above handles.
+        g.add(Recipe("melt-group", "t", [("fluid:rhenium", 100)],
+                     [Ingredient([HOLDER, SEDNANITE], 1)], category="minecraft.crafting"))
+        g.dimension_ores.update(
+            dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        node = Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve("fluid:rhenium", 1)["tree"]
+        self.assertEqual([c["key"] for c in node["children"]], [SEDNANITE])
+
+    def test_the_graph_keeps_the_set_apart_from_the_gates(self):
+        """`shadow_ores` is not recoverable from `dimension_ores`, so #168 persists it."""
+        g = shadow_graph(same_group=False)
+        shadows = dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED)
+        g.shadow_ores = shadows
+        g.dimension_ores.update(shadows)
+        self.assertEqual(sorted(g.shadow_ores), [HOLDER])
+        self.assertEqual(sorted(g.dimension_ores), sorted([SEDNANITE, HOLDER]))
+
+    def test_the_set_survives_a_save_and_load(self):
+        """It has to reach Java through graph.json, which is the whole point of persisting."""
+        g = shadow_graph(same_group=False)
+        g.shadow_ores = dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "graph.json")
+            g.save(path)
+            self.assertEqual(Graph.load(path).shadow_ores, {HOLDER: [147, "Sedna"]})
+
+    def test_a_graph_built_before_the_field_existed_loads_empty(self):
+        g = shadow_graph()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "graph.json")
+            g.save(path)
+            with open(path) as fh:
+                doc = json.load(fh)
+            del doc["shadow_ores"]
+            with open(path, "w") as fh:
+                json.dump(doc, fh)
+            self.assertEqual(Graph.load(path).shadow_ores, {})
+
+    def test_load_does_not_recompute_the_set(self):
+        """DO NOT make this recompute. `tools/make-java-fixtures.py` keys every golden
+        fixture to `len(dimension_ores)` on the oracle FILE, so a `load` that re-derived
+        shadows would move that count for a graph nobody rebuilt and stale the whole set."""
+        g = shadow_graph(same_group=False)
+        g.shadow_ores = {}
+        g.dimension_ores = {SEDNANITE: [147, "Sedna"]}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "graph.json")
+            g.save(path)
+            loaded = Graph.load(path)
+            self.assertEqual(loaded.shadow_ores, {})
+            self.assertEqual(sorted(loaded.dimension_ores), [SEDNANITE])
+
+
+class TheSearchRowSaysWhichOneIsRealTest(unittest.TestCase):
+    """The reported symptom: two "Sednanite Ore" rows and nothing on screen telling them apart.
+
+    NOT BY HIDING, and that is a constraint rather than a preference. `explore.rank_matches`
+    reports `hidden` instead of dropping, on the stated rule that anything you actually hold
+    stays findable however dead the graph thinks it is -- and three recipes consume the
+    Rhenium twin literally, so a player can be holding one. A golden fixture also PLANS a
+    twin as its target. Both rows stay; one of them now says what it is.
+    """
+
+    def _rows(self, g):
+        from recipegraph import explore
+        return {r["key"]: r for r in explore.suggest(g, "Sednanite Ore", {}).results}
+
+    def test_both_rows_are_still_returned(self):
+        g = shadow_graph()
+        g.shadow_ores = dimensions.shadow_ores(g, g.dimension_ores)
+        self.assertEqual(sorted(self._rows(g)), sorted([SEDNANITE, HOLDER]))
+
+    def test_the_twin_is_marked_and_the_real_block_is_not(self):
+        g = shadow_graph()
+        g.shadow_ores = dimensions.shadow_ores(g, g.dimension_ores)
+        rows = self._rows(g)
+        self.assertTrue(rows[HOLDER].get("shadow"))
+        self.assertNotIn("shadow", rows[SEDNANITE])
+
+    def test_an_ordinary_row_carries_no_flag_at_all(self):
+        """Absent rather than False: 4 keys in 266,728 have it, and a False on every other
+        row would rewrite every stored plan fixture over a field none of them is about."""
+        g = shadow_graph()
+        self.assertNotIn("shadow", self._rows(g)[HOLDER])
+
+    def test_the_real_block_still_ranks_first(self):
+        """#101 is a ranking problem and this is not; `_canonical_first` already sorts by
+        producers and consumers, and the twin loses on both. Pinned because a badge that
+        arrived with a reordering would be a new bug wearing a fix's clothes."""
+        g = shadow_graph()
+        g.shadow_ores = dimensions.shadow_ores(g, g.dimension_ores)
+        from recipegraph import explore
+        self.assertEqual(explore.rank_matches(g, "Sednanite Ore", {}, 10).results[0],
+                         SEDNANITE)
+
+
 class BuildWiresTheShadowsInTest(unittest.TestCase):
     """One line in `index.build`, and dropping it is silent.
 
@@ -449,12 +653,15 @@ class BuildWiresTheShadowsInTest(unittest.TestCase):
     `tests/test_multiblocks.py` keeps for the multiblock line.
     """
 
-    def _instance(self):
+    def _instance(self, holder_in_oredict=True, ct_log=None):
         d = tempfile.mkdtemp()
         cfg = os.path.join(d, "config", "advRocketry")
         os.makedirs(cfg)
         with open(os.path.join(cfg, "planetDefs.xml"), "w") as fh:
             fh.write(PLANET_XML)
+        if ct_log is not None:
+            with open(os.path.join(d, "crafttweaker.log"), "w") as fh:
+                fh.write(ct_log)
         dump = os.path.join(d, "mc-recipe-dump")
         os.makedirs(dump)
         with open(os.path.join(dump, "recipes.ndjson"), "w") as fh:
@@ -462,7 +669,8 @@ class BuildWiresTheShadowsInTest(unittest.TestCase):
                                  "in": [[{"i": HOLDER, "c": 1}]],
                                  "out": [{"i": "mod:ingot", "c": 1}]}) + "\n")
         with open(os.path.join(dump, "oredict.json"), "w") as fh:
-            json.dump({"oreSednanite": [SEDNANITE, HOLDER]}, fh)
+            json.dump({"oreSednanite": [SEDNANITE] + ([HOLDER] if holder_in_oredict else [])},
+                      fh)
         with open(os.path.join(dump, "names.json"), "w") as fh:
             json.dump({SEDNANITE: "Sednanite Ore", HOLDER: "Sednanite Ore"}, fh)
         return d
@@ -472,6 +680,156 @@ class BuildWiresTheShadowsInTest(unittest.TestCase):
         g = index.build(self._instance(), quiet=True)
         self.assertEqual(sorted(g.dimension_ores), sorted([SEDNANITE, HOLDER]))
         self.assertEqual(g.dimension_ores[HOLDER], g.dimension_ores[SEDNANITE])
+
+    def test_a_built_graph_records_which_id_is_the_duplicate(self):
+        """#168 persists the set as well as folding it in, and `build` is the only writer."""
+        from recipegraph import index
+        g = index.build(self._instance(), quiet=True)
+        self.assertEqual(sorted(g.shadow_ores), [HOLDER])
+
+    def test_build_reads_the_removals_and_reaches_the_rhenium_shape(self):
+        """The wiring #168 adds, end to end from pack files.
+
+        Dropping the `removals` argument in `index.build` is silent in exactly the way the
+        class docstring describes: every `shadow_ores` unit test above passes its own set
+        directly, so none of them would notice. The oredict here does NOT hold the twin --
+        this is the Rhenium shape -- and the log is the only thing that can find it.
+        """
+        from recipegraph import index
+        g = index.build(
+            self._instance(holder_in_oredict=False,
+                           ct_log="[INITIALIZATION][SERVER][INFO] Removing Sednanite Ore "
+                                  "from ore dictionary entry oreSednanite\n"),
+            quiet=True)
+        self.assertEqual(sorted(g.shadow_ores), [HOLDER])
+        self.assertEqual(sorted(g.dimension_ores), sorted([SEDNANITE, HOLDER]))
+
+    def test_the_same_pack_without_the_log_line_finds_nothing(self):
+        """The control: the twin is invisible without the removal record, which is #168."""
+        from recipegraph import index
+        g = index.build(self._instance(holder_in_oredict=False, ct_log=""), quiet=True)
+        self.assertEqual(g.shadow_ores, {})
+        self.assertEqual(sorted(g.dimension_ores), [SEDNANITE])
+
+    def test_a_pack_with_no_crafttweaker_log_still_builds(self):
+        """The reader degrades to "no removals", the way a missing planetDefs already does."""
+        from recipegraph import index
+        g = index.build(self._instance(holder_in_oredict=False), quiet=True)
+        self.assertEqual(g.shadow_ores, {})
+
+
+class ReadingTheRemovalsTest(unittest.TestCase):
+    """`oredict.removals_from_crafttweaker_log`, against the log lines the pack really writes.
+
+    Its own class because the tests above hand `shadow_ores` a removal set directly, so every
+    one of them would stay green if this regex matched nothing at all -- and "matched nothing"
+    is precisely how a log-format assumption fails. The samples below are copied from the
+    reference pack's `crafttweaker.log`, lines 6483-6484 and 2629.
+    """
+
+    LOG = (
+        "[INITIALIZATION][SERVER][INFO] Adding tile.contenttweaker.rhenium_ore.name to ore"
+        " dictionary entry oreRhenium\n"
+        "[INITIALIZATION][SERVER][INFO] Removing Rhenium Ore from ore dictionary entry"
+        " oreRhenium\n"
+        "[INITIALIZATION][SERVER][INFO] Removing Uranium Ore from ore dictionary entry"
+        " oreUranium\n"
+        "[INITIALIZATION][SERVER][INFO] Removing Tin Ingot from ore dictionary entry"
+        " ingotTin\n"
+        "[INITIALIZATION][SERVER][INFO] Removing item.projectred.core.itemResource."
+        "tin_ingot.name from ore dictionary entry ingotTin\n"
+    )
+
+    def _read(self, text):
+        from recipegraph.sources import oredict
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "crafttweaker.log")
+            with open(path, "w") as fh:
+                fh.write(text)
+            return oredict.removals_from_crafttweaker_log(path)
+
+    def test_it_finds_the_removal_that_matters(self):
+        self.assertIn(("Rhenium Ore", "oreRhenium"), self._read(self.LOG))
+
+    def test_an_addition_is_not_a_removal(self):
+        """The line immediately above the one that matters is an Adding, and the two differ
+        only in a verb. A regex anchored loosely enough to take both would gate every ore."""
+        self.assertNotIn(("tile.contenttweaker.rhenium_ore.name", "oreRhenium"),
+                         self._read(self.LOG))
+
+    def test_the_whole_pass_is_read_not_just_the_ore_groups(self):
+        """Filtering is the caller's question. Reading only `ore*` here would hide from the
+        next reader that 131 of the pack's 134 removals are ingots, dusts and plates."""
+        self.assertEqual(self._read(self.LOG),
+                         {("Rhenium Ore", "oreRhenium"),
+                          ("Uranium Ore", "oreUranium"),
+                          ("Tin Ingot", "ingotTin"),
+                          ("item.projectred.core.itemResource.tin_ingot.name", "ingotTin")})
+
+    def test_a_label_with_spaces_survives_intact(self):
+        """The subject is a DISPLAY name, so it has spaces in it and the group is the last
+        token. A greedy first group would swallow "from ore dictionary entry" as well."""
+        self.assertIn(("Coralium Infused Stone", "oreCoraliumStone"),
+                      self._read("Removing Coralium Infused Stone from ore dictionary"
+                                 " entry oreCoraliumStone\n"))
+
+    def test_an_unrelated_log_yields_nothing(self):
+        self.assertEqual(self._read("[INFO] Ore entries for <ore:oreTin>: [<mod:tin>]\n"),
+                         set())
+
+    def test_a_missing_file_is_not_an_error(self):
+        from recipegraph.sources import oredict
+        self.assertEqual(
+            oredict.removals_from_crafttweaker_log("/nonexistent/crafttweaker.log"), set())
+
+    def test_the_reference_pack_yields_exactly_three_ore_removals(self):
+        """The measurement the discriminator's precision rests on, pinned against the real
+        file when it is present. Three `ore*` removals in 134: oreRhenium is #168's twin,
+        oreUranium is the cross-mod false positive the mod clause declines, oreTartarite has
+        no gated anchor. Skipped rather than failed off the build machine."""
+        from recipegraph.model import is_world_ore_group
+        from recipegraph.sources import oredict
+        path = "/coding/.recipegraph-build/pack/crafttweaker.log"
+        if not os.path.exists(path):
+            self.skipTest("reference pack not present")
+        got = oredict.removals_from_crafttweaker_log(path)
+        self.assertEqual(sorted(p for p in got if is_world_ore_group(p[1])),
+                         [("Rhenium Ore", "oreRhenium"),
+                          ("Tartarite Ore", "oreTartarite"),
+                          ("Uranium Ore", "oreUranium")])
+
+
+class TheModOfAKeyTest(unittest.TestCase):
+    """`model.mod_of`, which #168 made the shadow test depend on and `api.FIELDS` already did.
+
+    One spelling now; it was two, and the second was an inline lambda in `api.FIELDS` -- the
+    same shape as the `reachable_form` copy that drifted for two releases.
+    """
+
+    def test_an_item_key_answers_its_namespace(self):
+        from recipegraph.model import mod_of
+        self.assertEqual(mod_of("contenttweaker:sub_block_holder_1:8"), "contenttweaker")
+
+    def test_a_plain_key_with_no_meta_still_answers(self):
+        from recipegraph.model import mod_of
+        self.assertEqual(mod_of("minecraft:stone"), "minecraft")
+
+    def test_a_fluid_answers_empty_not_fluid(self):
+        """`fluid:water` must not report a mod called "fluid" -- that is its KIND wearing
+        the shape of an answer, and a sweep grouping by mod would show it as a mod."""
+        from recipegraph.model import mod_of
+        self.assertEqual(mod_of("fluid:water"), "")
+
+    def test_an_oredict_and_an_essentia_key_answer_empty_too(self):
+        from recipegraph.model import mod_of
+        self.assertEqual(mod_of("ore:oreRhenium"), "")
+        self.assertEqual(mod_of("essentia:terra"), "")
+
+    def test_the_sweep_field_reads_this_one(self):
+        """`api.FIELDS["mod"]` must not grow a second copy back."""
+        import inspect
+        from recipegraph import api
+        self.assertIn("mod_of", inspect.getsource(api.FIELDS["mod"][0]))
 
 
 if __name__ == "__main__":

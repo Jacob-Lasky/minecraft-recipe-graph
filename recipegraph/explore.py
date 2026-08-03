@@ -268,9 +268,22 @@ def identity(graph, key):
     One definition, because every payload in this module and in `api` carries them and they
     were written out five times: a renderer reading `label` off a row built by the fifth copy
     that still spelled it something else fails at display time, on that row only.
+
+    `shadow` RIDES ALONG BECAUSE IT IS AN IDENTITY FACT, not a search feature: it says this
+    key is the pack's second id for a rock that generates under another id, so every surface
+    showing a row about it -- typeahead, search, a recipe's input slot -- has the same reason
+    to say so. Read straight off `graph.shadow_ores`, which `index.build` computed once; a
+    caller deriving it again is the drift `reachable_form` records.
+
+    PRESENT ONLY WHEN TRUE, which is not tidiness. Four keys in 266,728 carry it, and adding
+    a `False` to every other row would rewrite every stored plan fixture for a field none of
+    them is about.
     """
-    return {"key": key, "name": graph.display(key), "kind": graph.kind(key),
-            "label": graph.bare_name(key)}
+    row = {"key": key, "name": graph.display(key), "kind": graph.kind(key),
+           "label": graph.bare_name(key)}
+    if key in (graph.shadow_ores or {}):
+        row["shadow"] = True
+    return row
 
 
 def stack(graph, key, have):

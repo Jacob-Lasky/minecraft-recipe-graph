@@ -40,8 +40,22 @@ public final class LiveStock {
      */
     private static final long FRESH_FOR_MILLIS = 30_000L;
 
-    private static StockSnapshot latest;
-    private static long receivedAt;
+    /**
+     * VOLATILE BECAUSE THE PLAN THREAD READS THEM. These are written on the client thread and
+     * read by `PlannerService`'s worker through the `ScenarioSource.HAVE` reader (#191), which
+     * is the same argument that made `ScenarioSource.reader` volatile. Thread.start() already
+     * orders the usual case -- the client thread stores the snapshot and then starts the solve
+     * -- but a reply landing DURING a solve has no such edge, and a plain field read there may
+     * see the previous snapshot indefinitely.
+     *
+     * TWO FIELDS AND NOT ONE IMMUTABLE PAIR, unlike `JeiBridge.Indexed`, because the skew is
+     * harmless here and there it was not. A reader seeing a new snapshot beside an old
+     * timestamp decides the read is stale and asks again; one seeing the reverse plans against
+     * a snapshot at most one round trip old. Neither is a wrong answer, where a graph beside
+     * another graph's index resolved every key to the wrong item.
+     */
+    private static volatile StockSnapshot latest;
+    private static volatile long receivedAt;
 
     private LiveStock() {
     }

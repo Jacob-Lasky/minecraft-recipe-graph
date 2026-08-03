@@ -39,7 +39,7 @@ scan and no per-mod knowledge.
 import os
 import re
 
-from .model import is_world_ore_group
+from .model import is_world_ore_group, mod_of
 
 # The overworld is where you already are, so it can never gate anything. Named rather than
 # filtered by id at each call site, because "0 is not a gate" is a fact about the world and
@@ -133,7 +133,7 @@ def exclusive_keys(defs):
             if len(where) == 1 and where[0][0] != HOME_DIMENSION}
 
 
-def shadow_ores(graph, dimension_ores):
+def shadow_ores(graph, dimension_ores, ore_removals=None):
     """The same gated ores again, under whatever OTHER key the pack registered them as.
 
     WHY A SECOND KEY EXISTS AT ALL. MeatballCraft builds its custom ores twice. A material
@@ -164,6 +164,50 @@ def shadow_ores(graph, dimension_ores):
     group. Measured on the reference graph: of the 5 keys the group-only rule would have
     touched, this takes 3 and leaves 2.
 
+    A GROUP THE PACK DELETED STILL COUNTS, WHICH IS #168 AND IS NOT A LOOSENING. The 4th
+    twin, `contenttweaker:sub_block_holder_1:8` (Rhenium Ore), is in NO `ore*` group,
+    because `scripts/OreDictionary.zs:63` registers it into `oreRhenium` and then removes it
+    again. The finished registry -- all `Graph.ore_members` has ever seen -- shows a Rhenium
+    Ore belonging to nothing, so the group clause could not fire and the twin kept a bare
+    `BASE_RAW_COST` of 1.0 against the real block's 2.0. A plan for `fluid:rhenium` named it.
+    `oredict.removals_from_crafttweaker_log` reads the deletion back, and a group the pack
+    took this key out of satisfies the group clause exactly as a group it left the key in
+    does. Both clauses still hold; one of them is now being asked of a source that had not
+    been read yet.
+
+    DO NOT REPLACE THAT WITH "HAS NO `ore*` GROUP AT ALL", which is the obvious cheaper
+    spelling and was measured wrong. Over the whole reference graph it flags 6 keys for 4
+    correct: `immersiveengineering:ore:5` (a real Uranium Ore, gated behind a trip to Oi it
+    has nothing to do with) and `abyssalcraft:coraliumstone:32767`. It is absence of
+    evidence standing in for evidence, and it also cannot be squared with the two tests
+    below -- `blockSednanite` is not an `ore*` group, so #118's and #61's fixtures have an
+    EMPTY ore-group set and that rule gates them both.
+
+    AND THE MOD HAS TO MATCH, WHICH IS THE OTHER HALF OF #168. Reading removals alone still
+    flags `immersiveengineering:ore:5`, whose removal from `oreUranium`
+    (`scripts/TheGreatOreCleanse.zs:649`) sits in a 134-line unification pass that prunes
+    duplicate ingots, dusts and plates across mods so recipes resolve to one canonical item.
+    Removal is a statement about which item satisfies a group, NOT about which block
+    generates -- read the other way it gates one mod's ore behind the dimension declared for
+    another mod's, a provenance no pack source states. What this function is for is ONE
+    registrant giving ONE rock two ids; two mods each shipping a Uranium Ore is a different
+    phenomenon that happens to look the same in the graph. Measured with the mod clause: 4
+    flagged, 4 correct, nothing else in 266,728 keys. THE COVERAGE LIMIT that buys: a decoy
+    registered by a different mod from its anchor is invisible here. All four in this pack
+    are same-mod, so recall is 4 of 4 -- do not read that as "finds every decoy".
+
+    The mod clause is applied to BOTH arms rather than only the new one, because "one
+    registrant, one rock, two ids" is what the whole function means and a cross-mod match
+    would be just as wrong through a surviving group as through a deleted one. Measured a
+    no-op on the three that already shipped: all three are ContentTweaker on both sides.
+
+    THE CANDIDATE POOL IS EVERY NAMED KEY, not `world_ores`, and it has to be: the Rhenium
+    twin's whole problem is that it is NOT in `world_ores`, which is membership of the
+    finished registry. That widening cannot reach the surviving-group arm, which still
+    requires the sibling to hold an `ore*` group and so to be a `world_ores` member anyway.
+    Measured: run over the reference graph with no removals, the widened pool returns the
+    same three keys the narrow one did.
+
     WHAT IT DELIBERATELY DOES NOT DO is claim the two keys are one node. They stay separate
     in the graph, with separate recipes and separate stock, because merging them is a change
     to everything that walks a key and the canonical direction is genuinely unsettled: 26
@@ -183,9 +227,16 @@ def shadow_ores(graph, dimension_ores):
     """
     if not dimension_ores:
         return {}
+    # Coerced rather than trusted: `removals_from_crafttweaker_log` returns a set, but this
+    # is a membership test inside a loop over every same-named sibling, and a caller handing
+    # in the 134-element list it read from somewhere else would make it quietly quadratic.
+    removals = frozenset(ore_removals or ())
+
+    # `world_ores` is membership of the FINISHED registry, so it cannot see the Rhenium twin
+    # -- the pack took it back out. Candidates are drawn from every named key instead, and
+    # the clauses below carry the whole burden of declining the rest.
     by_name = {}
-    for key in graph.world_ores:
-        name = graph.names.get(key)
+    for key, name in graph.names.items():
         if name:
             by_name.setdefault(name, []).append(key)
 
@@ -197,11 +248,20 @@ def shadow_ores(graph, dimension_ores):
         groups = ore_groups(key)
         if not groups:
             continue
-        for sibling in by_name.get(graph.names.get(key)) or ():
+        name = graph.names.get(key)
+        # Which of the anchor's groups the pack is on record as having deleted a key of this
+        # name from. The anchor is still IN those groups, so the deleted one is necessarily
+        # some OTHER key wearing the same name -- which is the only inference the label-keyed
+        # removal record can support. See `oredict.removals_from_crafttweaker_log`.
+        deleted = {g for g in groups if (name, g) in removals}
+        for sibling in by_name.get(name) or ():
             if sibling == key or sibling in dimension_ores:
                 continue
-            if groups & ore_groups(sibling):
-                out[sibling] = list(entry)
+            if not (groups & ore_groups(sibling) or deleted):
+                continue
+            if mod_of(sibling) != mod_of(key):
+                continue
+            out[sibling] = list(entry)
     return out
 
 

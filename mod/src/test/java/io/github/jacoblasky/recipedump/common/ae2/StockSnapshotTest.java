@@ -7,6 +7,9 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import com.google.gson.JsonObject;
+
 import net.minecraft.init.Bootstrap;
 import net.minecraft.nbt.NBTTagCompound;
 import org.junit.BeforeClass;
@@ -147,5 +150,31 @@ public class StockSnapshotTest {
         source.put("minecraft:dirt", Long.valueOf(64L));
         assertEquals(1, snapshot.distinctKeys());
         assertEquals(0L, snapshot.count("minecraft:dirt"));
+    }
+
+    // -- the scenario field ---------------------------------------------------------------
+
+    @Test
+    public void theDocumentIsTheHaveFieldAPlanFixtureWrites() {
+        // Keys stay keys, digest and all, and counts stay longs. This is what a plan is priced
+        // against, so a narrowed count here is a route costed as though the player owned none.
+        Map<String, Long> held = counts("minecraft:stone", 64L);
+        held.put("thermalfoundation:material:128#a1b2c3", Long.valueOf(71_800_000L));
+        JsonObject document = StockSnapshot.of(held).document();
+        assertEquals(2, document.entrySet().size());
+        assertEquals(64L, document.get("minecraft:stone").getAsLong());
+        assertEquals(71_800_000L,
+                     document.get("thermalfoundation:material:128#a1b2c3").getAsLong());
+    }
+
+    @Test
+    public void aRefusalDocumentsAsEmptyAndTheCALLERHasToNotice() {
+        // Empty here is NOT the claim "you own nothing" -- it is only safe because the refusal
+        // travels beside it on `ScenarioSource`. The assertion is on the pairing, not on the
+        // emptiness: a reader that shipped this document without the reason would be back at
+        // the confidently-wrong plan.
+        StockSnapshot refused = StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE);
+        assertTrue(refused.document().entrySet().isEmpty());
+        assertFalse(refused.isAvailable());
     }
 }
