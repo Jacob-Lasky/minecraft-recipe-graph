@@ -51,6 +51,23 @@ public final class ShotHarness {
     public static final String PROP_FRAMES = "mcrecipedump.shotTimedFrames";
 
     /**
+     * Load a single-player world before opening the screen. Empty or absent means do not.
+     *
+     * TESTING A CLAIM THE README MADE FOR A FORTNIGHT WITHOUT CHECKING IT. That claim was
+     * "It renders GUIs, not the world. No world is loaded, so anything that needs a player, a
+     * tile entity or a server-side capability has nothing to draw from" -- which ruled Phase
+     * 5's live AE2 read untestable here. It was never measured. Its neighbour in the same
+     * section, "It has no input", was also never measured and turned out to be false, and
+     * #146 found the JEI runtime, the recipe-category walk and item-model rendering all live
+     * at the main menu after all three were assumed to need a world.
+     *
+     * OFF BY DEFAULT AND IT MUST STAY THAT WAY. Loading a world costs seconds and changes
+     * what is on screen behind the panel, so every existing shot would move. This is opt-in
+     * per run, not a new baseline.
+     */
+    public static final String PROP_WORLD = "mcrecipedump.shotWorld";
+
+    /**
      * Frames between opening the screen and capturing it.
      *
      * NOT ZERO, and not a wall-clock delay either. ModularUI animates a panel open, and a
@@ -117,6 +134,10 @@ public final class ShotHarness {
     public static class Runner {
 
         private final String spec;
+        /** {@link #PROP_WORLD}: empty for no world, otherwise the save folder to use. */
+        private final String world;
+        /** True once the integrated server has been asked to start. */
+        private boolean worldRequested;
         private final int settleFrames;
         private final int timedFrames;
         private final long deadlineNanos;
@@ -147,6 +168,7 @@ public final class ShotHarness {
 
         Runner(String spec) {
             this.spec = spec;
+            this.world = System.getProperty(PROP_WORLD, "").trim();
             this.settleFrames = intProperty(PROP_SETTLE, DEFAULT_SETTLE_FRAMES);
             this.timedFrames = Math.max(0, intProperty(PROP_FRAMES, 0));
             this.deadlineNanos = System.nanoTime()
@@ -160,7 +182,11 @@ public final class ShotHarness {
                 return;
             }
             Minecraft mc = Minecraft.getMinecraft();
-            if (!(mc.currentScreen instanceof GuiMainMenu)) {
+            if (!world.isEmpty()) {
+                if (!worldReady(mc)) {
+                    return;
+                }
+            } else if (!(mc.currentScreen instanceof GuiMainMenu)) {
                 waitOrTimeOut(mc.currentScreen);
                 return;
             }
@@ -352,6 +378,67 @@ public final class ShotHarness {
         }
 
         /** Log what the client is sitting on every 15s, and fail once past the deadline. */
+        /**
+         * Drive the load of a single-player world, and answer whether it is ready.
+         *
+         * THE FAILURE MODE IS WHY THIS IS AS LONG AS IT IS. A superflat that does not
+         * generate leaves the client sitting at the main menu, where the screen would open
+         * perfectly and the screenshot would be indistinguishable from a run where the world
+         * loaded -- the exact shape of the cursor probe's first version, which reported six
+         * lines of AGREE while comparing nothing to nothing. So this returns true only on
+         * POSITIVE evidence that a world exists, and on the way past it logs facts that
+         * cannot be true at the main menu, rather than logging "ok".
+         *
+         * THE SAVE IS DELETED FIRST. `mod/run/saves` persists between runs, so a world left
+         * behind by an earlier run -- or half-written by a crashed one -- would be silently
+         * reused, and a harness whose result depends on what the last run left behind is not
+         * a harness. Deleting costs milliseconds on a superflat.
+         */
+        private boolean worldReady(Minecraft mc) {
+            if (!worldRequested) {
+                if (mc.currentScreen != null && !(mc.currentScreen instanceof GuiMainMenu)) {
+                    waitOrTimeOut(mc.currentScreen);   // still on the loading screens
+                    return false;
+                }
+                worldRequested = true;
+                try {
+                    mc.getSaveLoader().deleteWorldDirectory(world);
+                } catch (Throwable t) {
+                    // Not fatal: the usual reason is that there was nothing to delete.
+                    log("could not clear a previous '" + world + "': " + t);
+                }
+                // SUPERFLAT AND CREATIVE, chosen so the world is the cheapest thing that is
+                // still a world: no terrain generation to wait for, no survival tick load,
+                // and a player who can fly rather than fall. `false, false` are map features
+                // and hardcore, neither of which a probe wants.
+                net.minecraft.world.WorldSettings settings =
+                        new net.minecraft.world.WorldSettings(
+                                1L, net.minecraft.world.GameType.CREATIVE, false, false,
+                                net.minecraft.world.WorldType.FLAT);
+                log("launching integrated server for a superflat world '" + world + "'");
+                mc.launchIntegratedServer(world, world, settings);
+                return false;
+            }
+            if (mc.world == null || mc.player == null) {
+                waitOrTimeOut(mc.currentScreen);
+                return false;
+            }
+            // POSITIVE EVIDENCE, not the absence of an error. Every fact here is one that is
+            // simply unavailable at the main menu, so a reader can tell a loaded world from a
+            // failed load without trusting this method.
+            net.minecraft.util.math.BlockPos under =
+                    new net.minecraft.util.math.BlockPos(mc.player.posX,
+                            mc.player.posY - 1, mc.player.posZ);
+            log("world loaded: dimension " + mc.player.dimension
+                    + ", player at " + String.format("%.1f,%.1f,%.1f",
+                            mc.player.posX, mc.player.posY, mc.player.posZ)
+                    + ", block beneath = "
+                    + mc.world.getBlockState(under).getBlock().getRegistryName()
+                    + ", integratedServer=" + (mc.getIntegratedServer() != null)
+                    + ", loadedTileEntities=" + mc.world.loadedTileEntityList.size());
+            return true;
+        }
+
         private void waitOrTimeOut(GuiScreen current) {
             long now = System.nanoTime();
             if (now - lastReportNanos > 15_000_000_000L) {
@@ -470,7 +557,35 @@ public final class ShotHarness {
      * harness nobody trusts the exit code of. The PNG is already flushed to disk by the time
      * this is called, so there is nothing left to lose by leaving early.
      */
+    /**
+     * Flush, tear down any world, and quit.
+     *
+     * THE WORLD MUST GO FIRST OR THE PROCESS HANGS, and it hangs after writing a perfectly
+     * good PNG. Measured: the first `-Dmcrecipedump.shotWorld` run captured its screenshot,
+     * logged "Stopping server", and was still alive thirteen minutes later holding the gradle
+     * file-hash lock -- which then failed the NEXT build with a lock timeout that names
+     * neither the world nor the harness. `exitJava` runs shutdown hooks, and 1.12.2's joins
+     * the integrated server thread, which is itself waiting on the client thread that called
+     * exit. Classic mutual wait, and invisible unless you notice the container never stopped.
+     *
+     * `loadWorld(null)` on the client thread disconnects and stops the integrated server
+     * before anything joins it. Harmless with no world loaded, which is why it is not
+     * conditional: an exit path that behaves differently in the case nobody exercises is an
+     * exit path with an untested branch.
+     */
     private static void exit(int code) {
+        System.out.flush();
+        try {
+            Minecraft mc = Minecraft.getMinecraft();
+            if (mc.world != null) {
+                mc.world.sendQuittingDisconnectingPacket();
+            }
+            mc.loadWorld(null);
+        } catch (Throwable t) {
+            // Never let teardown turn a successful capture into a failure. The exit code has
+            // already been decided by then, and a stack trace here is more use than a hang.
+            log("world teardown before exit failed, exiting anyway: " + t);
+        }
         System.out.flush();
         FMLCommonHandler.instance().exitJava(code, false);
     }
