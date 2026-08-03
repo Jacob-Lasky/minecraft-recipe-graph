@@ -11,6 +11,7 @@ import java.util.List;
 
 import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.screen.ModularPanel;
+import com.cleanroommc.modularui.widget.ParentWidget;
 import com.cleanroommc.modularui.widget.sizer.Area;
 import com.cleanroommc.modularui.widgets.ListWidget;
 
@@ -478,17 +479,22 @@ public class PlannerLayoutTest {
         }
     }
 
-    @Test
-    public void theSharedNodeContentIsNotClickable() {
-        // A diagram node hit-tests through its own viewport transform; a canvas of clickable
-        // rows would fight it.
-        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        com.cleanroommc.modularui.widget.ParentWidget<?> box =
-                PlannerWidgets.planNodeContent(node, 120, 10);
-        HeadlessLayout.layOutPanel("node", PlannerWidgets.PANEL_WIDTH,
-                                   PlannerWidgets.PANEL_HEIGHT, box);
-        assertTrue(clickables(box).isEmpty());
-    }
+    /**
+     * DELETED AND REPLACED: this used to assert `theSharedNodeContentIsNotClickable`.
+     *
+     * It pinned a claim that turned out to be false -- my comment on `planNodeContent` said a
+     * canvas of clickable rows would fight the viewport's hit-testing, and s1harness measured
+     * in #185 that `getWidgetsAt` routes correctly through both the scroll offset and the zoom
+     * matrix. The test was doing its job: it held the code to what the comment said. What was
+     * wrong was the comment, which was an assumption written in the register of a constraint.
+     *
+     * Worth leaving this note rather than deleting silently. A green test asserting a false
+     * claim is not neutral -- it is the claim's strongest-looking evidence, and the next
+     * person to doubt the comment finds an assertion agreeing with it.
+     *
+     * The replacements are `aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes` and
+     * `theThreeArgumentNodeContentIsInertAndNotSilentlyWiredToSomething`.
+     */
 
     /** The panels shown before a plan exists. Each says something different on purpose. */
     @Test
@@ -559,6 +565,59 @@ public class PlannerLayoutTest {
      * panel was. Clicking is reachable headlessly because a row is `Interactable` and
      * `onMousePressed` is an ordinary method.
      */
+    /**
+     * A diagram node opens the node menu, the same way a tree row does.
+     *
+     * MY OWN COMMENT ON `planNodeContent` SAID THIS WAS IMPOSSIBLE -- "a canvas of clickable
+     * rows would fight" the viewport's hit-testing -- and it was an assumption I had written
+     * as though it were a measured constraint. s1harness measured it in #185 with a real
+     * cursor: `IWidget.isHovering()` agrees with the layout at zoom 0.5, 1.0 and 2.0, so
+     * `getWidgetsAt` routes correctly through both the scroll offset and the zoom matrix.
+     *
+     * This is the headless half of that. It cannot prove hit-testing through a transform --
+     * only a real cursor can, which is what `flow-hit` is for -- but it does prove the widget
+     * is an `Interactable` wired to the actions it was handed, which is the part that was
+     * absent while the comment stood.
+     */
+    @Test
+    public void aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        Recorder recorder = new Recorder();
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, 214, 26, recorder);
+        HeadlessLayout.layOut(wrap(box));
+
+        List<PlannerWidgets.ClickableGroup> clickable = clickables(box);
+        assertEquals("the node itself is the click target, not a child", 1, clickable.size());
+        clickable.get(0).onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("menu:" + node.key()), recorder.calls);
+    }
+
+    /**
+     * The three-argument overload is INERT, and says so rather than defaulting quietly.
+     *
+     * The failure it enables is a canvas of nodes that look right and do nothing, which no
+     * layout assertion can catch because a layout assertion is what the overload is for.
+     */
+    @Test
+    public void theThreeArgumentNodeContentIsInertAndNotSilentlyWiredToSomething() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, 214, 26);
+        HeadlessLayout.layOut(wrap(box));
+        List<PlannerWidgets.ClickableGroup> clickable = clickables(box);
+        assertEquals(1, clickable.size());
+        // It clicks, and nothing happens. `PlannerActions.NONE` rather than a null check at
+        // the call site -- see that constant for why.
+        clickable.get(0).onMousePressed(0);
+    }
+
+    /** A panel to lay a bare widget out in, since the sizer runs over a panel. */
+    private static ModularPanel wrap(ParentWidget<?> widget) {
+        widget.pos(4, 4);
+        ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_test_wrap", 240, 60);
+        panel.child(widget);
+        return panel;
+    }
+
     /**
      * A pin the solver could not honour reaches the panel.
      *
@@ -874,6 +933,11 @@ public class PlannerLayoutTest {
         @Override
         public void openNodeMenu(PlanNode node) {
             calls.add("menu:" + node.key());
+        }
+
+        @Override
+        public void selectNode(PlanNode node) {
+            calls.add("select:" + node.key());
         }
 
         @Override

@@ -370,16 +370,36 @@ public final class PlannerWidgets {
      * content is shared and the container is not, which is why this takes both dimensions and
      * assumes nothing about a panel.
      *
-     * NOT CLICKABLE, unlike {@link #row}. A diagram node has its own hit-testing through the
-     * viewport transform, and a canvas of clickable rows would fight it.
+     * CLICKABLE, LIKE {@link #row}, AND THIS COMMENT USED TO SAY THE OPPOSITE. It read "a
+     * canvas of clickable rows would fight" the viewport's own hit-testing, which was an
+     * assumption written as though it were a constraint somebody had paid for -- and it
+     * contradicted `FlowCanvas`'s header, which says hit-testing THROUGH the transform comes
+     * free from `AbstractScrollWidget` and that hand-rolling it is the trap. Both could not be
+     * right, and the wrong one would have sent the next reader to hand-rolled coordinate maths:
+     * a false justification does not merely fail to help, it routes people into the thing the
+     * true one warns them off.
+     *
+     * MEASURED BY s1harness IN #185, once the harness had a cursor. `flow-hit` parks the real
+     * mouse over each node and compares `IWidget.isHovering()` against the layout's own answer:
+     * they AGREE at zoom 0.5, 1.0 and 2.0, so `getWidgetsAt` routes correctly through the
+     * scroll offset and the zoom matrix alike. That is what the viewport transform is for.
+     *
+     * @param actions where a click goes. {@link PlannerActions#NONE} for a layout assertion or
+     *                a screenshot, which is what the three-argument overload passes.
      *
      * The colours come from {@link NodeStatus} and must keep doing so: `present.py`'s own
      * docstring records that node statuses are drawn by four components which each kept their
      * own dict of bare strings, so adding a status drew silently wrong. `NodeStatusTest` reads
      * that file and asserts both directions, so there is one mapping and it is enforced.
      */
-    public static ParentWidget<?> planNodeContent(PlanNode node, int width, int height) {
-        Group box = new Group();
+    public static ParentWidget<?> planNodeContent(final PlanNode node, int width, int height,
+                                                  final PlannerActions actions) {
+        ClickableGroup box = new ClickableGroup(new Runnable() {
+            @Override
+            public void run() {
+                actions.openNodeMenu(node);
+            }
+        });
         box.size(width, height);
         int x = 0;
         // The column is RESERVED whether or not anything fills it, so installing NodeActions
@@ -403,6 +423,18 @@ public final class PlannerWidgets {
                               .pos(width - badgeWidth, 0));
         }
         return box;
+    }
+
+    /**
+     * {@link #planNodeContent} with nothing behind the click. THE INERT ONE.
+     *
+     * Named as such rather than left as a quiet default, because the failure it enables is a
+     * canvas of nodes that look right and do nothing when clicked -- and no test catches that,
+     * since a layout assertion is exactly what this overload is FOR. If a diagram is meant to
+     * open menus and does not, this is the overload it is on.
+     */
+    public static ParentWidget<?> planNodeContent(PlanNode node, int width, int height) {
+        return planNodeContent(node, width, height, PlannerActions.NONE);
     }
 
     /**

@@ -444,6 +444,10 @@ final class PlannerShot {
         }
 
         @Override
+        public void selectNode(PlanNode node) {
+        }
+
+        @Override
         public void openRecipePicker(PlanNode node) {
         }
 
