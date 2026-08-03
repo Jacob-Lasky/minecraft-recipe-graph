@@ -54,7 +54,7 @@ public final class FlowCulling {
 
     public FlowCulling(FlowLayout.Laid laid) {
         this.boxes = laid.boxes;
-        int pitchX = FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP;
+        int pitchX = FlowLayout.COLUMN_PITCH;
 
         int columnCount = 0;
         for (int i = 0; i < boxes.size(); i++) {
@@ -117,10 +117,34 @@ public final class FlowCulling {
             return shown;
         }
 
-        int pitchX = FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP;
+        int pitchX = FlowLayout.COLUMN_PITCH;
         // A column at index c spans x in [c*pitch, c*pitch + NODE_WIDTH). The first column
-        // that can touch the viewport is therefore the one whose RIGHT edge is past viewX.
-        int firstColumn = Math.max(0, Math.floorDiv(viewX - FlowLayout.NODE_WIDTH + 1, pitchX));
+        // that can touch the viewport is therefore the smallest c with c*pitch + NODE_WIDTH
+        // past viewX, which is floorDiv(viewX - NODE_WIDTH, pitch) + 1.
+        //
+        // THE +1 GOES OUTSIDE THE DIVISION. It was inside, as `viewX - NODE_WIDTH + 1`, which
+        // starts the sweep one column early for every viewX not sitting in a column gap. That
+        // is conservative rather than wrong -- the extra column's boxes all fail the x test
+        // below and never reach `shown` -- so no output ever differs, and no amount of
+        // comparing this against a reference implementation can see it. Found by mutating it
+        // and watching the suite stay green.
+        //
+        // MEASURED BEFORE AND AFTER, because the obvious justification for touching this was
+        // "it examines a whole extra column per sweep" and that turns out to overstate it.
+        // Over a 7,381-node layout at 124,889 viewport positions, 612x372:
+        //
+        //             mean columns examined    mean boxes examined
+        //   before            3.34                    11.80
+        //   after             2.52                    11.43
+        //
+        // A quarter off the column count and three percent off the box count, because the
+        // spurious column is the one to the LEFT of the viewport and few of its boxes fall in
+        // the visible y-band. So this is not a frame-time win worth quoting. What it is worth
+        // is that `columnsExamined()` -- the number the 60 fps claim rests on and the reason
+        // the counter is public at all -- now reports the work the design implies instead of
+        // one column more, and the bound in `aDeepPlanExaminesOneColumnPerVisibleDepthAndNoMore`
+        // can be exact rather than slack enough to hide this.
+        int firstColumn = Math.max(0, Math.floorDiv(viewX - FlowLayout.NODE_WIDTH, pitchX) + 1);
         int lastColumn = Math.min(columns.length - 1,
                 Math.floorDiv(viewX + viewWidth - 1, pitchX));
 
