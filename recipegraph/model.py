@@ -173,6 +173,41 @@ def is_world_ore_group(ore):
     return ore.startswith(WORLD_ORE_GROUP_PREFIX)
 
 
+# Forge's oredict convention is `<form><Material>` -- `nuggetSednanite`, `ingotIron`,
+# `dustRedstone`. These are the forms that mean "a PROCESSED shape of a material", the
+# mirror of `ore*` meaning "a thing you dig up".
+#
+# READ BACK FROM THE PACK'S OWN REGISTRATION, not guessed from a registry name, which is the
+# same standing rule `world_ores` follows. A prefix list is only as good as the convention
+# behind it, and this convention is one Forge enforces on every mod that wants its ingots to
+# interoperate -- which is why `ore*` was trustworthy enough to hang #61 and #106 on.
+#
+# `ore` IS ABSENT ON PURPOSE and its absence is load-bearing: an ore is the obtainable end of
+# a family, so including it here would let a family be "named" by the very thing that is out
+# of reach. `block` is absent for the reason `world_ores` gives -- `chisel:diamond` is in
+# `blockDiamond`, so accepting it readmits the decorative blocks #61 spent its measurement
+# demoting.
+PROCESSED_FORM_PREFIXES = ("nugget", "dust", "plate", "gear", "rod", "stick", "gem",
+                           "ingot", "wire", "foil", "casing", "coil", "screw", "bolt",
+                           "ring", "chunk", "crushed", "purified", "clump", "shard")
+
+
+def split_ore_group(ore):
+    """`(form, material)` for `nuggetSednanite`, or None when the name is not that shape.
+
+    LONGEST PREFIX WINS, because the list overlaps: `stick` is a prefix of nothing here but
+    `gem` is a prefix of nothing while `ingot` and `ing` would collide if `ing` were ever
+    added. Taking the longest match keeps the split stable if the list grows.
+    """
+    lowered = ore.lower()
+    best = None
+    for form in PROCESSED_FORM_PREFIXES:
+        if lowered.startswith(form) and len(ore) > len(form):
+            if best is None or len(form) > len(best):
+                best = form
+    return (best, ore[len(best):]) if best else None
+
+
 def split_discriminator(key):
     """Return (key_without_discriminator, discriminator_or_None).
 
@@ -418,6 +453,7 @@ class Graph:
         self._live_keys = None
         self._variant_index = None
         self._reshaped_only = None
+        self._material_forms = None
         self._meta_index = None
         self._fluid_names = None
         self._producer_cache = {}
@@ -543,6 +579,67 @@ class Graph:
                 if all(r.variant for r in made_by)
             }
         return self._reshaped_only
+
+    @property
+    def material_forms(self):
+        """`{material: {form: [keys]}}` for every `<form><Material>` oredict group.
+
+        WHAT THIS IS FOR, AND WHY IT IS NOT A PRICING SIGNAL. #136 reported a plan asking
+        for 18 Sednanite Nuggets, a key nothing in the pack makes, because `cost._seed`
+        prices anything with no producer at `BASE_RAW_COST` on the rule "nothing makes it,
+        so assume you can go and get one". That rule is wrong for a PROCESSED form: a nugget
+        is a shape of a material, not a thing in the world.
+
+        The fix for the PRICE is deliberately not here -- measured, it produces a worse plan
+        than the bug (see #136), and it needs both cost audits. What this supports is the
+        REPORTING half: `Solver.reachable_form` uses it to name the form the graph CAN make,
+        so the shopping list says "the graph can only make Sednanite Ingot" instead of
+        listing a nugget beside 128 Granite as though it were an ordinary thing to fetch.
+
+        THE FAMILY LINK IS PACK DATA, the same class of signal as `world_ores`. The pack
+        chose to register `nuggetSednanite` and `ingotSednanite`, and Forge's convention is
+        what makes those two the same material. It is not an inference from the registry id,
+        which is the thing #61 rejected four separate heuristics for attempting.
+        """
+        if self._material_forms is None:
+            out = {}
+            for group, members in self.ore_members.items():
+                split = split_ore_group(group)
+                if not split:
+                    continue
+                form, material = split
+                out.setdefault(material, {}).setdefault(form, []).extend(members)
+            self._material_forms = out
+        return self._material_forms
+
+    def obtainable_sibling(self, key):
+        """Another form of `key`'s material that the graph CAN make, or None.
+
+        DETERMINISTIC, because this reaches a plan tree and `tests/fixtures/plan/*.json`
+        freezes those for the Java port: ordered by producer count descending then by key,
+        so the answer is "the form the pack actually makes" and never depends on dict order.
+
+        Returns None when the material has no makeable form, which is the honest answer --
+        a family where nothing is obtainable gives the reader nothing to be pointed at, and
+        that is exactly the case `reachable_form`'s docstring refuses to badge.
+        """
+        material = None
+        for group in self.ores_of(key):
+            split = split_ore_group(group)
+            if split:
+                material = split[1]
+                break
+        if material is None:
+            return None
+        best = None
+        for _form, members in sorted((self.material_forms.get(material) or {}).items()):
+            for member in members:
+                if member == key:
+                    continue
+                made = len(self.real_producers(member))
+                if made and (best is None or (-made, member) < best[0]):
+                    best = ((-made, member), member)
+        return best[1] if best else None
 
     @property
     def labels(self):

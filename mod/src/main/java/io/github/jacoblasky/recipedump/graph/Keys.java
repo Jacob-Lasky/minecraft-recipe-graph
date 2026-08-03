@@ -175,6 +175,46 @@ public final class Keys {
         return oreName.startsWith(WORLD_ORE_GROUP_PREFIX);
     }
 
+    /**
+     * Forge's `&lt;form&gt;&lt;Material&gt;` oredict convention. Mirrors `model.split_ore_group`.
+     *
+     * `ore` IS ABSENT ON PURPOSE and its absence is load-bearing: an ore is the OBTAINABLE
+     * end of a family, so including it would let a family be named by the very thing that is
+     * out of reach. `block` is absent because `chisel:diamond` is in `blockDiamond`, so
+     * accepting it readmits the decorative blocks #61 spent its measurement demoting.
+     *
+     * KEEP THIS LIST BYTE-EQUAL TO `model.PROCESSED_FORM_PREFIXES`. It decides which keys get
+     * #136's "nothing makes this form" mark, that mark is a field on a plan node, and
+     * `PlanFixtureTest` compares plan nodes field for field -- so a prefix in one language
+     * and not the other is a failing golden gate with no behavioural change to point at.
+     */
+    public static final String[] PROCESSED_FORM_PREFIXES = {
+        "nugget", "dust", "plate", "gear", "rod", "stick", "gem", "ingot", "wire", "foil",
+        "casing", "coil", "screw", "bolt", "ring", "chunk", "crushed", "purified", "clump",
+        "shard",
+    };
+
+    /**
+     * The material half of `nuggetSednanite`, or null when the name is not that shape.
+     *
+     * LONGEST PREFIX WINS, so the split stays stable if the list grows to hold one prefix of
+     * another.
+     */
+    public static String materialOfOreGroup(String oreName) {
+        if (oreName == null) {
+            return null;
+        }
+        String lowered = oreName.toLowerCase(java.util.Locale.ROOT);
+        String best = null;
+        for (String form : PROCESSED_FORM_PREFIXES) {
+            if (lowered.startsWith(form) && oreName.length() > form.length()
+                    && (best == null || form.length() > best.length())) {
+                best = form;
+            }
+        }
+        return best == null ? null : oreName.substring(best.length());
+    }
+
     /** The index of the discriminator's `#`, or -1. */
     public static int discriminatorAt(String key) {
         return key.lastIndexOf('#');

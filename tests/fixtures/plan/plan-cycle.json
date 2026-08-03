@@ -159,7 +159,8 @@
     "kind": "item",
     "label": "Obsidian Dust",
     "name": "Obsidian Dust",
-    "qty": 2
+    "qty": 2,
+    "unsourced": true
    },
    {
     "key": "abyssalcraft:abynitore",
@@ -586,7 +587,9 @@
                      "label": "Obsidian Dust",
                      "name": "Obsidian Dust",
                      "need": 1,
-                     "status": "raw"
+                     "note": "nothing makes this form; the graph can only make Pulverized Obsidian",
+                     "status": "raw",
+                     "unsourced": true
                     }
                    ],
                    "key": "ore:dustObsidian",
@@ -897,7 +900,9 @@
                      "label": "Obsidian Dust",
                      "name": "Obsidian Dust",
                      "need": 1,
-                     "status": "raw"
+                     "note": "nothing makes this form; the graph can only make Pulverized Obsidian",
+                     "status": "raw",
+                     "unsourced": true
                     }
                    ],
                    "key": "ore:dustObsidian",

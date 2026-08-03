@@ -264,7 +264,8 @@
     "kind": "item",
     "label": "Sednanite Nugget",
     "name": "Sednanite Nugget",
-    "qty": 36
+    "qty": 36,
+    "unsourced": true
    },
    {
     "key": "itemblacklist:blacklisted#15e6d3819d2e",
@@ -322,7 +323,8 @@
     "kind": "item",
     "label": "Quartz Shard",
     "name": "Quartz Shard",
-    "qty": 16
+    "qty": 16,
+    "unsourced": true
    },
    {
     "key": "forestry:bee_drone_ge#68291b39a460",
@@ -351,7 +353,8 @@
     "kind": "item",
     "label": "Dreadite Nugget",
     "name": "Dreadite Nugget",
-    "qty": 9
+    "qty": 9,
+    "unsourced": true
    },
    {
     "key": "erebus:ore_fossil",
@@ -682,7 +685,9 @@
                    "label": "Sednanite Nugget",
                    "name": "Sednanite Nugget",
                    "need": 18,
-                   "status": "raw"
+                   "note": "nothing makes this form; the graph can only make Sednanite Ingot",
+                   "status": "raw",
+                   "unsourced": true
                   }
                  ],
                  "key": "contenttweaker:material_part:54",
@@ -961,7 +966,9 @@
                "label": "Dreadite Nugget",
                "name": "Dreadite Nugget",
                "need": 9,
-               "status": "raw"
+               "note": "nothing makes this form; the graph can only make Dreadite Plate",
+               "status": "raw",
+               "unsourced": true
               }
              ],
              "key": "fluid:dreadite",
@@ -2910,7 +2917,9 @@
                        "label": "Quartz Shard",
                        "name": "Quartz Shard",
                        "need": 4,
-                       "status": "raw"
+                       "note": "nothing makes this form; the graph can only make Nether Quartz",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 1,
@@ -3024,7 +3033,9 @@
                        "label": "Quartz Shard",
                        "name": "Quartz Shard",
                        "need": 4,
-                       "status": "raw"
+                       "note": "nothing makes this form; the graph can only make Nether Quartz",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 1,
@@ -3138,7 +3149,9 @@
                        "label": "Quartz Shard",
                        "name": "Quartz Shard",
                        "need": 4,
-                       "status": "raw"
+                       "note": "nothing makes this form; the graph can only make Nether Quartz",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 1,
@@ -3252,7 +3265,9 @@
                        "label": "Quartz Shard",
                        "name": "Quartz Shard",
                        "need": 4,
-                       "status": "raw"
+                       "note": "nothing makes this form; the graph can only make Nether Quartz",
+                       "status": "raw",
+                       "unsourced": true
                       },
                       {
                        "alternatives": 1,
@@ -5169,7 +5184,9 @@
                  "label": "Sednanite Nugget",
                  "name": "Sednanite Nugget",
                  "need": 18,
-                 "status": "raw"
+                 "note": "nothing makes this form; the graph can only make Sednanite Ingot",
+                 "status": "raw",
+                 "unsourced": true
                 }
                ],
                "key": "contenttweaker:material_part:54",

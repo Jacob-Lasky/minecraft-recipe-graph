@@ -186,7 +186,38 @@ UNGATED_MACHINE_COST = 20.0
 # behind a cost table that looked populated. Go through `_scaled_qty` for both directions.
 FLUID_SCALE = 1.0 / 1000.0
 
-BASE_RAW_COST = 1.0        # an item with no recipe: assume it can be obtained somehow
+# An item with no recipe: assume it can be obtained somehow.
+#
+# THAT ASSUMPTION IS SOMETIMES FALSE AND #136 IS WHERE IT SHOWS. A key nothing makes may be a
+# thing you pick up, or it may be a PROCESSED FORM the pack simply never authored a recipe
+# for -- the Sednanite Nugget has no producer at all, and 9 of them at 1.0 beat mining the
+# ore at 801.0, so the shopping list named a step nobody can perform. Nothing structural
+# separates the two cases; `Solver.reachable_form` reports the ones it CAN identify rather
+# than repricing them, deliberately.
+#
+# THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED. Do not re-propose one
+# without new evidence, and add to this list rather than rediscovering it:
+#
+#  * NO SEED AT ALL for an unobtainable processed form ("infinity is the honest reading").
+#    243 keys go finite -> infinity on the reference graph, `abyssalcraft:nitre` and
+#    `sulfur` among them, and 23,942 prices move. It does not even produce the intended
+#    answer: Sednanite Ingot lands on a 20-row route through data models and chickens.
+#  * FLOOR IT AT THE MATERIAL'S CHEAPEST OBTAINABLE MEMBER. Circular. The floor picks the
+#    INGOT, whose price was itself earned through the nugget, so the nugget rises to exactly
+#    the number the bug produced and nothing moves.
+#  * FLOOR IT AT THE MATERIAL'S WORLD ORE, re-seeded into a clean relaxation. Structurally
+#    sound and measured clean -- 6 keys floored, 0 lost, 0 cheaper, every control unchanged
+#    -- and it still produces a WORSE plan than the bug: with the nugget gone the solver
+#    falls to a cyclic route whose shopping list contains the item being planned. The root
+#    defect is that `score_recipe` ranks `cheap` above `-cyclic`, so a cheap cycle beats an
+#    expensive real route; fix that first and this may be moot.
+#
+# A FOURTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
+# TABLE. `_relax` only ever LOWERS, which `estimate` already states as the reason machine
+# entry costs need a second clean pass -- so raising a price after relaxation leaves every
+# consumer holding the price it banked before the raise. Measured: the nugget went 1.0 to
+# 10.0 and the ingot stayed at 10.0. A raise has to be an INPUT to a relaxation.
+BASE_RAW_COST = 1.0
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
 # What a PLACEHOLDER costs, by what it asks of the player. See `tokens.py` for the kinds.
