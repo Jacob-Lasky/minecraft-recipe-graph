@@ -54,7 +54,15 @@ public final class FlowLayout {
     /** Gap between two stacked nodes. */
     public static final int ROW_GAP = 6;
 
-    private static final int COLUMN_PITCH = NODE_WIDTH + COLUMN_GAP;
+    /**
+     * Distance from one column's left edge to the next. PUBLIC because {@link FlowCulling}
+     * indexes boxes by arithmetic on it, and it had recomputed `NODE_WIDTH + COLUMN_GAP`
+     * itself in two places. Three spellings of one number is three chances for the index to
+     * disagree with the layout it indexes, and that disagreement is invisible: a box filed
+     * under the wrong column is culled from the viewport it is really in, which reads as a
+     * node that vanishes when you pan.
+     */
+    public static final int COLUMN_PITCH = NODE_WIDTH + COLUMN_GAP;
     private static final int ROW_PITCH = NODE_HEIGHT + ROW_GAP;
 
     private FlowLayout() {

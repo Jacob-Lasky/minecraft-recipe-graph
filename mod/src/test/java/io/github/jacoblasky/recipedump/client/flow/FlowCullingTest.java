@@ -47,14 +47,29 @@ public class FlowCullingTest {
         FlowLayout.Laid laid = FlowLayout.of(PlanTrees.chain(400));
         FlowCulling culling = new FlowCulling(laid);
         int viewWidth = 400;
-        culling.visibleIn(0, 0, viewWidth, 200);
-        // DERIVED, not a number that looked about right: a viewport `viewWidth` wide spans
-        // at most that many column pitches, plus the two it can partially overlap at each
-        // edge. A magic constant here would silently absorb a regression that doubled the
-        // range.
-        int bound = viewWidth / (FlowLayout.NODE_WIDTH + FlowLayout.COLUMN_GAP) + 2;
-        assertTrue("examined " + culling.columnsExamined() + " of " + culling.columnCount()
-                + " columns, bound " + bound, culling.columnsExamined() <= bound);
+        // DERIVED AND TIGHT, not a number that looked about right.
+        //
+        // THE PREVIOUS BOUND WAS `viewWidth / PITCH + 2` AND IT WAS SLACK BY ONE, which is
+        // how an off-by-one in `firstColumn` sat here unnoticed: the sweep started a column
+        // early, and the bound had room for it. A loose bound in a performance assertion is
+        // not a safe default, it is the assertion declining to assert.
+        int bound = (viewWidth + FlowLayout.NODE_WIDTH - 1) / FlowLayout.COLUMN_PITCH + 1;
+        // AND THE BOUND ITSELF IS CHECKED, rather than asserted in a comment saying I once
+        // worked it out. If the formula is generous the test below still passes while having
+        // stopped measuring anything, which is exactly the failure that let the off-by-one
+        // live here -- so pin it against an exhaustive count over the same layout.
+        assertEquals("the bound must be the real maximum, not a comfortable one",
+                widestOverlap(laid, viewWidth), bound);
+        // SWEPT, NOT TAKEN AT THE ORIGIN. `firstColumn` is clamped at 0, so viewX = 0 is
+        // precisely the offset at which starting a column early costs nothing and the
+        // assertion cannot fail. The single case the old version tested was the one case
+        // immune to the bug it was there to catch.
+        for (int viewX = -viewWidth; viewX < laid.width + viewWidth; viewX += 13) {
+            culling.visibleIn(viewX, 0, viewWidth, 200);
+            assertTrue("at viewX " + viewX + " examined " + culling.columnsExamined()
+                            + " of " + culling.columnCount() + " columns, bound " + bound,
+                    culling.columnsExamined() <= bound);
+        }
     }
 
     @Test
@@ -150,7 +165,89 @@ public class FlowCullingTest {
                 culling.visibleIn(0, 0, laid.width, laid.height).size());
     }
 
+    // -- agreement with a brute-force oracle ------------------------------------------------
+    //
+    // THE CASES BELOW ARE GENERATED, NOT CHOSEN, AND THAT IS THE POINT. The obvious way to
+    // test a viewport query is a handful of offsets that look interesting, and it does not
+    // work: the interesting offsets are the ones I thought of while writing the index, so they
+    // exercise the branches I remembered and say nothing about the branch I forgot. `fixtures`
+    // hit exactly this on 2026-08-02 -- a comparison test passed for the whole period the two
+    // things it compared disagreed, because all five of its cases went down the one branch
+    // nobody had touched.
+    //
+    // The off-by-one in `firstColumn` this change fixes is the same shape one level up. It
+    // survived because the only assertion that could have caught it was taken at viewX = 0,
+    // where `Math.max(0, ...)` clamps the error away.
+    //
+    // So this sweeps every offset over a fixed layout and compares against a linear scan. The
+    // scan is not a second implementation to be kept in step; it is the definition of the
+    // answer, four comparisons long, and it is obviously right in a way the index is not.
+
+    @Test
+    public void theVisibleSetAgreesWithABruteForceScanAtEveryScrollOffset() {
+        FlowLayout.Laid laid = FlowLayout.of(PlanTrees.fan(30));
+        FlowCulling culling = new FlowCulling(laid);
+        int viewWidth = 400;
+        int viewHeight = 200;
+        // STARTS NEGATIVE AND RUNS PAST THE END. A viewport partly off the layout is the
+        // normal state at both extremes of a pan, and it is the case a chosen-offset test
+        // omits, because nobody writes down "scrolled to -37" as an interesting number.
+        for (int x = -viewWidth; x < laid.width + viewWidth; x += 7) {
+            for (int y = -viewHeight; y < laid.height + viewHeight; y += 5) {
+                Set<Integer> expected = scanForVisible(laid, x, y, viewWidth, viewHeight);
+                Set<Integer> actual = toSet(culling.visibleIn(x, y, viewWidth, viewHeight));
+                assertEquals("visibleIn(" + x + "," + y + ")", expected, actual);
+            }
+        }
+    }
+
     // -- helpers ---------------------------------------------------------------------------
+
+    /**
+     * The most columns a `viewWidth`-wide viewport can overlap, counted rather than derived.
+     *
+     * Swept one pixel at a time from before the layout to past its end, because the worst
+     * offset is a boundary and a coarser step would report a smaller maximum and make a slack
+     * bound look exact.
+     */
+    private static int widestOverlap(FlowLayout.Laid laid, int viewWidth) {
+        int columns = laid.width / FlowLayout.COLUMN_PITCH + 1;
+        int worst = 0;
+        for (int viewX = -viewWidth; viewX < laid.width + viewWidth; viewX++) {
+            int touched = 0;
+            for (int c = 0; c < columns; c++) {
+                int left = c * FlowLayout.COLUMN_PITCH;
+                if (left + FlowLayout.NODE_WIDTH > viewX && left < viewX + viewWidth) {
+                    touched++;
+                }
+            }
+            worst = Math.max(worst, touched);
+        }
+        return worst;
+    }
+
+    /** The definition of visible: the box's rectangle overlaps the viewport's. */
+    private static Set<Integer> scanForVisible(FlowLayout.Laid laid, int viewX, int viewY,
+                                               int viewWidth, int viewHeight) {
+        Set<Integer> found = new HashSet<Integer>();
+        for (int i = 0; i < laid.size(); i++) {
+            FlowLayout.Box box = laid.boxes.get(i);
+            if (box.right() > viewX && box.x < viewX + viewWidth
+                    && box.bottom() > viewY && box.y < viewY + viewHeight) {
+                found.add(Integer.valueOf(i));
+            }
+        }
+        return found;
+    }
+
+    private static Set<Integer> toSet(IntArray values) {
+        Set<Integer> found = new HashSet<Integer>();
+        for (int i = 0; i < values.size(); i++) {
+            found.add(Integer.valueOf(values.get(i)));
+        }
+        return found;
+    }
+
 
     /** The same box, moved one pixel off the column pitch. */
     private static FlowLayout.Box offGrid(FlowLayout.Box box) {
