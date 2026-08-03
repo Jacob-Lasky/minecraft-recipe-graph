@@ -539,8 +539,14 @@ class GraphRoundTripTest(unittest.TestCase):
 
 
 class SchemaStampTest(unittest.TestCase):
-    def test_the_python_side_expects_five(self):
-        self.assertEqual(dump_meta.SCHEMA, 5)
+    """THE SCHEMA NUMBER ITSELF IS PINNED IN `test_schema_six.py`, NOT HERE.
+
+    It used to be, as `test_the_python_side_expects_five`, and that is a literal that goes
+    stale in a file named for the number it holds: bumping the schema then has to edit an
+    assertion whose own name lies about what it checks. It moves with the current schema.
+    What stays here is the 4-to-5 severity distinction, which is about schema 5 and remains
+    true however far the number travels past it.
+    """
 
     def test_a_schema_four_dump_is_a_missing_FIELDS_warning_not_a_digest_one(self):
         """Schema 5 changed shapes, not the digest, so it must not fire the loud warning.

@@ -17,6 +17,13 @@ not the mod version. Bump it in DumpCommand.java and here together:
   5  summary.json's `skipped` becomes `threw` and gains `skip_lines` (#90); adds
      damageable.json (#118), emc.json (#50), machine_names.json (#55) and the
      icons-N.png / icons.json atlas (#36)
+  6  summary.json gains `names` and `names_failed`, so a names.json that lost entries stops
+     being undetectable in principle (#194)
+
+SCHEMA 6 IS ADDITIVE AND CHANGES NO EXISTING FIELD, so a schema-5 dump is read exactly as it
+was; what it cannot do is answer the question the new fields exist to answer, and `describe`
+says so rather than reporting a clean bill it did not measure. `DIGEST_FORMAT_SCHEMA` stays
+at 4 for the same reason it stayed there through 5.
 
 SCHEMA 5 IS A SHAPE CHANGE ONLY -- `n` is computed exactly as it was at 4, so a schema-4
 graph's discriminated keys are still the keys this reader computes and AE2 stock still
@@ -38,7 +45,7 @@ try:
 except ImportError:  # run directly as a script; see ae2_inventory's module docstring
     from nbt_digest import DIGEST_FORMAT_SCHEMA
 
-SCHEMA = 5
+SCHEMA = 6
 
 #: The directory `/recipedump` writes into, relative to the pack's `minecraft/` dir.
 #:
@@ -50,6 +57,14 @@ SCHEMA = 5
 #: redirect `recipes.ndjson` while `names.json`, `oredict.json` and `catalysts.json` still
 #: came from whatever sat at the canonical path, silently mixing two dumps in one graph.
 DIR_NAME = "mc-recipe-dump"
+
+#: The provenance file inside that directory, for the same reason `DIR_NAME` is one string.
+#:
+#: `gaps.load` spelled it itself, which made two modules independently responsible for
+#: agreeing with `DumpCommand.writeSummary`. The failure that arrangement produces is not an
+#: exception: `gaps` opens the path, finds nothing, and reports an empty summary -- the same
+#: shape a dump legitimately has before schema 2. A renamed file would read as an old dump.
+SUMMARY_NAME = "summary.json"
 
 
 def dir_for(instance_dir, dump_dir=None):
@@ -68,7 +83,7 @@ def _document(dump_dir):
     Never raises: a missing or corrupt summary.json means an old or partial dump, which is
     exactly the case this module is here to describe.
     """
-    path = os.path.join(dump_dir, "summary.json")
+    path = os.path.join(dump_dir, SUMMARY_NAME)
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -105,8 +120,25 @@ def category_mods(dump_dir):
     return out
 
 
+def _count(doc, field):
+    """A non-negative int field, or None when the dump does not declare it.
+
+    NONE AND ZERO ARE DIFFERENT ANSWERS and the whole of #194 turns on it: None means a
+    schema-5 dump that never recorded this, and zero means a schema-6 dump that measured it
+    and found nothing wrong. Coercing the absent case to 0 would report a clean bill nobody
+    measured, which is the failure the field was added to end.
+
+    `bool` is excluded because `isinstance(True, int)` is True in python and a `true` in the
+    JSON is a malformed count, not a count of one.
+    """
+    value = doc.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def read(dump_dir):
-    """{'mod_version', 'schema', 'present'} for a dump directory."""
+    """What summary.json declares about the dump that wrote it."""
     doc = _document(dump_dir)
     schema = doc.get("schema")
     return {
@@ -115,7 +147,73 @@ def read(dump_dir):
         # None would lose the one thing we can infer from the absence.
         "schema": int(schema) if isinstance(schema, int) else (1 if doc else None),
         "present": bool(doc),
+        # Schema 6. `names` is how many entries names.json should hold, `names_failed` how
+        # many keys the dump has no name for AT ALL because getDisplayName threw. See #194.
+        "names": _count(doc, "names"),
+        "names_failed": _count(doc, "names_failed"),
     }
+
+
+class DamagedDump(Exception):
+    """A dump directory whose own summary.json says it is not what is on disk.
+
+    RAISED, NOT RETURNED AS A VERDICT SOMEONE PRINTS, because this project has repeatedly
+    measured what a printed warning is worth in a long run: the `!!` line scrolls past and
+    the run still ends in a success message. `tools/check.sh` says it twice in its own
+    header, and #192 replaced a warning with a refusal for the same reason.
+
+    A SEPARATE TYPE FROM A MISSING FILE, because they call for opposite responses. Every
+    other absence this package handles is degradation the graph survives -- no catalysts,
+    no emc, no icons -- and each of those is reported and stepped over. This is the dump
+    contradicting itself, which no amount of stepping over makes safe, so it is raised
+    rather than said.
+    """
+
+
+def check_names(meta, on_disk):
+    """Raise `DamagedDump` when names.json is not the file summary.json says it is.
+
+    REFUSAL RATHER THAN A WARNING, and the reason is not that display names are precious.
+    It is that a count mismatch cannot be explained by age, by an optional mod, or by a
+    pack that genuinely has none of something -- every benign absence in this package
+    produces a MISSING file, not a short one. A short names.json means the bytes on disk are
+    not the bytes the dump wrote, and nothing else in the directory has been checked. This
+    project has repeatedly found that a `!!` line in a long run scrolls past and the run
+    still ends in a success message, so the artifact refuses instead of the reader noticing.
+
+    NO OVERRIDE FLAG, because a supported escape already exists and is honest: delete
+    names.json. `dump_names.find` returns None, items.csv covers what it covers, and the
+    graph is then built from sources that are what they claim to be. A `--yes-really` would
+    only be a way to build a graph from a file known to be damaged.
+
+    Silent -- returns None -- when the dump predates schema 6 (`names` is None) or there is
+    no names.json to compare (`on_disk` is None). Neither is evidence of damage.
+    """
+    declared = meta.get("names")
+    if declared is None or on_disk is None or declared == on_disk:
+        return
+    raise DamagedDump(
+        "names.json holds %d entries but summary.json says the dump wrote %d. That is a "
+        "damaged dump directory, not an old one -- an interrupted write, a partial copy or "
+        "a hand edit. Re-run /recipedump, re-copy the dump, or delete names.json to build "
+        "without it (items.csv still covers the undiscriminated keys)."
+        % (on_disk, declared))
+
+
+def _lost_names(meta):
+    """The clause `describe` carries when the dump could not read some display names.
+
+    APPENDED TO THE PROVENANCE LINE RATHER THAN PRINTED BESIDE IT, because that line is the
+    one sentence every surface already shows -- `build` prints it, and the server prints it
+    from `of_graph` for a graph built weeks ago. A loss recorded only where the build
+    happened is a loss nobody sees again. Empty at zero and empty when unknown, so a healthy
+    dump keeps the sentence it has always had.
+    """
+    failed = meta.get("names_failed")
+    if not failed:
+        return ""
+    return (" -- %d item%s in it could NOT be named (getDisplayName threw) and show%s as "
+            "raw ids" % (failed, "" if failed == 1 else "s", "s" if failed == 1 else ""))
 
 
 def describe(meta):
@@ -125,7 +223,8 @@ def describe(meta):
                 "re-run /recipedump with the current mod")
     version = meta["mod_version"] or "pre-0.4.2 (unstamped)"
     if meta["schema"] == SCHEMA:
-        return "dump: written by mod %s, schema %d" % (version, SCHEMA)
+        return "dump: written by mod %s, schema %d%s" % (
+            version, SCHEMA, _lost_names(meta))
     if meta["schema"] is not None and meta["schema"] < SCHEMA:
         # Two different severities wear the same sentence otherwise. Missing a field costs
         # a feature and the graph is still correct; predating the digest format means every
@@ -168,4 +267,12 @@ def of_graph(graph):
             # `present` means "a summary.json was read", and a recorded schema is the only
             # evidence of that a graph carries. A graph built before the dump existed has
             # neither, which `describe` renders as "provenance: unknown".
-            "present": schema is not None}
+            "present": schema is not None,
+            # CARRIED ON THE GRAPH, not recomputed: the dump directory is gone by the time
+            # the server runs, and #194's point is that the loss must survive in the
+            # artifact rather than in the log of the build that noticed it.
+            "names_failed": getattr(graph, "dump_names_failed", None),
+            # `names` is a check against a file the graph no longer has beside it, so a
+            # graph cannot answer it and must not appear to. `check_names` reads None as
+            # "nothing to compare", which is exactly right here.
+            "names": None}

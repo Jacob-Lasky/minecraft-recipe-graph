@@ -1046,7 +1046,16 @@ def main(argv=None):
     p.set_defaults(fn=cmd_stats)
 
     args = ap.parse_args(argv)
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except dump_meta.DamagedDump as e:
+        # CAUGHT ONCE HERE RATHER THAN AT EACH `index.build` CALL, of which there are two
+        # (`build`, and `ensure_graph`'s rebuild behind `serve` and `plan`). A per-caller
+        # catch is the arrangement where the third caller forgets and gets a traceback --
+        # and a traceback is a stack, not an instruction, so the one reader who most needs
+        # to be told to re-run /recipedump is the one shown a frame list instead.
+        print("refusing to build a graph: %s" % e, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

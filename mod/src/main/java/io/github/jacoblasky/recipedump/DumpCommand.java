@@ -12,8 +12,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import mezz.jei.api.IRecipeRegistry;
 import mezz.jei.api.ingredients.VanillaTypes;
@@ -585,10 +587,11 @@ public class DumpCommand extends CommandBase {
             }
 
             writeLines(new File(dir, "skipped.ndjson"), skips);
+            int namesFailed = sink.namesFailed();
             writeSummary(new File(dir, "summary.json"), perCategory, categoryMod,
-                         recipes, failed, skips.size());
+                         recipes, failed, skips.size(), sink.names().size(), namesFailed);
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
-            int ores = writeOreDict(new File(dir, "oredict.json"), sink.names());
+            int ores = writeOreDict(new File(dir, "oredict.json"));
             writeNames(new File(dir, "names.json"), sink.names());
             int damageables = writeDamageable(new File(dir, "damageable.json"));
             Map<String, String> machines = ModularMachineryBridge.machines();
@@ -621,10 +624,14 @@ public class DumpCommand extends CommandBase {
             // that does not hold, and a player who opened the file after being told 0 found
             // 22,188. "Did anything break" and "how much did JEI decline to give us" are
             // different questions; see #90.
+            // THE THIRD NUMBER IS ALWAYS PRINTED, INCLUDING WHEN IT IS ZERO, for the same
+            // reason the other two are: a line that only appears on failure makes a healthy
+            // dump and an unreported one look identical, which is the #194 defect itself.
             reply(sender, String.format(
-                    "%s wrappers threw; %s entries recorded in skipped.ndjson "
-                            + "(per-category counts in summary.json)",
-                    formatCount(failed), formatCount(skips.size())));
+                    "%s wrappers threw; %s display names could not be read; %s entries "
+                            + "recorded in skipped.ndjson (per-category counts in summary.json)",
+                    formatCount(failed), formatCount(namesFailed),
+                    formatCount(skips.size())));
             reply(sender, String.format(
                     "%s items scanned: %s with EMC, %s blueprints across %s machines, "
                             + "%s damageable item types",
@@ -849,6 +856,11 @@ public class DumpCommand extends CommandBase {
     static final class KeySink {
 
         private final Map<String, String> names = new LinkedHashMap<String, String>();
+        /**
+         * Keys whose `getDisplayName()` threw at least once. NOT the reported count -- see
+         * {@link #namesFailed()}, which subtracts the ones a later occurrence got.
+         */
+        private final Set<String> nameThrew = new LinkedHashSet<String>();
         /** null when not tracing, which is how every normal dump runs. */
         private final Map<String, String> trace;
 
@@ -858,6 +870,26 @@ public class DumpCommand extends CommandBase {
 
         Map<String, String> names() {
             return names;
+        }
+
+        /**
+         * How many discriminated keys this dump has NO display name for. #194
+         *
+         * SUBTRACTED AT THE END RATHER THAN COUNTED AS IT GOES, because a key can throw and
+         * then succeed. `record` re-enters the try on every occurrence of a key it has no
+         * name for, and the documented cause of the throw -- being outside a render pass --
+         * is a property of WHEN it is called, not of the item. Counting throws would report
+         * a loss for an item whose name the dump went on to write, and the number's whole
+         * job is to be comparable against `names.json`'s length.
+         */
+        int namesFailed() {
+            int lost = 0;
+            for (String key : nameThrew) {
+                if (!names.containsKey(key)) {
+                    lost++;
+                }
+            }
+            return lost;
         }
 
         Map<String, String> trace() {
@@ -877,7 +909,12 @@ public class DumpCommand extends CommandBase {
                     // written from the same place.
                     names.put(key, stack.getDisplayName());
                 } catch (Throwable ignored) {
-                    // a few modded items throw on getDisplayName outside a render pass
+                    // A few modded items throw on getDisplayName outside a render pass.
+                    // STILL SWALLOWED -- one unnameable item must not end a dump -- but no
+                    // longer SILENT: before #194 this catch discarded the fact as well as
+                    // the exception, so a dump that lost 40,000 names wrote a shorter
+                    // names.json and said nothing, and nothing downstream could tell.
+                    nameThrew.add(key);
                 }
             }
             // GATED ON THE '#', not on tagDigests returning null, and the difference is
@@ -1340,6 +1377,8 @@ public class DumpCommand extends CommandBase {
      *   5  summary.json's `skipped` becomes `threw` and gains `skip_lines`; adds
      *      damageable.json, emc.json, machine_names.json and the icons-N.png atlas with
      *      icons.json. See #90, #118, #50, #55, #36.
+     *   6  summary.json gains `names` and `names_failed`, so a short names.json stops
+     *      being undetectable in principle. See #194.
      *
      * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
      * expensive step is a launch of the game, not the code, and five increments on one
@@ -1373,16 +1412,25 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 5;
+    static final int SCHEMA = 6;
 
     /**
-     * @param threw      wrapper failures -- things that went wrong
-     * @param skipLines  lines in skipped.ndjson -- everything JEI declined to give us,
-     *                   failures included
+     * @param threw       wrapper failures -- things that went wrong
+     * @param skipLines   lines in skipped.ndjson -- everything JEI declined to give us,
+     *                    failures included
+     * @param names       entries names.json is about to receive, so a reader can tell a
+     *                    truncated names.json from a short one
+     * @param namesFailed keys this dump has no display name for at all. #194
      */
-    private static void writeSummary(File file, Map<String, int[]> perCategory,
-                                     Map<String, String> categoryMod,
-                                     int recipes, int threw, int skipLines) {
+    // Package-visible, not private, for the same reason `writeNbtTrace` is: `SchemaSixTest`
+    // writes a real summary.json with it and asserts the fields #194 added are in the
+    // output, so the python reader is held to bytes this writer actually produced rather
+    // than to a hand-typed guess at its shape. Two mocks agreeing with each other is the
+    // failure mode.
+    static void writeSummary(File file, Map<String, int[]> perCategory,
+                             Map<String, String> categoryMod,
+                             int recipes, int threw, int skipLines,
+                             int names, int namesFailed) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             // Stamp what produced this. Without it a dump is undatable: the only signal
@@ -1395,8 +1443,14 @@ public class DumpCommand extends CommandBase {
             // per-category tally beside it, and matches what gaps.py has always called it.
             // The line count it was mistaken for is its own field. #90
             w.write(",\n \"recipes\": " + recipes + ",\n \"threw\": " + threw
-                    + ",\n \"skip_lines\": " + skipLines
-                    + ",\n \"categories\": {");
+                    + ",\n \"skip_lines\": " + skipLines);
+            // TWO NUMBERS BECAUSE ONE CANNOT BE CHECKED. `names_failed` alone says a dump
+            // lost some display names; it cannot say whether names.json then arrived
+            // intact, because the total it should hold is not knowable from anything else
+            // the dump records. `names` is that total, so the python reader can compare it
+            // against the file's actual length and refuse a truncated one. #194
+            w.write(",\n \"names\": " + names + ",\n \"names_failed\": " + namesFailed);
+            w.write(",\n \"categories\": {");
             boolean first = true;
             for (Map.Entry<String, int[]> e : perCategory.entrySet()) {
                 if (!first) {
@@ -1439,7 +1493,7 @@ public class DumpCommand extends CommandBase {
         }
     }
 
-    private static int writeOreDict(File file, Map<String, String> names) {
+    private static int writeOreDict(File file) {
         int count = 0;
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {

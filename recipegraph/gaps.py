@@ -19,6 +19,7 @@ import os
 from .ae2_inventory import DIGEST_READER, OPAQUE_MARKER
 from .model import is_digest, split_discriminator
 from .nbt_digest import DIGEST_FORMAT_SCHEMA
+from .sources import dump_meta
 
 # Why a scanned stock key matches nothing in the graph. The cause decides the fix, which
 # is the whole reason they are counted apart rather than as one "unmatched" number.
@@ -29,7 +30,7 @@ CAUSE_UNKNOWN = "item not in this dump"
 
 
 def load(dump_dir):
-    summary_path = os.path.join(dump_dir, "summary.json")
+    summary_path = os.path.join(dump_dir, dump_meta.SUMMARY_NAME)
     skipped_path = os.path.join(dump_dir, "skipped.ndjson")
 
     summary = {}

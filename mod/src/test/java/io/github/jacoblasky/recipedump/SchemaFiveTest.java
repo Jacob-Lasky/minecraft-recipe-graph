@@ -163,11 +163,8 @@ public class SchemaFiveTest {
         assertFalse(json, json.contains("[1,"));
     }
 
-    @Test
-    public void theSchemaIsFive() {
-        // Pinned here as well as read out of the jar's constant pool by
-        // tests/test_dist_jar.py, because the python side's dump_meta.SCHEMA has to move
-        // with it and `tests/test_catalysts.py` compares the two by reading this source.
-        assertEquals(5, DumpCommand.SCHEMA);
-    }
+    // THE SCHEMA NUMBER IS PINNED IN `SchemaSixTest`, NOT HERE. It used to be, spelled
+    // `theSchemaIsFive`, and that is a literal that goes stale in a file named for the
+    // number it holds: a bump has to edit an assertion whose own name then lies about what
+    // it checks. It lives with the current schema's tests and moves with them.
 }
