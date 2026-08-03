@@ -111,8 +111,9 @@ public final class JeiNodeActions implements NodeActions {
     static String installMessage(GraphSource graphs) {
         if (graphs == null || graphs == NO_GRAPH) {
             return "JeiNodeActions installed with no graph source: the planner's recipe-viewer"
-                    + " entries will never appear. DumpPlugin.onRuntimeAvailable installs the"
-                    + " live source, so some other caller reached install() instead.";
+                    + " entries stay hidden for as long as this install stands, and no graph"
+                    + " load will change that. DumpPlugin.onRuntimeAvailable installs the live"
+                    + " source, so this line means some other caller reached install().";
         }
         return "JeiNodeActions installed, graph source " + graphs.getClass().getName() + ".";
     }

@@ -16,9 +16,14 @@ import io.github.jacoblasky.recipedump.DumpPlugin;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanJson;
+import io.github.jacoblasky.recipedump.common.GraphDocuments;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.common.GraphSource;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -38,16 +43,19 @@ import net.minecraft.item.ItemStack;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 /**
- * The Phase 4 node-menu adapter, in all four of the states a real client reaches.
+ * The JEI node-menu adapter, in all four of the states a real client reaches.
  *
  * THE FOUR STATES ARE THE POINT, because three of them look identical from a screenshot -- the
  * two recipe-viewer entries are simply not drawn -- and only one of them is a bug:
  *
  * <ol>
- * <li>No graph loaded. Correct today: nothing on the client loads one yet.</li>
+ * <li>No graph loaded. Correct during the 5.47 s load: `DumpPlugin`'s source answers null
+ *     until `GraphService` reaches READY, which is later than `onRuntimeAvailable`.</li>
  * <li>A graph, but the node names no item -- a fluid, an oredict group.</li>
  * <li>A graph and an item, but no JEI runtime. Entries hidden, because opening one would do
  *     nothing.</li>
@@ -67,23 +75,53 @@ public class JeiNodeActionsTest {
         Bootstrap.register();
     }
 
+    @Rule
+    public TemporaryFolder folder = new TemporaryFolder();
+
+    private String savedGraphProperty;
+
+    /**
+     * ONE `@Before` AND ONE `@After` RATHER THAN A PAIR OF EACH. JUnit 4 does not order two
+     * methods carrying the same annotation, so splitting the property handling out would make
+     * the isolation depend on something the framework declines to promise.
+     */
     @Before
+    public void isolate() {
+        savedGraphProperty = System.getProperty(GraphSource.PROPERTY);
+        System.clearProperty(GraphSource.PROPERTY);
+        resetStatics();
+    }
+
     @After
-    public void resetStatics() {
+    public void restore() {
+        if (savedGraphProperty == null) {
+            System.clearProperty(GraphSource.PROPERTY);
+        } else {
+            System.setProperty(GraphSource.PROPERTY, savedGraphProperty);
+        }
+        resetStatics();
+    }
+
+    private void resetStatics() {
         // Three statics, so any test that installs one must not leak it into the next.
         DumpPlugin.runtime = null;
         NodeActionsHolder.install(null);
         JeiBridge.indexFor(null);
+        // A fourth, for the one test that drives the real production install path. Reset for
+        // EVERY test rather than only that one: a leaked READY graph would let the no-graph
+        // assertions pass against a graph, which is the direction that hides a defect.
+        GraphService.get().reset();
     }
 
     // -- installation ---------------------------------------------------------------------
 
     @Test
-    public void installingReplacesTheNoOpEvenWithNothingForItToDoYet() {
-        // THE WHOLE REASON THE FALSE-ANSWERING VERSION IS INSTALLED RATHER THAN LEFT OUT. An
+    public void installingReplacesTheNoOpEvenWhileTheGraphIsStillLoading() {
+        // THE WHOLE REASON A FALSE-ANSWERING VERSION IS INSTALLED RATHER THAN LEFT OUT. An
         // absent implementation and one that always says false give the player an identical
-        // menu, so if registration were broken nobody would find out until the day a graph
-        // landed -- and then they would be debugging two things at once.
+        // menu -- and in a real client that state lasts the whole 5.47 s load, so broken
+        // registration and a graph that has not arrived would look alike for five seconds
+        // and then forever.
         assertSame(NodeActions.NONE, NodeActionsHolder.actions());
         JeiNodeActions.install(JeiNodeActions.NO_GRAPH);
         assertNotSame(NodeActions.NONE, NodeActionsHolder.actions());
@@ -104,6 +142,50 @@ public class JeiNodeActionsTest {
         // Names the source, so a log from a client that HAS one says which one.
         assertTrue(JeiNodeActions.installMessage(wired).contains(wired.getClass().getName()));
         assertEquals(blindly, JeiNodeActions.installMessage(null));
+    }
+
+    /**
+     * The production path installs the seam, and the graph it installs arrives LATER.
+     *
+     * TWO CLAIMS THAT NOTHING ELSE HERE ASSERTS, and both are about `DumpPlugin` rather than
+     * about this class -- which is exactly why they were missing. Every other test in this file
+     * installs the seam itself, so all of them stay green on a client where nothing ever does.
+     * That is the shape #191 catalogues: a seam whose producer and consumer are both tested and
+     * which nothing joins in production. `PlannerHooks.setTargetListener` is the sibling that
+     * has this defect for real, so the guard is worth having on the one that does not.
+     *
+     * THE SECOND HALF IS THE MUTATION-KILLER. `onRuntimeAvailable` fires long before
+     * `GraphService` reaches READY, so the source has to be asked PER INVOCATION; caching the
+     * graph in the constructor or resolving it once at the call site would answer null for the
+     * rest of the session. The install here happens while the service is IDLE and the SAME
+     * installed object is re-asked after the load, so a cached graph reddens the last
+     * assertion while every other test in this file stays green.
+     */
+    @Test
+    public void dumpPluginInstallsTheSeamAndTheGraphArrivesAfterwards() throws Exception {
+        assertSame(NodeActions.NONE, NodeActionsHolder.actions());
+        RecordingJei jei = new RecordingJei();
+
+        new DumpPlugin().onRuntimeAvailable(jei);
+
+        NodeActions installed = NodeActionsHolder.actions();
+        assertTrue("DumpPlugin must install the seam, not just capture the runtime",
+                   installed instanceof JeiNodeActions);
+        // IDLE, so `GraphService.graph()` is null -- the state a real client is in for the
+        // whole load. The entries are hidden and that is the correct answer, not a gap.
+        PlanNode stick = node("minecraft:stick");
+        assertFalse(installed.canShowInRecipeViewer(stick));
+
+        loadGraph();
+        ItemStack real = new ItemStack(Items.STICK);
+        assertEquals("the fixture graph must key the stick the way the dump does",
+                     "minecraft:stick", DumpCommand.stackKey(real));
+        JeiBridge.indexFor(GraphService.get().graph(), Collections.singletonList(real));
+
+        // NOTHING RE-INSTALLED. Same object, new answer.
+        assertTrue("the installed source must be re-asked, not resolved once",
+                   installed.canShowInRecipeViewer(stick));
+        assertSame(real, installed.iconFor(stick));
     }
 
     @Test
@@ -302,6 +384,36 @@ public class JeiNodeActionsTest {
         RecordingJei jei = new RecordingJei();
         DumpPlugin.runtime = jei;
         return new Fixture(stick, jei, new JeiNodeActions(source(graph)));
+    }
+
+    /**
+     * Load a real graph through the real production path, and wait for it.
+     *
+     * THROUGH `GraphService` AND NOT `GraphBuilder`, unlike every other fixture here, because
+     * the claim under test is about the thing `DumpPlugin`'s source calls. A hand-built graph
+     * handed to a hand-built source would assert the seam works, which four other tests
+     * already do, rather than that production reaches it.
+     *
+     * KEYED TO A REAL ITEM, unlike `GraphDocuments.TINY`'s `mod:plate`, because this test
+     * indexes an actual `ItemStack` against the loaded graph and no `Item` produces a plate.
+     */
+    private void loadGraph() throws Exception {
+        File file = new File(folder.getRoot(), "graph.json");
+        FileOutputStream out = new FileOutputStream(file);
+        try {
+            out.write(GraphDocuments.craftedFrom("minecraft:stick", "Stick").getBytes("UTF-8"));
+        } finally {
+            out.close();
+        }
+        System.setProperty(GraphSource.PROPERTY, file.getPath());
+        GraphService.get().startLoad(null);
+        long deadline = System.currentTimeMillis() + 30_000L;
+        while (GraphService.get().state() != GraphService.State.READY) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("graph never loaded: " + GraphService.get().describe());
+            }
+            Thread.sleep(5L);
+        }
     }
 
     private static RecipeGraph graphOf(String... keys) {

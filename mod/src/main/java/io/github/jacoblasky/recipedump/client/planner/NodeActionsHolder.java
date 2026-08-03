@@ -1,8 +1,8 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 /**
- * The one installed {@link NodeActions}. `client.jei.JeiNodeActions.install` replaces the
- * no-op at `onRuntimeAvailable` (#157).
+ * The one installed {@link NodeActions}. `client.jei.JeiNodeActions` replaces the no-op (#157);
+ * see {@link #install} for the two places that do it.
  *
  * A HOLDER RATHER THAN A CONSTRUCTOR PARAMETER, because the thing that knows how to talk to
  * JEI is the JEI plugin, and it learns it can at `onRuntimeAvailable` -- long after the
@@ -25,7 +25,14 @@ public final class NodeActionsHolder {
         return installed;
     }
 
-    /** Called once from the JEI plugin via `JeiNodeActions.install`. Null restores the no-op. */
+    /**
+     * Called once per client, through `JeiNodeActions.install`. Null restores the no-op.
+     *
+     * TWO CALLERS, and they are not alternatives: `DumpPlugin.onRuntimeAvailable` in a real
+     * client, and `PlannerShot` in the screenshot harness, which has no JEI runtime callback
+     * to hang off. See `PlannerActions.NONE` for why the harness installs the real holder and
+     * the layout tests must not.
+     */
     public static void install(NodeActions actions) {
         installed = actions == null ? NodeActions.NONE : actions;
     }

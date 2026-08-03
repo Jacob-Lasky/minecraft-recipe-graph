@@ -59,9 +59,15 @@ public final class PlannerWidgets {
     /**
      * The item-icon column, filled by {@link NodeActions#iconFor}.
      *
-     * CHARGED UNCONDITIONALLY, EVEN WHEN NO ICON IS DRAWN -- see the row builder. A width
-     * that depended on whether a stack came back would re-flow every row the moment a
-     * `NodeActions` was installed or a graph finished loading.
+     * THE ONE STATEMENT OF THE COLUMN RULE, for both builders below to point at rather than
+     * restate. `x` ADVANCES BY THIS WHETHER OR NOT AN ICON IS DRAWN: a width that depended on
+     * whether a stack came back would re-flow every row the moment a `NodeActions` was
+     * installed, or a graph finished loading mid-session and `iconFor` began answering.
+     *
+     * THE WIDGET, unlike the width, is added only when there is a stack -- an
+     * `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which is the
+     * sort of claim that reads identically either way in review and is only true one way
+     * round. Measured: 49 empty boxes down the left edge of the first screenshot.
      */
     public static final int ICON = 10;
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
@@ -408,11 +414,9 @@ public final class PlannerWidgets {
         });
         box.size(width, height);
         int x = 0;
-        // The column is RESERVED whether or not anything fills it, so installing NodeActions
-        // does not re-flow every node -- but the WIDGET is only added when there is a stack.
-        // An `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which
-        // is the sort of claim that reads identically either way in review and is only true
-        // one way round. Measured: 49 empty boxes down the left edge of the first screenshot.
+        // Width unconditional, widget conditional. Both halves and the measurement behind them
+        // are stated once, on ICON; DO NOT restate them here or make either half depend on the
+        // stack.
         net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
         if (!stack.isEmpty()) {
             box.child(icon(stack).pos(x, 0));
@@ -464,11 +468,9 @@ public final class PlannerWidgets {
         int indent = Math.min(depth, MAX_INDENT_DEPTH) * INDENT;
         int x = indent;
 
-        // `x` ADVANCES BY ICON UNCONDITIONALLY, below, whether or not a stack came back. DO
-        // NOT make the column width conditional on the stack: installing a `NodeActions`, or
-        // a graph finishing its load mid-session, would then re-flow every row. The WIDGET is
-        // added only when there is a stack, because an `ItemDisplayWidget` holding EMPTY still
-        // draws its slot frame -- 49 empty boxes down the left edge of the first screenshot.
+        // Width unconditional, widget conditional. Both halves and the measurement behind them
+        // are stated once, on ICON; DO NOT restate them here or make either half depend on the
+        // stack.
         net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
         if (!stack.isEmpty()) {
             row.child(icon(stack).pos(x, 0));
