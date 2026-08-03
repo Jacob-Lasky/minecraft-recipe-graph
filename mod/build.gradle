@@ -259,9 +259,11 @@ tasks.register('checkPackJars') {
 tasks.named('compileJava') { dependsOn 'checkPackJars' }
 
 // Put the pack jars where a `runClient` dev session will actually load them. RFG reads mods
-// from `run/mods/`, and the dev client is deliberately a SMALL mod set -- Forge, ModularUI,
-// HEI and this mod -- rather than all 410, because the point is to render our own screens
-// fast (#124), not to boot MeatballCraft.
+// from `run/mods/`, and the dev client is deliberately a SMALL mod set -- the five jars named
+// below, plus Forge and this mod, which FML reports as 10 loaded mods -- rather than all 410,
+// because the point is to render our own screens fast (#124), not to boot MeatballCraft.
+// This list was stale for three of the five; keep it in step with `packJars` above, which is
+// the only place that decides membership.
 //
 // Jars staged for RUNTIME ONLY, nothing compiles against these:
 //   MixinBooter    ModularUI is a Mixin coremod (`FMLCorePlugin` in its manifest, an early

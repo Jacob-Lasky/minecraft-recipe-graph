@@ -12,10 +12,17 @@
 #   harness/shot.sh fixture fixture -Dmcrecipedump.shotDebugOverlay=true
 #
 # It builds a container image if one is missing, starts Xvfb plus mesa's llvmpipe inside it,
-# runs RetroFuturaGradle's `runClient` against a five-mod dev set (Forge, MixinBooter,
-# ModularUI, HEI, JEC and this mod), and the mod opens the named screen, writes the PNG and
-# exits. Screens are registered one line each in `ShotScreens`; `mod/build.gradle`'s
-# `stageDevMods` decides what is in the dev set.
+# runs RetroFuturaGradle's `runClient` against the dev mod set, and the mod opens the named
+# screen, writes the PNG and exits. Screens are registered one line each in `ShotScreens`;
+# `mod/build.gradle`'s `stageDevMods` decides what is in the dev set.
+#
+# THE DEV SET IS FIVE STAGED JARS AND TEN LOADED MODS, and those two numbers are both right.
+# The jars are MixinBooter, ModularUI, HEI, JEC and AE2-UEL, staged out of the pack into
+# `mod/run/mods`; Forge and this mod are not among them because neither is staged. Ten is what
+# FML reports ("successfully loaded 10 mods") because Forge alone answers to four mod IDs.
+# Quote whichever number the sentence needs and say which it is: this comment previously said
+# "five-mod" while naming six things and omitting AE2, and the README and build.gradle each
+# gave a third and fourth answer.
 #
 # The exit code is the verdict: 0 means the PNG at the reported path is this run's. A PNG on
 # disk on its own proves nothing, because a failed run leaves the previous one there.

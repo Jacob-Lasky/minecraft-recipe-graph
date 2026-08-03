@@ -78,7 +78,31 @@ import net.minecraftforge.oredict.OreDictionary;
 public class DumpCommand extends CommandBase {
 
     /** Non-null while a dump is in flight; guards against a second concurrent run. */
-    private static Runner active;
+    private static volatile Runner active;
+
+    /**
+     * Is a dump in flight? Read by the headless harness to know when to stop waiting.
+     *
+     * AN ACCESSOR RATHER THAN WIDENING THE FIELD, so nothing outside this class can clear it.
+     * The field is nulled at both completion paths -- in the `IconAtlas` callback when icons
+     * are drawn and inline when they are not -- and those two are the definition of "done".
+     *
+     * DO NOT SUBSTITUTE "WAIT FOR summary.json". `writeSummary` swallows its own IOException,
+     * so the file's absence is not a failure signal and its presence is not a completion one.
+     *
+     * AND THIS ALONE CANNOT REPORT SUCCESS. `execute` returns early WITHOUT setting `active`
+     * on five refusal paths -- a dump already running, no JEI runtime, the output directory
+     * uncreatable, the category list throwing, the output file unopenable -- so a caller that
+     * polls this and sees false has learned nothing about whether a dump ever began. It must
+     * first observe this go TRUE. Those refusals go to `reply`, which is chat, so the reason
+     * appears in the framebuffer and not on stdout.
+     *
+     * Volatile because the harness polls it from the render thread while the walk advances on
+     * the client tick.
+     */
+    public static boolean running() {
+        return active != null;
+    }
 
     @Override
     public String getName() {

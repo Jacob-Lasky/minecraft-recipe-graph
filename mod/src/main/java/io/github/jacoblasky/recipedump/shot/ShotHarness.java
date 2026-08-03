@@ -7,11 +7,13 @@ import java.io.IOException;
 import javax.imageio.ImageIO;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiScreenWorking;
 import net.minecraft.util.ScreenShotHelper;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.FMLCommonHandler;
+import net.minecraftforge.fml.common.Loader;
+import net.minecraftforge.fml.common.LoaderState;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
 
@@ -212,23 +214,34 @@ public final class ShotHarness {
                 if (!worldReady(mc)) {
                     return;
                 }
-            } else if (!(mc.currentScreen instanceof GuiMainMenu)) {
+            } else if (!readyAtMenu(mc)) {
                 waitOrTimeOut(mc.currentScreen);
                 return;
             }
             setGuiScale();
             setModularUiDebugOverlay(Boolean.getBoolean(PROP_DEBUG_OVERLAY));
+            // WHAT WAS ON SCREEN BEFORE, so the check below can compare identity. The old
+            // check was `instanceof GuiMainMenu`, which does not merely fail to fire under a
+            // menu mod -- it fails SILENTLY IN THE OTHER DIRECTION. Under `CustomMainMenu` an
+            // opener that did nothing at all would leave a screen that is not a `GuiMainMenu`,
+            // so the harness would call it opened and photograph the menu. Identity says
+            // "nothing changed" without knowing what the menu is.
+            GuiScreen before = mc.currentScreen;
             String problem = ShotScreens.open(spec);
             if (problem != null) {
                 log("cannot open the requested screen: " + problem);
                 exit(EXIT_NO_SCREEN);
                 return;
             }
-            if (mc.currentScreen == null || mc.currentScreen instanceof GuiMainMenu) {
+            if (!ShotScreens.noScreenExpected()
+                    && (mc.currentScreen == null || mc.currentScreen == before)) {
                 // The opener ran without throwing and the screen did not change. Reported
                 // separately from a throw because the cause is different: the screen decided
-                // not to open, rather than failing to.
-                log("screen '" + spec + "' did not replace the main menu");
+                // not to open, rather than failing to. Skipped only for an entry that SAID it
+                // opens no screen -- see `ShotScreens.expectNoScreen`, which `dump` uses
+                // because a command's output is chat, and chat is the HUD.
+                log("screen '" + spec + "' did not replace "
+                        + (before == null ? "anything" : before.getClass().getName()));
                 exit(EXIT_NO_SCREEN);
                 return;
             }
@@ -236,7 +249,12 @@ public final class ShotHarness {
             // through `requestSettleFrames`, and it says so during `open` -- which is why
             // this is read here and not in the constructor.
             int settle = Math.max(settleFrames, ShotScreens.settleRequest());
-            log("opened " + mc.currentScreen.getClass().getName()
+            // `currentScreen` is legitimately null for an entry that opens none, so this
+            // cannot dereference it. It was safe before only because the check above
+            // guaranteed non-null on every path that reached here.
+            log("opened " + (mc.currentScreen == null
+                            ? "no screen; capturing the HUD"
+                            : mc.currentScreen.getClass().getName())
                     + "; settling " + settle + " frames"
                     + (settle > settleFrames
                             ? " (the screen asked for " + ShotScreens.settleRequest() + ")"
@@ -260,11 +278,47 @@ public final class ShotHarness {
                 framesLeft = framesLeft - 1;
                 return;
             }
+            if (holding()) {
+                return;
+            }
             if (timedFrames > 0 && timed <= timedFrames) {
                 measure();
                 return;
             }
             capture();
+        }
+
+        /**
+         * Is a screen still working, and may the run keep waiting for it?
+         *
+         * THE DEADLINE IS THE WHOLE REASON THIS IS SAFE TO OFFER. A screen that can postpone
+         * the capture indefinitely is a screen that can hang the container, and a hung
+         * container on Tower holds the gradle lock and fails the NEXT build with a timeout
+         * naming neither -- the exact damage {@link #exit}'s header records. So the run's own
+         * `-Dmcrecipedump.shotTimeoutSeconds` applies here too, and running past it is a
+         * TIMEOUT rather than a capture: whatever is on screen mid-job is not this run's
+         * answer, and photographing it would produce a plausible picture of a partial dump.
+         *
+         * Progress is logged on the same fifteen-second cadence as the pre-menu wait, because
+         * a `/recipedump` takes minutes and a silent container is indistinguishable from a
+         * dead one to whoever is watching it.
+         */
+        private boolean holding() {
+            ShotScreens.Hold screen = ShotScreens.hold();
+            if (screen == null || !screen.busy()) {
+                return false;
+            }
+            long now = System.nanoTime();
+            if (now > deadlineNanos) {
+                log("timed out waiting for the screen to finish its work");
+                exit(EXIT_TIMEOUT);
+                return true;
+            }
+            if (now - lastReportNanos > 15_000_000_000L) {
+                lastReportNanos = now;
+                log("still working; holding the capture");
+            }
+            return true;
         }
 
         /**
@@ -429,7 +483,7 @@ public final class ShotHarness {
          */
         private boolean worldReady(Minecraft mc) {
             if (!worldRequested) {
-                if (mc.currentScreen != null && !(mc.currentScreen instanceof GuiMainMenu)) {
+                if (!readyAtMenu(mc)) {
                     waitOrTimeOut(mc.currentScreen);   // still on the loading screens
                     return false;
                 }
@@ -565,6 +619,41 @@ public final class ShotHarness {
         } catch (Throwable ignored) {
             // No ModularUI, or it moved the field. Either way the screen still renders.
         }
+    }
+
+    /**
+     * Has the client finished loading and settled on a menu the harness may replace?
+     *
+     * NOT `instanceof GuiMainMenu`, AND THAT IS A BLOCKER RATHER THAN A TIDY-UP.
+     * `CustomMainMenu-MC1.12.2-2.0.9.1.jar` is in the target pack and replaces the menu with
+     * its own `GuiScreen` subclass, which is not a `GuiMainMenu`. Both of this class's waits
+     * used the class check, so a 410-jar run would have booted every mod correctly, reached a
+     * perfectly good menu, logged "waiting for the main menu" every fifteen seconds and exited
+     * 3 after ten minutes. That failure reads as "the pack cannot boot headlessly", which is
+     * the wrong conclusion, and it would have been drawn from the most expensive run this
+     * project has ever attempted. #146.
+     *
+     * VERIFIED AGAINST DECOMPILED FORGE RATHER THAN ASSUMED, because the whole fix rests on
+     * the comparison being an ordinal one. `LoadController:338` is
+     * `state.ordinal() >= state.ordinal() && state != ERRORED`; AVAILABLE is ordinal 6 and the
+     * SERVER_* states a world load moves through are 7 to 11. So this stays true once mods have
+     * loaded AND through a world load, which is what the world path below needs.
+     *
+     * IT ALSO MAKES THE FORGE ERROR SCREENS NEED NO ENUMERATION. ERRORED is ordinal 12 and
+     * would satisfy a naive `>=`, which is exactly why Forge excludes it explicitly -- so a
+     * client sitting on `GuiModsMissing`, `GuiSortingProblem` or a custom mod-error screen
+     * never reads as ready here, and `waitOrTimeOut` goes on naming it in the log.
+     *
+     * The one screen shown AFTER loading completes and still not ready is vanilla's progress
+     * screen, which is the only class this needs to know by name. It is also the only one our
+     * own runs have ever been observed waiting on.
+     */
+    private static boolean readyAtMenu(Minecraft mc) {
+        if (!Loader.instance().hasReachedState(LoaderState.AVAILABLE)) {
+            return false;
+        }
+        GuiScreen screen = mc.currentScreen;
+        return screen != null && !(screen instanceof GuiScreenWorking);
     }
 
     /** Package-visible so `ShotHarnessTest` can pin the fallback without a running client. */

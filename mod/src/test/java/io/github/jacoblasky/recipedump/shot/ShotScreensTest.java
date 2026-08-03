@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -110,6 +111,72 @@ public class ShotScreensTest {
         assertNull(ShotScreens.pendingReport());
         assertEquals("a pass must not erase a failure already reported",
                 "stored==64 false", ShotScreens.failedVerdict());
+    }
+
+    @Test
+    public void aHoldIsRegisteredAndDoesNotSurviveTheNextScreen() {
+        final boolean[] busy = {true};
+        ShotScreens.register("test-hold", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+                ShotScreens.holdCapture(new ShotScreens.Hold() {
+                    @Override
+                    public boolean busy() {
+                        return busy[0];
+                    }
+                });
+            }
+        });
+        assertNull(ShotScreens.open("test-hold"));
+        assertNotNull(ShotScreens.hold());
+        assertTrue(ShotScreens.hold().busy());
+        busy[0] = false;
+        assertFalse(ShotScreens.hold().busy());
+
+        // SAME ARGUMENT AS `animate`, and it bites harder here: a leftover hold belongs to a
+        // screen that is no longer open, so the harness would poll a finished job and either
+        // hold forever or release instantly. Neither is about the screen being photographed.
+        ShotScreens.register("test-nohold", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+        assertNull(ShotScreens.open("test-nohold"));
+        assertNull("a screen that asked for no hold must not inherit one", ShotScreens.hold());
+    }
+
+    @Test
+    public void onlyAnEntryThatSaysSoIsAllowedToOpenNoScreen() {
+        // THE DEFAULT MUST STAY FALSE. This flag suppresses the harness's check that an opener
+        // actually did something, and for the ten entries that photograph a GUI that check is
+        // the only thing standing between "the screen declined to open" and a photograph of
+        // the main menu reported as a success.
+        ShotScreens.register("test-opens-nothing", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+                ShotScreens.expectNoScreen();
+            }
+        });
+        ShotScreens.register("test-opens-a-screen", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+
+        assertNull(ShotScreens.open("test-opens-nothing"));
+        assertTrue(ShotScreens.noScreenExpected());
+
+        assertNull(ShotScreens.open("test-opens-a-screen"));
+        assertFalse("the declaration must not outlive the entry that made it",
+                ShotScreens.noScreenExpected());
+    }
+
+    @Test
+    public void theDumpScreenIsReachableByName() {
+        // Same reasoning as the AE2 probe: the name is the whole interface, and asserting the
+        // name rather than the class keeps `DumpShot` -- and through it `ClientCommandHandler`
+        // -- off the test runtime classpath.
+        assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("dump"));
     }
 
     @Test

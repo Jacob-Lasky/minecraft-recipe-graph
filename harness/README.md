@@ -27,10 +27,11 @@ artifact that `/sr-dev-review` Q5 demands for a UI claim comes from.
    actually hands it is `4.5 (Compatibility Profile) Mesa 26.0.3`, measured from the client's
    own banner.
 2. `entrypoint.sh` starts Xvfb on `:99` and execs the command.
-3. RetroFuturaGradle's `runClient` launches a dev client against a **small mod set** --
-   Forge, MixinBooter, ModularUI, HEI, AE2-UEL, JEC and this mod -- staged into `mod/run/mods`
-   by `stageDevMods`, which is a `Sync` so that set is exactly what the client loads. Booting
-   MeatballCraft is not the point.
+3. RetroFuturaGradle's `runClient` launches a dev client against a **small mod set**: five
+   jars staged into `mod/run/mods` by `stageDevMods` -- MixinBooter, ModularUI, HEI, JEC and
+   AE2-UEL -- plus Forge and this mod, which are not staged. FML reports **10 mods loaded**,
+   because Forge alone answers to four mod IDs. `stageDevMods` is a `Sync`, so that set is
+   exactly what the client loads. Booting MeatballCraft is not the point.
 4. The mod sees `-Dmcrecipedump.shot=<screen>`, waits for the main menu, opens that screen,
    lets it settle, reads the framebuffer with vanilla's `ScreenShotHelper.createScreenshot`,
    writes the PNG and exits. No menu is clicked through, and no world is loaded *by default* --
@@ -54,8 +55,8 @@ rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zo
 instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
 looks entirely correct and is of the wrong thing.
 
-`flow-hit` and `ae2-probe` are the two screens that ASSERT rather than photograph, and a screen
-in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
+`flow-hit`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen in that shape
+owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the
 harness fails the run if the verdict never arrives OR if it is a NO. There is deliberately no
 call that means only "I spoke": the first cut of this had one, and `ae2-probe` called it on all
@@ -84,6 +85,15 @@ nodes and the default twenty RENDER frames is shorter than that -- a screen that
 says so in code rather than in an incantation the next person has to know to type. See the AE2
 bullet under Limits for what its verdict does and does not establish.
 
+`dump` is the only entry that runs a COMMAND rather than opening a GUI, and the only one that
+opens no `GuiScreen` at all: `harness/shot.sh dump dump -Dmcrecipedump.shotWorld=dump`. It
+drives `/recipedump` through `ClientCommandHandler` -- the identical path a keyboard drives,
+rather than calling `DumpCommand.execute`, so a pass is evidence about the path players use.
+It needs a world because the sender is `mc.player`, it declares `expectNoScreen()` because
+chat is the HUD and not a screen, and it holds the capture until `DumpCommand.running()` goes
+false rather than guessing a frame count. See #146: this is Experiment A, and what it settles
+is whether the harness can drive the command at all, on the five-jar dev set.
+
 Keep it to one line: the moment adding a screen costs more than that, people stop adding them
 and the harness stops being used.
 
@@ -98,7 +108,7 @@ All are `-D` system properties on the client, forwarded from the gradle command 
 | `mcrecipedump.shotOut` | `<gamedir>/shots/<screen>.png` | Exact output path. |
 | `mcrecipedump.shotWidth` / `Height` | 1280 / 800 | Window size, and therefore image size. |
 | `mcrecipedump.shotSettleFrames` | 20 | Frames between opening the screen and capturing. |
-| `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the main menu. |
+| `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the menu, **and for a screen that is holding the capture**. Raise it for a big pack: 600 sits inside the estimated 410-jar boot range, so a healthy run would time out. Not raised by default, because for the five-jar dev set 600 is generous and a larger default only makes a genuinely hung run take longer to fail. |
 | `mcrecipedump.shotDebugOverlay` | `false` | Keep ModularUI's widget-outline overlay in the shot. |
 | `mcrecipedump.shotTimedFrames` | 0 | Time this many frames after settling, then report. See below. |
 | `mcrecipedump.shotWorld` | unset | Load a superflat single-player world before opening the screen. Adds ~40 s. See the world bullet under Limits. |

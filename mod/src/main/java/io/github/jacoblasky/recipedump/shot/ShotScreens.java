@@ -51,8 +51,35 @@ public final class ShotScreens {
         void step(int frame);
     }
 
+    /**
+     * A screen that is not finished yet, so the harness must not capture or exit.
+     *
+     * BECAUSE A FRAME COUNT IS A GUESS AND THIS PROJECT KEEPS PAYING FOR GUESSES.
+     * {@link #requestSettleFrames} answers "how long does this screen take to look right",
+     * which is a rendering question with a stable answer. `dump` asks a different one: it
+     * drives `/recipedump`, which takes as long as the pack takes, and the number of frames
+     * that fits in is a property of how busy Tower is. Sizing a settle window to cover it
+     * would produce exactly the under-wait the AE2 probe's header is about -- a run that
+     * captures and exits mid-dump and reports whatever it had got to.
+     *
+     * So the screen is ASKED. The harness polls this once per render tick after the settle
+     * window and holds the capture while it answers true, with the run's own
+     * `-Dmcrecipedump.shotTimeoutSeconds` as the backstop, so a screen that never finishes
+     * still fails on the clock instead of hanging.
+     */
+    public interface Hold {
+        /** @return true while the harness must keep waiting. */
+        boolean busy();
+    }
+
     /** Set by the current run's opener; null when the screen cannot be driven. */
     private static Animated animated;
+
+    /** See {@link Hold}. Null when the screen never asked the harness to wait. */
+    private static volatile Hold hold;
+
+    /** See {@link #expectNoScreen}. */
+    private static boolean noScreenExpected;
 
     /** See {@link #requestSettleFrames}. */
     private static int settleRequest;
@@ -94,6 +121,46 @@ public final class ShotScreens {
     /** What the last opened screen registered, or null. */
     public static Animated animated() {
         return animated;
+    }
+
+    /**
+     * Ask the harness to hold the capture until {@link Hold#busy} goes false.
+     *
+     * A HOLD IS NOT A SUBSTITUTE FOR A VERDICT. `busy()` going false means the screen has
+     * stopped working, not that it succeeded, so a screen that holds must still
+     * {@link #expectReport} and answer -- otherwise it buys itself all the time it needs and
+     * then reports nothing, which is the same silent success the verdict machinery exists for.
+     */
+    public static void holdCapture(Hold screen) {
+        hold = screen;
+    }
+
+    /** What the last opened screen registered, or null. */
+    public static Hold hold() {
+        return hold;
+    }
+
+    /**
+     * Declare that this entry deliberately opens no `GuiScreen` at all.
+     *
+     * BECAUSE `ShotHarness` OTHERWISE TREATS AN UNCHANGED SCREEN AS A FAILED OPEN, and it is
+     * right to: for the ten entries that photograph a GUI, "the opener ran and the screen did
+     * not change" means the screen declined to open and the run would photograph the menu.
+     *
+     * `dump` is the first entry that is not a screen at all. It runs `/recipedump` through the
+     * command handler, and the output goes to CHAT, which is the in-game HUD and not
+     * `Minecraft.currentScreen` -- so in a world with no GUI open, `currentScreen` is null
+     * before and null after, and the harness would have exited EXIT_NO_SCREEN before the dump
+     * did anything. Opening a throwaway GUI to satisfy the check would be worse than saying so:
+     * a panel would sit on top of the very chat that is the artifact.
+     */
+    public static void expectNoScreen() {
+        noScreenExpected = true;
+    }
+
+    /** Whether the current entry said it opens no screen. See {@link #expectNoScreen}. */
+    public static boolean noScreenExpected() {
+        return noScreenExpected;
     }
 
     /**
@@ -191,6 +258,14 @@ public final class ShotScreens {
             @Override
             public void open(String arg) {
                 Ae2ProbeShot.open(arg);
+            }
+        });
+        // The only screen that runs a COMMAND. See DumpShot for why it goes through
+        // `ClientCommandHandler` rather than calling `DumpCommand.execute`.
+        register("dump", new Opener() {
+            @Override
+            public void open(String arg) {
+                DumpShot.open(arg);
             }
         });
         register("world-probe", new Opener() {
@@ -293,6 +368,8 @@ public final class ShotScreens {
             return "no screen named '" + name + "'; known screens: " + names();
         }
         animated = null;
+        hold = null;
+        noScreenExpected = false;
         settleRequest = 0;
         pendingReport = null;
         failedVerdict = null;
