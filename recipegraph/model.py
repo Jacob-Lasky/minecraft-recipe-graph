@@ -461,6 +461,16 @@ class Graph:
         # graph so `serve` can say it too -- the dump directory is long gone by then, and a
         # loss reported only by the build that noticed it is a loss nobody sees twice.
         self.dump_names_failed = None
+        # WHICH JARS THE DUMP SAW, as a count and as a digest of the sorted modid set. #194
+        #
+        # The one thing a dump could not previously say about itself, and the reason #119's
+        # parity gap was argued about rather than measured: a graph built from five jars
+        # printed a provenance line identical IN FORM to one built from 410, and the
+        # contents could not settle it either -- a client-only mod registering no JEI
+        # category is invisible in the output. Both None for a graph built from a dump older
+        # than schema 6, which is every graph on disk today.
+        self.dump_mod_count = None
+        self.dump_mod_digest = None
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -1285,6 +1295,8 @@ class Graph:
             "dump_schema": self.dump_schema,
             "dump_version": self.dump_version,
             "dump_names_failed": self.dump_names_failed,
+            "dump_mod_count": self.dump_mod_count,
+            "dump_mod_digest": self.dump_mod_digest,
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
@@ -1299,6 +1311,56 @@ class Graph:
     def save(self, path):
         with open(path, "w") as fh:
             json.dump(self.to_json(), fh, separators=(",", ":"), sort_keys=True)
+
+    #: How much of a graph.json `recorded_mod_set` reads before giving up and parsing it all.
+    #:
+    #: MEASURED ON THE REFERENCE GRAPH, not guessed: `save` writes `sort_keys=True`, and on
+    #: the 121 MB oracle the `dump_*` block lands 127 KB in, after `catalysts`,
+    #: `category_mods` and `dimension_ores` and before `emc` (126,980) and `names` (959,134).
+    #: A megabyte is an eightfold margin on that and small enough that the fast path is free.
+    HEADER_BYTES = 1 << 20
+
+    #: The first key `save` writes that sorts AFTER `dump_mod_digest`, and therefore the
+    #: proof that a prefix has passed the point where the pair would be. See
+    #: `recorded_mod_set`; `tests/test_schema_six.py` pins the ordering this relies on.
+    _PAST_MOD_SET = '"dump_schema"'
+
+    @staticmethod
+    def recorded_mod_set(path):
+        """`(dump_mod_count, dump_mod_digest)` from a graph.json, without loading it.
+
+        WHY NOT `Graph.load`. The caller is `index.build` deciding whether it is about to
+        replace a graph built from a different pack, and the reference graph is 121 MB.
+        MEASURED on it: `json.load` is 3.4 s and 614 MB of peak RSS, this is 0.05 s and
+        10 MB. Two scalars are not worth the difference on every build, and a check that
+        makes the common path slower is a check someone eventually routes around.
+
+        THREE OUTCOMES, AND THE MIDDLE ONE IS THE POINT. Finding the pair answers directly.
+        Not finding it but finding a key that sorts AFTER it proves the pair is absent from
+        the document -- which is every graph built before #194, i.e. every graph on disk the
+        day this lands. Without that case the fallback would fire on all of them and pay a
+        full 121 MB parse on every build until the graph is rebuilt, which is precisely when
+        someone starts wondering why `build` got slower.
+
+        CORRECTNESS STILL DOES NOT DEPEND ON THE KEY ORDER. The absence conclusion is
+        licensed by `sort_keys=True`, and if that ever goes away the sentinel simply stops
+        appearing before the pair -- so a graph with neither the pair nor the sentinel in its
+        prefix falls through to a full parse rather than reporting an absence that would
+        silently switch the guard off. Getting quieter when something unexpected happens is
+        how a guard stops guarding.
+        """
+        with open(path, "rb") as fh:
+            head = fh.read(Graph.HEADER_BYTES)
+        text = head.decode("utf-8", errors="replace")
+        count = re.search(r'[{,]"dump_mod_count":(null|\d+)[,}]', text)
+        digest = re.search(r'[{,]"dump_mod_digest":(null|"[^"]*")[,}]', text)
+        if count and digest:
+            return json.loads(count.group(1)), json.loads(digest.group(1))
+        if Graph._PAST_MOD_SET in text:
+            return None, None
+        with open(path) as fh:
+            d = json.load(fh)
+        return d.get("dump_mod_count"), d.get("dump_mod_digest")
 
     @staticmethod
     def load(path):
@@ -1316,6 +1378,8 @@ class Graph:
         # `.get`, NOT `or None`: 0 is a real answer here -- "the dump measured and lost
         # nothing" -- and `or None` would turn every clean graph back into "cannot say".
         g.dump_names_failed = d.get("dump_names_failed")
+        g.dump_mod_count = d.get("dump_mod_count")
+        g.dump_mod_digest = d.get("dump_mod_digest")
         g.instance_dir = d.get("instance_dir")
         # Absent from every graph built before #93, and absent from any pack without Modular
         # Machinery. An empty map means "priced by the controller recipe alone", which is the

@@ -18,7 +18,8 @@ not the mod version. Bump it in DumpCommand.java and here together:
      damageable.json (#118), emc.json (#50), machine_names.json (#55) and the
      icons-N.png / icons.json atlas (#36)
   6  summary.json gains `names` and `names_failed`, so a names.json that lost entries stops
-     being undetectable in principle (#194)
+     being undetectable in principle, and `mod_count` / `mod_digest`, so a dump can say
+     which jars it saw (#194)
 
 SCHEMA 6 IS ADDITIVE AND CHANGES NO EXISTING FIELD, so a schema-5 dump is read exactly as it
 was; what it cannot do is answer the question the new fields exist to answer, and `describe`
@@ -151,22 +152,46 @@ def read(dump_dir):
         # many keys the dump has no name for AT ALL because getDisplayName threw. See #194.
         "names": _count(doc, "names"),
         "names_failed": _count(doc, "names_failed"),
+        # Schema 6, and the pair that answers "which jars was this taken against". Both
+        # None for any dump older than that, which is every dump on disk today. See #194.
+        "mod_count": _count(doc, "mod_count"),
+        "mod_digest": (doc.get("mod_digest")
+                       if isinstance(doc.get("mod_digest"), str) and doc.get("mod_digest")
+                       else None),
     }
 
 
-class DamagedDump(Exception):
-    """A dump directory whose own summary.json says it is not what is on disk.
+class RefusedBuild(Exception):
+    """A build that must not happen, raised rather than reported.
 
-    RAISED, NOT RETURNED AS A VERDICT SOMEONE PRINTS, because this project has repeatedly
-    measured what a printed warning is worth in a long run: the `!!` line scrolls past and
-    the run still ends in a success message. `tools/check.sh` says it twice in its own
-    header, and #192 replaced a warning with a refusal for the same reason.
+    RAISED, NOT RETURNED AS A VERDICT SOMEONE PRINTS. Both subclasses guard artifacts that
+    cost a game launch to reproduce, and this project has repeatedly measured what a printed
+    warning is worth in a long run: the `!!` line scrolls past and the run still ends in a
+    success message. `tools/check.sh` says it twice in its own header, and #192 replaced a
+    warning with a refusal for the same reason. So the failure has to be the exit code.
+
+    ONE BASE SO ONE CATCH COVERS BOTH. `recipegraph.cli.main` catches this and turns it into
+    exit 2 with the message; a third refusal added here needs no change there.
+    """
+
+
+class DamagedDump(RefusedBuild):
+    """A dump directory whose own summary.json says it is not what is on disk.
 
     A SEPARATE TYPE FROM A MISSING FILE, because they call for opposite responses. Every
     other absence this package handles is degradation the graph survives -- no catalysts,
     no emc, no icons -- and each of those is reported and stepped over. This is the dump
     contradicting itself, which no amount of stepping over makes safe, so it is raised
     rather than said.
+    """
+
+
+class WrongPack(RefusedBuild):
+    """The dump was taken against a different set of jars than the graph being replaced.
+
+    NOT a damaged dump: both artifacts may be perfectly good, and the wrong one is about to
+    overwrite the other. The five-jar case is the one #194 was filed about, and it is not
+    hypothetical -- the headless harness now produces valid dumps from a six-mod dev client.
     """
 
 
@@ -200,6 +225,56 @@ def check_names(meta, on_disk):
         % (on_disk, declared))
 
 
+#: The `build` flag that gets past `check_mod_set`. Spelled here as well as in `cli` so the
+#: refusal can name it; a message that says "pass the flag" without saying which one sends
+#: the reader to `--help` at the moment they are already surprised.
+#:
+#: NAMED AS A WHOLE `recipegraph build` COMMAND IN THE MESSAGE, not as a bare flag, because
+#: the refusal also fires from `plan` and `serve` through `ensure_graph`'s implicit rebuild
+#: -- and those two have no such flag. "Pass --allow-mod-set-change" is unactionable advice
+#: from a `plan` prompt; "run `recipegraph build --allow-mod-set-change`" works everywhere.
+OVERRIDE_FLAG = "--allow-mod-set-change"
+
+
+def check_mod_set(meta, graph_count, graph_digest):
+    """Raise `WrongPack` when this dump did not come from the pack the graph on disk did.
+
+    THE FAILURE THIS EXISTS FOR, stated concretely. A dump from five jars produces a graph,
+    and prints `dump: written by mod 0.9.11, schema 6` -- a line identical IN FORM to the one
+    a 410-jar dump prints. The contents cannot settle it either: a client-only mod that
+    registers no JEI category is invisible in the output. So the small graph silently
+    replaces the large one at the same path, and every downstream consumer trusts it.
+
+    IT REFUSES RATHER THAN WARNING, on the team's explicit instruction and for the reason
+    `RefusedBuild` records. The graph is the cheap artifact here, but it is the only thing
+    standing between a wrong dump and every plan priced from it.
+
+    THE OVERRIDE IS A FLAG AND NOT AN ENVIRONMENT VARIABLE, so that replacing a 410-jar graph
+    with a six-jar one is a thing someone typed on the line that did it, findable in a shell
+    history when the plans come out wrong.
+
+    Silent whenever it cannot compare: a dump older than schema 6 (`mod_digest` is None), no
+    graph at the output path yet, or a graph built before #194 recorded the digest. All three
+    are absence of evidence, and refusing on them would refuse the first build after this
+    change lands -- which is every build.
+    """
+    digest = meta.get("mod_digest")
+    if digest is None or graph_digest is None or digest == graph_digest:
+        return
+    raise WrongPack(
+        "the graph already at this path was built from a DIFFERENT set of mods (%s there, "
+        "%s in this dump). One of the two is not the pack you meant, and overwriting hides "
+        "which: a dump from a smaller jar set produces a graph that looks entirely normal "
+        "and is missing whole mods. Check which dump you are pointing at, or run "
+        "`recipegraph build %s` if replacing it is deliberate."
+        % (mods_phrase(graph_count), mods_phrase(meta.get("mod_count")), OVERRIDE_FLAG))
+
+
+def mods_phrase(count):
+    """`410 mods`, or an honest non-answer for a graph or dump that did not record one."""
+    return "an unrecorded number of mods" if count is None else "%d mods" % count
+
+
 def _lost_names(meta):
     """The clause `describe` carries when the dump could not read some display names.
 
@@ -223,8 +298,12 @@ def describe(meta):
                 "re-run /recipedump with the current mod")
     version = meta["mod_version"] or "pre-0.4.2 (unstamped)"
     if meta["schema"] == SCHEMA:
-        return "dump: written by mod %s, schema %d%s" % (
-            version, SCHEMA, _lost_names(meta))
+        # THE JAR COUNT IS IN THE CURRENT-SCHEMA SENTENCE AND NOWHERE ELSE, because it is
+        # the one branch that can print a number it actually has. It is also the branch that
+        # used to be the problem: "written by mod 0.9.11, schema 6" was identical whether
+        # five jars or 410 produced it, and this is the word that separates them. #194
+        return "dump: written by mod %s, schema %d, from %s%s" % (
+            version, SCHEMA, mods_phrase(meta.get("mod_count")), _lost_names(meta))
     if meta["schema"] is not None and meta["schema"] < SCHEMA:
         # Two different severities wear the same sentence otherwise. Missing a field costs
         # a feature and the graph is still correct; predating the digest format means every
@@ -275,4 +354,9 @@ def of_graph(graph):
             # `names` is a check against a file the graph no longer has beside it, so a
             # graph cannot answer it and must not appear to. `check_names` reads None as
             # "nothing to compare", which is exactly right here.
-            "names": None}
+            "names": None,
+            # Carried for the same reason as the loss above: the server's footer is where
+            # someone finds out their graph came from six jars, and by then there is no
+            # summary.json within reach to ask.
+            "mod_count": getattr(graph, "dump_mod_count", None),
+            "mod_digest": getattr(graph, "dump_mod_digest", None)}

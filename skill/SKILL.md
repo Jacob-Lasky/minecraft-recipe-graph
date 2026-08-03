@@ -445,9 +445,13 @@ buy a partial revert nobody can exercise, since reverting half a jar still costs
 
 **#194 is v0.10.0 (dump schema 6), and it is additive.** `summary.json` gains `names` and
 `names_failed` -- the display names the dump wrote, and the ones `getDisplayName()` threw on,
-which used to be caught and forgotten. `build` will not read a `names.json` whose length
-disagrees with `names`: a short one means the bytes on disk are not the bytes the dump
-wrote, which no amount of stepping over makes safe.
+which used to be caught and forgotten -- plus `mod_count` and `mod_digest`, so a dump can say
+which jars produced it. Three refusals hang off it: `build` will not read a `names.json`
+whose length disagrees with `names`, will not replace a graph built from a different
+`mod_digest` without `--allow-mod-set-change`, and `/recipedump` will not overwrite a dump
+directory written by a different jar set without `force`. That last one is the important
+one: the output path is hardcoded to `<gamedir>/mc-recipe-dump`, so a dev-client or harness
+dump run in a pack directory would otherwise destroy the pack's real dump in place.
 
 **Schema 5 and 6 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the
 keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then `build`,

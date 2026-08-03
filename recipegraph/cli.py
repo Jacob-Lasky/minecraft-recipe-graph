@@ -42,7 +42,8 @@ def cmd_build(args):
     # left in the pack instance, which the serving container cannot see. See sources/icons.
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     g = index.build(args.instance, hei_path=args.hei, no_guess=args.no_guess,
-                    dump_dir=args.dump_dir, out_path=args.out)
+                    dump_dir=args.dump_dir, out_path=args.out,
+                    allow_mod_set_change=args.allow_mod_set_change)
     g.save(args.out)
     print("wrote %s (%.1f MB)" % (args.out, os.path.getsize(args.out) / 1e6))
     return 0
@@ -905,6 +906,16 @@ def main(argv=None):
     p.add_argument("--out", default=DEFAULT_GRAPH)
     p.add_argument("--no-guess", action="store_true",
                    help="disable heuristic oredict inference")
+    # `--allow-mod-set-change`, spelled from `dump_meta.OVERRIDE_FLAG` so the refusal that
+    # tells you to type it and the parser that accepts it cannot disagree. The literal is
+    # here in prose because a reader greps for the flag, not for the constant.
+    #
+    # #194: `build` refuses when the dump names a different jar set than the graph it is
+    # about to replace. This is the way past it, and it is a flag rather than a prompt
+    # because the graph outlives the terminal -- a shell history can answer "who replaced
+    # the 410-mod graph with a six-mod one" months later, and a y/n cannot.
+    p.add_argument(dump_meta.OVERRIDE_FLAG, action="store_true",
+                   help="overwrite a graph that was built from a different set of mods")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("have", help="read AE2 network contents from a world save")
@@ -1048,7 +1059,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         return args.fn(args)
-    except dump_meta.DamagedDump as e:
+    except dump_meta.RefusedBuild as e:
         # CAUGHT ONCE HERE RATHER THAN AT EACH `index.build` CALL, of which there are two
         # (`build`, and `ensure_graph`'s rebuild behind `serve` and `plan`). A per-caller
         # catch is the arrangement where the third caller forgets and gets a traceback --

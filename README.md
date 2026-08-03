@@ -461,7 +461,19 @@ says whether it worked.
 `names_failed` are how many display names it wrote and how many it could not read — a few
 modded items throw on `getDisplayName()` outside a render pass, and before schema 6 that was
 caught and forgotten, so a dump that lost 40,000 names wrote a shorter `names.json` and said
-nothing. `recipegraph build` refuses a `names.json` whose length disagrees with `names`.
+nothing. `mod_count` and `mod_digest` say which jars were loaded, because nothing else can:
+a five-jar dump and a 410-jar one produce provenance lines identical in form, and the
+contents cannot settle it either since a client-only mod registering no JEI category leaves
+no trace in the output. `recipegraph build` refuses a `names.json` whose length disagrees
+with `names`, and refuses to replace a graph whose `mod_digest` differs from the dump's
+unless `--allow-mod-set-change` says so.
+
+**`/recipedump` refuses to overwrite a dump written by a different set of mods.** The output
+directory is `<gamedir>/mc-recipe-dump` and cannot be redirected, so a run from a dev client
+or a server-side instance would land on top of the pack's real dump — the one artifact here
+that costs a launch of a 410-mod pack to reproduce. `/recipedump force` overwrites anyway.
+A dump directory that predates schema 6 records no digest and is overwritten without a
+fight, which is what makes the first dump after upgrading work.
 
 It also writes `nbt_trace.json` by default: a per-top-level-tag digest of every key that
 carries identifying NBT, in two flavours per tag — lists in order, and lists sorted.

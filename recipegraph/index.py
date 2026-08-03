@@ -14,7 +14,8 @@ from .sources import hei_dump, icons as icons_src, jar_json, machine_names, ored
 
 
 def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
-          keep_categories=None, dump_dir=None, out_path=None):
+          keep_categories=None, dump_dir=None, out_path=None,
+          allow_mod_set_change=False):
     def say(msg):
         if not quiet:
             print(msg, file=sys.stderr)
@@ -25,6 +26,16 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # Resolved ONCE and used for every file read out of the dump, so a graph cannot end up
     # holding recipes from one dump and names from another. See dump_meta.DIR_NAME.
     dump_root = dump_meta.dir_for(instance_dir, dump_dir)
+
+    # READ HERE AND REPORTED LATER, which is two different orderings on purpose. The
+    # refusal below is about which pack this dump came from, and that is knowable from two
+    # small files -- so raising it after ten minutes of parsing would spend ten minutes to
+    # reach a conclusion available at the start, and those ten minutes are what tempt the
+    # next person to skip the check. `describe` still prints where it always has, ahead of
+    # the files this directory contributes. ONE read, so the guard and the report cannot
+    # disagree about what summary.json said. #194
+    meta = dump_meta.read(dump_root)
+    _refuse_the_wrong_pack(meta, out_path, allow_mod_set_change, say)
 
     csv_path = find_items_csv(instance_dir)
     if csv_path:
@@ -71,11 +82,13 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 
     # Provenance first: everything else read from this directory is only as current as the
     # dump that produced it, so say which mod wrote it before reporting what it contained.
-    meta = dump_meta.read(dump_root)
+    # (`meta` was read at the top, where the wrong-pack refusal needed it.)
     say(dump_meta.describe(meta))
     g.dump_schema = meta["schema"] or 0
     g.dump_version = meta["mod_version"] or None
     g.dump_names_failed = meta["names_failed"]
+    g.dump_mod_count = meta["mod_count"]
+    g.dump_mod_digest = meta["mod_digest"]
 
     # After items.csv, and with setdefault, so the pack's own export stays authoritative
     # for anything it covers. This only has to reach the keys items.csv cannot express.
@@ -196,6 +209,57 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         % (len(g.recipes), len(g.by_output),
            len(referenced & set(g.ore_members)), len(referenced)))
     return g
+
+
+def _refuse_the_wrong_pack(meta, out_path, allow_mod_set_change, say):
+    """Stop before a dump from one pack replaces a graph built from another. #194
+
+    COMPARED AGAINST THE GRAPH ABOUT TO BE OVERWRITTEN, which is the only comparison
+    available and turns out to be the right one. The graph at `--out` records the jar set
+    its dump had; a new dump declares its own. Two different answers at the same path means
+    one of the two artifacts is not the pack the operator has in mind, and the build is
+    about to decide which by destroying the other.
+
+    FOUR OUTCOMES, AND THREE OF THEM SAY SO. Returning silently for both "the jar sets
+    match" and "I could not compare them" would make a check that ran and a check that was
+    skipped look identical from the outside -- which is the #194 defect itself, one level up,
+    committed by the guard written to fix it. So an unchecked build says it was unchecked and
+    why, and a checked one says it checked.
+
+    NOTHING TO COMPARE AGAINST IS STILL NOT A FAILURE. A dump from before schema 6, or a
+    graph from before #194, cannot be compared and must not block: refusing on either would
+    refuse the first build after this lands, which is every build. They are reported, not
+    raised, and the same build records the digest that makes the NEXT one checkable.
+    """
+    if not out_path:
+        # No graph is being replaced, so there is no comparison to skip. The only outcome
+        # with nothing to report.
+        return
+    if not os.path.exists(out_path):
+        say("mod set: nothing at %s yet, so there is no graph to disagree with" % out_path)
+        return
+    if meta["mod_digest"] is None:
+        say("mod set: NOT CHECKED -- this dump predates schema 6 and does not record which "
+            "jars produced it, so it cannot be compared against the graph it is replacing; "
+            "re-run /recipedump to make the next build checkable")
+        return
+    count, digest = Graph.recorded_mod_set(out_path)
+    if digest is None:
+        say("mod set: NOT CHECKED -- the graph at %s predates #194 and records no jar set; "
+            "this build records one, so the next build is checkable" % out_path)
+        return
+    if digest == meta["mod_digest"]:
+        say("mod set: %s, matching the graph being replaced" % dump_meta.mods_phrase(count))
+        return
+    if allow_mod_set_change:
+        # SAID, not silent, because the flag is per-invocation and the graph it produces
+        # outlives the terminal it was typed in.
+        say("mod set: replacing a graph built from a different pack, as %s asked (%s there, "
+            "%s in this dump)"
+            % (dump_meta.OVERRIDE_FLAG, dump_meta.mods_phrase(count),
+               dump_meta.mods_phrase(meta["mod_count"])))
+        return
+    dump_meta.check_mod_set(meta, count, digest)
 
 
 def _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say):
