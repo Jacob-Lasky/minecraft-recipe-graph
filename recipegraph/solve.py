@@ -565,12 +565,7 @@ class Solver:
                 # tier of it is out of reach"; a processed FORM means "this shape of the
                 # material is not made at all, use the other one". Collapsing them into one
                 # sentence would make the second read as though levelling were involved.
-                node["note"] = (
-                    "no recipe reaches this state; the graph can only make %s"
-                    % self.g.bare_name(other)
-                    if base_key(key) != key else
-                    "nothing makes this form; the graph can only make %s"
-                    % self.g.bare_name(other))
+                node["note"] = self._unsourced_note(key, other)
             self.leaf_totals[key] += remainder
             return node
 
@@ -631,6 +626,22 @@ class Solver:
                 "every recipe you pinned for %s loops back on its own ingredients, so "
                 "the plan uses another route" % self.g.bare_name(key))
 
+    def _unsourced_note(self, key, other):
+        """Which of the three things `reachable_form` found, in words a player can act on.
+
+        THREE WORDINGS FOR THREE CLAIMS, and collapsing them would lose the action. A STATE
+        means "you have the item, this tier is out of reach"; a FORM means "this shape is
+        not made, use the other one"; a VARIANT means "the thing IS made, just carrying
+        NBT this row does not name" -- which is the one where the player's next move is to
+        go and look at the variant rather than to substitute anything.
+        """
+        name = self.g.bare_name(other)
+        if base_key(key) != key:
+            return "no recipe reaches this state; the graph can only make %s" % name
+        if base_key(other) == key:
+            return "nothing makes this exact item; the graph makes %s" % name
+        return "nothing makes this form; the graph can only make %s" % name
+
     def reachable_form(self, key):
         """The base item, when `key` is an NBT STATE of something the graph CAN make.
 
@@ -680,8 +691,32 @@ class Solver:
         if split_key(key)[1] == "*":
             return None
         stem = base_key(key)
-        if stem != key and self.g.real_producers(stem):
-            return stem
+        if stem != key:
+            # A STATE of a producible item: #139's half.
+            return stem if self.g.real_producers(stem) else None
+        # A BARE key nothing makes, while a VARIANT of it IS made: #170's half, and the
+        # third face of one subsumption rule. `animus:kama_bound` is consumed by four
+        # recipes and produced by none, while the Alchemy Array makes
+        # `animus:kama_bound#fd1adc426e12` -- so the graph knows a 53.35 route and
+        # `cost._seed` still prices the bare key at BASE_RAW_COST and tells the player they
+        # already have it. 96 keys on the reference graph, 4,193 produced variants behind
+        # them, the worst underpriced by a factor of 7,277.
+        #
+        # REPORTED, NOT REPRICED, and that is the whole of what is settled. Whether the
+        # SOLVER should route a bare demand through a produced variant is contested: #28
+        # rejected exactly that in `producers` -- "the solver asks for exactly this stack"
+        # -- and `test_the_solver_is_not_widened` pins the refusal. #170 argues the
+        # opposite from 1.12 ingredient matching. The dump cannot settle it, because
+        # `stackKey` writes a digest whenever the REPRESENTATIVE stack carries NBT and
+        # never records whether the slot would have accepted one. So the routing question
+        # goes to Jake with #171's `raw` split; saying what the tool knows does not need it.
+        made = [v for v in self.g.variant_index.get(key, ())
+                if self.g.real_producers(v)]
+        if made:
+            # Deterministic and meaningful: `variant_index` is insertion-ordered off
+            # `by_output`, and the cheapest-to-name answer would need prices the reporter
+            # does not have. First produced variant, which is the first one the dump saw.
+            return made[0]
         return self.g.obtainable_sibling(key)
 
     def _snapshot(self):

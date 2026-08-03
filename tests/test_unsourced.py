@@ -318,6 +318,90 @@ class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
         self.assertIsNone(split_ore_group("plankWood".replace("plank", "zzz")))
 
 
+class ProducedOnlyAsAVariantTest(unittest.TestCase):
+    """The bare key nothing makes, while an NBT variant of it IS made. #170's half.
+
+    Reported as "`animus:kama_bound` just says need, but the way it is made is via the
+    alchemy array". The recipe is in the dump and the graph has it -- filed under
+    `animus:kama_bound#fd1adc426e12`, while four recipes ask for the bare key. So the graph
+    knows a 53.35 route and prices the bare key at `BASE_RAW_COST`, which reads to a player
+    as "you already have this". 96 bare keys are in that state on the reference graph with
+    4,193 produced variants behind them, the worst underpriced by a factor of 7,277.
+
+    REPORTED, NOT REPRICED. Whether the solver should ROUTE a bare demand through a produced
+    variant is contested and stays open: #28 rejected exactly that widening in `producers`
+    and `test_machines.CatalystVariantTest.test_the_solver_is_not_widened` pins the refusal.
+    Nothing here touches `producers`, so that test still passes and this file makes no claim
+    about it.
+    """
+
+    BARE = "mod:kama_bound"
+    MADE = "mod:kama_bound#fd1adc426e12"
+
+    @staticmethod
+    def _graph(variant_producible=True):
+        g = Graph()
+        g.names = {ProducedOnlyAsAVariantTest.BARE: "Bound Khopesh",
+                   ProducedOnlyAsAVariantTest.MADE: "Bound Khopesh",
+                   "mod:reagent": "Binding Reagent", "mod:out": "Ritual Output"}
+        # Four recipes ask for the BARE key, as the report describes.
+        g.add(Recipe("use", "test", [("mod:out", 1)],
+                     [Ingredient([ProducedOnlyAsAVariantTest.BARE], 1)]))
+        if variant_producible:
+            g.add(Recipe("array", "bloodmagic:alchemyArray",
+                         [(ProducedOnlyAsAVariantTest.MADE, 1)],
+                         [Ingredient(["mod:reagent"], 1)]))
+        return g
+
+    def _leaf(self, g):
+        return Solver(g).solve("mod:out", 1)["tree"]["children"][0]
+
+    def test_the_bare_key_is_marked(self):
+        leaf = self._leaf(self._graph())
+        self.assertEqual(leaf["key"], self.BARE)
+        self.assertTrue(leaf.get("unsourced"))
+
+    def test_the_note_says_the_item_IS_made_rather_than_that_a_shape_is_missing(self):
+        # The player's next move here is to go and look at the variant, not to substitute a
+        # different form. Reusing the FORM wording would send them looking for another item.
+        note = self._leaf(self._graph())["note"]
+        self.assertIn("nothing makes this exact item", note)
+        self.assertIn("Bound Khopesh", note)
+        self.assertNotIn("this form", note)
+
+    def test_with_no_producible_variant_it_is_NOT_marked(self):
+        # Same refusal as the other two faces: nothing to name, so the mark would collapse
+        # to "no recipe", which the NEED badge already says.
+        self.assertFalse(self._leaf(self._graph(variant_producible=False)).get("unsourced"))
+
+    def test_the_solver_is_still_not_widened(self):
+        # THE #28 CONSTRAINT, asserted here too rather than only in test_machines, because
+        # this is the file that would be tempted to relax it. Marking must not reprice: the
+        # bare key still has no producers and the plan still says NEED.
+        g = self._graph()
+        self.assertEqual(g.real_producers(self.BARE), [])
+        leaf = self._leaf(g)
+        self.assertEqual(leaf["status"], "raw")
+
+    def test_the_choice_of_variant_is_deterministic(self):
+        # It reaches a plan tree and the fixtures freeze those for the Java port, so with two
+        # producible variants the answer cannot depend on dict order. `variant_index` is
+        # insertion-ordered off `by_output`, so the first the dump saw wins -- the same
+        # invariant `RecipeGraphOrderTest` pins for producer lists.
+        def built():
+            g = self._graph()
+            g.names["mod:kama_bound#aaaaaaaaaaaa"] = "Bound Khopesh"
+            g.add(Recipe("array2", "bloodmagic:alchemyArray",
+                         [("mod:kama_bound#aaaaaaaaaaaa", 1)],
+                         [Ingredient(["mod:reagent"], 1)]))
+            return g
+
+        first = self._leaf(built())["note"]
+        for _ in range(20):
+            self.assertEqual(first, self._leaf(built())["note"])
+        self.assertEqual(self.MADE, Solver(built()).reachable_form(self.BARE))
+
+
 if __name__ == "__main__":
     unittest.main()
 

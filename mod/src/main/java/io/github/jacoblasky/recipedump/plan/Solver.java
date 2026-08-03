@@ -764,14 +764,7 @@ public final class Solver {
                 // that is #136 and needs both cost audits; moving a price from here would
                 // change routing with none of that scrutiny, and no test here would notice.
                 node.unsourced = Boolean.TRUE;
-                // TWO WORDINGS, because they are two different claims. An NBT STATE means
-                // "you have the item, this tier is out of reach"; a processed FORM means
-                // "this shape is not made, use the other one". One sentence for both would
-                // make the second read as though levelling were involved.
-                node.note = (Keys.baseKey(g.key(keyId)).equals(g.key(keyId))
-                             ? "nothing makes this form; the graph can only make "
-                             : "no recipe reaches this state; the graph can only make ")
-                        + g.bareName(other);
+                node.note = unsourcedNote(keyId, other) + g.bareName(other);
             }
             leafTotals.add(keyId, remainder);
             return node;
@@ -891,6 +884,27 @@ public final class Solver {
      * inventory index makes: the question is "is this one NBT STATE of an item", and meta
      * separates genuinely different items. Python calls `model.base_key` for the same reason.
      */
+    /**
+     * Which of the three things {@link #reachableForm} found, in words a player can act on.
+     *
+     * THREE WORDINGS FOR THREE CLAIMS, and collapsing them loses the action. A STATE means
+     * "you have the item, this tier is out of reach"; a FORM means "this shape is not made,
+     * use the other one"; a VARIANT means "the thing IS made, just carrying NBT this row
+     * does not name" -- where the next move is to go and look at the variant rather than to
+     * substitute anything. Mirrors `Solver._unsourced_note` in python and is held to it by
+     * the golden gate.
+     */
+    private String unsourcedNote(int keyId, int other) {
+        String key = g.key(keyId);
+        if (!Keys.baseKey(key).equals(key)) {
+            return "no recipe reaches this state; the graph can only make ";
+        }
+        if (Keys.baseKey(g.key(other)).equals(key)) {
+            return "nothing makes this exact item; the graph makes ";
+        }
+        return "nothing makes this form; the graph can only make ";
+    }
+
     int reachableForm(int keyId) {
         if (hasRealProducers(keyId)) {
             return -1;
@@ -905,8 +919,20 @@ public final class Solver {
         }
         String stem = Keys.baseKey(key);
         if (!stem.equals(key)) {
+            // A STATE of a producible item: #139's half.
             int stemId = g.keyId(stem);
             return stemId >= 0 && hasRealProducers(stemId) ? stemId : -1;
+        }
+        // A BARE key nothing makes while a VARIANT of it IS made: #170's half, and the
+        // third face of one subsumption rule. REPORTED, NOT REPRICED -- whether the solver
+        // should ROUTE a bare demand through a produced variant is contested (#28 refused
+        // it in `producers`) and stays open. Mirrors `Solver.reachable_form` in python.
+        for (int variant : g.variantsOf(keyId)) {
+            if (hasRealProducers(variant)) {
+                // First produced variant, which is the one the dump saw first: `variantsOf`
+                // is insertion-ordered, and this reaches a plan tree the fixtures freeze.
+                return variant;
+            }
         }
         return obtainableSibling(keyId);
     }
