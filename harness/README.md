@@ -80,6 +80,7 @@ All are `-D` system properties on the client, forwarded from the gradle command 
 | `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the main menu. |
 | `mcrecipedump.shotDebugOverlay` | `false` | Keep ModularUI's widget-outline overlay in the shot. |
 | `mcrecipedump.shotTimedFrames` | 0 | Time this many frames after settling, then report. See below. |
+| `mcrecipedump.shotWorld` | unset | Load a superflat single-player world before opening the screen. Adds ~40 s. See the world bullet under Limits. |
 
 The two it does not set are reachable through the pass-through tail:
 
@@ -144,14 +145,30 @@ shaped what we believed was verifiable. **A limitation nobody checked is not a l
 it is a guess with authority**, and it is worse than a silent skip because it stops anyone
 running the check at all. So each bullet says whether it was measured.
 
-* **It renders GUIs, not the world. ASSUMED, NOT MEASURED.** No world is loaded, so anything
-  needing a player, a tile entity or a server-side capability has nothing to draw from, and
-  Phase 5's live AE2 read is believed untestable here. **Nobody has tried loading one.** The
-  experiment is small and specific -- have a shot screen create and enter a superflat single
-  player world before opening its screen -- and until someone runs it, treat this bullet the
-  way the input bullet deserved to be treated. The JEI runtime turning out to be fully live
-  at the main menu (#146) is the same shape: another thing assumed to need a world that did
-  not.
+* **It CAN render the world. MEASURED, and this bullet used to say the opposite.** It read:
+  "No world is loaded, so anything that needs a player, a tile entity or a server-side
+  capability has nothing to draw from. Phase 5's live AE2 read is not testable here." Three
+  clauses, none of them ever tested. All three are false.
+
+  `-Dmcrecipedump.shotWorld=<name>` makes the harness launch the integrated server on a
+  superflat and wait for the world before opening the screen. `world-probe` then places a
+  chest and queries it. Measured output:
+
+  ```
+  world loaded: dimension 0, player at 965.5,4.0,-598.5, block beneath = minecraft:grass,
+                integratedServer=true, loadedTileEntities=0
+  world-probe: setBlockState=true, block now minecraft:chest, tileEntity=TileEntityChest,
+                capability: IItemHandler with 27 slots
+  world-probe: loadedTileEntities now 1, integratedServer=true
+  ```
+
+  A player, a tile entity, and a server-side capability -- and `hasCapability` then
+  `getCapability` on a tile entity is the same shape of call Phase 5's AE2 read needs. **So
+  the harness can host that test.** It does not follow that the test passes: AE2 is not in
+  the dev mod set, so what is proven is the mechanism, not the grid.
+
+  Costs about 40 s on top of a normal run, and it is OFF BY DEFAULT -- a world changes what
+  is behind every panel, so turning it on would move every existing screenshot.
 * **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Seven mods is not 410. A
   screen that renders here can still collide with something in MeatballCraft -- a conflicting
   keybind, another mod's GUI overlay, a theme override. #19's verification plan keeps one live
