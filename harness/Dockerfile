@@ -9,9 +9,24 @@
 # through the Azul toolchain Gradle provisions; that is a separate JVM and unaffected.
 FROM eclipse-temurin:25-jdk
 
-# Xvfb plus mesa's llvmpipe give LWJGL 2 a real OpenGL 2.1 context with no GPU. 1.12.2 asks
-# for nothing llvmpipe lacks, so this is a software rasteriser standing in for a card rather
-# than a stub that fakes the API.
+# Xvfb plus mesa's llvmpipe give LWJGL 2 a real OpenGL context with no GPU. This is a
+# software rasteriser standing in for a card, NOT a stub that fakes the API -- which is the
+# distinction that makes rendered output trustworthy, and the reason not to reach for
+# HeadlessMC's LWJGL patching (see harness/README.md, "Why not HeadlessMC").
+#
+# 1.12.2 asks for OpenGL 2.1 and the context is much wider than that. The load-bearing claim
+# is "much wider", not the exact numbers; those are the evidence, read off the client's own
+# banner on 2026-08-02 and re-readable from any run's log rather than trusted from here:
+#
+#   GL info: Vendor: 'Mesa' Version: '4.5 (Compatibility Profile) Mesa 26.0.3-1ubuntu1'
+#            Renderer: 'llvmpipe (LLVM 21.1.8, 256 bits)'
+#
+# This comment previously asserted a 2.1 context. That was assumed rather than measured, and
+# it was wrong in the direction that makes the container look less capable than it is.
+#
+# Worth knowing before writing this container off for a heavier mod set: a 4.5 compatibility
+# profile covers essentially anything a 1.12.2 mod can ask for, so "a client mod refuses the
+# software rasteriser's GL level" is not the thing that would stop it (#146).
 #
 # Every X library below is one LWJGL 2 dlopen()s at Display.create(), and a missing one
 # fails as `UnsatisfiedLinkError: no lwjgl in java.library.path` -- which names LWJGL and
