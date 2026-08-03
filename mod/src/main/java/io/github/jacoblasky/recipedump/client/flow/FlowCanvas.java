@@ -74,17 +74,30 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         this.culling = new FlowCulling(laid);
         this.boxWidgets = new ArrayList<IWidget>(laid.size());
         for (FlowLayout.Box box : laid.boxes) {
-            // A BACKGROUND, unlike the tree's rows. In a list a row is bounded by the rows
-            // above and below it; on a canvas it is text floating on a panel, and the first
-            // screenshot of this showed exactly that -- three nodes and an elbow that read as
-            // unrelated captions. The box is what makes it a graph.
+            // A BACKGROUND, unlike the tree's rows: on a canvas a row is text floating on a
+            // panel rather than something bounded by its neighbours.
             //
-            // `MC_BACKGROUND` AND NOT `MC_BUTTON`, which was the second screenshot's lesson.
-            // The row colours its label with `NodeStatus.INK_MUTED`, chosen against the light
-            // panel the tree sits on; on the button's dark face the quantity and badge stayed
-            // legible and the item NAME disappeared entirely -- a diagram of boxes that will
-            // not tell you what is in them. The node keeps the panel's own surface and is
-            // delimited by the nine-slice's border instead.
+            // DO NOT CHANGE THIS TO `MC_BUTTON`, OR TO ANY OTHER DARK BACKGROUND. The
+            // background here is load-bearing for a decision made in a file this one does not
+            // own, and getting it wrong costs a word rather than a crash.
+            //
+            // `NodeStatus`'s inks are the web UI's LIGHT theme, chosen because a ModularUI
+            // panel is vanilla's light grey -- that is documented on the constants, and it
+            // makes the surface underneath the shared row part of the row's contract. On the
+            // button's dark face the quantity and the badge stayed legible and the item NAME
+            // disappeared entirely, because it is drawn in `INK_MUTED`. A diagram of boxes
+            // that will not tell you what is in them, and nothing fails: the widget is there,
+            // sized, hit-testable and the right colour for a panel it is not on.
+            //
+            // Found by screenshot, and only by screenshot. If a dark canvas is ever actually
+            // wanted, the fix is a dark-theme ink set in `NodeStatus` -- s2layout owns it --
+            // and not a background swap here. Selection highlighting composes with this by
+            // swapping the BACKGROUND rather than the ink, for the same reason.
+            //
+            // The node keeps the panel's own surface and is delimited by the nine-slice's
+            // border. That border is also what makes this read as a graph at all: in a list a
+            // row is bounded by the rows above and below it, and the first screenshot of this
+            // canvas was three nodes and an elbow that read as unrelated captions.
             IWidget widget = PlannerWidgets
                     .planNodeContent(box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT)
                     .background(GuiTextures.MC_BACKGROUND)
