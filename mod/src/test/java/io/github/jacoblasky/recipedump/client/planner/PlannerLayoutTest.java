@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Pins;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -15,6 +16,7 @@ import com.cleanroommc.modularui.widgets.ListWidget;
 
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.common.ScenarioSource;
 import org.junit.Test;
 
 /**
@@ -195,7 +197,8 @@ public class PlannerLayoutTest {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
         assertNoEllipsis(PlannerWidgets.nodeMenu(node, withRecipeViewer()));
         assertNoEllipsis(PlannerWidgets.nodeMenu(node, PlannerActions.NONE));
-        assertNoEllipsis(PlannerWidgets.recipePicker(node));
+        assertNoEllipsis(pickerFor(node, RecipeChoices.MAX_SHOWN));
+        assertNoEllipsis(pickerFor(node, 0));
         // The TODO panel's own furniture, not the keys in it: a key is a tree label and may
         // legitimately be cut.
         PlanBook book = new PlanBook();
@@ -248,7 +251,7 @@ public class PlannerLayoutTest {
     public void theRecipePickerAndTodoPanelLayOutForEveryFixture() {
         for (String fixture : PlanFixtures.names()) {
             PlanView plan = PlanFixtures.load(fixture);
-            ModularPanel picker = PlannerWidgets.recipePicker(plan.tree());
+            ModularPanel picker = pickerFor(plan.tree(), 3);
             ModularPanel todo = PlannerWidgets.todoPanel(plan, emptyBook());
             HeadlessLayout.layOut(picker);
             HeadlessLayout.layOut(todo);
@@ -319,7 +322,7 @@ public class PlannerLayoutTest {
             ModularPanel[] panels = {
                 PlannerWidgets.plannerPanel(plan, book, recorder()),
                 PlannerWidgets.todoPanel(plan, book),
-                PlannerWidgets.recipePicker(plan.tree()),
+                pickerFor(plan.tree(), RecipeChoices.MAX_SHOWN + 7),
                 PlannerWidgets.nodeMenu(plan.tree(), PlannerActions.NONE),
             };
             for (ModularPanel panel : panels) {
@@ -556,6 +559,289 @@ public class PlannerLayoutTest {
      * panel was. Clicking is reachable headlessly because a row is `Interactable` and
      * `onMousePressed` is an ordinary method.
      */
+    /**
+     * A pin the solver could not honour reaches the panel.
+     *
+     * FOUND BY A SCREENSHOT AND NOT BY A TEST, which is why it is written down here. Pinning
+     * "Iron Ingot from Iron Nugget" against the reference pack produced a plan
+     * byte-identical to pinning nothing -- the pin resolved, the solver applied it, the cycle
+     * guard overruled it (9 nuggets come from an ingot) and recorded a sentence saying so,
+     * and the panel read past the field. The click looked like it had worked. `render.py`
+     * has shown this in its warnbar since #30.
+     */
+    @Test
+    public void aPinTheSolverCouldNotHonourIsSaidOutLoud() {
+        PlanView plan = planWithOverruledPins(1);
+        assertEquals(java.util.Arrays.asList("every recipe you pinned for Thing 0 loops back"),
+                     PlannerWidgets.warnings(plan));
+
+        ModularPanel panel =
+                PlannerWidgets.plannerPanel(plan, emptyBook(), PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        assertTrue("the panel must say it: " + dumpText(panel),
+                   texts(panel).contains("every recipe you pinned for Thing 0 loops back"));
+    }
+
+    /**
+     * More overruled pins than there is room for are COUNTED, and the tree survives.
+     *
+     * An uncapped list eats the panel from the top: one line per pin, and a player has as
+     * many of those as they made choices. The failure is not a scrollbar, it is a tree with
+     * no height at all, which renders as an empty plan.
+     */
+    @Test
+    public void tooManyOverruledPinsAreCountedRatherThanAllowedToEatTheTree() {
+        PlanView plan = planWithOverruledPins(9);
+        List<String> shown = PlannerWidgets.warnings(plan);
+        assertEquals(PlannerWidgets.MAX_WARNINGS, shown.size());
+        assertEquals("+7 more recipe choice(s) could not be used",
+                     shown.get(shown.size() - 1));
+        // SORTED, matching `render.py`'s warnbar and `cli.cmd_plan`, so the same plan reads
+        // the same way wherever it is shown. A map's iteration order is not a thing to put
+        // in front of a reader.
+        assertEquals(java.util.Arrays.asList(
+                             "every recipe you pinned for Thing 0 loops back",
+                             "every recipe you pinned for Thing 1 loops back"),
+                     shown.subList(0, 2));
+
+        ModularPanel panel =
+                PlannerWidgets.plannerPanel(plan, emptyBook(), PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            Area area = widget.getArea();
+            assertTrue(widget.getClass().getSimpleName() + " has no box: " + area,
+                       area.w() > 0 && area.h() > 0);
+        }
+    }
+
+    /**
+     * The "planned without" caveat wraps instead of losing its last input.
+     *
+     * The one place in this package where wrapping beats cutting. The caveat is the list of
+     * inputs the plan could NOT see; a cut list is a shorter, wrong list, and the reader has
+     * no way to tell it was cut except a "..." that could equally be part of a name.
+     */
+    @Test
+    public void theCaveatWrapsRatherThanLosingItsLastInput() {
+        String caveat = ScenarioSource.summary();
+        assertFalse("the fixture for this test is the real caveat; it must not be empty",
+                    caveat.isEmpty());
+        List<String> lines = NodeRowText.wrap(caveat, PlannerWidgets.CONTENT_WIDTH,
+                                              PlannerWidgets.MAX_CAVEAT_LINES);
+        StringBuilder rejoined = new StringBuilder();
+        for (String line : lines) {
+            if (rejoined.length() > 0) {
+                rejoined.append(' ');
+            }
+            rejoined.append(line);
+        }
+        assertEquals("every input the plan could not see must survive the wrap",
+                     caveat, rejoined.toString());
+        for (String line : lines) {
+            assertFalse("a wrapped line must not also be cut: " + line,
+                        line.endsWith(NodeRowText.ELLIPSIS));
+        }
+    }
+
+    /** A plan carrying `count` overruled pins and nothing else out of the ordinary. */
+    private static PlanView planWithOverruledPins(int count) {
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        result.addProperty("target", "mod:thing");
+        result.addProperty("target_name", "Thing");
+        result.addProperty("qty", 1);
+        result.addProperty("nodes", 1);
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "mod:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.CRAFT);
+        result.add("tree", tree);
+        com.google.gson.JsonObject overruled = new com.google.gson.JsonObject();
+        for (int i = 0; i < count; i++) {
+            overruled.addProperty("mod:thing" + i,
+                                  "every recipe you pinned for Thing " + i + " loops back");
+        }
+        result.add("pins_overruled", overruled);
+        return PlanJson.readResult(result);
+    }
+
+    /**
+     * A picker for `node` offering `ways` real candidates, or the empty case at zero.
+     *
+     * THROUGH `RecipeChoices` AND A REAL GRAPH rather than by fabricating `RecipeChoice`
+     * values, so a layout assertion is made against the strings the picker will really be
+     * handed. `Pins.label` produces "Plate from ingot"; a made-up "Recipe 1" would be
+     * shorter than anything real and would pass a truncation test the shipped panel fails.
+     */
+    private static ModularPanel pickerFor(PlanNode node, int ways) {
+        return PlannerWidgets.recipePicker(node, choicesFor(node, ways), PlannerActions.NONE);
+    }
+
+    private static RecipeChoices choicesFor(PlanNode node, int ways) {
+        if (ways <= 0) {
+            return RecipeChoices.forNode(ChoiceGraphs.makingKey("mod:nothing", 1), node, null);
+        }
+        return RecipeChoices.forNode(ChoiceGraphs.makingKey(node.key(), ways), node, null);
+    }
+
+    /**
+     * Every candidate gets a row, and clicking one asks for that recipe on that node.
+     *
+     * BOTH HALVES OF THE IDENTITY, because a picker whose rows all pin the first candidate
+     * would pass any test that only counted them -- the same single-row blind spot
+     * `aDifferentRowAsksForADifferentNode` was written for on the tree.
+     */
+    @Test
+    public void everyRecipePickerRowPinsItsOwnRecipe() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        RecipeChoices choices = choicesFor(node, 3);
+        assertEquals(3, choices.shown().size());
+        Recorder recorder = new Recorder();
+        ModularPanel picker = PlannerWidgets.recipePicker(node, choices, recorder);
+        HeadlessLayout.layOut(picker);
+
+        List<PlannerWidgets.ClickableGroup> rows = clickables(picker);
+        assertEquals("one clickable per candidate and nothing else", 3, rows.size());
+        List<String> expected = new java.util.ArrayList<String>();
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).onMousePressed(0);
+            expected.add("pin:" + node.key() + ":" + choices.shown().get(i).rid());
+        }
+        assertEquals(expected, recorder.calls);
+    }
+
+    /**
+     * The empty picker prints the reason and offers nothing to click.
+     *
+     * A picker with no rows and no sentence is the failure this whole family is about: a
+     * player cannot tell "no graph loaded" from "nothing makes this", and one of those is a
+     * file they forgot to install.
+     */
+    @Test
+    public void anEmptyRecipePickerSaysWhyAndHasNothingToClick() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        RecipeChoices nothing = choicesFor(node, 0);
+        assertTrue(nothing.isEmpty());
+        ModularPanel picker = PlannerWidgets.recipePicker(node, nothing, new Recorder());
+        HeadlessLayout.layOut(picker);
+        assertTrue("the reason must be on screen verbatim: " + HeadlessLayout.dump(picker),
+                   texts(picker).contains(nothing.why()));
+        assertEquals("nothing to click when there is nothing to choose",
+                     0, clickables(picker).size());
+    }
+
+    /**
+     * A capped list says so, and an uncapped one does not claim to be capped.
+     *
+     * The cap is `RecipeChoices.MAX_SHOWN`; the fixtures reach 172 alternatives on one node,
+     * so this is the normal case on a real pack rather than an edge. A list of 24 out of 172
+     * that stays quiet is a player concluding the pack has 24 ways to make a thing.
+     */
+    @Test
+    public void aCappedRecipePickerSaysHowManyItLeftOut() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        ModularPanel capped = pickerFor(node, RecipeChoices.MAX_SHOWN + 7);
+        HeadlessLayout.layOut(capped);
+        assertTrue("a capped picker must say so: " + dumpText(capped),
+                   dumpText(capped).contains("7 not shown"));
+
+        ModularPanel whole = pickerFor(node, 3);
+        HeadlessLayout.layOut(whole);
+        assertFalse("an uncapped picker must not: " + dumpText(whole),
+                    dumpText(whole).contains("not shown"));
+    }
+
+    /**
+     * The category column survives, and the LABEL is what gets cut.
+     *
+     * The inversion of the tree row's rule, and it was a screenshot that settled it: the
+     * picker for `minecraft:iron_ingot` -- 172 candidates, the fixture set's worst case --
+     * came out as fourteen rows all reading "Iron Ingot from ..." with the category cut off
+     * the end. Every row is the same item, so the label's leading words are identical down
+     * the list and the category is the only column that tells them apart.
+     */
+    @Test
+    public void theRecipePickerCutsTheLabelRatherThanTheCategory() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        RecipeChoices choices = choicesFor(node, RecipeChoices.MAX_SHOWN);
+        ModularPanel picker = PlannerWidgets.recipePicker(node, choices, PlannerActions.NONE);
+        HeadlessLayout.layOut(picker);
+
+        List<String> lines = texts(picker);
+        for (RecipeChoice choice : choices.shown()) {
+            assertTrue("a category was cut or dropped: " + choice.category() + " in " + lines,
+                       lines.contains(choice.category()));
+        }
+    }
+
+    /**
+     * A category longer than the cap is cut, and the label keeps {@link
+     * PlannerWidgets#MIN_LABEL}.
+     *
+     * `modularmachinery.recipes.ender_stone` is 36 characters and real; a column sized for it
+     * would spend the whole row on one pack's naming habit. So the cap wins over the category
+     * and the label floor wins over the cap, in that order, and neither can starve the other.
+     */
+    @Test
+    public void theCategoryColumnIsCappedAndNeverStarvesTheLabel() {
+        int inner = PlannerWidgets.PICKER_WIDTH - PlannerWidgets.PADDING * 2;
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        int capped = PlannerWidgets.categoryWidth(choicesFor(node, 3), inner);
+        assertTrue("the category column must not exceed the cap",
+                   capped <= PlannerWidgets.MAX_CATEGORY_CHARS * NodeRowText.CHAR_WIDTH);
+        assertTrue("a row that is all category leaves no label",
+                   inner - PlannerWidgets.CHOICE_STATE - PlannerWidgets.GAP * 2 - capped
+                           >= PlannerWidgets.MIN_LABEL);
+        // Squeezed to nothing rather than overflowing, which is what #125 measured ModularUI
+        // does NOT do for you: a child wider than its parent just draws past the edge.
+        assertEquals(0, PlannerWidgets.categoryWidth(choicesFor(node, 3), 40));
+    }
+
+    /**
+     * A pin outranks the solver's own choice in the colour, because it outranks it in fact.
+     *
+     * The row that is BOTH says so in words as well; a state drawn only as a colour is a
+     * state a colour-blind player cannot read, which is the argument `NodeStatus` exists on.
+     */
+    @Test
+    public void aPinnedRowReadsAsPinnedEvenWhenItIsAlsoTheOneInUse() {
+        assertEquals("pinned", PlannerWidgets.choiceState(choice(false, true)));
+        assertEquals("in use", PlannerWidgets.choiceState(choice(true, false)));
+        assertEquals("both", PlannerWidgets.choiceState(choice(true, true)));
+        assertEquals("", PlannerWidgets.choiceState(choice(false, false)));
+
+        assertEquals(NodeStatus.INK_OK, PlannerWidgets.choiceColour(choice(false, true)));
+        assertEquals("a pin is the player's decision and outranks the solver's",
+                     NodeStatus.INK_OK, PlannerWidgets.choiceColour(choice(true, true)));
+        assertEquals(NodeStatus.INK_CRAFT, PlannerWidgets.choiceColour(choice(true, false)));
+        assertEquals(NodeStatus.INK_MUTED, PlannerWidgets.choiceColour(choice(false, false)));
+    }
+
+    private static RecipeChoice choice(boolean inUse, boolean pinned) {
+        return new RecipeChoice(-1, "hei:x:1", new Pins.Pin("f", "cat", "Plate from ingot"),
+                                inUse, pinned);
+    }
+
+    /**
+     * The state column fits every word it can hold, for the badge column's reason.
+     *
+     * A recipe state is FIXED VOCABULARY, unlike a label, so a truncated one is always a bug
+     * rather than an honest cut. "in use..." says the opposite of "in use" only to a reader
+     * who does not notice the dots.
+     */
+    @Test
+    public void theStateColumnFitsEveryWordItCanHold() {
+        for (int combination = 0; combination < 4; combination++) {
+            RecipeChoice choice = new RecipeChoice(-1, "hei:x:1",
+                                                   new Pins.Pin("f", "cat", "Plate from ingot"),
+                                                   (combination & 1) != 0,
+                                                   (combination & 2) != 0);
+            String word = PlannerWidgets.choiceState(choice);
+            assertEquals("the state column cuts \"" + word + "\"",
+                         word, NodeRowText.fit(word, PlannerWidgets.CHOICE_STATE));
+        }
+    }
+
     private static final class Recorder implements PlannerActions, NodeActions {
         boolean recipeViewerAvailable;
         final List<String> calls = new java.util.ArrayList<String>();
@@ -593,6 +879,11 @@ public class PlannerLayoutTest {
         @Override
         public void openRecipePicker(PlanNode node) {
             calls.add("picker:" + node.key());
+        }
+
+        @Override
+        public void pinRecipe(PlanNode node, RecipeChoice choice) {
+            calls.add("pin:" + node.key() + ":" + choice.rid());
         }
 
         @Override

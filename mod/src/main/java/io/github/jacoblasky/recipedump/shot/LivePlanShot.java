@@ -8,6 +8,7 @@ import java.io.Writer;
 
 import io.github.jacoblasky.recipedump.client.PlannerEntry;
 import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.common.PinStore;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.plan.Solver;
@@ -80,6 +81,7 @@ final class LivePlanShot {
 
         if (awaitGraph()) {
             log("graph: " + GraphService.get().describe());
+            logPins();
             if (PlannerService.get().plan(target, qty(), Solver.DEFAULT_MAX_NODES)) {
                 awaitPlan();
             }
@@ -95,6 +97,22 @@ final class LivePlanShot {
         PlannerEntry.open(book);
     }
 
+    /**
+     * What the pin file contributed, in one line.
+     *
+     * EVIDENCE BESIDE THE PICTURE, for the reason {@link #PROP_JSON_OUT} exists. A plan that
+     * ignores a pin and a plan with no pins to ignore produce the SAME tree, so a screenshot
+     * cannot tell them apart -- which is exactly how a broken pin path gets shipped behind a
+     * picture that looks right. This says which of the two happened before the picture is
+     * taken.
+     */
+    private static void logPins() {
+        PinStore store = PinStore.get();
+        log("pins: " + store.pins().size() + " from "
+                + (store.file() == null ? "nowhere" : store.file().getPath())
+                + (store.problem().isEmpty() ? "" : " -- " + store.problem()));
+    }
+
     private static long qty() {
         try {
             return Math.max(1L, Long.parseLong(System.getProperty(PROP_QTY, "1")));
@@ -103,8 +121,13 @@ final class LivePlanShot {
         }
     }
 
-    /** True once the graph is READY. False for every other outcome, including a timeout. */
-    private static boolean awaitGraph() {
+    /**
+     * True once the graph is READY. False for every other outcome, including a timeout.
+     *
+     * PACKAGE-VISIBLE because `PlannerShot`'s recipe picker needs the same wait for the same
+     * reason, and a second copy of a bounded-poll loop is a second timeout to keep in step.
+     */
+    static boolean awaitGraph() {
         GraphService graphs = GraphService.get();
         long deadline = System.currentTimeMillis() + GRAPH_WAIT_MILLIS;
         while (graphs.state() == GraphService.State.IDLE

@@ -25,10 +25,11 @@ public final class PlanView {
     private final int maxNodes;
     private final List<ShoppingRow> shoppingList;
     private final List<MachineRow> machinesToBuild;
+    private final List<String> pinsOverruled;
 
     PlanView(String target, String targetName, long qty, PlanNode tree, boolean truncated,
              boolean exhausted, int nodes, int maxNodes, List<ShoppingRow> shoppingList,
-             List<MachineRow> machinesToBuild) {
+             List<MachineRow> machinesToBuild, List<String> pinsOverruled) {
         this.target = target;
         this.targetName = targetName;
         this.qty = qty;
@@ -39,6 +40,7 @@ public final class PlanView {
         this.maxNodes = maxNodes;
         this.shoppingList = Collections.unmodifiableList(shoppingList);
         this.machinesToBuild = Collections.unmodifiableList(machinesToBuild);
+        this.pinsOverruled = Collections.unmodifiableList(pinsOverruled);
     }
 
     /**
@@ -58,7 +60,8 @@ public final class PlanView {
                 .build();
         return new PlanView("", "no plan yet", 0L, root, false, false, 1, 0,
                             java.util.Collections.<ShoppingRow>emptyList(),
-                            java.util.Collections.<MachineRow>emptyList());
+                            java.util.Collections.<MachineRow>emptyList(),
+                            java.util.Collections.<String>emptyList());
     }
 
     public String target() {
@@ -109,6 +112,24 @@ public final class PlanView {
     /** Machines the plan routes through that the player does not have yet. */
     public List<MachineRow> machinesToBuild() {
         return machinesToBuild;
+    }
+
+    /**
+     * One sentence per recipe choice the solver could not honour, sorted.
+     *
+     * THE PANEL MUST SAY THESE, and until this field existed it silently did not. A pin the
+     * cycle guard overrules -- `9 nuggets -> 1 ingot`, whose nuggets come from ingots -- is
+     * the case where the picker's click appears to have worked and did not, and the plan
+     * comes back using the route the player just rejected. `Solver.noteOverruledPin`'s own
+     * comment says the plan says it; `render.py` puts it in the warnbar; the in-game panel
+     * read past it. Found by a screenshot: pinning "Iron Ingot from Iron Nugget" against the
+     * reference pack produced a byte-identical picture to not pinning anything at all.
+     *
+     * SORTED, matching `render.py` and `cmd_plan`, so the same plan reads the same way
+     * wherever it is shown -- a map's iteration order is not a thing to expose to a reader.
+     */
+    public List<String> pinsOverruled() {
+        return pinsOverruled;
     }
 
     /** Every node of the tree, parents before children. */

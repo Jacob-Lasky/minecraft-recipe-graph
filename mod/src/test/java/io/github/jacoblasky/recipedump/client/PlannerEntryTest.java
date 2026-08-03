@@ -96,6 +96,59 @@ public class PlannerEntryTest {
         return PlannerEntry.stateFor(GraphService.get(), PlannerService.get());
     }
 
+    /**
+     * Reopening the planner does not re-solve a question the service has already answered.
+     *
+     * NOT AN OPTIMISATION -- see {@link PlannerEntry#alreadyAnswered}. The window follows
+     * the service now, so a redundant solve visibly throws away the tree, shows "planning
+     * ..." and puts back an identical plan. Found by a harness screenshot, which plans and
+     * then opens and so hits this every single time.
+     */
+    @Test
+    public void reopeningDoesNotReSolveTheSameQuestion() throws Exception {
+        loadGraph();
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        PlannerEntry.startPlan(book);
+        awaitPlan();
+
+        long generation = PlannerService.get().generation();
+        PlannerEntry.startPlan(book);
+        assertEquals("the same question must not be asked again",
+                     generation, PlannerService.get().generation());
+        assertEquals(PlannerService.State.DONE, PlannerService.get().state());
+    }
+
+    @Test
+    public void aDifferentQuantityIsADifferentQuestionAndIsAskedAgain() throws Exception {
+        // The guard keys on the target AND the amount, because 1 hopper and 64 hoppers are
+        // different plans. Keying on "a plan exists" would pin the window to the first one.
+        loadGraph();
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        PlannerEntry.startPlan(book);
+        awaitPlan();
+
+        long generation = PlannerService.get().generation();
+        PlanBook more = new PlanBook();
+        more.setTodo("mod:plate", 64L);
+        PlannerEntry.startPlan(more);
+        awaitPlan();
+        assertTrue("a new quantity must produce a new answer",
+                   PlannerService.get().generation() > generation);
+        assertEquals(64L, PlannerService.get().targetQty());
+    }
+
+    private static void awaitPlan() throws Exception {
+        long deadline = System.currentTimeMillis() + 60_000L;
+        while (PlannerService.get().state() == PlannerService.State.PLANNING) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("the plan never finished");
+            }
+            Thread.sleep(5L);
+        }
+    }
+
     @Test
     public void noGraphIsAFailureThatNamesThePath() {
         GraphService.get().startLoad(folder.getRoot());
@@ -132,13 +185,7 @@ public class PlannerEntryTest {
     public void aFinishedPlanIsDrawnRatherThanDescribed() throws Exception {
         loadGraph();
         PlannerService.get().plan("mod:plate", 1L, Solver.DEFAULT_MAX_NODES);
-        long deadline = System.currentTimeMillis() + 60_000L;
-        while (PlannerService.get().state() == PlannerService.State.PLANNING) {
-            if (System.currentTimeMillis() > deadline) {
-                throw new AssertionError("the plan never finished");
-            }
-            Thread.sleep(5L);
-        }
+        awaitPlan();
         // null is "draw the tree", which is the one case that is not a PlannerState.
         assertNull(state());
     }

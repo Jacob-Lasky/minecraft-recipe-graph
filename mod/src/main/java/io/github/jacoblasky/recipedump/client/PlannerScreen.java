@@ -13,49 +13,67 @@ import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
+import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
+import io.github.jacoblasky.recipedump.common.PlannerService;
 
 /**
  * Opens the planner's windows. Everything they contain is built by {@link PlannerWidgets},
  * which is where the design lives and where the tests point.
  *
- * TWO ENTRY POINTS BECAUSE THERE ARE TWO STATES, and the split is honest rather than
+ * TWO ENTRY POINTS BECAUSE THERE ARE TWO CALLERS, and the split is honest rather than
  * scaffolding:
  *
- *   - {@link #open} is what the calculator item does today. There is no Java solver yet
- *     (#141), so what the mod can truthfully show is the plan book it already keeps -- the
- *     TODO list, synced from the server, which is a working feature from #140.
- *   - {@link #openPlan} takes a solved plan and draws the tree. It is what the screenshot
- *     harness drives against the frozen fixtures and what the solver will call with a live
- *     result. The argument type does not change between those two, because
- *     `tests/fixtures/plan/*.json` IS the solver's output shape.
+ *   - {@link #openPlanner} is what the calculator item does. It picks between the tree and
+ *     the four not-yet states each time it draws, and it REDRAWS ITSELF when the answer
+ *     underneath it changes -- see {@code PlannerWindow}.
+ *   - {@link #openPlan} takes a plan already in hand and draws it once. It is what the
+ *     screenshot harness drives against the frozen fixtures, where there is no service to
+ *     watch and nothing that could change. The argument type does not differ between the
+ *     two, because `tests/fixtures/plan/*.json` IS the solver's output shape.
  *
  * DO NOT MAKE THIS A `CustomModularScreen` SUBCLASS. That constructor hands `this::buildUI`
  * to `ModularScreen`, which calls it during `super(...)`, before any subclass field is
  * assigned -- so a screen holding its data in a field reads null while building its own
  * panel. Measured in #140, where the only symptom the client gave was
  * `opening 'planner' threw NullPointerException`, with the stack swallowed by `ShotScreens`.
- * A captured local cannot go wrong that way.
+ * A captured local cannot go wrong that way, and {@code PlannerWindow} keeps to it: its
+ * fields are read from `onUpdate` and never from the panel builder, which is handed a
+ * captured constructor argument.
  */
 public final class PlannerScreen {
 
     private PlannerScreen() {
     }
 
-    /** The plan book, with no plan. What the calculator item shows until #141 lands. */
-    public static void open(final PlanBook book) {
-        openPanel(new Function<ModularGuiContext, ModularPanel>() {
-            @Override
-            public ModularPanel apply(ModularGuiContext context) {
-                ModularPanel panel = PlannerWidgets.todoPanel(PlanView.empty(), book);
-                PlannerAreaSource.install(panel);
-                return panel;
-            }
-        });
+    /**
+     * The planner, showing whatever the services can answer with right now.
+     *
+     * @param book the player's plan book, for the "still needed" column.
+     */
+    public static void openPlanner(PlanBook book) {
+        // THE COUNTERS ARE READ BEFORE THE PANEL IS BUILT, not after. Read afterwards, a plan
+        // landing between the two would be drawn AND recorded as already drawn, and the
+        // window would sit on it -- a missed update, which is the failure that matters. Read
+        // first, the same race costs one redundant rebuild of an identical panel.
+        ClientGUI.open(new PlannerWindow(book, stamp(book)));
     }
 
     /**
-     * A solved plan, as a tree.
+     * What the window has drawn: the plan's generation and the book's revision together.
+     *
+     * BOTH, because the panel is a function of both and they change independently. The plan
+     * arrives from a worker thread; the book arrives from the server after "Add to TODO" or
+     * "Favourite" in the node menu, and it is what the footer's "N on TODO" counts. Watching
+     * only the plan left those two menu entries looking broken: the packet went, the server
+     * answered, and nothing on screen moved.
+     */
+    private static long stamp(PlanBook book) {
+        return PlannerService.get().generation() * 31L + book.revision();
+    }
+
+    /**
+     * A plan handed over directly, drawn once. For the screenshot harness.
      *
      * The panel and its actions are built TOGETHER and in that order, because opening a
      * sub-panel needs the panel it hangs off -- which does not exist until the main one has
@@ -66,29 +84,7 @@ public final class PlannerScreen {
         openPanel(new Function<ModularGuiContext, ModularPanel>() {
             @Override
             public ModularPanel apply(ModularGuiContext context) {
-                LivePlannerActions actions = new LivePlannerActions();
-                ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, actions);
-                actions.attachTo(panel);
-                // So JEI lays its item list out AROUND the planner rather than over it
-                // (#145's other seam). The source reports nothing once the panel closes, so
-                // there is nothing to deregister.
-                PlannerAreaSource.install(panel);
-                return panel;
-            }
-        });
-    }
-
-    /**
-     * The planner with no plan to draw: loading, solving, failed or idle.
-     *
-     * Same size as {@link #openPlan}'s panel, so the window does not jump when a plan
-     * arrives underneath it.
-     */
-    public static void openState(final PlannerState state) {
-        openPanel(new Function<ModularGuiContext, ModularPanel>() {
-            @Override
-            public ModularPanel apply(ModularGuiContext context) {
-                return PlannerWidgets.statePanel(state);
+                return planPanel(plan, book);
             }
         });
     }
@@ -107,5 +103,86 @@ public final class PlannerScreen {
         // Through `ClientGUI` rather than `Minecraft.displayGuiScreen`: a ModularScreen is
         // NOT a GuiScreen, it needs the `GuiScreenWrapper` that ClientGUI builds around it.
         ClientGUI.open(new ModularScreen(RecipeDumpMod.MODID, builder));
+    }
+
+    private static ModularPanel planPanel(PlanView plan, PlanBook book) {
+        LivePlannerActions actions = new LivePlannerActions();
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, actions);
+        actions.attachTo(panel);
+        // So JEI lays its item list out AROUND the planner rather than over it (#145's other
+        // seam). The source reports nothing once the panel closes, so nothing to deregister.
+        PlannerAreaSource.install(panel);
+        return panel;
+    }
+
+    /**
+     * The planner window, which rebuilds itself when the services have a new answer.
+     *
+     * WHY THE WINDOW WATCHES RATHER THAN THE PLANNER PUSHING. A plan is solved on a worker
+     * thread -- 0.4 s typically and 26 s at the budget ceiling -- so the window is routinely
+     * opened before there is anything to draw, and a pinned recipe re-solves underneath one
+     * that is already open. Without this, both cases leave a window showing an answer that is
+     * no longer the current one, and the only way to see the new one is to close it and use
+     * the item again. A player has no reason to guess that, and a picker whose click produces
+     * no visible change reads as a broken button rather than as a slow one.
+     *
+     * A COMBINED COUNTER, not just the plan's -- see {@link #stamp}. Multiplying by a prime
+     * rather than concatenating is enough here because both halves only ever go UP: any
+     * change to either moves the sum, and nothing needs to recover which one moved.
+     *
+     * A COUNTER POLLED FROM `onUpdate` RATHER THAN A CALLBACK. `onUpdate` is ModularUI's
+     * per-client-tick hook, so this runs on the thread that is allowed to touch a GUI; a
+     * callback fired from the solver thread would rebuild widgets off the client thread,
+     * which in 1.12.2 surfaces as a ConcurrentModificationException from inside a GUI and
+     * gets blamed on the GUI. The cost is one volatile read per tick.
+     *
+     * REOPENING THROWS AWAY SCROLL POSITION AND ANY OPEN SUB-PANEL, and that is acceptable
+     * ONLY because it happens when the plan itself has changed -- a scroll offset into a tree
+     * that no longer exists is not worth keeping. DO NOT extend this to redraw on anything
+     * cheaper than a generation bump; a window that reset the player's scroll on a tick would
+     * be worse than one that never refreshed.
+     */
+    private static final class PlannerWindow extends ModularScreen {
+
+        private final PlanBook book;
+        private final long drawn;
+
+        PlannerWindow(PlanBook book, long stamp) {
+            super(RecipeDumpMod.MODID, builderFor(book));
+            this.book = book;
+            this.drawn = stamp;
+        }
+
+        @Override
+        public void onUpdate() {
+            super.onUpdate();
+            long now = stamp(book);
+            if (now != drawn) {
+                ClientGUI.open(new PlannerWindow(book, now));
+            }
+        }
+    }
+
+    /**
+     * What the planner should draw at the moment it is built.
+     *
+     * A FUNCTION AND NOT A PANEL, because a rebuilt window has to ask the question again
+     * rather than redraw the answer its predecessor was given -- which is the whole point of
+     * rebuilding. It takes `book` as a captured argument rather than reading a field, for the
+     * `CustomModularScreen` reason on the class: it is invoked with the screen only partly
+     * constructed.
+     */
+    private static Function<ModularGuiContext, ModularPanel> builderFor(final PlanBook book) {
+        return new Function<ModularGuiContext, ModularPanel>() {
+            @Override
+            public ModularPanel apply(ModularGuiContext context) {
+                PlannerState state = PlannerEntry.stateFor(GraphService.get(),
+                                                           PlannerService.get());
+                if (state != null) {
+                    return PlannerWidgets.statePanel(state);
+                }
+                return planPanel(PlannerEntry.planFor(PlannerService.get()), book);
+            }
+        };
     }
 }

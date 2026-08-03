@@ -12,6 +12,9 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
+import io.github.jacoblasky.recipedump.client.planner.RecipeChoices;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.common.PinStore;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
@@ -49,8 +52,52 @@ final class PlannerShot {
         PlannerScreen.openPanel(PlannerWidgets.nodeMenu(plan.tree(), SHOT_ACTIONS));
     }
 
+    /**
+     * The recipe picker, on the root of a fixture, with candidates from the loaded graph.
+     *
+     * THE SUBJECT MATTER IS DECIDED BY WHETHER AN ORACLE IS MOUNTED, exactly as
+     * `planner-live` is, and both outcomes are pictures worth having. With one, this is the
+     * real alternatives for a real item, which no fixture can supply -- the plan shape
+     * carries `alternatives` as a COUNT, so a candidate list simply is not in there and the
+     * only sources are a real graph or an invented one. Without one it is the empty case
+     * saying which of the three reasons applies, which is what a player without a
+     * `graph.json` gets.
+     *
+     * IT WAITS FOR THE GRAPH for the reason `LivePlanShot` does: the read is 5.47 s off the
+     * main thread, so a shot that opened immediately would photograph "loading" every time
+     * and the wait is bounded. Instant when there is no graph to wait for.
+     */
     static void openRecipePicker(String arg) {
-        PlannerScreen.openPanel(PlannerWidgets.recipePicker(fixture(arg).tree()));
+        PlanNode node = mostAlternatives(fixture(arg).tree());
+        LivePlanShot.awaitGraph();
+        PlannerScreen.openPanel(PlannerWidgets.recipePicker(
+                node,
+                RecipeChoices.forNode(GraphService.get().graph(), node,
+                                      PinStore.get().pins()),
+                SHOT_ACTIONS));
+    }
+
+    /**
+     * The node in `tree` with the most candidates, which is the one worth photographing.
+     *
+     * NOT THE ROOT, which is what this shot used before and is a poor subject: a root with
+     * one alternative photographs a picker containing a single row, and the fixtures' roots
+     * run from 1 to 22 while nodes deeper in reach 172. The picker's whole job is the list,
+     * so the shot should be of a list -- including the case where it is capped, which no
+     * fixture root can produce.
+     *
+     * Ties go to the first in depth-first order, so the choice is deterministic and a shot
+     * of a given fixture is the same picture every time.
+     */
+    static PlanNode mostAlternatives(PlanNode tree) {
+        PlanNode best = tree;
+        for (PlanNode child : tree.children()) {
+            PlanNode candidate = mostAlternatives(child);
+            if (candidate.alternatives() > best.alternatives()) {
+                best = candidate;
+            }
+        }
+        return best;
     }
 
     /**
@@ -398,6 +445,11 @@ final class PlannerShot {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void pinRecipe(PlanNode node,
+                io.github.jacoblasky.recipedump.client.planner.RecipeChoice choice) {
         }
 
         @Override

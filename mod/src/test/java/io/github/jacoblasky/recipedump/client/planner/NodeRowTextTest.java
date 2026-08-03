@@ -6,6 +6,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.util.List;
+
 import org.junit.Test;
 
 /**
@@ -61,6 +63,47 @@ public class NodeRowTextTest {
         assertEquals("", NodeRowText.fit(null, 240));
     }
 
+    /**
+     * {@link NodeRowText#wrap}, including the cases a caller reaches by accident.
+     *
+     * The one place in this package where wrapping beats cutting -- the "planned without"
+     * caveat is a LIST, and a cut list is a shorter, wrong list. Everywhere else `fit` is
+     * correct, because a `TextWidget` that wraps itself draws over the row beneath.
+     */
+    @Test
+    public void wrapBreaksOnWordsAndCutsOnlyTheLastLine() {
+        int width = 10 * NodeRowText.CHAR_WIDTH;
+        // Ten characters takes "alpha beta" and breaks at the space, not mid-word.
+        assertEquals(java.util.Arrays.asList("alpha beta", "gamma"),
+                     NodeRowText.wrap("alpha beta gamma", width, 2));
+        assertEquals("it fits, so it is one line",
+                     java.util.Arrays.asList("alpha"), NodeRowText.wrap("alpha", width, 3));
+        // Three lines for three words that will not pair up at six characters.
+        assertEquals(java.util.Arrays.asList("alpha", "beta", "gamma"),
+                     NodeRowText.wrap("alpha beta gamma", 6 * NodeRowText.CHAR_WIDTH, 3));
+
+        // The last permitted line is CUT rather than dropping the tail silently: an ellipsis
+        // says there was more, an absence does not.
+        List<String> squeezed = NodeRowText.wrap("alpha beta gamma delta", width, 1);
+        assertEquals(1, squeezed.size());
+        assertTrue(squeezed.get(0), squeezed.get(0).endsWith(NodeRowText.ELLIPSIS));
+
+        // A single word longer than the line has no boundary to break on and must still
+        // terminate rather than loop on a zero-length cut.
+        assertEquals(java.util.Arrays.asList("abcdefghij", "klmnopqrst"),
+                     NodeRowText.wrap("abcdefghijklmnopqrst", width, 2));
+    }
+
+    @Test
+    public void wrapReturnsNothingRatherThanThrowingOnTheDegenerateCases() {
+        assertTrue(NodeRowText.wrap(null, 60, 2).isEmpty());
+        assertTrue(NodeRowText.wrap("", 60, 2).isEmpty());
+        assertTrue("asking for no lines must give none",
+                   NodeRowText.wrap("alpha", 60, 0).isEmpty());
+        // A zero-width box: one character a line rather than an infinite loop.
+        assertEquals(java.util.Arrays.asList("a", "b"), NodeRowText.wrap("ab", 0, 2));
+    }
+
     @Test
     public void aMissingLabelFallsBackToTheKeyRatherThanBlank() {
         assertEquals("test:thing", NodeRowText.label(node("{\'key\':\'test:thing\',\'label\':\'\'}")));
@@ -83,6 +126,35 @@ public class NodeRowTextTest {
             }
         }
         assertEquals("any of 2 · -> natura:sticks:*", NodeRowText.meta(ore));
+    }
+
+    /**
+     * `pinned` comes first, so a narrow row cannot cut the one word that says the route was
+     * the player's own choice rather than the solver's.
+     *
+     * Found by a screenshot: a pinned iron ingot in the reference pack rendered as
+     * `Iron Ingot -- Crafting -- 172 recip...`, with `pinned` past the cut. See
+     * {@link NodeRowText#meta} for why this is the one departure from `render.py`'s order.
+     */
+    @Test
+    public void pinnedComesFirstSoTruncationCannotEatIt() {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "mod:plate");
+        json.addProperty("label", "Plate");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("pinned", true);
+        json.addProperty("alternatives", 172);
+        json.addProperty("machine", "Rolling Machine");
+        json.addProperty("category", "techreborn.rolling");
+        String meta = NodeRowText.meta(PlanJson.readNode(json));
+
+        assertTrue(meta, meta.startsWith("pinned"));
+        // The part that matters: still there at a width that loses everything else.
+        String cut = NodeRowText.fit(meta, 9 * NodeRowText.CHAR_WIDTH);
+        assertTrue(cut, cut.startsWith("pinned"));
+        assertTrue("the rest keeps the browser's order: " + meta,
+                   meta.indexOf("Rolling Machine") < meta.indexOf("172 recipes"));
     }
 
     @Test
