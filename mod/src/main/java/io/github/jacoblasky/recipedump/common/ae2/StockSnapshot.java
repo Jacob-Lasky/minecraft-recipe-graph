@@ -3,6 +3,10 @@ package io.github.jacoblasky.recipedump.common.ae2;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import com.google.gson.JsonObject;
+
+import io.github.jacoblasky.recipedump.common.ScenarioSource;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 
@@ -105,6 +109,29 @@ public final class StockSnapshot {
 
     public int distinctKeys() {
         return counts.size();
+    }
+
+    /**
+     * The `have` field of a scenario document, in the shape `ScenarioInputs.resolve` reads and
+     * a plan fixture writes.
+     *
+     * ON THE SNAPSHOT RATHER THAN AT THE PLANNER, for `PinStore.document`'s reason: the keys
+     * are already the dump's keys and the counts are already longs, so the one place that
+     * knows the format is the one place that holds it. A converter at the call site would be a
+     * second spelling of the field, free to narrow a count or re-derive a key.
+     *
+     * A REFUSAL PRODUCES AN EMPTY OBJECT because it holds no counts, and that is safe ONLY
+     * because {@link ScenarioSource} carries the refusal separately: the empty object goes
+     * into the document beside a caveat naming the reason, rather than as the silent claim
+     * "you own nothing" this class exists to prevent. DO NOT read this without checking
+     * {@link #isAvailable}.
+     */
+    public JsonObject document() {
+        JsonObject out = new JsonObject();
+        for (Map.Entry<String, Long> entry : counts.entrySet()) {
+            out.addProperty(entry.getKey(), entry.getValue());
+        }
+        return out;
     }
 
     /**

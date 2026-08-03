@@ -5,14 +5,11 @@ import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ByteArrayOutputStream;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import io.github.jacoblasky.recipedump.RecipeDumpMod;
+import io.github.jacoblasky.recipedump.ClassFiles;
 import org.junit.Test;
 
 /**
@@ -65,11 +62,11 @@ public class CommonSideSafetyTest {
         List<String> checked = new ArrayList<String>();
         List<String> offences = new ArrayList<String>();
         for (File file : commonClassFiles()) {
-            byte[] bytes = read(file);
+            byte[] bytes = ClassFiles.read(file);
             String name = file.getPath();
             checked.add(name);
             for (String forbidden : FORBIDDEN) {
-                if (contains(bytes, forbidden)) {
+                if (ClassFiles.contains(bytes, forbidden)) {
                     offences.add(name + " references " + forbidden);
                 }
             }
@@ -101,11 +98,11 @@ public class CommonSideSafetyTest {
      */
     @Test
     public void theScanActuallyDetectsAClientReferenceWhenThereIsOne() throws IOException {
-        File clientProxy = new File(classesRoot(),
+        File clientProxy = new File(ClassFiles.classesRoot(),
                                     "io/github/jacoblasky/recipedump/client/ClientProxy.class");
         assertTrue("expected the client proxy at " + clientProxy, clientProxy.isFile());
         assertTrue("ClientProxy names Minecraft, so the scan must see it there",
-                   contains(read(clientProxy), "net/minecraft/client/"));
+                   ClassFiles.contains(ClassFiles.read(clientProxy), "net/minecraft/client/"));
     }
 
     private static void assertContains(List<String> paths, String suffix) {
@@ -118,68 +115,10 @@ public class CommonSideSafetyTest {
     }
 
     private static List<File> commonClassFiles() {
-        File root = classesRoot();
-        List<File> files = new ArrayList<File>();
-        collect(new File(root, COMMON_PACKAGE), files);
-        File modClass = new File(root, MOD_CLASS + ".class");
+        List<File> files = ClassFiles.under(COMMON_PACKAGE);
+        File modClass = new File(ClassFiles.classesRoot(), MOD_CLASS + ".class");
         assertTrue("expected the mod class at " + modClass, modClass.isFile());
         files.add(modClass);
         return files;
-    }
-
-    /** Where the build put `main`'s classes, found from a class rather than from a path. */
-    private static File classesRoot() {
-        URL url = RecipeDumpMod.class.getResource("/" + MOD_CLASS + ".class");
-        assertTrue("the mod class must be on the test classpath as a file, not a jar; got "
-                   + url, url != null && "file".equals(url.getProtocol()));
-        File file = new File(url.getPath());
-        for (int i = 0; i < MOD_CLASS.split("/").length; i++) {
-            file = file.getParentFile();
-        }
-        return file;
-    }
-
-    private static void collect(File dir, List<File> into) {
-        File[] entries = dir.listFiles();
-        if (entries == null) {
-            return;
-        }
-        for (File entry : entries) {
-            if (entry.isDirectory()) {
-                collect(entry, into);
-            } else if (entry.getName().endsWith(".class")) {
-                into.add(entry);
-            }
-        }
-    }
-
-    private static byte[] read(File file) throws IOException {
-        InputStream in = file.toURI().toURL().openStream();
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] chunk = new byte[8192];
-            int n;
-            while ((n = in.read(chunk)) > 0) {
-                out.write(chunk, 0, n);
-            }
-            return out.toByteArray();
-        } finally {
-            in.close();
-        }
-    }
-
-    /** Substring search over raw bytes; a constant pool entry is plain ASCII here. */
-    private static boolean contains(byte[] haystack, String needle) {
-        byte[] pattern = needle.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-        outer:
-        for (int i = 0; i + pattern.length <= haystack.length; i++) {
-            for (int j = 0; j < pattern.length; j++) {
-                if (haystack[i + j] != pattern[j]) {
-                    continue outer;
-                }
-            }
-            return true;
-        }
-        return false;
     }
 }

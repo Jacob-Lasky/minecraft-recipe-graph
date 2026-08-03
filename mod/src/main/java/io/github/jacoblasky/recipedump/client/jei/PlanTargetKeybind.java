@@ -67,9 +67,15 @@ public final class PlanTargetKeybind {
      * What the key does. Separated from the event so it can be driven without an input queue.
      *
      * FOUR WAYS TO DO NOTHING, and they are deliberately indistinguishable to the player: no
-     * JEI, nothing under the mouse, something under the mouse that is not an item, or nobody
-     * listening yet. Every one of them is an ordinary state rather than an error, and a
+     * JEI, nothing under the mouse, something under the mouse that is not an item, or the
+     * listener declining. Every one of them is an ordinary state rather than an error, and a
      * message for any of them would fire on an idle keypress.
+     *
+     * THE FOURTH USED TO BE "nobody listening yet", and it meant it: nothing installed a
+     * listener, so every press of this key did nothing at all. `ClientProxy` installs
+     * `PlanTarget` now (#191), and the remaining refusals are its own -- a solve already
+     * running, an item the dump cannot key, no player. A listener that declines still leaves
+     * the player where they are, which is what `PlannerHooks.TargetListener`'s boolean is for.
      *
      * Returns whether a target was delivered, so the screenshot harness and the tests can
      * tell those apart without reading a log.

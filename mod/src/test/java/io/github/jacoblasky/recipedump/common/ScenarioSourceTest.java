@@ -316,6 +316,65 @@ public class ScenarioSourceTest {
                     ScenarioSource.NO_REASON_GIVEN.equals("not available"));
     }
 
+    // -- what a reader CONTRIBUTES, which is the other half of the seam ---------------------
+
+    @Test
+    public void aReaderFillsInTheFieldItRead() {
+        // The join #191 was missing. Before it, a reader could say `have` was live and the
+        // document beside it still said `{}` -- the caveat disappeared and the plan went on
+        // being priced as though the player owned nothing, which is worse than either alone.
+        final JsonObject counts = new JsonObject();
+        counts.addProperty("minecraft:iron_ingot", 377L);
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(counts);
+            }
+        });
+        assertEquals(377L, ScenarioSource.liveDocument()
+                                         .getAsJsonObject("have")
+                                         .get("minecraft:iron_ingot").getAsLong());
+    }
+
+    @Test
+    public void aRefusalContributesTheEmptyFormRatherThanWhateverWasReadBefore() {
+        // A `Status` carries the flag and the value together for exactly this: there is no way
+        // to construct a refusal that also carries counts, so a plan cannot be priced against
+        // numbers from a read that failed while a caveat above it says the read did not happen.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.unavailable("no wireless access point in range");
+            }
+        });
+        assertTrue(ScenarioSource.liveDocument()
+                                 .getAsJsonObject("have").entrySet().isEmpty());
+    }
+
+    @Test
+    public void aFilledFieldDoesNotCostTheDocumentItsOtherKeys() throws IOException {
+        // The shape IS the contract, so a reader filling one field must not turn the document
+        // into just that field -- which is what an assembled-by-hand builder does when someone
+        // adds an input and forgets a line.
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(new JsonObject());
+            }
+        });
+        assertEquals(fixtureFields(), keysOf(ScenarioSource.liveDocument()));
+        assertEquals(fixtureFields(), keysOf(PlannerService.liveScenario()));
+    }
+
+    @Test
+    public void anArrayFieldStaysAnArrayWhenNobodyReadIt() {
+        // `craftables` and `no_machine` are lists in every fixture. Handing the solver a `{}`
+        // where it expects a `[]` is a parse failure at plan time rather than a missing input.
+        assertTrue(ScenarioSource.liveDocument().get("craftables").isJsonArray());
+        assertTrue(ScenarioSource.liveDocument().get("no_machine").isJsonArray());
+        assertTrue(ScenarioSource.liveDocument().get("have").isJsonObject());
+    }
+
     @Test
     public void everySourceGoingLiveEmptiesTheCaveatEntirely() {
         // The end state, asserted now so the caveat disappears rather than degrading into an

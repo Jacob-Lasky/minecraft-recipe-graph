@@ -220,6 +220,29 @@ public class PlannerEntryTest {
     }
 
     @Test
+    public void theKeybindAndTheCalculatorAgreeOnHowManyToPlan() {
+        // ONE RULE FOR BOTH DOORS. Pressing `=` over an item already on the TODO must ask the
+        // same question the calculator would have asked about it -- otherwise the player gets
+        // a plan for one beside a TODO saying 3,000, and which answer they get depends on
+        // which control they happened to use.
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 3000L);
+        assertEquals(3000L, PlannerEntry.quantityFor(book, "mod:plate"));
+        assertEquals("an item that is not on the TODO is planned singly",
+                     1L, PlannerEntry.quantityFor(book, "mod:gear"));
+    }
+
+    @Test
+    public void aFavouriteIsPlannedSinglyBecauseItNamesNoQuantity() {
+        // A favourite is "I make this often", not "I want this many", so there is nothing to
+        // read a count from and one is the only honest answer.
+        PlanBook book = new PlanBook();
+        book.addFavourite("mod:fav");
+        assertEquals("mod:fav", PlannerEntry.firstTarget(book));
+        assertEquals(1L, PlannerEntry.quantityFor(book, "mod:fav"));
+    }
+
+    @Test
     public void nothingIsPlannedUntilTheGraphIsReady() {
         // `plan` would refuse anyway and set FAILED, which would then be rendered in red
         // over a graph that is merely still loading -- a wait reported as an error.

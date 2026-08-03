@@ -154,14 +154,19 @@ public final class PlannerService {
         // DERIVED FROM `ScenarioSource`, not restated. One list of the scenario fields, so a
         // new input cannot be declared in one place and forgotten in the other -- which was
         // the shape of this code until the review, with a test to catch the drift rather than
-        // a structure that prevented it.
-        JsonObject document = ScenarioSource.emptyDocument();
-        // THE ONE FIELD THE GAME ACTUALLY FILLS SO FAR. `emptyDocument` gives every field its
-        // empty form, which for `pins` was the claim "this player has chosen nothing" -- and
-        // that claim was true only for as long as there was no way to choose. The recipe
-        // picker writes to `PinStore`; leaving this line out would make the picker a control
-        // that saves a file nothing reads, which is the worst of the three possible states
-        // because it looks like it worked.
+        // a structure that prevented it. Since #191 the VALUES come the same way: a source
+        // with an installed reader contributes what it read, so wiring an input up is
+        // installing a reader and nothing else. `have` arrives that way, from the client.
+        JsonObject document = ScenarioSource.liveDocument();
+        // PINS ARE ADDED HERE AND NOT THROUGH A READER, and the difference is load-bearing
+        // rather than historical. `PinStore` installs a reader that reports the pin file's
+        // STATE -- a file it could not write reads as unavailable -- but the pins themselves
+        // still apply to this session either way: `PinStore.pin` deliberately keeps a choice
+        // it failed to save, so the player's click steers this plan while the caveat says it
+        // will not survive a restart. A reader's contents are dropped on an unavailable
+        // status, by design, so routing pins through one would silently discard exactly the
+        // choices that case exists to preserve. The recipe picker writes to `PinStore`;
+        // leaving this line out would make it a control that saves a file nothing reads.
         document.add(ScenarioSource.PINS.field(), PinStore.get().document());
         return document;
     }

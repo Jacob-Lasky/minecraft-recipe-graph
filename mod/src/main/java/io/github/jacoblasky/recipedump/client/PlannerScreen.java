@@ -109,8 +109,19 @@ public final class PlannerScreen {
         LivePlannerActions actions = new LivePlannerActions();
         ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, actions);
         actions.attachTo(panel);
-        // So JEI lays its item list out AROUND the planner rather than over it (#145's other
-        // seam). The source reports nothing once the panel closes, so nothing to deregister.
+        return avoidedByJei(panel);
+    }
+
+    /**
+     * Tell JEI to lay its item list out AROUND this panel rather than over it (#145's other
+     * seam). The source reports nothing once the panel closes, so nothing to deregister.
+     *
+     * EVERY PANEL THIS OPENS, not only the one with a tree in it. It used to be the plan panel
+     * alone, which meant the five-second window a player actually stares at -- "loading
+     * graph.json" -- was the one JEI was allowed to draw over, and the message they are waiting
+     * to read is the one that got covered. The four state panels are windows like any other.
+     */
+    private static ModularPanel avoidedByJei(ModularPanel panel) {
         PlannerAreaSource.install(panel);
         return panel;
     }
@@ -179,7 +190,7 @@ public final class PlannerScreen {
                 PlannerState state = PlannerEntry.stateFor(GraphService.get(),
                                                            PlannerService.get());
                 if (state != null) {
-                    return PlannerWidgets.statePanel(state);
+                    return avoidedByJei(PlannerWidgets.statePanel(state));
                 }
                 return planPanel(PlannerEntry.planFor(PlannerService.get()), book);
             }

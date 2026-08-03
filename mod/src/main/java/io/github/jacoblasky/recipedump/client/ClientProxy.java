@@ -43,6 +43,18 @@ public class ClientProxy extends CommonProxy {
         // binding ends up registered twice. Safe without JEI -- the key resolves nothing and
         // says nothing, which is what an unbound feature should do.
         PlanTargetKeybind.register();
+        // AND THE LISTENER THAT GIVES THE KEY SOMETHING TO DO. Registering the binding without
+        // this is what the mod shipped for the whole of #19 phase 4: the key resolved a JEI
+        // target and dropped it, because `PlannerHooks`' default does exactly that and does it
+        // silently (#191). The two lines belong together -- a binding with no listener is a
+        // control that answers nothing, and neither half fails on its own.
+        PlanTarget.install();
+        // ANSWER FOR `ScenarioSource.HAVE` FROM HERE ON, so a plan is priced against what the
+        // player owns instead of against the assumption that they own nothing. Installed at
+        // init rather than when the planner opens: the source is asked while a plan is being
+        // built, and a reader installed by the window would leave the FIRST plan -- the one
+        // started as the window opens -- reading as unwired.
+        PlannerStock.install();
         // BUILD JEI'S STACK INDEX WHEN THE GRAPH LANDS, on the loader thread, so the first
         // context menu does not pay for a walk of ~35,000 item stacks. `indexFor` is
         // null-safe and does nothing useful without JEI, so this is unconditional; the
@@ -76,6 +88,27 @@ public class ClientProxy extends CommonProxy {
                 if (book != null) {
                     book.deserializeNBT(payload);
                 }
+            }
+        });
+    }
+
+    /**
+     * Take the stock snapshot the server read off this player's ME network.
+     *
+     * ON THE CLIENT THREAD, for the reason {@link #applyPlanBookSync} records: `onMessage` runs
+     * on a netty IO thread, and this hands the snapshot to `PlannerStock`, which may start a
+     * plan and will certainly be read while a panel is drawing.
+     *
+     * WITHOUT THIS OVERRIDE THE REPLY LANDS IN `CommonProxy`'S EMPTY BODY, which is where it
+     * landed from the moment the packet was written until #191 -- the server read the grid,
+     * serialised it, sent it, and the client threw it away with no error anywhere.
+     */
+    @Override
+    public void applyStockSnapshot(final NBTTagCompound payload) {
+        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+            @Override
+            public void run() {
+                PlannerStock.accept(payload);
             }
         });
     }

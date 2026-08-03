@@ -7,6 +7,7 @@ import com.cleanroommc.modularui.api.widget.Interactable;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.SecondaryPanel;
 
+import io.github.jacoblasky.recipedump.client.PlannerStock;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PinStore;
 import io.github.jacoblasky.recipedump.common.PlannerService;
@@ -103,7 +104,19 @@ public final class LivePlannerActions implements PlannerActions {
         // to patch one subtree, because another recipe takes other ingredients and the cost
         // of the whole branch moves. Cheap in the usual case: `costSignature` does not
         // mention pins, so the cached cost table survives and only the solve is repeated.
-        PlannerService.get().replan();
+        //
+        // THROUGH `PlannerStock` FOR THE SAME REASON OPENING THE PLANNER DOES. A player who
+        // has had the window open for a while and then pins a recipe is asking a fresh
+        // question, and answering it against a stock read from several minutes ago would
+        // price a route against items they have since spent. It costs nothing when the held
+        // read is still fresh, which is the usual case for a click made while looking at the
+        // plan the read produced.
+        PlannerStock.planWhenRead(new Runnable() {
+            @Override
+            public void run() {
+                PlannerService.get().replan();
+            }
+        });
     }
 
     @Override
