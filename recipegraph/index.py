@@ -155,7 +155,15 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
                             if key in g.world_ores and name in by_name}
         # And the same ores again under the pack's OTHER id for them, which is where #112's
         # price went missing: the key planetDefs names is not the key the recipes consume.
-        shadows = dimensions.shadow_ores(g, g.dimension_ores)
+        #
+        # The removals are read here rather than beside the oredict above because they are
+        # evidence for exactly one question and nothing else consumes them -- a group the
+        # pack DELETED a same-named key from is the pack saying the two ids are one rock,
+        # and it is the only signal that reaches the Rhenium twin. #168, and see
+        # `oredict.removals_from_crafttweaker_log` for why the record cannot name a key.
+        removals = oredict.removals_from_crafttweaker_log(ct_log)
+        shadows = dimensions.shadow_ores(g, g.dimension_ores, removals)
+        g.shadow_ores = shadows
         g.dimension_ores.update(shadows)
         say("dimensions: %d declared, %d ores generate in exactly one of them "
             "(%d after the ore* filter, +%d duplicate registrations of those)"
