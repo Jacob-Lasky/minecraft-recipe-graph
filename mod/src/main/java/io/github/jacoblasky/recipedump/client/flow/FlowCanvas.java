@@ -269,6 +269,119 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         return (int) Math.round(Math.max(0.0, Math.min(1.0, fraction)) * range);
     }
 
+    /**
+     * Which box, if any, is under a point in LAYOUT coordinates. -1 for a gap or off the end.
+     *
+     * THE SAME INDEX AS THE CULLER, not a scan over `boxes`. A click is one event rather than
+     * sixty a second, so speed is not the argument -- the argument is that a hit-test
+     * disagreeing with the cull is a bug you cannot see: a node you can click but cannot see,
+     * or see but cannot click, in some places and not others.
+     *
+     * KEPT AS A CROSS-CHECK ON MODULARUI RATHER THAN AS THE CLICK PATH. `getWidgetsAt` already
+     * routes a click through the viewport transform AND the zoom matrix, and reimplementing
+     * that by hand is the exact trap this class's header names. `flow-hit` compares the two so
+     * the claim that the framework gets it right is measured rather than assumed.
+     *
+     * A POINT IN A GAP IS -1 RATHER THAN THE NEAREST BOX: the column gap is 40px, it is where
+     * the edges are drawn, and "nearest" would silently claim a 20px strip either side of
+     * every node.
+     */
+    public int boxAt(int layoutX, int layoutY) {
+        return culling.boxAt(layoutX, layoutY);
+    }
+
+    /** Screen point (relative to this widget's area) to layout coordinates, at this zoom. */
+    public int toLayoutX(int screenX) {
+        return (int) Math.floor((screenX + getScrollX()) / (double) zoom);
+    }
+
+    /** Screen point (relative to this widget's area) to layout coordinates, at this zoom. */
+    public int toLayoutY(int screenY) {
+        return (int) Math.floor((screenY + getScrollY()) / (double) zoom);
+    }
+
+    /**
+     * The box index ModularUI thinks is under the mouse, or -1.
+     *
+     * Asks the widgets themselves rather than walking a viewport stack, because
+     * `IWidget.isHovering()` is already the answer `getWidgetsAt` produced this frame -- so
+     * this reads the framework's real verdict rather than a re-derivation of it.
+     */
+    public int hoveredBox() {
+        for (int i = 0; i < visibleBoxes.size(); i++) {
+            int index = visibleBoxes.get(i);
+            if (boxWidgets.get(index).isHovering()) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Put the real cursor over the centre of box `index`. Returns false if it is off screen.
+     *
+     * FOR THE HIT-TEST PROBE, and it is the first thing in this project to move a mouse.
+     *
+     * IT DOES NOT SCROLL THE NODE TO THE CURSOR, which was the first version and was wrong in
+     * a way that produced a clean-looking pass. It centred the cursor in the canvas and
+     * scrolled the wanted node under it -- but a layout SMALLER than the viewport cannot
+     * scroll at all, so every probe landed on the same empty middle of the canvas and both
+     * answers came back -1. Six lines of "AGREE", agreeing about nothing. The cursor goes to
+     * where the node already is instead, and a node that is not on screen is skipped loudly
+     * rather than probed at the wrong place.
+     *
+     * `Mouse.setCursorPosition` takes DISPLAY pixels with the origin at the BOTTOM left, while
+     * everything here is GUI pixels from the top left. Two conversions, either of which puts
+     * the cursor somewhere plausible and blames the canvas for the probe's own error.
+     */
+    public boolean parkCursorOverBox(int index) {
+        FlowLayout.Box box = laid.boxes.get(index);
+        int screenX = (int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
+                - getScrollX();
+        int screenY = (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
+                - getScrollY();
+        if (screenX < 0 || screenY < 0
+                || screenX >= getArea().width || screenY >= getArea().height) {
+            return false;
+        }
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+        int scale = new net.minecraft.client.gui.ScaledResolution(mc).getScaleFactor();
+        int guiX = getArea().x + screenX;
+        int guiY = getArea().y + screenY;
+        // Y IS FLIPPED: LWJGL's origin is the bottom left of the display, a GUI y of 0 is the
+        // top. Get it wrong and the cursor lands on the vertical mirror of the intended node.
+        org.lwjgl.input.Mouse.setCursorPosition(guiX * scale, mc.displayHeight - guiY * scale);
+        return true;
+    }
+
+    /** Where the probe thinks everything is, for when the probe itself is the thing wrong. */
+    public String cursorDiagnostic() {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+        net.minecraft.client.gui.ScaledResolution res =
+                new net.minecraft.client.gui.ScaledResolution(mc);
+        int guiX = org.lwjgl.input.Mouse.getX() / res.getScaleFactor();
+        int guiY = (mc.displayHeight - org.lwjgl.input.Mouse.getY()) / res.getScaleFactor();
+        return "mouseRaw=" + org.lwjgl.input.Mouse.getX() + "," + org.lwjgl.input.Mouse.getY()
+                + " scale=" + res.getScaleFactor()
+                + " gui=" + guiX + "," + guiY
+                + " area=" + getArea().x + "," + getArea().y
+                + " " + getArea().width + "x" + getArea().height
+                + " scroll=" + getScrollX() + "," + getScrollY()
+                + " layout=" + toLayoutX(guiX - getArea().x) + ","
+                + toLayoutY(guiY - getArea().y)
+                + " drawn=" + visibleBoxes.size();
+    }
+
+    /** What the layout says is under the cursor right now, as a box index or -1. */
+    public int boxAtCursor() {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+        net.minecraft.client.gui.ScaledResolution res =
+                new net.minecraft.client.gui.ScaledResolution(mc);
+        int guiX = org.lwjgl.input.Mouse.getX() / res.getScaleFactor();
+        int guiY = (mc.displayHeight - org.lwjgl.input.Mouse.getY()) / res.getScaleFactor();
+        return boxAt(toLayoutX(guiX - getArea().x), toLayoutY(guiY - getArea().y));
+    }
+
     /** How many boxes the layout produced. */
     public int nodeCount() {
         return laid.size();
