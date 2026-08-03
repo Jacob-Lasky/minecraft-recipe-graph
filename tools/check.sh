@@ -6,6 +6,13 @@
 #   tools/check.sh --python         # ~11 min with an oracle present, ~17s without
 #   tools/check.sh --java           # ~3 min
 #   GRADLE_CACHE=<dir> tools/check.sh
+#   GATE_LOCK= tools/check.sh       # opt out of the one-container-at-a-time gate
+#
+# IT TAKES THE CONTAINER GATE AROUND ITS CONTAINERS AND NOT AROUND ITSELF. Several agents share
+# this host and three 8 GB JVMs against 20 GB free is a real problem, so `tools/gate.sh`
+# serialises them -- but the python arm is eleven minutes that starts no container, and holding
+# the lock across it would starve everyone else for nothing. The wait is announced and names
+# the holder, because a script blocking silently is indistinguishable from a script that hung.
 #
 # ELEVEN MINUTES FOR THE PYTHON SUITE IS CORRECT, NOT A HANG. Without an oracle it is 17
 # seconds; with one, `tests/test_plan_fixtures.py` regenerates every fixture and `cost.estimate`
@@ -43,6 +50,14 @@ ORACLE=${RECIPEGRAPH_ORACLE:-/coding/.recipegraph-build/graph-oracle.json}
 PACK_MODS=${PACK_MODS:-/coding/.recipegraph-build/deps}
 GRADLE_CACHE=${GRADLE_CACHE:-/coding/.recipegraph-build/gradle-cache}
 BUILD_DIR=$(dirname "$ORACLE")
+# EXPORTED because `mod/tools/build-jar.sh` reads both from the environment, and it is invoked
+# below as a plain command rather than with inline assignments so that it can take the
+# container gate itself. See `tools/gate.sh` on why nesting the gate would deadlock.
+export PACK_MODS GRADLE_CACHE
+
+# One heavy container at a time on this host; `gated` blocks, announces the wait and names the
+# holder. This script's own container is the java arm at the bottom.
+. tools/gate.sh
 
 want_python=1
 want_java=1
@@ -131,20 +146,127 @@ report_python_skips() {
 # THE ITERATION FLAGS DELIBERATELY DO NOT BUILD. `--java` and `--python` are for the inner
 # loop, where an unbuilt `libs` is the normal state and a three-minute build every time would
 # teach people to stop running this at all. That asymmetry is intentional; do not "fix" it.
+# IS THE JAR THE ONE THIS SOURCE TREE WOULD PRODUCE? Answered with `test_dist_jar`'s OWN
+# comparison -- the sha256 `stampSourceHash` bakes into the jar against a hash recomputed over
+# `mod/src/main/java` -- because that is the question the suite will ask half an hour from now,
+# and two ways of asking one question is how the two answers drift apart.
+#
+# DELIBERATELY NOT "IS ANY SOURCE FILE NEWER THAN THE JAR". That is a weaker question wearing
+# the same clothes: it misses a DELETED file, which moves the digest while leaving nothing
+# newer behind, and it misses a rename that swaps two names with identical bytes. Both of those
+# fail `test_dist_jar` and neither trips an mtime check.
+#
+# Exits 0 current, 1 stale, 2 could not tell -- and 2 SAYS SO rather than being read as 0,
+# because "the check could not run" reading as "the check passed" is the failure this whole
+# file exists to prevent.
+jar_matches_source() {
+    python3 - "$1" <<'PY_STAMP'
+import sys
+import zipfile
+
+sys.path.insert(0, ".")
+try:
+    from tests.test_dist_jar import _source_hash
+except Exception as exc:
+    print("cannot import tests.test_dist_jar: %s" % exc)
+    sys.exit(2)
+
+try:
+    with zipfile.ZipFile(sys.argv[1]) as jar:
+        stamps = [n for n in jar.namelist() if n.endswith("mcrecipedump-source.sha256")]
+        if len(stamps) != 1:
+            print("it carries no source stamp, so it predates stampSourceHash")
+            sys.exit(1)
+        got = jar.read(stamps[0]).decode("utf-8").strip()
+except Exception as exc:
+    print("cannot read %s: %s" % (sys.argv[1], exc))
+    sys.exit(2)
+
+want = _source_hash()
+if got == want:
+    sys.exit(0)
+print("stamped %s, this tree hashes to %s" % (got[:12], want[:12]))
+sys.exit(1)
+PY_STAMP
+}
+
+# SAY WHEN THERE IS NO JAR TO CHECK, for the same reason as the oracle warning below.
+# `test_dist_jar` calls `skipTest` when `mod/build/libs` holds no jar, so an unbuilt worktree
+# turns its eleven assertions into eleven silent skips -- and `unittest` exits 0 on a skip, so
+# this script printed "all green" over them. Measured, not imagined: the same tree gave three
+# failures with stale jars present and a clean "all green" after `rm -rf mod/build/libs`, and
+# the second reads as the better result. Deleting the artifact an assertion inspects is a way
+# of passing it.
+#
+# AND SAY WHEN THE JAR IS STALE-BUT-PRESENT, which is the same hole one step along and was
+# found by a real gate failure: the absence test above is satisfied by a jar at the CURRENT
+# version built before this session's edits, so nothing rebuilt, and the run reached
+# `test_it_was_built_from_the_source_that_is_checked_in_now` and failed there on a hash
+# mismatch. Nothing unsafe happened -- the digest check did exactly its job -- but a bare
+# mismatch of two hex strings reads as a packaging defect, and the skill records two people
+# diagnosing stale-jar symptoms as real faults before noticing the files were merely old.
+#
+# The existing sweep above removes jars for OTHER versions only, on purpose, so that a stale
+# CURRENT-version jar still fails loudly. That design is right and stays; what was missing is
+# that "loudly" meant "opaquely".
+#
+# A WARNING IS NOT ENOUGH FOR THE FULL RUN, so it builds the jar instead -- now for a stale one
+# as well as a missing one. A `!!` line in a fourteen-minute run scrolls past, and the run
+# would still end in "all green" over an unasserted contract -- relying on the reader noticing,
+# which is the exact habit this whole family of bugs is about not relying on. The right move is
+# the one this finding itself argues for: change the artifact rather than look harder at it.
+# Three minutes on top of fourteen is nothing for a pre-merge gate, and it leaves behind a
+# current verified jar, which is what someone needs before installing one anyway.
+#
+# THE ITERATION FLAGS DELIBERATELY DO NOT BUILD. `--java` and `--python` are for the inner
+# loop, where an unbuilt `libs` is the normal state and a three-minute build every time would
+# teach people to stop running this at all. That asymmetry is intentional; do not "fix" it.
+# They now PREDICT the failure instead, naming it before the eleven-minute python arm rather
+# than leaving it to be discovered as a hash mismatch after it.
 jar_warning=""
-if [ -n "$version" ] && [ ! -f "mod/build/libs/mc-recipe-dump-$version.jar" ]; then
+jar_path="mod/build/libs/mc-recipe-dump-$version.jar"
+jar_state=ok
+jar_why=""
+if [ -n "$version" ]; then
+    if [ ! -f "$jar_path" ]; then
+        jar_state=absent
+        jar_why="there is no $jar_path"
+    else
+        set +e
+        detail=$(jar_matches_source "$jar_path")
+        rc=$?
+        set -e
+        case $rc in
+        0) ;;
+        1) jar_state=stale
+           jar_why="$jar_path was built from different source than mod/ holds now ($detail)" ;;
+        *) echo "!! cannot tell whether $jar_path is current: $detail" >&2 ;;
+        esac
+    fi
+fi
+
+# The two states fail `test_dist_jar` in DIFFERENT ways, and saying which is the whole point:
+# an absent jar makes its eleven assertions skip (and `unittest` exits 0 over a skip), a stale
+# one makes the digest assertion fail.
+if [ "$jar_state" = absent ]; then
+    failure_word="SKIP and prove nothing"
+else
+    failure_word="FAIL on the source digest"
+fi
+
+if [ "$jar_state" != ok ]; then
     if [ "$full_run" -eq 1 ]; then
         echo "== jar =="
-        echo "no mc-recipe-dump-$version.jar; building it so test_dist_jar has something to check"
-        if GRADLE_CACHE="$GRADLE_CACHE" PACK_MODS="$PACK_MODS" mod/tools/build-jar.sh; then
+        echo "$jar_why; building so test_dist_jar checks THIS source tree"
+        if mod/tools/build-jar.sh; then
             :
         else
-            echo "!! build-jar.sh failed; test_dist_jar will SKIP and prove nothing" >&2
-            jar_warning="build failed, so there is no jar -- test_dist_jar will SKIP"
+            echo "!! build-jar.sh failed; test_dist_jar will not prove anything" >&2
+            jar_warning="build failed -- test_dist_jar will $failure_word"
             fail=1
         fi
     else
-        jar_warning="no mc-recipe-dump-$version.jar in mod/build/libs -- test_dist_jar will SKIP"
+        jar_warning="$jar_why -- test_dist_jar will $failure_word. Rebuild with mod/tools/build-jar.sh"
     fi
 fi
 
@@ -172,7 +294,7 @@ if [ "$want_java" -eq 1 ]; then
     log=$(mktemp)
     # 8g, not 4g: the gate holds the whole 121 MB graph in the test JVM. 4g dies partway
     # through with an OOM that looks like a hang.
-    docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
+    gated docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
         -v "$(host_path "$ROOT")":/repo \
         -v "$(host_path "$PACK_MODS")":/deps:ro \
         -v "$(host_path "$BUILD_DIR")":/build:ro \
