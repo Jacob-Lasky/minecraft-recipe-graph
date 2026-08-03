@@ -10,6 +10,11 @@ Two accepted sources, in preference order:
 Without one of these, every `ore:` input stays unresolved and shows up as a raw
 leaf. That is why the dump mod emits the oredict itself rather than relying on the
 player remembering to run a chat command.
+
+Both sources describe the FINAL registry, after every script has run. What a script
+TOOK OUT along the way is a separate reading of the same log -- see
+`removals_from_crafttweaker_log`, which #168 needs because a membership the pack
+deleted is still evidence about what the pack thinks a block is.
 """
 
 import json
@@ -17,6 +22,13 @@ import re
 
 ORE_LINE = re.compile(r"Ore entries for\s*<?(?:ore(?:Dict)?:)?([A-Za-z0-9_.\-]+)>?\s*[:=]\s*(.*)")
 ENTRY = re.compile(r"<([^>]+)>")
+
+# CraftTweaker announces every `<ore:X>.remove(...)` a script runs. The subject is the
+# item's DISPLAY NAME rather than its key -- "Removing Rhenium Ore from ore dictionary
+# entry oreRhenium" -- which is the whole reason `removals_from_crafttweaker_log` returns
+# `(label, group)` and not `(key, group)`. See that function for what the pair can and
+# cannot be asked.
+REMOVAL_LINE = re.compile(r"Removing (.+?) from ore dictionary entry (\S+)\s*$")
 
 
 def _norm_entry(raw):
@@ -102,6 +114,49 @@ def guess_from_names(ore_names, names):
             if hit:
                 out[ore] = list(hit)
                 break
+    return out
+
+
+def removals_from_crafttweaker_log(path):
+    """`{(display name, ore group)}` the pack's scripts DELETED from the oredict.
+
+    WHY A DELETED MEMBERSHIP IS WORTH READING. `from_crafttweaker_log` above reports the
+    registry as it ends up, which is the right answer for "what satisfies `<ore:oreX>`" and
+    the wrong one for "what does the pack think this block IS". MeatballCraft registers
+    `contenttweaker:sub_block_holder_1:8` into `oreRhenium` and then removes it again
+    (`scripts/OreDictionary.zs:63`), so the finished registry shows a Rhenium Ore in no ore
+    group at all -- and #117's test, display name AND a shared `ore*` group, cannot see that
+    it is the same rock as `contenttweaker:rhenium_ore`. The removal line is the pack SAYING
+    they were the same rock. Read back, never guessed, the same standing rule as
+    `Graph.world_ores` and `dimensions.load_planet_defs`.
+
+    THE SUBJECT IS A LABEL, NOT A KEY, AND THAT BOUNDS WHAT THIS CAN ANSWER. CraftTweaker
+    logs "Removing Rhenium Ore from ore dictionary entry oreRhenium" -- the display name,
+    which is precisely the thing that does not discriminate between the twin and the real
+    block. So a pair here supports exactly one claim: SOME key called <label> was once in
+    <group>. It can never name which. `dimensions.shadow_ores` is the only caller and it is
+    sound there only because it already knows the anchor is still in the group, so the
+    removed one has to be a different key wearing the same name. DO NOT use a pair from
+    here as though it identified a key.
+
+    NARROW BY MEASUREMENT, NOT BY HOPE. The reference pack logs 134 removals, of which just
+    3 name an `ore*` group: oreRhenium, oreTartarite, oreUranium. The other 131 are the
+    ingot/dust/plate unification in `scripts/TheGreatOreCleanse.zs` and cannot reach an ore
+    gate. Callers still filter with `is_world_ore_group`; this returns the lot because
+    filtering is the caller's question, not the reader's.
+    """
+    out = set()
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        # Same degradation as a missing planetDefs: no removals means the #117 test runs on
+        # the finished registry alone, which is the pre-#168 behaviour rather than a break.
+        return out
+    with fh:
+        for line in fh:
+            m = REMOVAL_LINE.search(line.rstrip("\n"))
+            if m:
+                out.add((m.group(1).strip(), m.group(2)))
     return out
 
 

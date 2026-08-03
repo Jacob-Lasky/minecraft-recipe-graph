@@ -18,6 +18,27 @@ from recipegraph import (graphview, machines, pins, present, render, server,  # 
                          solve)
 
 
+def _home_page_html():
+    """The home page as `server.home_page` really renders it, placeholders and all.
+
+    Built here rather than asserted against `server.HOME_JS`, because the substitutions
+    happen at the call site and a per-placeholder test cannot see a call site that dropped
+    one of them.
+    """
+    import tempfile
+    from recipegraph.model import Graph
+
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "graph.json")
+    Graph().save(path)
+    state = server.State(path, os.path.join(d, "have.json"),
+                         os.path.join(d, "machines.json"),
+                         sources_path=os.path.join(d, "sources.json"),
+                         tokens_path=os.path.join(d, "tokens.json"),
+                         pins_path=os.path.join(d, "pins.json"))
+    return server.home_page(state)
+
+
 def solver_status_constants():
     """Every STATUS_* the solver defines, discovered rather than restated.
 
@@ -201,6 +222,59 @@ class KindChipTest(unittest.TestCase):
 
     def test_the_placeholder_is_actually_substituted_on_the_page(self):
         self.assertIn("%%CHIPS%%", server.HOME_JS)
+
+    def test_the_browser_gets_the_duplicate_id_wording_too(self):
+        """#168's badge, injected on exactly the same terms as the chips above.
+
+        The typeahead builds its rows in the browser, so an un-substituted placeholder is a
+        syntax error in the page rather than a missing word -- the whole search box dies.
+        """
+        js = server.HOME_JS.replace("%%SHADOW%%", present.shadow_pill_json())
+        self.assertNotIn("%%SHADOW%%", js)
+        emitted = re.search(r"var SHADOW=(\{.*?\});", js).group(1)
+        self.assertEqual(json.loads(emitted),
+                         {"text": present.SHADOW_BADGE, "title": present.SHADOW_TITLE})
+
+    def test_the_shadow_placeholder_is_actually_on_the_page(self):
+        self.assertIn("%%SHADOW%%", server.HOME_JS)
+
+    def test_the_served_page_has_no_placeholder_left_in_it(self):
+        """Both substitutions happen at one call site, so forgetting one is one edit away.
+
+        Asserted against the REAL rendered page rather than against `HOME_JS`, because the
+        two tests above each check their own placeholder and would both stay green if the
+        call site dropped the other one.
+        """
+        for name in ("%%CHIPS%%", "%%SHADOW%%"):
+            self.assertNotIn(name, _home_page_html(), name)
+
+    def test_the_row_template_actually_renders_the_badge(self):
+        """Deleting the badge from the row is otherwise silent, which is how it was found.
+
+        Every other test here checks the WORDING and the injection; the payload tests in
+        `test_dimensions` check the `shadow` field on the wire. All of them stay green with
+        the pill deleted from the row, because none of them looks at the row. Asserted
+        structurally rather than by rendering, because the template is JavaScript: the
+        branch has to exist, and it has to read the injected object rather than a literal
+        the page would then own a second copy of.
+        """
+        row = re.search(r"list\.innerHTML=items\.map\(function\(it,i\)\{(.*?)\}\)\.join",
+                        server.HOME_JS, re.S)
+        self.assertTrue(row, "the typeahead's row template moved; this test cannot see it")
+        tpl = row.group(1)
+        self.assertIn("it.shadow", tpl)
+        self.assertIn("SHADOW.text", tpl)
+        self.assertIn("SHADOW.title", tpl)
+        # Not spelled out in the page. The constant is injected precisely so that the
+        # terminal and the browser cannot come to say different things.
+        self.assertNotIn(present.SHADOW_BADGE, tpl)
+
+    def test_the_badge_is_the_only_thing_that_marks_a_duplicate_row(self):
+        """`UNSOURCED_BADGE` must not be reused for it: `reachable_form` measures False for
+        all 23 of these keys, and widening that predicate to cover them would badge the 19
+        genuine barren ores as well. Different fact, different words."""
+        self.assertNotEqual(present.SHADOW_BADGE, present.UNSOURCED_BADGE)
+        self.assertIn("duplicate", present.SHADOW_BADGE)
 
 
 class HiddenNoteTest(unittest.TestCase):

@@ -43,7 +43,7 @@ from .htmlutil import deeper_href, item_href, machine_href, plan_url
 from .model import FLUID_PREFIX, Graph, fluid_key, path_of
 from .names import build_reverse
 from .present import (STATE_BADGE, STATE_LABEL, STATE_PILL, STATE_RANK, UNRANKED,
-                      hidden_note, kind_chip_json, pin_badge)
+                      hidden_note, kind_chip_json, pin_badge, shadow_pill_json)
 from .render import CSS, kind_chip, render_explore_html, render_html
 from .solve import Solver
 from .sources import dump_meta
@@ -850,6 +850,8 @@ HOME_JS = """
  // Injected from present.KIND_CHIP rather than restated, so the client-rendered rows and
  // the server-rendered pages cannot disagree about what a type is called.
  var CHIPS=%%CHIPS%%;
+ // Same reason as CHIPS: present.py owns the wording, the page renders it.
+ var SHADOW=%%SHADOW%%;
  function chip(kind){
    var l=CHIPS[kind];
    return l?'<span class="t t-'+kind+'">'+l+'</span>':'';
@@ -883,6 +885,12 @@ HOME_JS = """
        +(it.stock?n(it.stock)+' in stock':'none')+'</span>'
        +'<span class="pill '+(it.makes?'mut':'no')+'">'+made+'</span>'
        +'<span class="pill mut">'+n(it.uses)+' use'+(it.uses===1?'':'s')+'</span>'
+       // #168. Only the twin carries it, so the row that does NOT say this is the one the
+       // pack generates -- which is why the badge is absent rather than negated on
+       // ordinary rows. Wording injected from present, like the chips above, because a
+       // second spelling of it here is how the page and the terminal drift apart.
+       +(it.shadow?'<span class="pill no" title="'+esc(SHADOW.title)+'">'
+                   +esc(SHADOW.text)+'</span>':'')
        +'<span class="id2">'+esc(it.key)+'</span></a>'
        +'<button class="star'+(fav?' on':'')+'" type="button" data-star="'+i+'"'
        +' aria-pressed="'+fav+'" title="keep this in Favourites">'
@@ -1000,7 +1008,9 @@ def home_page(state, query="", qty=1):
         "{:,}".format(len(state.graph.recipes)),
         "{:,}".format(len(state.have)),
         sum(1 for s, _w in state.states.values() if s == machines_mod.HAVE),
-        _esc(query), qty, HOME_JS.replace("%%CHIPS%%", kind_chip_json()),
+        _esc(query), qty,
+        (HOME_JS.replace("%%CHIPS%%", kind_chip_json())
+                .replace("%%SHADOW%%", shadow_pill_json())),
     )
     return _page("Recipe graph", body, state)
 

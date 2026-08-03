@@ -264,6 +264,20 @@ def split_key(key):
     return key, 0
 
 
+def mod_of(key):
+    """The mod that registered `key`, or "" for a fluid, oredict or essentia key.
+
+    The namespace before the first colon. Empty rather than the prefix for a non-item key,
+    because `fluid:nethengeic_fluid` would otherwise answer "fluid" -- its KIND wearing the
+    shape of an answer, and a sweep grouping by mod would report a mod called fluid.
+
+    ONE SPELLING, because there were two: `api.FIELDS["mod"]` computed this inline and
+    `dimensions.shadow_ores` needed the same answer, which is how `reachable_form` acquired
+    the copy that drifted for two releases. Both read this.
+    """
+    return key.split(":")[0] if is_item_key(key) else ""
+
+
 class Ingredient:
     """One input slot: any of `alternatives` satisfies it, `qty` of them."""
 
@@ -392,6 +406,21 @@ class Graph:
         # so the two never have to be rebuilt together. Empty for a pack with no
         # Advanced Rocketry, which behaves exactly as before.
         self.dimension_ores = {}
+        # The subset of `dimension_ores` that is a SECOND id for an ore already in it, from
+        # `dimensions.shadow_ores`. Kept as well as folded in, because the two answer
+        # different questions and #168 needs both: `dimension_ores` says "a trip is priced
+        # into this key", and this says "this key is not the block that generates -- its
+        # twin is". Only the first prices a plan; only the second lets a search tell a decoy
+        # from the 19 barren ores in this pack that are perfectly real.
+        #
+        # PERSISTED RATHER THAN RECOMPUTED, and that is the point rather than an
+        # optimisation. It is derived from pack files (planetDefs.xml, crafttweaker.log)
+        # that only `index.build` has in hand, so a consumer that re-derived it would need
+        # the instance directory and would be a second spelling besides. #19 Phase 6 deletes
+        # the Python search page and the in-game planner has no search surface yet; carrying
+        # the answer in graph.json is what stops that search being born with this bug.
+        # Empty on any graph built before #168, which behaves exactly as before.
+        self.shadow_ores = {}
         # item key -> maxDamage, for items whose META IS DURABILITY rather than a subtype.
         # From the item registry via the dump, because nothing structural can tell 46 damage
         # values of one Iron Axe from 9 genuinely distinct `chisel:lapis` blocks -- see
@@ -1243,6 +1272,7 @@ class Graph:
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
+            "shadow_ores": self.shadow_ores,
             "max_damage": self.max_damage,
             "machine_names": self.machine_names,
             "blueprint_machines": self.blueprint_machines,
@@ -1274,6 +1304,14 @@ class Graph:
         g.multiblocks = d.get("multiblocks") or {}
         # Absent before #112; empty means "no dimension is priced", the pre-#112 behaviour.
         g.dimension_ores = d.get("dimension_ores") or {}
+        # Absent before #168; empty means "no key is known to be a duplicate registration",
+        # which is the pre-#168 behaviour and NOT "every key is genuine". DO NOT recompute it
+        # here the way `relabel_unlocalized` is recomputed below: this is derived from pack
+        # files rather than from the graph, so a `load` that re-derived it would silently
+        # change `dimension_ores` for an oracle on disk -- and `tools/make-java-fixtures.py`
+        # keys every fixture to that count, so the whole golden set would go stale without a
+        # rebuild having happened.
+        g.shadow_ores = d.get("shadow_ores") or {}
         # All five absent before schema 5, and every one of them means "the feature is off"
         # rather than "something is broken": no meta collapse, no blueprint names, no EMC
         # route, no icons. A graph built from an older dump goes on working unchanged, which

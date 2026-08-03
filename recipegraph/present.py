@@ -125,6 +125,21 @@ STATE_BADGE = {HAVE: "ok", BUILDABLE: "warn", UNKNOWN: "muted", UNAVAILABLE: "ne
 #: One definition, because the tree badge, the shopping-list row and the legend all show it.
 UNSOURCED_BADGE = "no known source"
 
+#: What a search row says when the key is the pack's SECOND id for a rock that generates
+#: under another id -- `graph.shadow_ores`, computed once by `index.build`. #168 was reported
+#: as two identical "Sednanite Ore" rows with nothing on screen to tell them apart.
+#:
+#: SAYS "DUPLICATE", NOT "FAKE" OR "NO SOURCE". The twin is a real registered block that
+#: three recipes consume literally, so a player can be holding one; what is untrue about it
+#: is only that the ground contains it. `UNSOURCED_BADGE` would be the wrong words as well as
+#: the wrong predicate -- see `Graph.reachable_form`, which measures False for all 23 of these
+#: keys and must not be widened to cover them.
+SHADOW_BADGE = "duplicate id"
+#: The hover text, which is where the actionable half goes: the row above it is the one to
+#: plan. Separate from the badge because a pill has to stay short enough to sit in a row.
+SHADOW_TITLE = ("a second id for the same ore -- the pack generates the other one, "
+                "which is the row ranked above this")
+
 
 def status_badge(status, token_kind=None, unsourced=False):
     """`(text, css class)` for a node's badge, refined by token kind or by `unsourced`.
@@ -192,6 +207,16 @@ def kind_chip_json():
     it rather than restating it is what keeps one source of truth.
     """
     return script_json(KIND_CHIP)
+
+
+def shadow_pill_json():
+    """`SHADOW_BADGE` and `SHADOW_TITLE` as JS, for the same reason `kind_chip_json` exists.
+
+    The home page's typeahead builds its rows in the browser, so the words have to reach it
+    somehow, and restating them in the JS is how the page and the terminal come to say
+    different things about the same key.
+    """
+    return script_json({"text": SHADOW_BADGE, "title": SHADOW_TITLE})
 
 
 # What a pin's resolution state says to the reader. Keyed by the constants themselves, so
