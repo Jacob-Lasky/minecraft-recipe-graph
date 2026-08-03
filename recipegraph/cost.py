@@ -739,15 +739,44 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # rather than lowers. See UNSOURCED_COST. Until #176 these were `BASE_RAW_COST` like any
     # other leaf -- the CHEAPEST value in the model -- so the solver preferred a route through
     # an item it had already badged "no known source" over any route it could account for.
-    # Measured across eight targets, this drives unsourced nodes in a plan from 54 to 5.
+    # Measured over the golden fixture set, this drives unsourced plan nodes from 57 to 3.
+    #
+    # IT INSERTS AS WELL AS RAISES, FOR 39 KEYS, and that is a second effect rather than a
+    # detail of the first. The leaf rule above walks recipe INPUTS, so a key nothing consumes
+    # is never seeded and prices at infinity; `unsourced_keys` is built over `live_keys`,
+    # which is wider by exactly those 39. For them `cost.get(key, BASE_RAW_COST)` returns the
+    # default and this line CREATES the entry, taking them from infinite to 2,000. That is
+    # deliberate and argued in `Graph.unsourced_keys` -- they reach no plan but they do reach
+    # `/api/sweep` and `/api/cost`, and pricing a key one way in the table and another way in
+    # the sweep is the drift #178 removed. Downstream it is visible: 18 machine categories
+    # whose cheapest build candidate is one of the 39 move off UNPRICED_MACHINE_COST (111.0)
+    # onto `build_entry_cost(2000.0)` = 95.773 in `tools/entry-census.py`.
+    #
+    # SO DO NOT "NEUTRALISE" THIS LOOP BY SETTING UNSOURCED_COST LOW TO GET A BASELINE. The
+    # write happens regardless of the value, so a low arm still moves those 39 and silently
+    # measures the wrong thing -- a control that performs the effect it controls for. Pre-#176
+    # behaviour is the loop over an EMPTY set: `graph._unsourced_keys = frozenset()`.
     #
     # SAME GUARD AS THE TOKEN LOOP BELOW, and for the same reason: anything already priced
     # under a raw leaf is stock, an infinite generator or a learned EMC item, and every one
     # of those is a stronger claim about THIS world than a structural inference is. If you
     # are holding one, the graph's inability to explain where it came from is irrelevant.
     #
-    # `max`, not assignment, so a floor another rule raised higher is kept. A dimension-gated
-    # leaf sits at BASE_RAW_COST + DIMENSION_COST and would be lowered by a bare assignment.
+    # `max`, NOT ASSIGNMENT, AND IT IS DEFENSIVE RATHER THAN LOAD-BEARING TODAY. Measured on
+    # the reference graph, all 47,674 of these keys hold exactly BASE_RAW_COST when this loop
+    # runs, so `max` and a bare assignment produce identical tables -- the count of keys where
+    # they differ is 0. An earlier version of this comment justified `max` by saying a
+    # dimension-gated leaf "would be lowered by a bare assignment"; that is backwards. Such a
+    # leaf sits at BASE_RAW_COST + DIMENSION_COST = 801, which is BELOW UNSOURCED_COST, so an
+    # assignment would RAISE it exactly as `max` does.
+    #
+    # KEEP `max` ANYWAY, and this is the real reason: it is what makes the loop correct for
+    # any ordering of the constants rather than only for the current one. The seed rules above
+    # can leave at most BASE_RAW_COST + DIMENSION_COST here, and nothing enforces that that
+    # stays under UNSOURCED_COST -- `test_progression` pins UNSOURCED_COST between GATE_COST
+    # and the `unavailable` wall, and DIMENSION_COST is free to move. A bare assignment would
+    # silently start LOWERING gated leaves the day DIMENSION_COST passes 2,000, and the symptom
+    # would be a cheaper route through a planet you have never visited.
     #
     # BEFORE THE TOKENS, so a token wins. A placeholder is already an instruction with its
     # own price for what the player must go and DO, and `Solver.expand` returns at the token

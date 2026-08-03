@@ -76,10 +76,19 @@ final class Unsourced {
     /**
      * Every key {@link #reachableForm} names another form for, as a bitset over key ids.
      *
-     * COMPUTED ONCE PER TABLE, NOT PER KEY IN THE SEEDING LOOP, because `Cost.estimate`
-     * seeds TWICE -- once per relaxation pass -- and the answer cannot change between them.
-     * Mirrors `Graph.unsourced_keys` in python, which is a cached property for the same
-     * reason.
+     * COMPUTED ONCE PER TABLE, NOT PER KEY IN THE SEEDING LOOP, which is a sweep of every
+     * live key rather than a lookup. Mirrors `Graph.unsourced_keys` in python.
+     *
+     * NOT "BECAUSE `estimate` SEEDS TWICE", which this javadoc said until #176 checked it.
+     * {@link Cost#estimate} calls {@link Cost#seed} ONCE and hands `seed.clone()` to each of
+     * the two relaxations, exactly as python hands `dict(seed)` to each of its own. The
+     * hoisting is still worth it for the per-key reason above; the twice-per-estimate reason
+     * was simply not true in either language.
+     *
+     * NOT CACHED ON THE GRAPH, unlike python, and deliberately: `GraphService` hands one
+     * graph to concurrent off-thread solves, so a lazily-populated field on it would be a
+     * data race. One sweep per cost table is the price of that, and a cost table is already
+     * two full relaxations.
      *
      * OVER EVERY LIVE KEY, matching python. Only a consumed key can change a recipe's price,
      * so sweeping consumed keys alone would price every route identically -- but the set

@@ -50,7 +50,7 @@ public final class PlannerWidgets {
     /**
      * Indentation stops here.
      *
-     * `plan-fluid-chain` is 347 nodes and runs deeper than eight levels; without a cap the
+     * `plan-fluid-chain` is 634 nodes and runs deeper than eight levels; without a cap the
      * label column would be pushed off the right edge and, per rule 2 above, nothing would
      * say so. The tree structure is still readable because the rows above are still indented.
      */
@@ -217,7 +217,7 @@ public final class PlannerWidgets {
      * A row that can be clicked.
      *
      * `Interactable` on the ROW rather than a `ButtonWidget` around it, because a button
-     * brings its own themed background and hover fill, and 347 of those down a tree panel is
+     * brings its own themed background and hover fill, and 634 of those down a tree panel is
      * a wall of boxes. What is wanted is a click target the width of the row and no visual
      * change at all.
      */

@@ -9,6 +9,7 @@
   "BUILD_SLOPE": 79.0,
   "BUILD_SPREAD": 70.0,
   "DIMENSION_COST": 800.0,
+  "EMC_COST": 0.5,
   "FLUID_SCALE": 0.001,
   "GATE_COST": 1000.0,
   "LOOT_COST": 200.0,
@@ -17,7 +18,8 @@
   "SETTLED_FRACTION": 0.002,
   "TRANSFER_PENALTY": 500.0,
   "UNGATED_MACHINE_COST": 20.0,
-  "UNPRICED_MACHINE_COST": 111.0
+  "UNPRICED_MACHINE_COST": 111.0,
+  "UNSOURCED_COST": 2000.0
  },
  "digest": "aae44c11c74f7d942b10d499886fda1035e2a87fcf104d877b4600dadf4fbe71",
  "digest_format": "sha256 over '<key> <%.17e of the cost>\\n' for every key in sorted order, with a non-finite cost written as the literal 'inf'. NOT repr: 33% of doubles render differently as text in Python and Java while differing in value in 0% of cases. 17 significant digits is injective over binary64, so this detects a one-ULP drift.",

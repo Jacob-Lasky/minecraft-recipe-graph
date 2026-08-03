@@ -456,16 +456,24 @@ TARGETS = [
             "fluid is not a small variation on an item: `cost.FLUID_SCALE` divides both "
             "sides of every recipe it touches, and scaling one side alone makes every "
             "fluid-to-fluid hop 1000x cheaper while the table still looks populated (see "
-            "cost.py). It is also 347 nodes finishing inside the default budget, which is "
+            "cost.py). It is also 634 nodes finishing inside the default budget, which is "
             "the only fixture here that pins the whole walk rather than the first few "
-            "hops: recipe choice at every level, the ancestor set, 27 oredict slots, 7 "
+            "hops: recipe choice at every level, the ancestor set, 44 oredict nodes, 7 "
             "token leaves reported apart from the shopping list, machines and free "
             "sources. A port that gets one scoring term wrong diverges somewhere in here "
             "even when every small fixture agrees.\n\nIt took over the deep-chain role "
             "from `extendedcrafting:singularity_custom:1012`, which completed on the "
             "schema-3 oracle and EXHAUSTS ITS WORK BUDGET on the schema-5 one after 135 "
             "seconds. A 135-second fixture on a tool that reruns whenever a cost constant "
-            "moves is a fixture that stops being regenerated."),
+            "moves is a fixture that stops being regenerated.\n\nWATCH THE WORK BUDGET "
+            "HERE, for exactly the reason the previous paragraph retired its predecessor. "
+            "#176 took this plan from 347 to 388 to 634 nodes and its `work` from 400 to "
+            "28,012 against a budget of 80,000 -- 0.5% of the budget to 35% in one change, "
+            "because the search no longer stops at 40 unsourced dead ends and instead "
+            "explores the routes behind them. `truncated` and `exhausted` are both still "
+            "false, so the claims above still hold, but the headroom that made this a "
+            "SAFE deep fixture is much thinner than when it was chosen. If a later change "
+            "flips `exhausted` anywhere in this set, look here first."),
     Target(
         "truncated", "fluid:nethengeic_fluid", max_nodes=40,
         expect=("depth", "truncated", "craft"),
@@ -930,12 +938,30 @@ COST_PROBE_ITEMS = [key for key, _label in _cost_probe().PROBES]
 # and a digest mismatch that says nothing; with these in the file the first thing to compare
 # is the inputs. `FORMULA_VERSION` is separate because it is the cache's tripwire rather
 # than an input to the arithmetic.
+# EVERY NUMERIC CONSTANT `cost` DECLARES, and `tests/test_plan_fixtures.py` asserts that this
+# tuple is exhaustive rather than trusting whoever adds the next one. It was NOT exhaustive
+# before #176: `EMC_COST` and `UNSOURCED_COST` were both missing, so the tripwire that catches
+# "a cost constant moved without a regeneration" could not see either of them. #176 added one
+# of those two and would have shipped the same gap a third time.
+#
+# EXEMPTIONS GO IN `NOT_PINNED` WITH A REASON, never by quietly leaving a name out of here.
 PINNED_CONSTANTS = (
     "BASE_RAW_COST", "BLOCKED_CEILING", "BLOCKED_FLOOR", "BUILD_KNEE", "BUILD_SCALE",
-    "BUILD_SLOPE", "BUILD_SPREAD", "DIMENSION_COST", "FLUID_SCALE", "GATE_COST",
-    "LOOT_COST", "PASSES", "PRICED_CEILING", "SETTLED_FRACTION", "TRANSFER_PENALTY",
-    "UNGATED_MACHINE_COST", "UNPRICED_MACHINE_COST",
+    "BUILD_SLOPE", "BUILD_SPREAD", "DIMENSION_COST", "EMC_COST", "FLUID_SCALE",
+    "GATE_COST", "LOOT_COST", "PASSES", "PRICED_CEILING", "SETTLED_FRACTION",
+    "TRANSFER_PENALTY", "UNGATED_MACHINE_COST", "UNPRICED_MACHINE_COST",
+    "UNSOURCED_COST",
 )
+
+# The only numeric constants in `cost` that are deliberately NOT in the recorded set, each
+# because something else already pins it harder than a recorded copy would.
+NOT_PINNED = {
+    # Has its own dedicated assertion, `test_the_recorded_formula_version_is_the_live_one`,
+    # and its own top-level field in `cost.json`. Recording it twice would let the two
+    # disagree. It is also not a PRICE -- Java has no counterpart and reproduces no value
+    # from it -- so it does not belong in a table the port is held to.
+    "FORMULA_VERSION",
+}
 
 
 def generate(graph_path):

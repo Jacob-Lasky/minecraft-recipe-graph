@@ -27,19 +27,25 @@ public class PlanJsonTest {
     public void everyFixtureParsesAndCarriesTheNodeCountItClaims() {
         List<String> names = PlanFixtures.names();
         // A directory scan that found nothing passes vacuously; assert the population first.
-        // TWENTY, not the 23 files in that directory: `cost.json`, `machines.json` and
-        // `machines-overridden.json` live there too and are inputs rather than plans.
+        //
+        // COUNT PLAN TARGETS, NOT FILES, and the two numbers are both live so do not "fix"
+        // one into the other. `PlanFixtures.names()` globs `plan-*`, giving 21; the
+        // directory holds 24 entries, because `cost.json`, `machines.json` and
+        // `machines-overridden.json` sit there too and are INPUTS rather than plans. A #170
+        // review read the directory and reported "10 of 23 fixtures", which was true of
+        // files and did not match this assertion -- so say which denominator this is.
         //
         // THIS NUMBER MOVES WHENEVER A TARGET IS ADDED, and that is the point rather than a
         // maintenance cost -- a fixture added without anyone noticing is one the port was
-        // never held to. 19 at #135, 20 at #170's `plan-unsourced-variant`.
-        assertEquals("20 plan fixtures; found " + names, 20, names.size());
+        // never held to. 19 at #135, 20 at #170's `plan-unsourced-variant`, 21 at #176's
+        // `plan-unsourced-price`.
+        assertEquals("21 plan fixtures; found " + names, 21, names.size());
         for (String name : names) {
             PlanView plan = PlanFixtures.load(name);
             assertNotNull(name + " has no tree", plan.tree());
             assertFalse(name + " has no target", plan.target().isEmpty());
             // `nodes` is the solver's own count. If the reader dropped a child, or read one
-            // twice, this is where it shows -- across 572 nodes and 20 trees.
+            // twice, this is where it shows -- across 856 nodes and 21 trees.
             assertEquals(name + " lost or gained nodes in the read",
                          plan.nodes(), plan.flatten().size());
         }
@@ -92,7 +98,19 @@ public class PlanJsonTest {
         PlanView plan = PlanFixtures.load("plan-truncated");
         assertTrue("plan-truncated is the fixture for exactly this", plan.truncated());
         // 49 before #172. Splitting the cycle term stopped the ranking entering cyclic
-        // routes first, so the same node budget now buys three more real nodes.
+        // routes first, so the same node budget now buys three more real nodes. This is the
+        // one fixture where a NODE BUDGET argument is valid at all: `max_nodes` is 40 here
+        // and genuinely binds, where every other fixture runs at 4,000 and never reaches it.
+        //
+        // #176 MOVED NOTHING HERE, and that is worth recording because it nearly got the
+        // credit for these three nodes. A comment claiming "the same node budget buys three
+        // more REAL nodes now that the ranking stops spending it on routes the graph cannot
+        // account for" was written against a pre-#172 base and, regenerated on top of #172,
+        // measures 52 -> 52: same nodes, same work (60), same shopping list (19). What #176
+        // does to this plan is swap ONE node -- `forestry:bee_drone_ge#438f0076b188`
+        // "Radiant Drone", which carried `unsourced`, becomes `bee_princess_ge#438f0076b188`
+        // -- and the mark goes from 1 to 0. Two changes had claimed the same three nodes by
+        // different mechanisms; only #172's claim survived being measured.
         assertEquals(52, plan.nodes());
         assertTrue(plan.maxNodes() > 0);
     }
@@ -263,12 +281,29 @@ public class PlanJsonTest {
 
     @Test
     public void theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive() {
-        // 388 nodes in one viewport, 347 before #172. Named here so a future change that
-        // makes the tree panel O(n^2) has something to fail against rather than just feeling
-        // slow in game -- so when this number MOVES UP it is the test getting harder, and the
-        // only wrong response is to stop asserting it.
+        // 634 nodes in one viewport. 347 before #172, 388 before #176. Named here so a future
+        // change that makes the tree panel O(n^2) has something to fail against rather than
+        // just feeling slow in game -- so when this number MOVES UP it is the test getting
+        // harder, and the only wrong response is to stop asserting it.
+        //
+        // WHY IT GREW, MEASURED RATHER THAN REASONED. All 42 of this plan's `unsourced` nodes
+        // were LEAVES before #176 -- dead ends resting on items the graph cannot explain.
+        // Pricing them at UNSOURCED_COST made those routes lose, so the search continues into
+        // routes it can account for: unsourced 42 -> 2, leaves 139 -> 243, `craft` 214 -> 347,
+        // `raw` 131 -> 228. A bigger tree that says true things is the trade #176 makes.
+        //
+        // NOT A NODE-BUDGET EFFECT, and an earlier draft of this comment said it was. This
+        // fixture runs at `max_nodes` 4,000 with `truncated` and `exhausted` both false on
+        // BOTH sides, so no budget was ever binding and nothing is being reallocated -- the
+        // tree simply stopped terminating early. The budget argument belongs to
+        // `plan-truncated`, whose `max_nodes` is 40, and #176 does not move that one.
+        //
+        // WATCH `work`, NOT JUST THE NODE COUNT: it went 400 -> 28,012 against a work_budget
+        // of 80,000, so this fixture now spends 35% of its search budget where it used to
+        // spend 0.5%. Still passing, with much less headroom. If a later change flips
+        // `exhausted` on any fixture, this is the one to look at first.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(388, plan.flatten().size());
+        assertEquals(634, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

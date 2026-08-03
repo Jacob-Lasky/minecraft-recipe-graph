@@ -789,10 +789,17 @@ class Graph:
         """Every live key `reachable_form` names another form for. 47,674 on the reference.
 
         THE COST MODEL'S HALF OF #139/#136/#170, and the reason it is a set rather than a
-        predicate call inside `cost._seed`: `estimate` seeds TWICE, once per relaxation pass,
-        so a per-key predicate would run the whole enumeration twice for an answer that
-        cannot change between them. Cached here the way `reshaped_only` and `variant_index`
-        are, and for the same reason.
+        predicate call inside `cost._seed`: the seed loop would otherwise run the whole
+        enumeration once per key instead of once per table. Cached on the graph the way
+        `reshaped_only` and `variant_index` are, because `estimate` is not the only caller --
+        `/api/sweep` and `/api/cost` ask the same question of the same graph, and a graph
+        outlives any one of them.
+
+        NOT "BECAUSE `estimate` SEEDS TWICE", which an earlier version of this docstring said
+        and `Unsourced.keys` repeated. `estimate` calls `_seed` ONCE and hands `dict(seed)` to
+        each of the two relaxations, so the second pass re-uses the first pass's seed rather
+        than recomputing it. The justification above does not depend on that being wrong or
+        right, which is why it is stated separately.
 
         WHAT THESE KEYS ARE. `reachable_form` returns non-None only when nothing makes this
         exact key AND the graph demonstrably makes another form of it -- another NBT state, a

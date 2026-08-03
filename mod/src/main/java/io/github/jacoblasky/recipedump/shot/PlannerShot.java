@@ -23,9 +23,10 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
  * Opens a planner window against a frozen plan fixture, for `-Dmcrecipedump.shot=planner:...`.
  *
  * A FIXTURE FROM DISK RATHER THAN A BOOK MADE UP HERE. The harness shoots from the main menu,
- * so there is no player, no capability and no solver -- and #135's fixtures are 19 real solved
- * plans from the reference pack, which is far better subject matter than anything written to
- * flatter the renderer. `plan-fluid-chain` alone is 347 nodes.
+ * so there is no player, no capability and no solver -- and the fixtures are real solved plans
+ * from the reference pack, which is far better subject matter than anything written to
+ * flatter the renderer. `plan-fluid-chain` alone is 634 nodes. (19 fixtures at #135; the count
+ * is asserted in `PlanJsonTest` rather than restated here, because it has moved three times.)
  *
  * DEV-ONLY, and it is in `shot/` for that reason: it reads `tests/fixtures/` out of the
  * working tree, which does not exist beside a shipped jar. Nothing outside the harness calls
@@ -300,7 +301,7 @@ final class PlannerShot {
     /**
      * The tree to draw: a fixture, or `synthetic:<n>` for a plan of a chosen size.
      *
-     * THE GATE IS 4,000 NODES AND THE LARGEST FIXTURE IS 347. `DEFAULT_MAX_NODES` is 4,000,
+     * THE GATE IS 4,000 NODES AND THE LARGEST FIXTURE IS 634. `DEFAULT_MAX_NODES` is 4,000,
      * so that is the size the 60 fps claim has to be made at, and no real solved plan in the
      * fixture set comes close. A generated tree is honest subject matter for a PERFORMANCE
      * measurement in a way it would not be for a rendering one: what costs frames is the node
@@ -497,7 +498,7 @@ final class PlannerShot {
         });
     }
 
-    /** Recursive for the reason `PlanJson.readNode` is: the deepest fixture is 347 nodes. */
+    /** Recursive for the reason `PlanJson.readNode` is: the deepest fixture is 634 nodes. */
     static void intern(PlanNode node, GraphBuilder builder) {
         builder.key(node.key());
         for (PlanNode child : node.children()) {
