@@ -1,12 +1,14 @@
 package io.github.jacoblasky.recipedump.plan;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -422,11 +424,87 @@ public class SolverTest {
         RecipeGraph g = b.build();
 
         PlanResult plan = solver(g).build().solve(g.keyId("mod:out"), 1);
-        List<String> keys = new ArrayList<String>();
-        for (PlanEntry entry : plan.shoppingList) {
-            keys.add(entry.key);
-        }
-        assertEquals(Arrays.asList("mmm:most", "zzz:first_seen", "aaa:second_seen"), keys);
+        assertEquals(Arrays.asList("mmm:most", "zzz:first_seen", "aaa:second_seen"),
+                keysOf(plan.shoppingList));
+    }
+
+    @Test
+    public void theShoppingListTieFollowsDiscoveryAndNotTheKeyIdOrTheAlphabet() {
+        // `tests/test_result_order.py:TheShoppingListKeepsDiscoveryOrderNotAlphabeticalOrder`,
+        // ported. THIS AND `theUsedFromStockTieFollowsTheSameRule` ARE THE ONLY TWO ASSERTIONS
+        // IN THIS FILE THAT DISCRIMINATE AGAINST ALL THREE WRONG MAPS AT ONCE: apple holds the
+        // lower key id and sorts first alphabetically, and the plan reaches zebra first. `HashMap` and `TreeMap<Integer>` both order small
+        // non-negative int keys ascending and put apple first; `TreeMap<String>` and a bare
+        // `sorted()` put apple first for the other reason. Only insertion order gives zebra.
+        //
+        // The case above cannot see any of that: its tie is zzz before aaa, which is not
+        // alphabetical but IS ascending by key id, so it passes under a HashMap. Measured, not
+        // reasoned -- see the PR for #192 for the sabotage runs.
+        RecipeGraph g = tieGraph();
+
+        PlanResult plan = solver(g).build().solve(g.keyId("mod:widget"), 1);
+        assertEquals("ties must follow slot order, not sorted() order and not key-id order",
+                Arrays.asList("mod:zebra", "mod:apple"), keysOf(plan.shoppingList));
+    }
+
+    @Test
+    public void theTwoOrdersGenuinelyDisagreeSoTheTieTestsCanFail() {
+        // The guard on the guard, as `tests/test_result_order.py:test_the_two_orders_genuinely`
+        // `_disagree_so_the_test_above_can_fail` does on the Python side, plus the key-id half
+        // that Python has no equivalent of because its Counter is keyed by string. If a later
+        // edit renames these keys, or drops the intern that gives apple the lower id, the two
+        // tie tests silently stop discriminating and keep passing forever.
+        RecipeGraph g = tieGraph();
+        assertTrue("mod:apple must hold the LOWER key id, or an id-ordered map would agree "
+                        + "with the expected list by accident",
+                g.keyId("mod:zebra") > g.keyId("mod:apple"));
+        List<String> expected = Arrays.asList("mod:zebra", "mod:apple");
+        List<String> alphabetical = new ArrayList<String>(expected);
+        Collections.sort(alphabetical);
+        assertFalse("the expected list must not be alphabetical by accident",
+                expected.equals(alphabetical));
+    }
+
+    @Test
+    public void theUsedFromStockTieFollowsTheSameRule() {
+        // `tests/test_result_order.py:UsedFromStockKeepsTheSameOrderingRule`, ported, and it is
+        // the only discriminating tie `used_from_stock` has anywhere: the census in #192 found
+        // 13 in `shopping_list` and 1 in `tokens_needed` across all 20 golden fixtures, and
+        // NONE in `used_from_stock`, `from_sources` or `from_emc`, which hold 10 rows between
+        // them. So the golden gate cannot cover this list's order at all and this is the whole
+        // of its coverage.
+        RecipeGraph g = tieGraph();
+        Map<Integer, Long> have = new LinkedHashMap<Integer, Long>();
+        // Stocked in APPLE-FIRST order, so a pool that leaked its own iteration order into the
+        // result would be caught rather than accidentally agreed with.
+        have.put(g.keyId("mod:apple"), 3L);
+        have.put(g.keyId("mod:zebra"), 3L);
+
+        PlanResult plan = solver(g).have(have).build().solve(g.keyId("mod:widget"), 1);
+        assertEquals("both draws tie at 3, so the order is the order the solver reached them",
+                Arrays.asList("mod:zebra", "mod:apple"), keysOf(plan.usedFromStock));
+        assertTrue("nothing may be left to buy, or the draws did not both happen",
+                plan.shoppingList.isEmpty());
+    }
+
+    /**
+     * `tests/test_result_order.py:_tie_graph`, ported: one recipe needing equal amounts of two
+     * leaves, reached ZEBRA-first while APPLE holds the lower key id.
+     *
+     * BOTH DISAGREEMENTS ARE DELIBERATE AND ARE THE ONLY REASON THE TESTS ABOVE CAN FAIL.
+     * `mod:apple` is interned before the recipe is authored so it takes the lower id, and the
+     * zebra slot is written FIRST so the solver reaches it first. Do not reorder either line,
+     * and do not rename the keys: `theTwoOrdersGenuinelyDisagreeSoTheTieTestsCanFail` asserts
+     * both properties so a tidy-up has to argue with a test rather than with this comment.
+     */
+    private static RecipeGraph tieGraph() {
+        GraphBuilder b = new GraphBuilder();
+        b.name("mod:widget", "Widget");
+        b.name("mod:apple", "Apple Part");
+        b.name("mod:zebra", "Zebra Part");
+        recipe(b, "make-widget", "crafting_shaped", "mod:widget", 1,
+                slot("mod:zebra", 3), slot("mod:apple", 3));
+        return b.build();
     }
 
     @Test
@@ -500,6 +578,15 @@ public class SolverTest {
         }
         b.output(b.key(output), yield);
         b.endRecipe(rid, category, null, "jar_json", false, false);
+    }
+
+    /** The `key` of every row, which is what every ordering assertion here is about. */
+    private static List<String> keysOf(List<PlanEntry> entries) {
+        List<String> keys = new ArrayList<String>(entries.size());
+        for (PlanEntry entry : entries) {
+            keys.add(entry.key);
+        }
+        return keys;
     }
 
     private static Map<Integer, Long> stock(RecipeGraph g, String key, long count) {
