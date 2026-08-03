@@ -92,13 +92,34 @@ class FixtureTest(unittest.TestCase):
     def test_every_case_renders_the_recorded_canonical_string(self):
         # Asserted separately from the digest because a hash mismatch says only "these
         # differ"; the canonical string says WHERE.
+        #
+        # COUNTED, because the `continue` is how this test can pass without running. A
+        # regenerated fixture that stopped writing `canonical` -- or wrote it as null --
+        # skips every case and leaves a green no-op where the whole cross-language string
+        # contract used to be. 42 of the 46 cases carry it; the four that do not are the
+        # `java_diverges` case and the empty-tag ones. `NodeStatusTest` counts its rows out
+        # of present.py for the same reason and is the pattern here.
+        #
+        # `DigestFixtureTest.everyCaseRendersTheRecordedCanonicalString` asserts the same 42
+        # on the Java side. TWO INDEPENDENT LITERALS RATHER THAN ONE SHARED NUMBER, on
+        # purpose: a count carried in the fixture would be regenerated along with the field
+        # it is meant to guard, so it has to come from outside the fixture -- and having to
+        # edit both languages is the deliberate cost of adding a case.
+        checked = 0
         for case in self.cases:
+            # Subscript rather than `.get`, so a fixture that DROPS the field raises here
+            # instead of quietly skipping. The count below is for the other half: a field
+            # present and null.
             if case["canonical"] is None:
                 continue
             with self.subTest(case["name"]):
                 tree = {k: v for k, v in _tree(case).items()
                         if k not in nbt_digest.COSMETIC_TAGS}
                 self.assertEqual(nbt_digest.canonical(tree), case["canonical"])
+            checked += 1
+        self.assertEqual(42, checked,
+                         "the fixture must carry 42 canonical strings; a case that stopped "
+                         "recording one is skipped silently and asserts nothing")
 
     def test_the_ground_truth_cases_are_real_dump_output(self):
         # Guards the provenance, not the arithmetic. These six digests were not computed

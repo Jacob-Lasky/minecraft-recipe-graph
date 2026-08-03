@@ -100,10 +100,30 @@ class ANameResolvesTheWayTheUIRanksTest(unittest.TestCase):
 
     def test_the_cli_and_the_web_ui_now_agree(self):
         # They did not, and that is the defect underneath the defect: two rankings for one
-        # question. Asserted against `rank_matches` itself so they cannot drift apart again.
+        # question.
+        #
+        # ASSERTED AGAINST THE FUNCTIONS THE WEB UI ACTUALLY CALLS, not against
+        # `rank_matches`. `resolve_query` IS `rank_matches(...).results` for a non-exact
+        # query -- the last line of the function -- so comparing the two was one expression
+        # against itself and could not fail however far the two surfaces drifted. The web
+        # UI's ranked paths are `explore.search` (server.py's `/explore` route) and
+        # `explore.suggest` (its `/suggest` route); those are the sides that have to agree.
         g = bottled()
-        self.assertEqual(explore.resolve_query(g, "strong mythic essence"),
-                         explore.rank_matches(g, "strong mythic essence").results)
+        query = "strong mythic essence"
+        # ONE EXPLICIT LIMIT FOR ALL THREE. The three entry points default differently --
+        # `suggest` caps at 25 and `/explore` passes 40 -- so comparing their defaults would
+        # one day fail on a truncation rather than on a ranking, which is a failure that sends
+        # the reader after the wrong thing.
+        limit = 10
+        cli = explore.resolve_query(g, query, limit=limit)
+        self.assertTrue(len(cli) > 1,
+                        "a one-result query cannot show a ranking disagreement")
+        self.assertEqual(
+            cli, [row["key"] for row in explore.search(g, query, limit=limit).results],
+            "`/explore` must rank what the CLI ranks")
+        self.assertEqual(
+            cli, [row["key"] for row in explore.suggest(g, query, limit=limit).results],
+            "the typeahead must rank what the CLI ranks")
 
     def test_a_name_nothing_wears_resolves_to_nothing(self):
         self.assertEqual(explore.resolve_query(bottled(), "nonexistent widget"), [])

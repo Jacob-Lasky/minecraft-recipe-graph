@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.graph;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayInputStream;
@@ -84,11 +85,56 @@ public class NaiveGraphAgreementTest {
 
     @Test
     public void bothModelsAgreeOnEveryRecordedLabel() {
+        // THE LABEL ITSELF, not merely that there is one. This asserted `id >= 0` and
+        // `hasName(id)` and never looked at the string, so a compact reader that filed every
+        // name against the WRONG key -- off by one in the name table, say -- agreed here
+        // perfectly. That is `TheTwoPredicatesAgreeTest` exactly: an agreement test whose
+        // cases exercise a branch nobody changed, passing for the whole period the two sides
+        // disagreed. This class is the honesty guard on #126's heap comparison, so it is the
+        // one place a comparison that cannot see a difference is worst.
+        //
+        // PARTITIONED ON `Keys.isUnlocalized` RATHER THAN SKIPPING ANYTHING, because the two
+        // models legitimately hold different strings for one set of keys and only for those.
+        // `NaiveGraph` keeps the raw dump label; the compact reader keeps it too but flags it
+        // and lets `recordedName` compute python's `relabel_unlocalized` replacement lazily
+        // (see the `unlocalizedName` field note). So the raw label is the input on both
+        // sides, and which branch a key takes is derivable from the NAIVE string -- which
+        // means every key can be asserted, in the branch it belongs to, with no `continue`.
+        //
+        // Both branches then catch a distinct defect. A wrong label filed against a key fails
+        // the usable branch. A reader that stopped flagging unlocalized labels fails the
+        // junk branch, because `recordedName` would hand back the lang key unchanged. A
+        // reader that over-flags fails the usable branch for the same reason in reverse.
+        assertTrue("the fixture names nothing; the comparison would be vacuous",
+                naive.names().size() > 0);
+        int usable = 0;
+        int junk = 0;
         for (java.util.Map.Entry<String, String> entry : naive.names().entrySet()) {
-            int id = compact.keyId(entry.getKey());
-            assertTrue(entry.getKey(), id >= 0);
-            assertTrue(entry.getKey(), compact.hasName(id));
+            String key = entry.getKey();
+            String recorded = entry.getValue();
+            int id = compact.keyId(key);
+            assertTrue(key, id >= 0);
+            assertTrue(key, compact.hasName(id));
+            if (Keys.isUnlocalized(recorded)) {
+                assertFalse(key + " is the lang key " + recorded
+                                + "; the compact model must have replaced it",
+                        recorded.equals(compact.recordedName(id)));
+                junk++;
+            } else {
+                assertEquals(key, recorded, compact.recordedName(id));
+                usable++;
+            }
         }
+        // NEITHER BRANCH MAY BE EMPTY, or half of the check above is a no-op that reads as
+        // covered. The fixture is `GraphJsonReaderTest.DOCUMENT` and carries both today.
+        assertTrue("no usable label in the fixture, so the string comparison never ran",
+                usable > 0);
+        assertTrue("no unlocalized label in the fixture, so the relabel branch never ran",
+                junk > 0);
+        // And the compact model's own flag count agrees with the set derived from the naive
+        // strings, so the partition is a fact about the readers rather than about this loop.
+        assertEquals("the two models disagree about WHICH labels are unlocalized",
+                junk, compact.unlocalizedNameCount());
     }
 
     @Test

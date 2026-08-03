@@ -216,6 +216,32 @@ public class NodeStatusTest {
         List<String> legend = NodeStatus.legendFor(plan.tree());
         assertFalse(legend.isEmpty());
         assertTrue("plan-cycle contains a loop marker", legend.contains(NodeStatus.CYCLE));
+
+        // THE `ONLY` HALF, which nothing here asserted. `legendFor` returning the whole of
+        // `NodeStatus.all()` -- the legend a player reads as "this plan has an EMC route and
+        // a locked token in it" when it has neither -- satisfied the containment check and
+        // the ordering check both, because `all()` is in canonical order by construction.
+        // Derived from the tree rather than written out, so a regenerated fixture cannot
+        // quietly make it agree.
+        java.util.Set<String> inTree = new java.util.LinkedHashSet<String>();
+        collectStatuses(plan.tree(), inTree);
+        assertEquals(inTree, new java.util.LinkedHashSet<String>(legend));
+        assertEquals("a legend must not repeat a status", inTree.size(), legend.size());
+
+        // And that the fixture discriminates: `plan-cycle` has to be MISSING statuses, or
+        // "only what the tree contains" and "everything there is" are the same list.
+        assertTrue("plan-cycle must not contain every status, or this test is vacuous",
+                   inTree.size() < NodeStatus.all().size());
+        // Measured out of the fixture, not guessed: `plan-cycle`'s tree holds craft, cycle,
+        // oredict, raw and source. `source` IS in it, which is why it is not on this list.
+        for (String absent : new String[] {NodeStatus.EMC, NodeStatus.TOKEN,
+                                           NodeStatus.HAVE, NodeStatus.PARTIAL,
+                                           NodeStatus.DEPTH}) {
+            assertFalse("plan-cycle was expected not to contain " + absent
+                        + "; pick another fixture or another status",
+                        legend.contains(absent));
+        }
+
         // Order follows the canonical list, not the order of first appearance in the tree.
         List<String> canonical = NodeStatus.all();
         int last = -1;
@@ -223,6 +249,22 @@ public class NodeStatusTest {
             int at = canonical.indexOf(status);
             assertTrue("legend is out of canonical order at " + status, at > last);
             last = at;
+        }
+    }
+
+    /**
+     * The tree's own statuses, so the legend is compared against its input.
+     *
+     * DELIBERATELY A SECOND COPY OF `NodeStatus`'s PRIVATE WALK. DO NOT replace this with a
+     * call into `NodeStatus` -- there is no public accessor, and exposing one so this could
+     * share the production walk is the change that makes the comparison agree with itself: a
+     * walk that missed a subtree would then miss it on both sides and the legend would match
+     * a set that is wrong in the same way. The duplication IS the independence.
+     */
+    private static void collectStatuses(PlanNode node, java.util.Set<String> into) {
+        into.add(node.status());
+        for (PlanNode child : node.children()) {
+            collectStatuses(child, into);
         }
     }
 

@@ -20,14 +20,18 @@ order DISAGREE. A fixture where they happen to agree passes under either impleme
 tests nothing, which is the trap this file is written to avoid.
 """
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import index  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
+from recipegraph.sources import dump_meta, oredict  # noqa: E402
 
 
 def _tie_graph():
@@ -167,7 +171,35 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
         return g
 
     def test_members_keep_the_order_the_dump_listed_them_in(self):
-        self.assertEqual(self._graph().ore_members["plateStuff"], ["mod:z", "mod:a"])
+        # THROUGH `oredict.from_json`, which is the function this class's docstring names as
+        # the thing that builds the list. It used to set `g.ore_members` by hand and read the
+        # literal straight back, so it asserted that a Python list preserves its own order
+        # and nothing about the reader -- `from_json` could have been `sorted(...)` or a
+        # `set` and this stayed green. Before this it had NO caller in tests/ at all.
+        #
+        # The written order is `mod:z` then `mod:a`, so insertion order and alphabetical
+        # order disagree and a sorting reader fails here.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "oredict.json")
+            with open(path, "w") as fh:
+                json.dump({"plateStuff": ["mod:z", "mod:a"]}, fh)
+            self.assertEqual(oredict.from_json(path)["plateStuff"], ["mod:z", "mod:a"])
+
+    def test_the_graph_reads_the_dumps_oredict_in_that_order_too(self):
+        # And the whole way up: `index.build` is what puts `from_json`'s answer on the graph,
+        # so an order preserved by the reader and lost by the loader is the same wrong plan.
+        # Written UNSORTED, for the reason the class docstring gives.
+        with tempfile.TemporaryDirectory() as tmp:
+            dump = os.path.join(tmp, dump_meta.DIR_NAME)
+            os.makedirs(dump)
+            with open(os.path.join(dump, "oredict.json"), "w") as fh:
+                json.dump({"plateStuff": ["mod:z", "mod:a"]}, fh)
+            with open(os.path.join(dump, "recipes.ndjson"), "w") as fh:
+                fh.write(json.dumps({"cat": "minecraft.crafting",
+                                     "in": [[{"i": "ore:plateStuff", "c": 1}]],
+                                     "out": [{"i": "mod:target", "c": 1}]}) + "\n")
+            g = index.build(tmp, quiet=True)
+        self.assertEqual(g.ore_members["plateStuff"], ["mod:z", "mod:a"])
 
     def test_an_untied_oredict_slot_resolves_to_the_first_member(self):
         # No stock and no costs, so every member ties on availability and on price, and the

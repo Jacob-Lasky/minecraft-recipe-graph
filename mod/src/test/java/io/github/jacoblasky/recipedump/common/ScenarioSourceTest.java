@@ -101,22 +101,46 @@ public class ScenarioSourceTest {
     public void anInputThatIsNotLiveCarriesAReason() {
         // A warning with no reason is one a player cannot act on, and it is the reason rather
         // than the flag that stops "planned without: have" reading as a defect.
+        //
+        // COUNTED, because the assertion is inside an `if` and this file's own comments say
+        // Phase 5 makes every source live. On the day that lands, "not live" selects nothing,
+        // the loop asserts nothing, and this test goes green forever over a rule it stopped
+        // checking. The count is what makes that day a FAILURE that has to be looked at
+        // rather than a silent no-op.
+        //
+        // WHAT THIS TEST COVERS IS THE DECLARED CONSTANTS, and only those.
+        // `aReaderCanSayWHICHRefusalHappened` below asserts the same rule through a Reader
+        // and cannot go vacuous, so the rule itself survives Phase 5 without this test. That
+        // is why the failure message says to delete THIS sweep rather than to keep `note()`
+        // alive for it: `note()` is still how a runtime refusal names itself.
+        int asserted = 0;
         for (ScenarioSource source : ScenarioSource.values()) {
             if (!source.live()) {
                 assertFalse(source + " is not live and says nothing about why",
                             source.note().isEmpty());
+                asserted++;
             }
         }
+        assertTrue("no source declares itself not-live, so this test asserted nothing. Phase 5 "
+                   + "has landed: delete this sweep. Do NOT delete note() or "
+                   + "aReaderCanSayWHICHRefusalHappened -- a runtime refusal still has to say "
+                   + "why, and that test is where the rule lives afterwards", asserted > 0);
     }
 
     @Test
     public void aLiveInputDoesNotWarn() {
+        // Counted for the same reason as the test above, in the other direction: a change
+        // that made every source not-live -- a reader wired wrong, an enum row edited --
+        // would empty this loop and leave it green over the rule it exists for.
+        int asserted = 0;
         for (ScenarioSource source : ScenarioSource.values()) {
             if (source.live()) {
                 assertTrue(source + " is live and should have nothing to warn about",
                            source.note().isEmpty());
+                asserted++;
             }
         }
+        assertTrue("no source is live, so this test asserted nothing", asserted > 0);
     }
 
     @Test

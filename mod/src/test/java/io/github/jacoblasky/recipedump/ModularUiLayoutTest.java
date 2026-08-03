@@ -144,7 +144,17 @@ public class ModularUiLayoutTest {
      */
     @Test
     public void everyWidgetInTheTreeCameOutOfTheResizePassWithARealBox() {
-        for (IWidget widget : HeadlessLayout.flatten(tree.panel)) {
+        List<IWidget> all = HeadlessLayout.flatten(tree.panel);
+        // THE COUNT FIRST, because `flatten` always yields at least the root it was handed.
+        // A harness that stopped walking children -- or a `treePanel` that stopped attaching
+        // them -- reduces the loop below to "the panel itself has a non-zero size", which is
+        // the one widget whose size the panel constructor sets directly, so the assertion
+        // this test exists for would never run and the test would still be green.
+        //
+        // Panel, viewport, column and ROW_COUNT rows.
+        assertEquals("the flattened tree is not the shape this test walks: " + all,
+                     3 + ROW_COUNT, all.size());
+        for (IWidget widget : all) {
             Area area = widget.getArea();
             assertTrue(widget.getName() + " has no width: " + area, area.w() > 0);
             assertTrue(widget.getName() + " has no height: " + area, area.h() > 0);

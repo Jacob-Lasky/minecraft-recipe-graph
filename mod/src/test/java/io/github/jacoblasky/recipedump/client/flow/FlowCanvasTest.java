@@ -74,18 +74,57 @@ public class FlowCanvasTest {
         FlowCanvas canvas = new FlowCanvas(tree);
         assertEquals(laid.width, canvas.getScrollArea().getScrollX().getScrollSize());
         assertEquals(laid.height, canvas.getScrollArea().getScrollY().getScrollSize());
+
+        // AND AT A ZOOM THAT IS NOT 1, because at the default the two are the same number:
+        // `applyScrollSize` sets `scaledExtent(laid.width, zoom)`, so the assertions above
+        // hold just as well for a canvas that dropped the scaling entirely, which is the bug
+        // `FlowCanvas.applyScrollSize`'s own comment says lets the view run off the end of a
+        // zoomed diagram by a factor of the zoom.
+        canvas.setZoom(2.0f);
+        assertEquals(2.0f, canvas.zoom(), 0.0f);
+        assertEquals(FlowZoom.scaledExtent(laid.width, 2.0f),
+                canvas.getScrollArea().getScrollX().getScrollSize());
+        assertEquals(FlowZoom.scaledExtent(laid.height, 2.0f),
+                canvas.getScrollArea().getScrollY().getScrollSize());
+        assertTrue("a zoomed extent must actually differ, or this adds nothing",
+                FlowZoom.scaledExtent(laid.height, 2.0f) > laid.height);
     }
 
     @Test
     public void panningWrapsRatherThanParkingAtTheEdge() {
         // The timing harness drives a long diagonal pan; clamping would park it against the
         // corner after a second and time a stationary canvas while reporting it as panning.
-        FlowCanvas canvas = new FlowCanvas(PlanTrees.fan(200));
+        //
+        // ASSERTED AS THE MODULUS, NOT AS "SMALLER THAN THE LAYOUT". The old assertion was
+        // `getScroll() < laid.height`, which a CLAMPING `panTo` satisfies just as well --
+        // clamping parks the offset at `extent - viewport`, comfortably under the layout
+        // height -- so the exact defect this test names passed it. Landing on a specific
+        // remainder is a property only wrapping has.
+        //
+        // IT DOES NOT GUARD `scaledExtent`. `range` below is computed with the same function
+        // `panTo` wraps against, so a wrong scale moves both and this still passes. That is
+        // deliberate: the extent arithmetic is `FlowZoomTest`'s job and it sweeps the zoom
+        // range, while the only property asserted here is wrap-versus-clamp.
+        PlanNode tree = PlanTrees.fan(200);
+        FlowCanvas canvas = new FlowCanvas(tree);
         canvas.pos(0, 0).size(300, 180);
         HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
-        canvas.panTo(1_000_000, 1_000_000);
-        assertTrue("a wrapped pan must stay inside the layout",
-                canvas.getScrollArea().getScrollY().getScroll() < FlowLayout.of(
-                        PlanTrees.fan(200)).height);
+
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+        int range = FlowZoom.scaledExtent(laid.height, canvas.zoom()) - canvas.getArea().height;
+        assertTrue("the fixture must be tall enough to have somewhere to wrap to", range > 37);
+
+        canvas.panTo(0, range + 37);
+        assertEquals("one range past the end must come back to 37, not park at the end",
+                37, canvas.getScrollArea().getScrollY().getScroll());
+
+        // AND THAT THE TWO DIFFER, which is the harness's actual complaint: a clamped pan
+        // returns the same offset for every value past the end, so the timed canvas is
+        // stationary while the run reports it as panning.
+        canvas.panTo(0, 1_000_000);
+        int first = canvas.getScrollArea().getScrollY().getScroll();
+        canvas.panTo(0, 1_000_037);
+        assertTrue("two pans past the end that differ by 37 must land in different places",
+                first != canvas.getScrollArea().getScrollY().getScroll());
     }
 }
