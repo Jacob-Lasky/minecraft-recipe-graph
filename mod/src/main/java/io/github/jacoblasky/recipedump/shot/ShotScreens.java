@@ -105,6 +105,12 @@ public final class ShotScreens {
                 PlannerShot.openRecipePicker(arg);
             }
         });
+        register("flow-hit", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openFlowHit(arg);
+            }
+        });
         register("flow", new Opener() {
             @Override
             public void open(String arg) {

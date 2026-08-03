@@ -174,6 +174,35 @@ public final class FlowCulling {
         return shown;
     }
 
+    /**
+     * The box containing a point in LAYOUT coordinates, or -1 for a gap or off the layout.
+     *
+     * Reuses the column index the culler already builds, so the hit-test and the cull answer
+     * out of one structure. See {@link FlowCanvas#boxAt} for why this exists as a cross-check
+     * on ModularUI's own hit-testing rather than as the click path.
+     */
+    public int boxAt(int x, int y) {
+        if (x < 0 || y < 0) {
+            return -1;
+        }
+        int column = x / FlowLayout.COLUMN_PITCH;
+        if (column >= columns.length) {
+            return -1;
+        }
+        if (x - column * FlowLayout.COLUMN_PITCH >= FlowLayout.NODE_WIDTH) {
+            return -1;   // in the gap after that column, where the edges are drawn
+        }
+        int[] boxesInColumn = columns[column];
+        // The first box not entirely above the point. Because the column is ascending in y and
+        // boxes within one do not overlap, that is the only candidate there can be.
+        int at = firstVisible(boxesInColumn, y);
+        if (at >= boxesInColumn.length) {
+            return -1;
+        }
+        int index = boxesInColumn[at];
+        return boxes.get(index).y <= y ? index : -1;   // else the point is in the row gap
+    }
+
     /** Binary search for the first box in `column` whose bottom edge is below `top`. */
     private int firstVisible(int[] column, int top) {
         int low = 0;

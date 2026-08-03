@@ -52,6 +52,13 @@ rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zo
 instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
 looks entirely correct and is of the wrong thing.
 
+`flow-hit` is the one screen that asserts rather than photographs. It parks the real cursor
+over each node in turn and logs, side by side, which box `IWidget.isHovering()` reports and
+which box the layout says is there. They agree at zoom 0.5, 1.0 and 2.0 -- which is the
+evidence that ModularUI's own hit-testing is correct through the scroll viewport *and* the
+zoom matrix, and therefore that a diagram click should go through `getWidgetsAt` rather than
+through hand-rolled coordinate maths.
+
 `jei` is the one screen that is not ours: it asks `JeiBridge` to open JEI's own recipe page,
 so the picture is evidence that the runtime was captured, a focus was created and the GUI was
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
@@ -136,13 +143,21 @@ be the rasteriser, or another container on the box. Quote a pass; do not quote a
   here can still collide with something in MeatballCraft -- a conflicting keybind, another
   mod's GUI overlay, a theme override. #19's verification plan keeps one live acceptance run
   per phase for exactly this.
-* **It has no input.** Nothing clicks, scrolls or types. A screen that only reaches an
-  interesting state after interaction needs to expose that state through the `:arg` in its
-  spec. If real input ever becomes necessary,
+* **It has a cursor, and does not yet have clicks or typing.** This bullet used to say the
+  harness had no input at all, and that was never tested -- it was assumed, because there is
+  no window manager. There is a real X display, so `Mouse.setCursorPosition` moves the real
+  cursor and Minecraft's hover pass runs for real: `IWidget.isHovering()` answers correctly,
+  which is enough to exercise a hit-test end to end. `flow-hit` does exactly that, and
+  `FlowCanvas.parkCursorOverBox` has the two coordinate conversions it needs (LWJGL's origin
+  is the BOTTOM left, in display pixels rather than GUI pixels).
+
+  **Hover is proven; a synthetic click is not.** Minecraft reads button state from LWJGL's
+  event queue rather than by polling, so pressing a button is a different problem from moving
+  the pointer and nobody has tried it here. Do not write "the harness can click" until
+  something has. If it turns out to need real events,
   [HeadlessMC](https://github.com/headlesshq/headlessmc) has a command channel with `gui` and
-  `click` verbs and is the fallback #124 named; it was not needed, because llvmpipe carried
-  it. Read "Why not HeadlessMC" below before reaching for it -- take its command channel, not
-  its LWJGL stubs.
+  `click` verbs and is the fallback #124 named. Read "Why not HeadlessMC" below before
+  reaching for it -- take its command channel, not its LWJGL stubs.
 * **It is a dev client, so ModularUI's dev behaviour is on.** The widget-outline overlay is
   suppressed for the shot (see the table above), but `ModularUI.isDev` stays true and other
   dev-only branches inside ModularUI are not suppressed.
