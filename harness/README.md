@@ -136,20 +136,32 @@ be the rasteriser, or another container on the box. Quote a pass; do not quote a
 
 ## Limits, and what this is not
 
-* **It renders GUIs, not the world.** No world is loaded, so anything that needs a player, a
-  tile entity or a server-side capability has nothing to draw from. Phase 5's live AE2 read
-  is not testable here.
-* **It is not a substitute for the real pack.** Seven mods is not 410. A screen that renders
-  here can still collide with something in MeatballCraft -- a conflicting keybind, another
-  mod's GUI overlay, a theme override. #19's verification plan keeps one live acceptance run
-  per phase for exactly this.
-* **It has a cursor, and does not yet have clicks or typing.** This bullet used to say the
-  harness had no input at all, and that was never tested -- it was assumed, because there is
-  no window manager. There is a real X display, so `Mouse.setCursorPosition` moves the real
-  cursor and Minecraft's hover pass runs for real: `IWidget.isHovering()` answers correctly,
-  which is enough to exercise a hit-test end to end. `flow-hit` does exactly that, and
-  `FlowCanvas.parkCursorOverBox` has the two coordinate conversions it needs (LWJGL's origin
-  is the BOTTOM left, in display pixels rather than GUI pixels).
+**EVERY BULLET BELOW IS AN ASSERTION, AND ASSERTIONS HERE GET THE SAME STANDARD AS ASSERTIONS
+IN CODE.** This section said "It has no input. Nothing clicks, scrolls or types" for a
+fortnight. It was never tested; it was inferred from there being no window manager, and it
+was wrong -- the harness could always move the real cursor. Four people repeated it and it
+shaped what we believed was verifiable. **A limitation nobody checked is not a limitation,
+it is a guess with authority**, and it is worse than a silent skip because it stops anyone
+running the check at all. So each bullet says whether it was measured.
+
+* **It renders GUIs, not the world. ASSUMED, NOT MEASURED.** No world is loaded, so anything
+  needing a player, a tile entity or a server-side capability has nothing to draw from, and
+  Phase 5's live AE2 read is believed untestable here. **Nobody has tried loading one.** The
+  experiment is small and specific -- have a shot screen create and enter a superflat single
+  player world before opening its screen -- and until someone runs it, treat this bullet the
+  way the input bullet deserved to be treated. The JEI runtime turning out to be fully live
+  at the main menu (#146) is the same shape: another thing assumed to need a world that did
+  not.
+* **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Seven mods is not 410. A
+  screen that renders here can still collide with something in MeatballCraft -- a conflicting
+  keybind, another mod's GUI overlay, a theme override. #19's verification plan keeps one live
+  acceptance run per phase for exactly this.
+* **It has a cursor. MEASURED. Clicks and typing: UNKNOWN.** There is a real X display, so
+  `Mouse.setCursorPosition` moves the real cursor and Minecraft's hover pass runs for real:
+  `IWidget.isHovering()` answers correctly, which is enough to exercise a hit-test end to end.
+  `flow-hit` does exactly that, and `FlowCanvas.parkCursorOverBox` has the two coordinate
+  conversions it needs (LWJGL's origin is the BOTTOM left, in display pixels rather than GUI
+  pixels).
 
   **Hover is proven; a synthetic click is not.** Minecraft reads button state from LWJGL's
   event queue rather than by polling, so pressing a button is a different problem from moving
@@ -158,12 +170,13 @@ be the rasteriser, or another container on the box. Quote a pass; do not quote a
   [HeadlessMC](https://github.com/headlesshq/headlessmc) has a command channel with `gui` and
   `click` verbs and is the fallback #124 named. Read "Why not HeadlessMC" below before
   reaching for it -- take its command channel, not its LWJGL stubs.
-* **It is a dev client, so ModularUI's dev behaviour is on.** The widget-outline overlay is
-  suppressed for the shot (see the table above), but `ModularUI.isDev` stays true and other
-  dev-only branches inside ModularUI are not suppressed.
-* **llvmpipe is a software rasteriser.** Frame timings taken here are a floor, not a
-  prediction of the desktop's -- see "Measuring frame cost" above for what that does and does
-  not license, and for why the number to read is the draw rather than the period.
+* **It is a dev client, so ModularUI's dev behaviour is on. MEASURED.** The widget-outline
+  overlay is suppressed for the shot (see the table above), but `ModularUI.isDev` stays true
+  and other dev-only branches inside ModularUI are not suppressed.
+* **llvmpipe is a software rasteriser. MEASURED, and the variance more so than the floor.**
+  Frame timings taken here are a floor, not a prediction of the desktop's -- see "Measuring
+  frame cost" above for what that does and does not license, and for why the number to read is
+  the draw rather than the period.
 
 ## Why not HeadlessMC
 
