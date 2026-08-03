@@ -1008,7 +1008,7 @@ public class DumpCommand extends CommandBase {
      *
      * A DIGEST rather than a decoded species name, on purpose. Reading Forestry's
      * chromosome layout would fix Forestry and nothing else; every mod that hides an
-     * item's identity in NBT has its own structure, and there are ~410 of them. The
+     * item's identity in NBT has its own structure, and there are 370-odd of them. The
      * digest asks only "is this the same stack", which is the question the graph
      * actually needs. Readability comes from names.json, which is keyed by the
      * discriminated id and holds JEI's own display name -- "Forest Drone".
@@ -1502,7 +1502,7 @@ public class DumpCommand extends CommandBase {
      * THIS stack take", which a mod may answer from the stack's own NBT; the question being
      * asked is "does meta mean damage for this ITEM", which is a property of the registered
      * item and has no stack to ask about. Handing it a synthesised stack invites every
-     * override in 410 mods to read NBT that is not there. DO NOT "fix" this to the
+     * override in 370-odd mods to read NBT that is not there. DO NOT "fix" this to the
      * stack-sensitive overload.
      */
     @SuppressWarnings("deprecation")

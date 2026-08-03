@@ -73,15 +73,48 @@ host_path() {
     echo "$1" | sed 's|^/coding|/mnt/user/misc/coding|'
 }
 
-# GATED: one heavy container at a time on this host, announced while it waits. This script
-# takes the gate itself rather than trusting its callers to, which is also why `tools/check.sh`
-# invokes it plainly -- `flock` is not recursive and a nested gate would deadlock on itself.
-gated docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
-    -v "$(host_path "$ROOT")":/repo \
-    -v "$(host_path "$PACK_MODS")":/deps:ro \
-    -v "$(host_path "$GRADLE_CACHE")":/gradle \
-    -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
-    ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
+[ -d "$PACK_MODS" ] || {
+    echo "[build-jar] PACK_MODS=$PACK_MODS is not a directory." >&2
+    echo "[build-jar] It needs HEI, ModularUI and AE2-UEL together (checkPackJars wants all" >&2
+    echo "[build-jar] three); an instance's own mods/ dir works. PACK_MODS=<dir> to set it." >&2
+    exit 1
+}
+
+# CONTAINER ON TOWER, DIRECT GRADLE ON A WORKSTATION, AND THE FALLBACK IS THE POINT. This
+# script hard-coded `docker run`, so it exited 127 on the one machine that INSTALLS the jar and
+# LAUNCHES the game: cachyos-desktop has a JDK 25 and no docker at all. That is the worst place
+# to lose these checks, because installing the `-dev` jar or a stale build is only discovered
+# after a launch, and a launch is the most expensive action in this project. Anyone on that box
+# was left running `./gradlew` by hand and skipping the SRG, schema and stamp verification
+# below -- which is exactly the "a guard that is inert where it is used" shape `tools/gate.sh`
+# warns about two files over.
+#
+# GATED either way: one heavy JVM at a time on this host, announced while it waits.
+if command -v docker >/dev/null 2>&1; then
+    # Host paths are resolved by the UnRAID daemon, not by this container's view; the
+    # `host_path` rewrite above is why. Only the container path needs them.
+    gated docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
+        -v "$(host_path "$ROOT")":/repo \
+        -v "$(host_path "$PACK_MODS")":/deps:ro \
+        -v "$(host_path "$GRADLE_CACHE")":/gradle \
+        -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
+        ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
+else
+    command -v java >/dev/null 2>&1 || {
+        echo "[build-jar] neither docker nor java found; one of them is required." >&2
+        exit 1
+    }
+    # USE GRADLE'S OWN DEFAULT WHEN THE SHARED CACHE IS ABSENT. `$GRADLE_CACHE` points into
+    # `/coding`, which exists only on Tower, and naming a missing directory does not fail --
+    # it makes RetroFuturaGradle decompile Minecraft through fernflower from scratch, ~9
+    # minutes, silently, every single run.
+    if [ -d "$GRADLE_CACHE" ]; then
+        GRADLE_USER_HOME=$GRADLE_CACHE
+        export GRADLE_USER_HOME
+    fi
+    gated sh -c 'cd mod && ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g \
+        -Ppack_mods="$1" build' -- "$PACK_MODS"
+fi
 
 built="mod/build/libs/mc-recipe-dump-$next.jar"
 [ -f "$built" ] || { echo "[build-jar] $built was not produced" >&2; exit 1; }

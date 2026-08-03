@@ -56,6 +56,16 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
             g.add(recipe)
             n += 1
         say("jar_json: %d crafting recipes from mod jars" % n)
+        # Forge loads `mods/<mcversion>/` too and `extract` does not, so SAY what was skipped
+        # rather than leaving a future recipe-bearing subdirectory to vanish in silence.
+        for sub, jars, recipes in jar_json.unread_subdir_jars(mods_dir):
+            if recipes:
+                say("jar_json: WARNING mods/%s/ holds %d jars with %d recipe files, NOT read "
+                    "-- Forge loads that directory; these recipes are missing from the graph"
+                    % (sub, jars, recipes))
+            else:
+                say("jar_json: mods/%s/: %d jars skipped, 0 recipe files in them"
+                    % (sub, jars))
     else:
         say("jar_json: no mods/ dir at %s" % mods_dir)
 
