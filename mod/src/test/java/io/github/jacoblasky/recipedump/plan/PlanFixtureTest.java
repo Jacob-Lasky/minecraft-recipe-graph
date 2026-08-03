@@ -11,6 +11,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -21,6 +22,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.TreeSet;
 
 import com.google.gson.JsonElement;
@@ -99,6 +102,12 @@ public class PlanFixtureTest {
         node.runs = 1L;
         node.perRun = 1L;
         node.alternatives = 1;
+        // MAXIMAL MEANS MAXIMAL, and `pinned` below suppresses this one on a REAL node --
+        // #181 writes `interchangeable` only in the `else` of the pin branch. Both are set
+        // here anyway, because this node is not a plan, it is the enumeration of every field
+        // the writer can emit. Leaving it out is how a new wire field reaches the fixtures
+        // with nothing on the port able to produce it, which is what this test caught.
+        node.interchangeable = 62;
         node.pinned = Boolean.TRUE;
         node.machine = "Machine";
         node.machineState = "buildable";
@@ -141,6 +150,41 @@ public class PlanFixtureTest {
         }
         assertTrue("the oracle writes fields this port cannot emit: " + unknown,
                 unknown.isEmpty());
+    }
+
+    @Test
+    public void theTieThresholdIsTheSAMENUMBERONBOTHSIDES() throws IOException {
+        // #181. `Solver.TIE_MIN` and `solve.TIE_MIN` decide whether a node carries the
+        // "interchangeable" mark, so a divergence renders a DIFFERENT PLAN on each side.
+        //
+        // WHY THIS EXISTS WHEN THE GOLDEN GATE WOULD PROBABLY CATCH IT. Probably is the
+        // problem. The gate would only notice if some fixture happens to hold a tie whose
+        // size falls between the two values -- true today, because 29 marks sit at 3 and 4,
+        // and an accident of which targets are in the set rather than a guarantee. Raise
+        // python to 5 and java to 6 and the gate goes green while the two disagree.
+        //
+        // The java comment beside the constant says it "MUST stay equal", which is exactly
+        // the shape of a rule with nothing enforcing it -- the same defect as a cache
+        // fingerprint that omits a constant, or a pinned-constant list that omits a name.
+        // Both of those shipped in this repository before somebody wrote the assertion.
+        Matcher matcher = Pattern.compile("(?m)^TIE_MIN\\s*=\\s*(\\d+)")
+                                 .matcher(readSolvePy());
+        assertTrue("recipegraph/solve.py should define TIE_MIN at module level",
+                   matcher.find());
+        assertEquals("solve.TIE_MIN and Solver.TIE_MIN must be the same number",
+                     Integer.parseInt(matcher.group(1)), Solver.TIE_MIN);
+    }
+
+    private static String readSolvePy() throws IOException {
+        for (String prefix : Arrays.asList("../", "./")) {
+            File candidate = new File(prefix + "recipegraph/solve.py");
+            if (candidate.isFile()) {
+                return new String(Files.readAllBytes(candidate.toPath()),
+                                  StandardCharsets.UTF_8);
+            }
+        }
+        fail("could not find recipegraph/solve.py from " + new File(".").getAbsolutePath());
+        return null;
     }
 
     @Test

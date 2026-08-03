@@ -68,6 +68,16 @@ public final class PlanNode {
     Long perRun;
     /** How many recipes could have made this, so the UI can offer the choice. */
     Integer alternatives;
+    /**
+     * How many EQUALLY-SCORED recipes are the same offer as the one taken, when that is 3 or
+     * more. #181: absent when the pick was not arbitrary, which is the overwhelming majority.
+     *
+     * NOT A SMALLER `alternatives`. That counts every real producer -- 65 for
+     * `fluid:lifeessence` -- including three routes priced at infinity. This counts the ones
+     * that tie AND are structurally interchangeable, which is 62, and it is the number that
+     * makes "the plan named Blaze because Blaze sorts first" legible.
+     */
+    Integer interchangeable;
     /** Present and true only when the chosen recipe is one the player pinned. */
     Boolean pinned;
 
@@ -176,6 +186,11 @@ public final class PlanNode {
         return alternatives == null ? 0 : alternatives.intValue();
     }
 
+    /** 0 when the pick was not arbitrary, so callers can treat absent and 1 alike. */
+    public int interchangeable() {
+        return interchangeable == null ? 0 : interchangeable.intValue();
+    }
+
     public int altCount() {
         return altCount == null ? 0 : altCount.intValue();
     }
@@ -242,6 +257,7 @@ public final class PlanNode {
         other.runs = runs;
         other.perRun = perRun;
         other.alternatives = alternatives;
+        other.interchangeable = interchangeable;
         other.pinned = pinned;
         other.machine = machine;
         other.machineState = machineState;
@@ -361,6 +377,11 @@ public final class PlanNode {
 
         public Builder alternatives(Integer value) {
             node.alternatives = value;
+            return this;
+        }
+
+        public Builder interchangeable(Integer value) {
+            node.interchangeable = value;
             return this;
         }
 

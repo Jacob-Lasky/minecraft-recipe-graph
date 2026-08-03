@@ -163,7 +163,19 @@ public final class NodeRowText {
         if (machine != null) {
             parts.add(machine);
         }
-        if (node.alternatives() > 1) {
+        // THE INTERCHANGEABLE COUNT REPLACES THE RECIPE COUNT WHERE IT EXISTS, rather than
+        // sitting beside it. #181: on `fluid:lifeessence` the row would otherwise read
+        // "65 recipes, 62 interchangeable", and 65 is the false-comfort number -- it counts
+        // three Blood God Altar routes priced at infinity. Showing both invites the reader to
+        // believe there were 65 ways when the model could only distinguish 3.
+        //
+        // WORDED SO THE READER CAN ACT. "62 interchangeable" says the pick was arbitrary and
+        // the picker will show them; "62 alternatives" reads as trivia. The mark is absent on
+        // the overwhelming majority of nodes -- 1.3% of multi-producer keys -- which is the
+        // whole reason it can be believed when it does appear.
+        if (node.interchangeable() > 1) {
+            parts.add("any of " + node.interchangeable() + " interchangeable");
+        } else if (node.alternatives() > 1) {
             parts.add(node.alternatives() + " recipes");
         }
         // How many things the SLOT would have accepted, as opposed to how many recipes make

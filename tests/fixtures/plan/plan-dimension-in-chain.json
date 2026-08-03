@@ -225,6 +225,7 @@
                    "status": "raw"
                   }
                  ],
+                 "interchangeable": 67,
                  "key": "forestry:bee_drone_ge#e1904b1a26ba",
                  "kind": "item",
                  "label": "Common Drone",
@@ -247,6 +248,7 @@
                  "status": "raw"
                 }
                ],
+               "interchangeable": 14,
                "key": "forestry:bee_drone_ge#9cd0196d9f2a",
                "kind": "item",
                "label": "Cultivated Drone",
@@ -260,6 +262,7 @@
                "status": "craft"
               }
              ],
+             "interchangeable": 4,
              "key": "forestry:bee_drone_ge#e870ae142070",
              "kind": "item",
              "label": "Eldritch Drone",
