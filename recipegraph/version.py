@@ -68,30 +68,6 @@ def _git(*args):
     return text or None
 
 
-def in_a_checkout():
-    """Whether a `.git` exists at all, which is a DIFFERENT question from `from_git`.
-
-    `os.path.exists` rather than `isdir`, because a git WORKTREE's `.git` is a file holding
-    a `gitdir:` pointer -- and every agent working this repo does so from a worktree, so an
-    `isdir` test here would answer False for the normal case.
-
-    THE TWO QUESTIONS GOT CONFLATED AND IT COST THE VERSION ASSERTIONS. `from_git` is False
-    for two unrelated reasons: there is genuinely no checkout (the Docker image, a released
-    archive), or `_git` gave up. `tests/test_version.py` skipped on `from_git` alone, so a
-    `git` call that timed out read as "not a checkout" and two assertions silently stopped
-    running. Measured on this FUSE mount: `git describe` takes 1.7-2.0s idle and exceeds the
-    5s timeout during a `tools/check.sh` fixture regeneration -- which is the PRE-MERGE run,
-    the one time those assertions most need to have executed. A skip reads exactly like a
-    pass; see the header of `tools/check.sh` for the family this belongs to.
-
-    DO NOT "fix" that by raising the timeout in `_git`. Five seconds is a deliberate ceiling
-    on how long importing this module may block server startup, and the comment there says
-    why. The bug was never the timeout; it was a test that could not tell a timeout from an
-    archive.
-    """
-    return os.path.exists(os.path.join(_ROOT, ".git"))
-
-
 def _describe_git():
     """`(version, date)` from git, or `(None, None)` outside a checkout."""
     version = _git("describe", "--tags", "--always", "--dirty")
