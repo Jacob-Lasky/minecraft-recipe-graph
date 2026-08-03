@@ -371,6 +371,94 @@ class SelfConsumingRecipeTest(unittest.TestCase):
         self.assertEqual(solver.solve("mod:gem", 1)["tree"]["recipe"], "upgrade")
 
 
+class TheNamedScorePositionsMatchTheTupleTest(unittest.TestCase):
+    """The three constants above must point at the terms they are named for.
+
+    THEY ARE INDEX LITERALS WEARING A NAME, AND THAT IS ALL. Naming them stopped four
+    assertions being four silent index bumps when #172 reordered the tuple, but it does not
+    stop the NEXT reordering leaving a constant pointing at the wrong element -- and then
+    `score[OWN_CYCLIC]` reads some other term, the assertion still compares two numbers, and
+    it can quite easily still pass. Same shape as the drift #178 found, where a comparison
+    test agreed with itself for two releases.
+
+    EVERY NAMED POSITION HOLDS A DISTINCT VALUE IN THIS FIXTURE, AND THAT IS THE WHOLE
+    DESIGN. The first version of this class used a one-slot recipe, so `own_cyclic` was 0 --
+    and so was `satisfied` next door. Moving `OWN_CYCLIC` from 3 to 4 read `satisfied`, got
+    0, and the pin PASSED. Measured, not imagined: the drift arm was run and came back OK.
+    A pin whose neighbours share its value is not a pin.
+
+    So: one ancestor slot, TWO own-output slots, nothing satisfied. `-1` and `-2` cannot be
+    confused with each other or with anything else in the tuple, and the whole tuple is
+    asserted rather than three positions out of eight.
+    """
+
+    @staticmethod
+    def _scored():
+        """A score whose every term is known by construction. `(score, expected)`."""
+        g = Graph()
+        g.names = {"mod:gem": "Gem", "mod:slag": "Slag", "mod:dross": "Dross"}
+        # Consumes the key being planned (ANCESTOR, and the elif puts a both-slot here),
+        # plus two of its own other outputs (OWN, twice). Nothing is in stock, so all three
+        # count and `satisfied` is 0.
+        g.add(Recipe("loop", "t",
+                     [("mod:gem", 1), ("mod:slag", 1), ("mod:dross", 1)],
+                     [Ingredient(["mod:gem"], 1), Ingredient(["mod:slag"], 1),
+                      Ingredient(["mod:dross"], 1)],
+                     category="minecraft.crafting"))
+        costs = cost.estimate(g, machine_states=STATES)
+        solver = Solver(g, machine_states=STATES, costs=costs)
+        recipe = g.real_producers("mod:gem")[0]
+        return solver.score_recipe(recipe, frozenset(["mod:gem"]))
+
+    def test_the_whole_tuple_is_what_the_constants_assume(self):
+        """Every position, not only the named three.
+
+        Asserting the whole thing is what makes ANY reordering fail here rather than
+        somewhere confusing. `cheap` is the one computed term and is checked for shape.
+        """
+        scored = self._scored()
+        self.assertEqual(8, len(scored))
+        self.assertEqual(1, scored[0], "real production, not a container transfer")
+        self.assertEqual(-1, scored[ANCESTOR_CYCLIC], "one ancestor slot")
+        self.assertIsInstance(scored[2], float)
+        self.assertLess(scored[2], 0.0, "`cheap` is -cost and the cost here is positive")
+        self.assertEqual(-2, scored[OWN_CYCLIC], "two own-output slots")
+        self.assertEqual(0, scored[4], "nothing is in stock")
+        self.assertEqual(0, scored[5], "no raw leaf, so not ore-backed")
+        # Three merged slots: 1/(1+3) plus the 0.1 hand-crafting bonus.
+        self.assertAlmostEqual(0.35, scored[SIMPLE_PLAIN], places=9)
+        self.assertEqual(2, scored[7], "minecraft.crafting is a machine you have")
+
+    def test_no_named_position_shares_a_value_with_another(self):
+        """The property that makes the assertions above a pin rather than a coincidence.
+
+        If two positions held the same number, a constant could drift onto its neighbour and
+        every assertion would still pass. Checked here so that a future edit to the fixture
+        cannot quietly remove the thing that makes this class work.
+        """
+        scored = self._scored()
+        named = [scored[ANCESTOR_CYCLIC], scored[OWN_CYCLIC], scored[SIMPLE_PLAIN]]
+        for position, value in enumerate(scored):
+            for name_value in named:
+                if value == name_value:
+                    self.assertIn(position, (ANCESTOR_CYCLIC, OWN_CYCLIC, SIMPLE_PLAIN),
+                                  "position %d holds %r, which a named constant also "
+                                  "reads -- a drift onto it would go unnoticed"
+                                  % (position, value))
+
+    def test_the_ancestor_term_outranks_price_and_the_own_term_does_not(self):
+        """The ordering claim itself, read off the tuple rather than off the docstring.
+
+        This is what #172 changed and the one thing a future reordering must not undo
+        quietly. `cheap` sits between the two cycle terms; if either constant crosses it,
+        the split is gone and only this assertion says so.
+        """
+        self.assertLess(ANCESTOR_CYCLIC, OWN_CYCLIC)
+        cheap_position = ANCESTOR_CYCLIC + 1
+        self.assertLess(cheap_position, OWN_CYCLIC)
+        self.assertIsInstance(self._scored()[cheap_position], float)
+
+
 class CheapCycleBeatsExpensiveRealRouteTest(unittest.TestCase):
     """Issue #172: a route that cannot be performed must not win on price.
 
