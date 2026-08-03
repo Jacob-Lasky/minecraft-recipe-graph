@@ -152,6 +152,85 @@ final class PlannerShot {
         });
     }
 
+    /**
+     * `flow-hit`: does ModularUI's own hit-testing agree with the layout, through the scroll
+     * viewport AND the zoom matrix?
+     *
+     * WHY THIS EXISTS AT ALL. Two comments in this codebase disagree. `FlowCanvas`'s header
+     * says viewport hit-testing "comes for free" from `AbstractScrollWidget` and that
+     * hand-rolling a canvas gets it wrong; `PlannerWidgets.planNodeContent` says a diagram
+     * node "has its own hit-testing through the viewport transform, and a canvas of clickable
+     * rows would fight it". Both cannot be the better design, and which one is right decides
+     * whether the click path is `ClickableGroup` rows or a hand-rolled `boxAt`. Nobody had
+     * measured it, because the harness had no mouse.
+     *
+     * IT HAS ONE NOW. `Mouse.setCursorPosition` moves the real cursor on the Xvfb display, and
+     * Minecraft reads its position from LWJGL rather than from an event queue, so the hover
+     * pass runs for real. That is a genuine capability the README used to deny: "It has no
+     * input. Nothing clicks, scrolls or types."
+     *
+     * The screen parks the cursor over the centre of a chosen node and logs, side by side,
+     * which box `IWidget.isHovering()` reports and which box the layout says is at that point.
+     * They must agree. A disagreement is a node you can see and cannot click.
+     */
+    static void openFlowHit(String arg) {
+        String spec = arg;
+        float zoom = FlowZoom.DEFAULT;
+        int at = arg == null ? -1 : arg.lastIndexOf('@');
+        if (at >= 0) {
+            spec = arg.substring(0, at);
+            zoom = Float.parseFloat(arg.substring(at + 1));
+        }
+        final FlowCanvas canvas = new FlowCanvas(flowTree(spec));
+        canvas.pos(4, 4).size(612, 372);
+        canvas.setZoom(zoom);
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+        ShotScreens.animate(new ShotScreens.Animated() {
+            @Override
+            public void step(int frame) {
+                // PARK, THEN WAIT FIVE FRAMES, THEN READ. The hover pass runs from the
+                // cursor position sampled at the start of a tick, so `isHovering` lags a move
+                // by at least one frame -- and at one frame's gap the probe reported ModularUI
+                // answering for the PREVIOUS node on every line. Six tidy DISAGREE lines that
+                // were really six agreements, one row out of step. A log that needs the reader
+                // to shift it by one is a log that gets read wrong.
+                int target = frame / SETTLE;
+                if (target >= PROBE_NODES) {
+                    return;
+                }
+                if (frame % SETTLE == HOLD) {
+                    report(canvas, target);
+                    return;
+                }
+                if (frame % SETTLE != 0) {
+                    return;
+                }
+                if (!canvas.parkCursorOverBox(target)) {
+                    // LOUDLY. A skipped probe that says nothing is a probe that passes.
+                    ShotHarness.log("flow-hit: node " + target + " is off screen, not probed");
+                }
+            }
+        });
+    }
+
+    /** How many nodes `flow-hit` probes. Enough to cross a column boundary and a row gap. */
+    private static final int PROBE_NODES = 6;
+
+    /** Frames per probe: park on frame 0 of the group, read on frame {@link #HOLD}. */
+    private static final int SETTLE = 10;
+
+    /** Frames to wait after moving the cursor before believing `isHovering`. */
+    private static final int HOLD = 5;
+
+    private static void report(FlowCanvas canvas, int expected) {
+        int hovered = canvas.hoveredBox();
+        int fromLayout = canvas.boxAtCursor();
+        ShotHarness.log("flow-hit: node " + expected + " -- ModularUI says " + hovered
+                + ", the layout says " + fromLayout
+                + (hovered == fromLayout ? "  AGREE" : "  DISAGREE")
+                + "   [" + canvas.cursorDiagnostic() + "]");
+    }
+
     static void openTodo(String arg) {
         PlannerScreen.openPanel(PlannerWidgets.todoPanel(fixture(arg), book()));
     }

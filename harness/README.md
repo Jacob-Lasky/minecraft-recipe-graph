@@ -52,6 +52,13 @@ rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zo
 instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
 looks entirely correct and is of the wrong thing.
 
+`flow-hit` is the one screen that asserts rather than photographs. It parks the real cursor
+over each node in turn and logs, side by side, which box `IWidget.isHovering()` reports and
+which box the layout says is there. They agree at zoom 0.5, 1.0 and 2.0 -- which is the
+evidence that ModularUI's own hit-testing is correct through the scroll viewport *and* the
+zoom matrix, and therefore that a diagram click should go through `getWidgetsAt` rather than
+through hand-rolled coordinate maths.
+
 `jei` is the one screen that is not ours: it asks `JeiBridge` to open JEI's own recipe page,
 so the picture is evidence that the runtime was captured, a focus was created and the GUI was
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
@@ -129,26 +136,47 @@ be the rasteriser, or another container on the box. Quote a pass; do not quote a
 
 ## Limits, and what this is not
 
-* **It renders GUIs, not the world.** No world is loaded, so anything that needs a player, a
-  tile entity or a server-side capability has nothing to draw from. Phase 5's live AE2 read
-  is not testable here.
-* **It is not a substitute for the real pack.** Seven mods is not 410. A screen that renders
-  here can still collide with something in MeatballCraft -- a conflicting keybind, another
-  mod's GUI overlay, a theme override. #19's verification plan keeps one live acceptance run
-  per phase for exactly this.
-* **It has no input.** Nothing clicks, scrolls or types. A screen that only reaches an
-  interesting state after interaction needs to expose that state through the `:arg` in its
-  spec. If real input ever becomes necessary,
+**EVERY BULLET BELOW IS AN ASSERTION, AND ASSERTIONS HERE GET THE SAME STANDARD AS ASSERTIONS
+IN CODE.** This section said "It has no input. Nothing clicks, scrolls or types" for a
+fortnight. It was never tested; it was inferred from there being no window manager, and it
+was wrong -- the harness could always move the real cursor. Four people repeated it and it
+shaped what we believed was verifiable. **A limitation nobody checked is not a limitation,
+it is a guess with authority**, and it is worse than a silent skip because it stops anyone
+running the check at all. So each bullet says whether it was measured.
+
+* **It renders GUIs, not the world. ASSUMED, NOT MEASURED.** No world is loaded, so anything
+  needing a player, a tile entity or a server-side capability has nothing to draw from, and
+  Phase 5's live AE2 read is believed untestable here. **Nobody has tried loading one.** The
+  experiment is small and specific -- have a shot screen create and enter a superflat single
+  player world before opening its screen -- and until someone runs it, treat this bullet the
+  way the input bullet deserved to be treated. The JEI runtime turning out to be fully live
+  at the main menu (#146) is the same shape: another thing assumed to need a world that did
+  not.
+* **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Seven mods is not 410. A
+  screen that renders here can still collide with something in MeatballCraft -- a conflicting
+  keybind, another mod's GUI overlay, a theme override. #19's verification plan keeps one live
+  acceptance run per phase for exactly this.
+* **It has a cursor. MEASURED. Clicks and typing: UNKNOWN.** There is a real X display, so
+  `Mouse.setCursorPosition` moves the real cursor and Minecraft's hover pass runs for real:
+  `IWidget.isHovering()` answers correctly, which is enough to exercise a hit-test end to end.
+  `flow-hit` does exactly that, and `FlowCanvas.parkCursorOverBox` has the two coordinate
+  conversions it needs (LWJGL's origin is the BOTTOM left, in display pixels rather than GUI
+  pixels).
+
+  **Hover is proven; a synthetic click is not.** Minecraft reads button state from LWJGL's
+  event queue rather than by polling, so pressing a button is a different problem from moving
+  the pointer and nobody has tried it here. Do not write "the harness can click" until
+  something has. If it turns out to need real events,
   [HeadlessMC](https://github.com/headlesshq/headlessmc) has a command channel with `gui` and
-  `click` verbs and is the fallback #124 named; it was not needed, because llvmpipe carried
-  it. Read "Why not HeadlessMC" below before reaching for it -- take its command channel, not
-  its LWJGL stubs.
-* **It is a dev client, so ModularUI's dev behaviour is on.** The widget-outline overlay is
-  suppressed for the shot (see the table above), but `ModularUI.isDev` stays true and other
-  dev-only branches inside ModularUI are not suppressed.
-* **llvmpipe is a software rasteriser.** Frame timings taken here are a floor, not a
-  prediction of the desktop's -- see "Measuring frame cost" above for what that does and does
-  not license, and for why the number to read is the draw rather than the period.
+  `click` verbs and is the fallback #124 named. Read "Why not HeadlessMC" below before
+  reaching for it -- take its command channel, not its LWJGL stubs.
+* **It is a dev client, so ModularUI's dev behaviour is on. MEASURED.** The widget-outline
+  overlay is suppressed for the shot (see the table above), but `ModularUI.isDev` stays true
+  and other dev-only branches inside ModularUI are not suppressed.
+* **llvmpipe is a software rasteriser. MEASURED, and the variance more so than the floor.**
+  Frame timings taken here are a floor, not a prediction of the desktop's -- see "Measuring
+  frame cost" above for what that does and does not license, and for why the number to read is
+  the draw rather than the period.
 
 ## Why not HeadlessMC
 
