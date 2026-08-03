@@ -166,6 +166,117 @@ public class SeamInstallationTest {
     }
 
     /**
+     * A THIRD SHAPE: the class that installs a seam is itself never switched on.
+     *
+     * The scan above asks whether ANYTHING calls `ScenarioSource.readBy`. `PinStore` does, and
+     * has since #140 -- so that seam read as installed while `HAVE` had no reader at all, which
+     * is one of the three defects #191 filed. Per-CONSTANT granularity is not recoverable from a
+     * constant pool: `HAVE.readBy(...)` and `PINS.readBy(...)` are the same `Methodref` behind
+     * different `getstatic`s, and pairing them by co-occurrence in one class would be a
+     * heuristic that can pass wrongly, which is worse than no gate.
+     *
+     * WHAT IS RECOVERABLE is the layer above. A class whose job is to install a seam turns
+     * itself on through a public static no-argument entry point -- `PlanTarget.install()`,
+     * `PlannerStock.install()` -- and whether PRODUCTION calls that is an exact question. So
+     * the rule is derived rather than listed: any class that references a seam installer and is
+     * not the seam's own declaring class must have every such entry point called from outside
+     * itself. Installing `HAVE`'s reader is now covered, and so is the next class of this shape
+     * on the day it is written.
+     *
+     * WHAT IT STILL DOES NOT COVER, stated because the PR says so too: that the seam a helper
+     * installs is the one it was supposed to install. `PlannerStock.install()` being called
+     * proves a reader was installed, not that it was installed on `HAVE`. Only
+     * `PlannerStockTest` says that, and it installs the reader itself.
+     */
+    @Test
+    public void everyClassThatInstallsASeamIsItselfSwitchedOnByProduction() throws Exception {
+        Scan scan = findSeams();
+        assertTheScanFoundTheSeamsItIsKnownToHave(scan);
+        Map<String, Set<String>> entryPoints = installerEntryPoints(scan);
+
+        assertTrue("no installer entry points found, so this gate is asserting nothing; the"
+                   + " `install()` shape must have moved", entryPoints.size() >= 2);
+        assertTrue("PlannerStock installs the HAVE reader through a no-argument entry point,"
+                   + " which is the case this gate exists for; found " + entryPoints.keySet(),
+                   entryPoints.containsKey(
+                           ClassFiles.ROOT_PACKAGE + "/client/PlannerStock.install()V"));
+
+        List<String> orphaned = new ArrayList<String>();
+        for (Map.Entry<String, Set<String>> entry : entryPoints.entrySet()) {
+            System.out.println("installer entry point " + entry.getKey() + " <- "
+                    + (entry.getValue().isEmpty() ? "NOTHING" : entry.getValue().toString()));
+            if (entry.getValue().isEmpty()) {
+                orphaned.add(entry.getKey());
+            }
+        }
+        assertEquals("these classes install a seam and nothing in the shipped mod switches them"
+                     + " on, so the seam they install is installed only by their tests",
+                     Collections.emptyList(), orphaned);
+    }
+
+    /**
+     * `owner.install()V` for every seam-installing class, mapped to its production callers.
+     *
+     * PUBLIC, STATIC, VOID AND NO ARGUMENTS, because that is the shape of "turn this on": a
+     * method taking something is being handed a collaborator and is a seam in its own right,
+     * already covered above.
+     */
+    private static Map<String, Set<String>> installerEntryPoints(Scan scan) throws IOException {
+        Set<String> seamReferences = new LinkedHashSet<String>(scan.seams.keySet());
+        Map<String, Set<String>> found = new LinkedHashMap<String, Set<String>>();
+        for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
+            String internal = ClassFiles.internalName(file);
+            if (isHarness(internal) || declaresASeam(scan, internal)) {
+                continue;
+            }
+            if (Collections.disjoint(ClassFiles.methodReferences(ClassFiles.read(file)),
+                                     seamReferences)) {
+                continue;
+            }
+            Class<?> owner = load(internal);
+            if (owner == null) {
+                continue;
+            }
+            try {
+                for (Method method : owner.getDeclaredMethods()) {
+                    int modifiers = method.getModifiers();
+                    if (Modifier.isPublic(modifiers) && Modifier.isStatic(modifiers)
+                            && !method.isSynthetic() && method.getParameterTypes().length == 0
+                            && method.getReturnType() == void.class) {
+                        found.put(internal + "." + method.getName() + "()V",
+                                  new LinkedHashSet<String>());
+                    }
+                }
+            } catch (NoClassDefFoundError absent) {
+                continue;
+            }
+        }
+        for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
+            String caller = ClassFiles.internalName(file);
+            if (isHarness(caller)) {
+                continue;
+            }
+            for (String reference : ClassFiles.methodReferences(ClassFiles.read(file))) {
+                Set<String> callers = found.get(reference);
+                if (callers != null && !isSelf(reference.substring(0, reference.indexOf('.')),
+                                               caller)) {
+                    callers.add(caller);
+                }
+            }
+        }
+        return found;
+    }
+
+    private static boolean declaresASeam(Scan scan, String internal) {
+        for (Seam seam : scan.seams.values()) {
+            if (isSelf(seam.owner, internal)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * THE OTHER SHAPE OF THE SAME DEFECT: a proxy hook with an empty body and no override.
      *
      * `CommonProxy`'s hooks are empty deliberately -- a dedicated server has no screen to open
