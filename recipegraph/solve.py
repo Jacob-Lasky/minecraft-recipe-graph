@@ -40,6 +40,30 @@ STATUS_TOKEN = "token"
 # and stop. See projecte and #50.
 STATUS_EMC = "emc"
 
+# How many INTERCHANGEABLE recipes must tie before a node admits the pick was arbitrary. #181.
+#
+# THREE IS A JUDGEMENT AND THE MEASUREMENT IS WHY, over 23,476 multi-producer keys on the
+# reference graph. A bare score tie is useless as a trigger -- it fires on 33.5% of them, and
+# a mark that fires on a third of a tree is the failure #136 measured for `producers == 0`.
+# Requiring the tied recipes to be the SAME OFFER cuts that to 6.2%, and requiring three of
+# them to 1.3%, which is 294 keys:
+#
+#     trigger at >=2   tied 7866 (33.5%)   interchangeable 1449 (6.2%)
+#     trigger at >=3   tied  976 ( 4.2%)   interchangeable  294 (1.3%)
+#     trigger at >=25  tied   47 ( 0.2%)   interchangeable   47 (0.2%)
+#
+# At >=25 the two columns are IDENTICAL: every large tie in this pack is structurally the
+# same recipe repeated. Below it they diverge sharply, and 22,027 of the 23,476 keys have a
+# largest interchangeable subset of exactly 1 -- so when the score ties, the tied recipes are
+# usually genuinely different offers and the pick was not arbitrary at all. The tie is
+# necessary and NOT sufficient, which is the whole reason this is not simply a tie badge.
+#
+# Two rather than three was rejected deliberately: it adds 1,155 keys whose honest wording is
+# "either of these two", which is real but weak, and takes the mark from 1.3% to 6.2% of
+# nodes. Lowering it later is a one-line change; recovering from a badge people have learned
+# to ignore is not.
+TIE_MIN = 3
+
 
 def _count_cycles(node):
     """How many cycle leaves this subtree bottomed out on."""
@@ -346,6 +370,64 @@ class Solver:
         return (0 if recipe.transfer else 1, -ancestor_cyclic, cheap, -own_cyclic,
                 satisfied, self.ore_backed(recipe, slots), simple + plain, avail)
 
+    def offer_shape(self, recipe, key):
+        """What makes two recipes the SAME OFFER rather than merely equally scored. #181.
+
+        The merged slot view, because that is what `_build` expands and what `score_recipe`
+        counts; the per-run output of the key being planned, because two recipes yielding
+        1000 and 1 are not the same offer however they score; the category, because a
+        different machine is a different thing to go and build; and the transfer flag.
+
+        SLOT IDENTITY IS DELIBERATELY EXCLUDED, and it is the crux. The 62 Digital Mob
+        Agonizer recipes for `fluid:lifeessence` differ precisely in WHICH four data models
+        they accept, and that difference is the entire reason a player might prefer one of
+        them -- they will have some models and not others. Including the identities would
+        make every shape unique, the interchangeable subset 1 everywhere, and the whole
+        measurement vacuous. The shape is the OFFER (what it costs you structurally), not
+        the ingredients.
+
+        `options` IS ALREADY A COUNT and not a list. `model.merge_slots` stores the widest
+        slot's `len(ing.alternatives)`, so `len(options)` raises rather than lying, which is
+        the cheap version of this mistake; the expensive version is a field that happens to
+        be sized and quietly measures something else.
+        """
+        slots = self._merge_slots(recipe)
+        per_run = sum(qty for out, qty in recipe.outputs if out == key)
+        return (tuple(sorted((options, qty) for _alt, qty, options in slots)),
+                per_run, recipe.category, bool(recipe.transfer))
+
+    def _interchangeable_count(self, scored, chosen, key, cache):
+        """How many recipes tied with `chosen` are the same offer as it. 1 when none are.
+
+        READS `scored`, WHICH `expand` ALREADY BUILT. No `score_recipe` call happens here and
+        none may be added; see the note at the ranking site. The only new work is
+        `offer_shape`, and it is skipped entirely unless the tie is already big enough to
+        reach `TIE_MIN`, so on the overwhelming majority of nodes this costs one dict lookup.
+
+        THE SUBSET MUST CONTAIN THE CHOSEN RECIPE, which is narrower than "the largest
+        interchangeable subset among the tied" and is deliberate. The mark says the pick was
+        arbitrary; that is a claim about the recipe actually taken, so counting a larger
+        group the winner is not part of would put a true number beside a false statement.
+        On `fluid:lifeessence` the two readings coincide at 62.
+
+        `cache` is per-`expand`, keyed by score, because backtracking can settle on a recipe
+        from a different score band than the one it started with and each band is counted at
+        most once.
+        """
+        score = next((s for s, r in scored if r is chosen), None)
+        if score is None:                      # not one of the ranked candidates
+            return 1
+        if score not in cache:
+            tied = [r for s, r in scored if s == score]
+            # Cheap gate: the interchangeable subset is a SUBSET of the tied set, so a tie
+            # too small to reach the threshold cannot produce a mark and needs no shapes.
+            cache[score] = (collections.Counter(self.offer_shape(r, key) for r in tied)
+                            if len(tied) >= TIE_MIN else None)
+        counts = cache[score]
+        if counts is None:
+            return 1
+        return counts.get(self.offer_shape(chosen, key), 1)
+
     def ore_backed(self, recipe, slots=None):
         """1 when every raw leaf this recipe rests on is something you mine, else 0.
 
@@ -613,7 +695,23 @@ class Solver:
             return node
 
         nxt = ancestors | {key}
-        ranked = sorted(candidates, key=lambda r: self.score_recipe(r, nxt), reverse=True)
+        # THE SCORES ARE KEPT, NOT DISCARDED, AND THAT IS #181's WHOLE COST. `sorted(key=...)`
+        # calls `score_recipe` exactly once per candidate and then throws the values away, so
+        # materialising them here is the SAME number of scoring calls -- measured, not
+        # assumed: `plan-fluid-chain`'s `work` is unchanged at 28,012, and `work` counts every
+        # `expand` including the ones backtracking discards.
+        #
+        # DO NOT RE-SCORE FROM A REPORTING PATH. A second `score_recipe` pass would be
+        # correct, would produce identical output, and would be invisible in every test,
+        # while roughly doubling the cost of the most expensive part of planning -- on a
+        # graph where one fixture already spends 35% of its work budget. The scores are in
+        # hand at the moment the winner is chosen; use those.
+        scored = [(self.score_recipe(r, nxt), r) for r in candidates]
+        # `key=` on the pair rather than sorting the pairs, because a Recipe is not orderable
+        # and a full-tuple tie would otherwise compare the recipes themselves. Same stability
+        # and same `reverse=True` as the `sorted` this replaces, so `ranked` is identical.
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        ranked = [recipe for _score, recipe in scored]
         # A stable sort, so a pin that accepts several recipes keeps them in score order
         # among themselves. The pinned ones move to the front rather than replacing the
         # list: if every one of them cycles, the backtracking below still has somewhere
@@ -627,11 +725,13 @@ class Solver:
         # chosen for their single simple input and produce a plan that asks for the
         # item being crafted. Only accept a cycling recipe if every option cycles.
         best = None  # (rank_tuple, attempt, state_to_restore)
+        tie_cache = {}   # score -> shape counts, per this expand. See _interchangeable_count.
         for rank, recipe in enumerate(ranked[: self.branch_tries]):
             if self.work > self.work_budget:
                 break
             snapshot = self._snapshot()
-            attempt = self._build(node, recipe, key, remainder, from_stock, nxt, depth)
+            attempt = self._build(node, recipe, key, remainder, from_stock, nxt, depth,
+                                  self._interchangeable_count(scored, recipe, key, tie_cache))
             cycles = _count_cycles(attempt)
             if not cycles:
                 self._note_overruled_pin(key, recipe)
@@ -701,8 +801,15 @@ class Solver:
         (self.pool, self.used_from_stock, self.leaf_totals,
          self.from_sources, self.tokens_needed, self.from_emc, self.nodes) = snap
 
-    def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth):
-        """Expand one specific recipe choice for `key`."""
+    def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth,
+               interchangeable=1):
+        """Expand one specific recipe choice for `key`.
+
+        `interchangeable` is how many equally-scored recipes are the SAME OFFER as this one,
+        computed by the caller from scores it already had. 1 means the pick was not arbitrary
+        and nothing is rendered. Defaulted so the two call sites that are not the ranking
+        loop -- and any future one -- get the silent answer rather than a wrong number.
+        """
         per_run = next((q for k, q in recipe.outputs if k == key), 1) or 1
         runs = -(-remainder // per_run)  # ceil
         node = dict(base)
@@ -718,6 +825,19 @@ class Solver:
         # audit and this one changes every plan that touches the item.
         if recipe.rid in self.pinned.get(key, ()):
             node["pinned"] = True
+        elif interchangeable >= TIE_MIN:
+            # THE PICK WAS ARBITRARY AND THE PLAN SAYS SO. #181: `fluid:lifeessence` has 62
+            # structurally identical Digital Mob Agonizer recipes, and the plan named Blaze
+            # Data Model because Blaze sorts first, not because the model preferred it.
+            #
+            # NOT `alternatives`, WHICH IS A DIFFERENT AND MORE FLATTERING NUMBER. That is
+            # `len(real_producers)` -- 65 here -- and it includes three Blood God Altar
+            # routes that price at infinity. "There were 65 ways" is false comfort; "62 of
+            # these were interchangeable" is the finding. They agree on this key by luck.
+            #
+            # SUPPRESSED UNDER A PIN, hence the `elif`. A pin is the player having already
+            # answered "which of these", so a node carrying both badges contradicts itself.
+            node["interchangeable"] = interchangeable
         if recipe.machine:
             node["machine"] = recipe.machine
         state = self.machine_states.get(recipe.category)

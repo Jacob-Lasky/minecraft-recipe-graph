@@ -142,6 +142,7 @@ public final class PlanJson {
                 .runs(longOrNull(json, "runs"))
                 .perRun(longOrNull(json, "per_run"))
                 .alternatives(intOrNull(json, "alternatives"))
+                .interchangeable(intOrNull(json, "interchangeable"))
                 .altCount(intOrNull(json, "alt_count"))
                 .note(optional(json, "note"))
                 .resolvedTo(optional(json, "resolved_to"))

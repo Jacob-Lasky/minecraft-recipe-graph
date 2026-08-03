@@ -52,6 +52,17 @@ public final class Solver {
     public static final int DEFAULT_MAX_NODES = 4000;
     /** `solve.Solver.__init__`'s default `max_depth`. */
     public static final int DEFAULT_MAX_DEPTH = 24;
+    /**
+     * How many INTERCHANGEABLE recipes must tie before a node admits the pick was arbitrary.
+     *
+     * Mirrors `solve.TIE_MIN` in python and MUST stay equal to it -- the golden gate compares
+     * plans byte for byte, so a divergence here shows up as every marked node differing. The
+     * measurement behind the value of 3 lives beside the python constant; the short version
+     * is that a bare score tie fires on 33.5% of multi-producer keys and is useless, the
+     * same-offer requirement cuts it to 6.2%, and requiring three cuts it to 1.3%.
+     */
+    public static final int TIE_MIN = 3;
+
     /** How many ranked recipes to try before accepting a cycling one. */
     public static final int DEFAULT_BRANCH_TRIES = 4;
 
@@ -797,7 +808,11 @@ public final class Solver {
 
         Set<Integer> next = new HashSet<Integer>(ancestors);
         next.add(keyId);
-        List<Integer> ranked = rank(candidates, next, keyId);
+        Ranking ranking = rank(candidates, next, keyId);
+        List<Integer> ranked = ranking.order;
+        // score -> shape counts, per this expand. See interchangeableCount.
+        Map<RecipeScore, Map<Object, Integer>> tieCache =
+                new HashMap<RecipeScore, Map<Object, Integer>>();
 
         // Try recipes best-first and BACKTRACK out of any whose subtree loops back on an
         // ancestor. Uncrafting recipes (block -> 9 ingots) otherwise get chosen for their
@@ -814,7 +829,8 @@ public final class Solver {
             }
             Snapshot snapshot = snapshot();
             PlanNode attempt = build(node, ranked.get(rank), keyId, remainder, fromStock,
-                    next, depth);
+                    next, depth,
+                    interchangeableCount(ranking, ranked.get(rank), keyId, tieCache));
             int cycles = attempt.countCycles();
             if (cycles == 0) {
                 noteOverruledPin(keyId, ranked.get(rank));
@@ -858,7 +874,7 @@ public final class Solver {
      * than replacing the list: if every one of them cycles, the backtracking above still has
      * somewhere to go, and a plan beats an error.
      */
-    private List<Integer> rank(List<Integer> candidates, Set<Integer> ancestors, int keyId) {
+    private Ranking rank(List<Integer> candidates, Set<Integer> ancestors, int keyId) {
         final Map<Integer, RecipeScore> scores =
                 new HashMap<Integer, RecipeScore>(candidates.size() * 2);
         for (int recipeId : candidates) {
@@ -882,7 +898,110 @@ public final class Solver {
                 }
             });
         }
-        return ranked;
+        // THE SCORES GO BACK WITH THE ORDER, because #181 needs them and recomputing would
+        // double the cost of the hottest path. This map is exactly what the sort already
+        // built; nothing extra is scored. Mirrors python keeping its `scored` list.
+        return new Ranking(ranked, scores);
+    }
+
+    /**
+     * A ranked candidate list AND the scores that produced it.
+     *
+     * `rank` used to return the list alone and throw the scores away, which meant #181's tie
+     * count would have had to call `scoreRecipe` a second time -- correct, invisible in every
+     * test, and roughly double the cost of the most expensive part of planning. Handing them
+     * back costs one object per `expand`.
+     */
+    private static final class Ranking {
+        final List<Integer> order;
+        final Map<Integer, RecipeScore> scores;
+
+        Ranking(List<Integer> order, Map<Integer, RecipeScore> scores) {
+            this.order = order;
+            this.scores = scores;
+        }
+    }
+
+    /**
+     * What makes two recipes the SAME OFFER rather than merely equally scored. #181.
+     *
+     * The merged slot view, because that is what `build` expands and what `scoreRecipe`
+     * counts; the per-run output of the key being planned, because two recipes yielding 1000
+     * and 1 are not the same offer however they score; the category, because a different
+     * machine is a different thing to go and build; and the transfer flag.
+     *
+     * SLOT IDENTITY IS DELIBERATELY EXCLUDED, and it is the crux. The 62 Digital Mob Agonizer
+     * recipes for `fluid:lifeessence` differ precisely in WHICH four data models they accept,
+     * and that is the entire reason a player might prefer one. Including the identities would
+     * make every shape unique and the whole measurement vacuous. The shape is the OFFER, not
+     * the ingredients. Mirrors `Solver.offer_shape` in python.
+     *
+     * A STRING KEY rather than a value class, because it only ever feeds a HashMap and a
+     * record type would need equals/hashCode maintained in step with python's tuple.
+     */
+    private String offerShape(int recipeId, int keyId) {
+        RecipeStore store = g.recipes();
+        List<MergedSlot> slots = mergeSlots(recipeId);
+        // Sorted, matching python's `tuple(sorted(...))`: slot ORDER must not make two
+        // otherwise identical offers look different.
+        List<String> parts = new ArrayList<String>(slots.size());
+        for (MergedSlot slot : slots) {
+            parts.add(slot.options + "x" + slot.qty);
+        }
+        Collections.sort(parts);
+        long perRun = 0;
+        for (int p = store.outputStart(recipeId); p < store.outputEnd(recipeId); p++) {
+            if (store.outputKeyAt(p) == keyId) {
+                perRun += store.outputQtyAt(p);
+            }
+        }
+        return parts + "|" + perRun + "|" + store.categoryId(recipeId) + "|"
+                + store.isTransfer(recipeId);
+    }
+
+    /**
+     * How many recipes tied with `chosen` are the same offer as it. 1 when none are.
+     *
+     * READS THE SCORES `rank` ALREADY BUILT. No `scoreRecipe` call happens here and none may
+     * be added: a second scoring pass would be correct, invisible in every test, and would
+     * roughly double the cost of the most expensive part of planning.
+     *
+     * THE SUBSET MUST CONTAIN THE CHOSEN RECIPE, which is narrower than "the largest
+     * interchangeable subset among the tied". The mark claims the pick was arbitrary, which
+     * is a claim about the recipe actually taken, so a larger group the winner is not part of
+     * would be a true number beside a false statement. Mirrors python.
+     */
+    private int interchangeableCount(Ranking ranking, int chosen, int keyId,
+                                     Map<RecipeScore, Map<Object, Integer>> cache) {
+        RecipeScore score = ranking.scores.get(chosen);
+        if (score == null) {
+            return 1;
+        }
+        Map<Object, Integer> counts = cache.get(score);
+        if (counts == null) {
+            List<Integer> tied = new ArrayList<Integer>();
+            for (int recipeId : ranking.order) {
+                RecipeScore other = ranking.scores.get(recipeId);
+                // `compareTo == 0` rather than equals: RecipeScore has no equals, and its
+                // comparator already handles -0.0 the way python's `==` does.
+                if (other != null && other.compareTo(score) == 0) {
+                    tied.add(recipeId);
+                }
+            }
+            counts = new HashMap<Object, Integer>();
+            // Cheap gate: the interchangeable subset is a SUBSET of the tied set, so a tie
+            // too small to reach the threshold cannot produce a mark and needs no shapes.
+            if (tied.size() >= TIE_MIN) {
+                for (int recipeId : tied) {
+                    Object shape = offerShape(recipeId, keyId);
+                    Integer seen = counts.get(shape);
+                    counts.put(shape, Integer.valueOf(seen == null ? 1 : seen.intValue() + 1));
+                }
+            }
+            cache.put(score, counts);
+        }
+        Integer n = counts.get(offerShape(chosen, keyId));
+        return n == null ? 1 : n.intValue();
     }
 
     /**
@@ -1010,7 +1129,8 @@ public final class Solver {
 
     /** Expand one specific recipe choice for `keyId`. */
     private PlanNode build(PlanNode base, int recipeId, int keyId, long remainder,
-                           long fromStock, Set<Integer> ancestors, int depth) {
+                           long fromStock, Set<Integer> ancestors, int depth,
+                           int interchangeable) {
         RecipeStore store = g.recipes();
         long perRun = 1;
         for (int p = store.outputStart(recipeId); p < store.outputEnd(recipeId); p++) {
@@ -1040,6 +1160,12 @@ public final class Solver {
         Set<String> wanted = pinned.get(keyId);
         if (wanted != null && wanted.contains(store.rid(recipeId))) {
             node.pinned = Boolean.TRUE;
+        } else if (interchangeable >= TIE_MIN) {
+            // THE PICK WAS ARBITRARY AND THE PLAN SAYS SO. #181. Suppressed under a pin --
+            // hence the `else` -- because a pin is the player having already answered "which
+            // of these", and a node carrying both badges contradicts itself.
+            // Mirrors `solve._build` in python and is held to it by the golden gate.
+            node.interchangeable = Integer.valueOf(interchangeable);
         }
         int machineId = store.machineId(recipeId);
         if (machineId >= 0) {

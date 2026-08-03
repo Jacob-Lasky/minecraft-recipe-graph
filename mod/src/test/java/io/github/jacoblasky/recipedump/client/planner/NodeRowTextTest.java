@@ -137,6 +137,40 @@ public class NodeRowTextTest {
      * {@link NodeRowText#meta} for why this is the one departure from `render.py`'s order.
      */
     @Test
+    public void anArbitraryPickSaysSoINSTEADOfCountingRecipes() {
+        // #181, and the substitution is the point rather than an aesthetic choice. On
+        // `fluid:lifeessence` this node has 65 real producers and 62 of them are the same
+        // offer, so "65 recipes" is the false-comfort number the issue exists to stop
+        // showing -- it counts three Blood God Altar routes priced at infinity.
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "fluid:lifeessence");
+        json.addProperty("name", "Life Essence");
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("alternatives", 65);
+        json.addProperty("interchangeable", 62);
+        String meta = NodeRowText.meta(PlanJson.readNode(json));
+
+        assertTrue(meta, meta.contains("any of 62 interchangeable"));
+        assertFalse("65 is the number #181 exists to stop showing; both together would put "
+                    + "the flattering one first: " + meta, meta.contains("65 recipes"));
+    }
+
+    @Test
+    public void withNoTieTheRecipeCountIsStillShown() {
+        // The other direction, so the substitution above is not simply deleting a feature.
+        // A node with alternatives and no interchangeable mark reads exactly as before.
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "mod:thing");
+        json.addProperty("name", "Thing");
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("alternatives", 65);
+        String meta = NodeRowText.meta(PlanJson.readNode(json));
+
+        assertTrue(meta, meta.contains("65 recipes"));
+        assertFalse(meta, meta.contains("interchangeable"));
+    }
+
+    @Test
     public void pinnedComesFirstSoTruncationCannotEatIt() {
         com.google.gson.JsonObject json = new com.google.gson.JsonObject();
         json.addProperty("key", "mod:plate");

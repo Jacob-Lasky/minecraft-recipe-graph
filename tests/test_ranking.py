@@ -1120,3 +1120,127 @@ class BuildableMachineIsPricedByWhatBuildingItCostsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ATieAmongIDENTICALOFFERSIsAdmittedTest(unittest.TestCase):
+    """#181: the plan says when its pick was arbitrary, and says nothing when it was not.
+
+    Reported on Life Essence, whose 62 Digital Mob Agonizer recipes are structurally
+    identical and differ only in WHICH four data models they accept. The plan named Blaze
+    because Blaze sorts first, and `alternatives` said 65 -- a number that reads as choice
+    and was, at the level the model can see, no choice at all.
+
+    THE TRIGGER IS NOT A TIE. Measured over 23,476 multi-producer keys on the reference
+    graph, a bare score tie fires on 33.5% of them, which is the mark-fires-on-everything
+    failure #136 recorded. Requiring the tied recipes to be the SAME OFFER cuts it to 6.2%
+    and requiring three of them to 1.3%. So these tests pin the DIFFERENCE between a tie and
+    an interchangeable tie, because that difference is the whole feature.
+    """
+
+    def solver_for(self, graph, **kw):
+        costs = cost.estimate(graph)
+        return Solver(graph, costs=costs, **kw)
+
+    def three_identical_offers(self):
+        """Three recipes for one key that differ ONLY in which item they consume.
+
+        One slot, one input, same quantity, same category, same output. That is exactly the
+        Agonizer shape at the smallest size that can reach `TIE_MIN`.
+        """
+        g = Graph()
+        g.names = {"mod:goo": "Goo", "mod:a": "A", "mod:b": "B", "mod:c": "C"}
+        for rid, src in (("ra", "mod:a"), ("rb", "mod:b"), ("rc", "mod:c")):
+            g.add(Recipe(rid, "Machine", [("mod:goo", 1)], [Ingredient([src], 1)],
+                         category="mod.machine"))
+        return g
+
+    def test_three_interchangeable_recipes_are_admitted_as_arbitrary(self):
+        g = self.three_identical_offers()
+        node = self.solver_for(g).solve("mod:goo", 1)["tree"]
+        self.assertEqual(3, node.get("interchangeable"))
+        # And the OTHER count stays what it always was, because they answer different
+        # questions and #181 exists because the plan was showing the flattering one.
+        self.assertEqual(3, node.get("alternatives"))
+
+    def test_two_is_below_the_threshold_and_says_nothing(self):
+        # TIE_MIN is 3 rather than 2 deliberately: ">= 2" adds 1,155 keys whose honest
+        # wording is "either of these two", and takes the mark from 1.3% to 6.2% of nodes.
+        g = Graph()
+        g.names = {"mod:goo": "Goo", "mod:a": "A", "mod:b": "B"}
+        for rid, src in (("ra", "mod:a"), ("rb", "mod:b")):
+            g.add(Recipe(rid, "Machine", [("mod:goo", 1)], [Ingredient([src], 1)],
+                         category="mod.machine"))
+        node = self.solver_for(g).solve("mod:goo", 1)["tree"]
+        self.assertIsNone(node.get("interchangeable"))
+
+    def test_a_tie_between_DIFFERENT_offers_is_not_arbitrary(self):
+        """The negative case the whole design rests on, and the one a tie-only trigger fails.
+
+        Three recipes that SCORE the same and are not the same offer: one takes a single
+        input, one takes two, one is a different machine. A reader picking between them is
+        making a real choice, so the plan must not call it arbitrary.
+        """
+        g = Graph()
+        g.names = {"mod:goo": "Goo", "mod:a": "A", "mod:b": "B", "mod:c": "C",
+                   "mod:d": "D"}
+        g.add(Recipe("one_slot", "M", [("mod:goo", 1)], [Ingredient(["mod:a"], 1)],
+                     category="mod.machine"))
+        g.add(Recipe("two_slots", "M", [("mod:goo", 1)],
+                     [Ingredient(["mod:b"], 1), Ingredient(["mod:c"], 1)],
+                     category="mod.machine"))
+        g.add(Recipe("other_machine", "N", [("mod:goo", 1)], [Ingredient(["mod:d"], 1)],
+                     category="mod.other"))
+        node = self.solver_for(g).solve("mod:goo", 1)["tree"]
+        # Whatever it picked, it is not interchangeable with three of anything: the three
+        # shapes are distinct, so the largest same-offer group has size 1.
+        self.assertIsNone(node.get("interchangeable"))
+
+    def test_a_pin_suppresses_the_mark_because_the_player_already_chose(self):
+        g = self.three_identical_offers()
+        node = self.solver_for(g, pinned={"mod:goo": ["rb"]}).solve("mod:goo", 1)["tree"]
+        self.assertTrue(node.get("pinned"))
+        self.assertIsNone(node.get("interchangeable"))
+        # The pin really did move the choice, so this is not passing because nothing changed.
+        self.assertEqual("rb", node.get("recipe"))
+
+    def test_the_count_is_the_offer_group_and_not_the_whole_tied_set(self):
+        """Four recipes tie; THREE are one offer and the winner is the odd one out.
+
+        `max(shape counts)` -- what the issue originally specified, and what the population
+        sweep correctly uses -- would render 3 here, on a node whose chosen recipe is
+        interchangeable with nothing. Measured over the reference graph this shape occurs on
+        4 keys, and on every one of them the larger reading produces a mark that is false.
+        """
+        g = Graph()
+        g.names = {"mod:goo": "Goo", "mod:a": "A", "mod:b": "B", "mod:c": "C",
+                   "mod:d": "D"}
+        # DIFFERING BY CATEGORY, NOT BY SLOT COUNT, and that is forced rather than chosen.
+        # `offer_shape` reads (slots, per_run, category, transfer); `score_recipe` reads
+        # none of those directly except through `simple`, which counts SLOTS. So a shape
+        # difference that is invisible to the score has to come from the category, and a
+        # first draft using a two-slot winner could not tie at all -- `simple` separated
+        # them and the test skipped itself, which reads exactly like a pass.
+        #
+        # Listed FIRST so the stable sort leaves it at rank 0 on a full tie.
+        g.add(Recipe("odd", "M", [("mod:goo", 1)], [Ingredient(["mod:a"], 1)],
+                     category="mod.solo"))
+        for rid, src in (("t1", "mod:b"), ("t2", "mod:c"), ("t3", "mod:d")):
+            g.add(Recipe(rid, "M", [("mod:goo", 1)], [Ingredient([src], 1)],
+                         category="mod.machine"))
+        solver = self.solver_for(g)
+        node = solver.solve("mod:goo", 1)["tree"]
+        # ASSERTED, NOT SKIPPED. If the winner is not the odd one the premise is absent and
+        # the test proves nothing, so it must fail rather than quietly opt out.
+        self.assertEqual("odd", node.get("recipe"),
+                         "premise absent: the odd-shaped recipe must be the one chosen for "
+                         "this test to distinguish the two readings")
+        # And the premise's other half: three of the OTHERS really are one shape, so the
+        # `max` reading would have had 3 to report.
+        shapes = [solver.offer_shape(r, "mod:goo") for r in g.real_producers("mod:goo")]
+        self.assertEqual(3, max(shapes.count(s) for s in shapes),
+                         "premise absent: there must be a larger group for the rejected "
+                         "reading to have found")
+        self.assertIsNone(node.get("interchangeable"),
+                          "the chosen recipe is its own shape, so nothing is interchangeable "
+                          "with it -- reporting the largest OTHER group would be a true "
+                          "number beside a false statement")

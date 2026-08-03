@@ -139,6 +139,9 @@ public final class PlanJson {
         if (node.alternatives != null) {
             w.name("alternatives").value(node.alternatives);
         }
+        if (node.interchangeable != null) {
+            w.name("interchangeable").value(node.interchangeable);
+        }
         if (node.pinned != null) {
             w.name("pinned").value(node.pinned.booleanValue());
         }
