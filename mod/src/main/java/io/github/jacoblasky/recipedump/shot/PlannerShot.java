@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.shot;
 
 import io.github.jacoblasky.recipedump.client.PlannerScreen;
 import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
+import io.github.jacoblasky.recipedump.client.flow.FlowZoom;
 import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
@@ -53,6 +54,27 @@ final class PlannerShot {
     }
 
     /**
+     * Frames one full corner-to-corner sweep takes.
+     *
+     * 300, matching the default `-Dmcrecipedump.shotTimedFrames`, so a standard timing run
+     * traverses the diagram exactly once. A longer run simply sweeps it again rather than
+     * running off the end and parking, which would report a stationary viewport as the cost of
+     * panning.
+     */
+    private static final int SWEEP = 300;
+
+    /**
+     * Horizontal passes per vertical descent.
+     *
+     * 8 rather than 1, because the diagram is far taller than it is wide -- depth is capped at
+     * 24 columns by `solve.py` while the leaf level is thousands of rows -- so one pass per
+     * descent is a diagonal, and a diagonal over a shape like this is a sweep of the empty
+     * corner. Eight is enough that every pass crosses the leaf column while the descent is
+     * still fine-grained.
+     */
+    private static final int PASSES = 8;
+
+    /**
      * `flow`, or `flow:<fixture>`: the plan as a pannable diagram.
      *
      * Registers itself as {@link ShotScreens.Animated} so a timing run measures PANNING.
@@ -61,16 +83,71 @@ final class PlannerShot {
      * screen, and those are different numbers.
      */
     static void openFlow(String arg) {
-        final FlowCanvas canvas = new FlowCanvas(flowTree(arg));
+        // `<plan>@<zoom>`, so the zoom can be photographed. The suffix is stripped BEFORE
+        // `flowTree` sees the argument, since `synthetic:4000@0.5` still has to parse as a
+        // synthetic plan of four thousand nodes.
+        String spec = arg;
+        float zoom = FlowZoom.DEFAULT;
+        int at = arg == null ? -1 : arg.lastIndexOf('@');
+        if (at >= 0) {
+            spec = arg.substring(0, at);
+            String value = arg.substring(at + 1);
+            try {
+                zoom = Float.parseFloat(value);
+            } catch (NumberFormatException e) {
+                // LOUDLY. A silently ignored zoom produces a screenshot at 1.0 that looks
+                // entirely correct, and the whole point of the shot is to show it is not.
+                throw new IllegalArgumentException("bad zoom '" + value + "' in '" + arg + "'");
+            }
+        }
+        final FlowCanvas canvas = new FlowCanvas(flowTree(spec));
         canvas.pos(4, 4).size(612, 372);
+        canvas.setZoom(zoom);
         PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
         ShotScreens.animate(new ShotScreens.Animated() {
+            /** Most nodes drawn in any one frame so far. See the note where it is updated. */
+            private int peakDrawn;
+
             @Override
             public void step(int frame) {
-                // A steady diagonal drift, wrapping at the layout's extent. Diagonal because
-                // the culler indexes columns and searches rows, so panning on one axis only
-                // would exercise half of it and report the cheaper half as the cost.
-                canvas.panTo(frame * 7, frame * 3);
+                // A SERPENTINE OVER THE WHOLE DIAGRAM: several passes across while descending
+                // once. Both axes, because the culler indexes columns and searches rows, so
+                // panning on one only exercises half of it.
+                //
+                // IN FRACTIONS BECAUSE PIXELS MEASURED AN EMPTY VIEWPORT. `panTo(frame * 7,
+                // frame * 3)` covers about two thousand pixels over three hundred frames, and a
+                // 4,000 node plan is seventy thousand pixels tall -- so the sweep stayed in the
+                // top-left corner. See `FlowCanvas.panToFraction`.
+                //
+                // AND NOT A DIAGONAL, which was the first fix and was still wrong. This layout
+                // is roughly 2,200 x 69,000: depth is bounded at 24 columns while the leaf
+                // level is thousands of rows, so a diagonal spends nearly all of its frames at
+                // small x -- the shallow columns, which hold one node, then two, then five. It
+                // reaches the leaf column only in its last few frames. A raster covers the
+                // plane; a diagonal covers the sparse corner of it.
+                canvas.panToFraction(((frame * PASSES) % SWEEP) / (double) SWEEP,
+                        (frame % SWEEP) / (double) SWEEP);
+                // THE DENOMINATOR FOR THE FRAME TIMINGS, and it is here because without it the
+                // timings cannot be compared with each other at all. Wall-clock draw cost on
+                // this host varies more between runs of identical work than the thing being
+                // varied does -- on 2026-08-03, p50 for the same sweep came back at 6.13ms and
+                // at 18.04ms hours apart, and one set of runs put zoom 0.75 FASTER than zoom
+                // 1.0, which cannot be true since 0.75 draws strictly more. How many nodes were
+                // drawn does not depend on the host, the rasteriser or what else Tower is
+                // doing, so it is the number that can actually be quoted.
+                //
+                // THE RUNNING MAXIMUM, NOT THE INSTANTANEOUS COUNT. A plan diagram is mostly
+                // empty: depth is capped at 24 columns and only the LEAF column is dense, so
+                // every other column spreads its nodes over the full height at a pitch far
+                // larger than the viewport. Sampling the count every hundred frames therefore
+                // reports 0 most of the time, which says nothing about the worst frame -- and
+                // the worst frame is the whole question a frame budget asks.
+                peakDrawn = Math.max(peakDrawn, canvas.drawnLastFrame());
+                if (frame % 100 == 0) {
+                    ShotHarness.log("flow: zoom " + canvas.zoom() + " peak " + peakDrawn
+                            + " of " + canvas.nodeCount() + " nodes drawn in one frame, by "
+                            + "frame " + frame);
+                }
             }
         });
     }
@@ -112,21 +189,44 @@ final class PlannerShot {
         return fixture(wanted).tree();
     }
 
-    /** A balanced tree of `nodes` nodes, shaped like a plan: a few children per level. */
-    private static PlanNode synthetic(int nodes) {
+    /**
+     * A balanced tree of EXACTLY `nodes` nodes, shaped like a plan: a few children per level.
+     *
+     * IT USED TO BUILD ABOUT HALF WHAT IT WAS ASKED FOR, and every 60 fps measurement taken
+     * before 2026-08-03 -- including the ones quoted on #166 as "4,000 nodes" -- was really
+     * taken on 2,006. The old version started the deepest level at `nodes / 3` and shrank by a
+     * third per level, so the total converged to about `nodes / 2` and the loop then exited on
+     * `width == 1` with the budget still unspent. Its comment claimed "the count is exact
+     * rather than approached", which is exactly the kind of claim that stops anyone checking.
+     *
+     * The widths are computed first now, and the deepest one is trimmed so they sum to the
+     * requested total. `syntheticBuildsExactlyTheNodeCountAskedFor` asserts it, because a
+     * generator quietly producing the wrong size makes every performance number downstream
+     * wrong in a way no other test can see.
+     */
+    static PlanNode synthetic(int nodes) {
+        int[] widths = levelWidths(nodes);
         java.util.List<PlanNode> level = new java.util.ArrayList<PlanNode>();
         int made = 0;
-        // Built bottom-up so the count is exact rather than approached: the deepest row is
-        // whatever is left over after the levels above have taken their share.
-        while (made < nodes) {
-            int width = Math.min(nodes - made, Math.max(1, level.isEmpty() ? nodes / 3 : 1
-                    + level.size() / 3));
+        for (int depth = 0; depth < widths.length; depth++) {
+            int width = widths[depth];
             java.util.List<PlanNode> next = new java.util.ArrayList<PlanNode>(width);
             for (int i = 0; i < width; i++) {
-                int from = level.size() * i / width;
-                int to = Math.max(from + 1, level.size() * (i + 1) / width);
-                java.util.List<PlanNode> kids = level.subList(Math.min(from, level.size()),
-                        Math.min(to, level.size()));
+                // A STRICT PARTITION: every node on the level below goes to exactly one
+                // parent, and a parent that gets none is simply a leaf.
+                //
+                // It used to be `Math.max(from + 1, ...)`, which guaranteed every parent at
+                // least one child by OVERLAPPING the ranges when a level was wider than the
+                // one below it. That makes the result a DAG rather than a tree: the same node
+                // hangs off two parents, `FlowLayout` lays its whole subtree out twice, and
+                // the plan is bigger than the number it was asked for by however much got
+                // shared. It could not happen while the widths always shrank; it happens as
+                // soon as the deepest level is trimmed to hit an exact total, which is what
+                // `levelWidths` now does. Caught by `syntheticIsExactAtEverySizeAndAlways`
+                // `HasOneRoot`, which counts the tree at 600 consecutive sizes.
+                int from = Math.min(level.size(), level.size() * i / width);
+                int to = Math.min(level.size(), level.size() * (i + 1) / width);
+                java.util.List<PlanNode> kids = level.subList(from, to);
                 next.add(new PlanNode.Builder()
                         .key("synthetic:node" + made)
                         .name("Synthetic Node " + made)
@@ -139,11 +239,55 @@ final class PlannerShot {
                 made++;
             }
             level = next;
-            if (width == 1) {
-                break;
-            }
         }
         return level.get(0);
+    }
+
+    /**
+     * Level widths, deepest first, summing to exactly `nodes` and ending at a single root.
+     *
+     * The shrink rule is the original's -- each level is a third of the one below it, plus one
+     * -- so the shape the timings are taken on has not changed. What changed is that the
+     * DEEPEST level is chosen to make the total come out right, instead of being guessed at
+     * `nodes / 3` and the remainder abandoned.
+     */
+    private static int[] levelWidths(int nodes) {
+        int wanted = Math.max(1, nodes);
+        // Smallest leaf count whose tree is big enough. Monotonic in `leaves`, and the search
+        // starts at half because the total is about 1.5x the leaf count -- a plain scan from 1
+        // would be right and would walk a couple of thousand steps to get here.
+        int leaves = Math.max(1, wanted / 2);
+        java.util.List<Integer> widths = shrinkFrom(leaves);
+        while (total(widths) < wanted) {
+            widths = shrinkFrom(++leaves);
+        }
+        // Trim the deepest level to land exactly. The excess is at most one leaf's worth of
+        // knock-on, since `leaves` is the SMALLEST count that overshot.
+        int excess = total(widths) - wanted;
+        widths.set(0, Math.max(1, widths.get(0) - excess));
+        int[] out = new int[widths.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = widths.get(i);
+        }
+        return out;
+    }
+
+    /** Deepest level `leaves` wide, each level above a third of it plus one, down to one root. */
+    private static java.util.List<Integer> shrinkFrom(int leaves) {
+        java.util.List<Integer> widths = new java.util.ArrayList<Integer>();
+        widths.add(leaves);
+        while (widths.get(widths.size() - 1) > 1) {
+            widths.add(1 + widths.get(widths.size() - 1) / 3);
+        }
+        return widths;
+    }
+
+    private static int total(java.util.List<Integer> widths) {
+        int sum = 0;
+        for (int width : widths) {
+            sum += width;
+        }
+        return sum;
     }
 
     private static PlanView fixture(String name) {

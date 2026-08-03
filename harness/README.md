@@ -47,6 +47,11 @@ register("planner", new Opener() {
 
 `harness/shot.sh planner` then shoots it, and `harness/shot.sh planner:someArg` passes `arg`.
 
+`flow` takes `<plan>@<zoom>` on top of its plan argument, so a zoom level can be photographed
+rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zoom throws
+instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
+looks entirely correct and is of the wrong thing.
+
 `jei` is the one screen that is not ours: it asks `JeiBridge` to open JEI's own recipe page,
 so the picture is evidence that the runtime was captured, a focus was created and the GUI was
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`

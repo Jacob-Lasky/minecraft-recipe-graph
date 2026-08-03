@@ -482,8 +482,12 @@ public final class ShotHarness {
      * client's output, so they have to appear on stdout whatever log4j is configured to do
      * with mod logging in the pack this eventually runs against. A println cannot be routed
      * elsewhere by a config file; a logger can.
+     *
+     * PACKAGE-VISIBLE so a screen can report its own numbers under the same prefix. A screen
+     * that printed through its own logger would be the one line missing from the harness's
+     * output in the pack, which is the run where it matters most.
      */
-    private static void log(String message) {
+    static void log(String message) {
         System.out.println("[mcrecipedump-shot] " + message);
     }
 }

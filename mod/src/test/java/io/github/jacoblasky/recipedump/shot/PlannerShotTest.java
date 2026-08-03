@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.shot;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -73,5 +74,51 @@ public class PlannerShotTest {
         for (PlanNode child : node.children()) {
             assertInterned(child, graph);
         }
+    }
+
+    @Test
+    public void syntheticBuildsExactlyTheNodeCountAskedFor() {
+        // THE SUBJECT OF EVERY 60 FPS MEASUREMENT IN THIS PROJECT, and it was wrong. Before
+        // 2026-08-03 `synthetic(4000)` returned a 2,006 node tree: the deepest level started
+        // at `nodes / 3` and each level above was a third of the one below, so the total
+        // converged to about half the request and the loop exited on `width == 1` with the
+        // rest of the budget unspent. The comment above it said "the count is exact rather
+        // than approached", which is why nobody counted.
+        //
+        // Nothing else can catch this. The screenshots look identical, the culling assertions
+        // are proportional to what is on screen rather than to the plan, and the frame timings
+        // are simply lower than they should be -- a gate that passes because the subject is
+        // half the size it claims. So: count the tree.
+        assertEquals(4000, count(PlannerShot.synthetic(4000)));
+    }
+
+    @Test
+    public void syntheticIsExactAtEverySizeAndAlwaysHasOneRoot() {
+        // SWEPT, because the trim that makes the total come out right acts on the deepest
+        // level and its size depends on where the shrink happens to land -- so the sizes that
+        // break it are the ones nobody would pick. A handful of round numbers would all be
+        // comfortably in the middle of a level.
+        for (int n = 1; n <= 600; n++) {
+            PlanNode root = PlannerShot.synthetic(n);
+            assertEquals("synthetic(" + n + ")", n, count(root));
+        }
+        for (int n = 1000; n <= 5000; n += 137) {
+            assertEquals("synthetic(" + n + ")", n, count(PlannerShot.synthetic(n)));
+        }
+    }
+
+    /** Nodes in the tree. Iterative, since the trees under test are thousands deep-ish. */
+    private static int count(PlanNode root) {
+        int seen = 0;
+        java.util.Deque<PlanNode> pending = new java.util.ArrayDeque<PlanNode>();
+        pending.push(root);
+        while (!pending.isEmpty()) {
+            PlanNode node = pending.pop();
+            seen++;
+            for (PlanNode child : node.children()) {
+                pending.push(child);
+            }
+        }
+        return seen;
     }
 }
