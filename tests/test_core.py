@@ -20,6 +20,7 @@ from recipegraph.model import (  # noqa: E402
 )
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
+from recipegraph.sources import jar_json  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
 
 
@@ -497,3 +498,86 @@ class TestOredictGuess(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnreadSubdirJarsTest(unittest.TestCase):
+    """`jar_json.extract` reads `mods/*.jar` flat, but Forge ALSO loads `mods/<mcversion>/`.
+
+    The gap is silent by construction, so these pin the REPORT rather than the read. The
+    reference pack has 13 jars in `mods/1.12.2/` carrying zero recipe files, which is why
+    recursing was rejected: it would move every plan fixture to cover a case nobody has
+    created yet.
+    """
+
+    def _mods(self, layout):
+        """`{subdir_or_None: {jarname: [entry, ...]}}` -> a mods dir on disk."""
+        import zipfile as zf
+        d = tempfile.mkdtemp()
+        mods = os.path.join(d, "mods")
+        os.makedirs(mods)
+        for sub, jars in layout.items():
+            target = mods if sub is None else os.path.join(mods, sub)
+            os.makedirs(target, exist_ok=True)
+            for name, entries in jars.items():
+                with zf.ZipFile(os.path.join(target, name), "w") as z:
+                    for e in entries:
+                        z.writestr(e, "{}")
+        return mods
+
+    def test_a_subdirectory_of_recipeless_jars_is_reported_as_costing_nothing(self):
+        mods = self._mods({None: {"a.jar": []},
+                           "1.12.2": {"scala.jar": ["scala/Predef.class"]}})
+        self.assertEqual(jar_json.unread_subdir_jars(mods), [("1.12.2", 1, 0)])
+
+    def test_a_subdirectory_holding_recipes_reports_the_count_that_is_being_lost(self):
+        """The whole point: this is the case that must not stay silent."""
+        mods = self._mods({None: {"a.jar": []},
+                           "1.12.2": {"m.jar": ["assets/m/recipes/x.json",
+                                                "assets/m/recipes/y.json",
+                                                "assets/m/textures/z.png"]}})
+        self.assertEqual(jar_json.unread_subdir_jars(mods), [("1.12.2", 1, 2)])
+
+    def test_those_recipes_really_are_absent_from_extract(self):
+        """The report would be pointless if `extract` picked them up anyway.
+
+        This is the assertion that makes the other two mean something: it establishes the
+        loss the report describes, rather than trusting the docstring.
+        """
+        mods = self._mods({None: {},
+                           "1.12.2": {"m.jar": ["assets/m/recipes/x.json"]}})
+        self.assertEqual(list(jar_json.extract(mods)), [])
+        self.assertEqual(jar_json.unread_subdir_jars(mods)[0][2], 1)
+
+    def test_a_subdirectory_with_no_jars_at_all_is_not_reported(self):
+        mods = self._mods({None: {"a.jar": []}, "config": {}})
+        os.makedirs(os.path.join(mods, "memory_repo", "net"), exist_ok=True)
+        self.assertEqual(jar_json.unread_subdir_jars(mods), [])
+
+    def test_the_worst_subdirectory_leads(self):
+        mods = self._mods({None: {},
+                           "aaa": {"m.jar": ["assets/m/recipes/x.json"]},
+                           "zzz": {"n.jar": []}})
+        self.assertEqual([r[0] for r in jar_json.unread_subdir_jars(mods)], ["aaa", "zzz"])
+
+    def test_a_corrupt_jar_in_a_subdirectory_does_not_abort_the_report(self):
+        mods = self._mods({None: {}, "1.12.2": {"good.jar": ["assets/m/recipes/x.json"]}})
+        with open(os.path.join(mods, "1.12.2", "bad.jar"), "w") as fh:
+            fh.write("not a zip")
+        self.assertEqual(jar_json.unread_subdir_jars(mods), [("1.12.2", 2, 1)])
+
+    def test_extract_and_the_subdir_check_share_one_predicate(self):
+        """Two copies of "is this a recipe entry" is how they stop agreeing.
+
+        Derived from the shapes rather than hand-picked, so a change to the predicate cannot
+        satisfy this by accident.
+        """
+        yes = ["assets/m/recipes/x.json", "assets/m/recipes/sub/x.json"]
+        no = ["assets/m/recipes/x.txt", "m/recipes/x.json", "assets/m/textures/x.json",
+              "assets/m/recipes/", "recipes/x.json"]
+        for e in yes:
+            self.assertTrue(jar_json._is_recipe_entry(e), e)
+        for e in no:
+            self.assertFalse(jar_json._is_recipe_entry(e), e)
+        # and `extract` must agree, via the same function rather than a second copy
+        mods = self._mods({None: {"m.jar": yes + no}})
+        self.assertEqual(len(list(jar_json.extract(mods))), 0)  # `{}` parses to no recipe

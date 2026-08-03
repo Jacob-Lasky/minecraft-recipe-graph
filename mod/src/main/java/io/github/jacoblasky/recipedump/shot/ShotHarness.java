@@ -19,7 +19,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
  * `-Dmcrecipedump.shot=<screen>` -- open one of our GUIs, write a PNG of it, exit.
  *
  * This exists because pocket-dev cannot run the game and the desktop can only run it by hand,
- * so every GUI iteration in #19 otherwise costs a manual launch of a 410-mod pack. Driven by
+ * so every GUI iteration in #19 otherwise costs a manual launch of a 367-jar pack. Driven by
  * a system property rather than a command because a COMMAND needs someone to type it: the
  * whole point is that no human is at the keyboard. See harness/README.md.
  *

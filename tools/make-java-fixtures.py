@@ -26,9 +26,14 @@ BUILD A DEDICATED ORACLE. DO NOT POINT THIS AT `data/graph.json`, even though th
 current and would work today. It is the file the container SERVES, so it is replaced whenever
 Jake redumps and rebuilds -- and a fixture set pinned to it would be silently invalidated by a
 redeploy, turning the port's contract into a function of the last time somebody launched the
-game. An oracle has to be a file that changes only when somebody decides it should. It is also
-built on the desktop from ~410 jars while a Tower build reads 367, a measured 1.2% of produced
-keys (#119), so the two are different graphs regardless of when either was made.
+game. An oracle has to be a file that changes only when somebody decides it should.
+
+THE JAR COUNT IS NOT A SECOND REASON, and this docstring used to give it as one: it said the
+desktop builds from "~410 jars while a Tower build reads 367, a measured 1.2% of produced keys".
+Measured 2026-08-03 (#119): the client has 367 jars, Tower 364, the 364 shared ones are
+byte-identical, and the 3 extras hold no `assets/*/recipes/` entries between them, so `jar_json`
+yields the same 10,301 recipes and 8,784 produced keys either way. Both machines build the same
+graph from the same dump; only the dump's provenance matters.
 
 USE CURRENT CODE, THOUGH, AND CHECK. #110, #112 and #117 all do their work in `index.build`, so
 an oracle built before them is a graph the fixtures cannot exercise: `dimension_ores` is empty

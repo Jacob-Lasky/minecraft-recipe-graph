@@ -1,7 +1,7 @@
 """The item icon atlas the dump mod renders: icons.json plus its icons-N.png pages.
 
 WHY THE MOD RENDERS THESE AT ALL. Item textures do live in the jars, at
-`assets/<modid>/textures/items/<name>.png`, and a python-side extractor over the ~410 jars
+`assets/<modid>/textures/items/<name>.png`, and a python-side extractor over the 367 jars
 was the obvious plan. Three things defeat it: the texture name is not the registry name (it
 comes from the item's model JSON, and blocks resolve through a blockstate); metadata variants
 have separate models, which is the rule in this pack rather than the exception; and some

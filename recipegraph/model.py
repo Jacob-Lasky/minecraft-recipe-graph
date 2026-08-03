@@ -793,9 +793,17 @@ class Graph:
         difference is where the inputs live. Multiblock structures come from the pack's
         config, which the deployment does not ship, so they have to travel inside the graph.
         These come from recipes the graph already holds, so baking them would buy nothing and
-        cost a rebuild -- and a rebuild has to happen on the desktop, whose instance has ~410
-        jars against the server's 364, to avoid regressing the item names it is built from.
-        A derivation that needs no rebuild reaches the running container on a redeploy.
+        cost a rebuild. A derivation that needs no rebuild reaches the running container on a
+        redeploy.
+
+        THE REASON THIS USED TO GIVE WAS FALSE, and it is recorded rather than deleted because
+        it was cited elsewhere: it claimed a rebuild "has to happen on the desktop, whose
+        instance has ~410 jars against the server's 364". Measured 2026-08-03: the client has
+        367 jars, the server 364, and the 364 shared ones are byte-identical -- the 3 extras
+        are two client cosmetics with no `assets/*/recipes/` entries at all plus our own dump
+        mod, so `jar_json` yields the same 10,301 recipes and 8,784 produced keys from either
+        set. A rebuild is pinned to the desktop by the DUMP (`recipes.ndjson` needs a running
+        game), never by jar parity. See #119.
 
         Costs 0.10s over 117,681 recipes, against a 4.4s graph load. See fluidnames and #103.
         """

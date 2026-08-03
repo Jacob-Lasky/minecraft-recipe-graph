@@ -28,7 +28,7 @@ def script_json(value):
 
     Not a threat model so much as a reason not to have a page whose correctness depends on
     nobody naming a mod oddly: the machines page ships JEI's own mod DISPLAY names, which
-    are whatever ~410 mod authors typed. Use this for anything going into a `<script>`,
+    are whatever 370-odd mod authors typed. Use this for anything going into a `<script>`,
     including payloads that happen to be ours today.
 
     U+2028 and U+2029 too: legal in JSON strings, and a line terminator in JavaScript

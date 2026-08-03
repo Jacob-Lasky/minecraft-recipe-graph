@@ -134,8 +134,56 @@ def parse_recipe_json(doc, rid, constants=None):
     return Recipe(rid, "jar_json", outputs, slots, category=cat, machine=title)
 
 
+def unread_subdir_jars(mods_dir):
+    """`[(subdir, jars, recipe_json)]` for jars `extract` does NOT read, worst first.
+
+    `extract` uses a flat `os.listdir`, but FORGE ALSO LOADS `mods/<mcversion>/` as a mod
+    directory -- MeatballCraft keeps 13 scala and ChickenASM jars in `mods/1.12.2/`. Those
+    carry no `assets/*/recipes/` between them, so nothing is lost TODAY and the flat read is
+    not a bug. It is a SILENT gap: the day a recipe-bearing mod lands in a version
+    subdirectory, its recipes vanish from the graph and no output says so, which is
+    indistinguishable from the pack not having them.
+
+    Reported rather than read, deliberately. Recursing would change which recipes the graph
+    holds -- and therefore every plan fixture -- on the strength of a subdirectory nobody has
+    put a recipe in yet; a build that ANNOUNCES what it skipped costs nothing and turns the
+    silent case into a loud one. `recipe_json` is the number that decides which it is: 0 means
+    the skip is free, non-zero means recurse and regenerate.
+    """
+    out = []
+    for name in sorted(os.listdir(mods_dir)):
+        sub = os.path.join(mods_dir, name)
+        if not os.path.isdir(sub):
+            continue
+        jars = sorted(f for f in os.listdir(sub) if f.lower().endswith(".jar"))
+        if not jars:
+            continue
+        n = 0
+        for f in jars:
+            try:
+                with zipfile.ZipFile(os.path.join(sub, f)) as zf:
+                    n += sum(1 for e in zf.namelist() if _is_recipe_entry(e))
+            except (zipfile.BadZipFile, OSError):
+                continue
+        out.append((name, len(jars), n))
+    out.sort(key=lambda r: (-r[2], r[0]))
+    return out
+
+
+def _is_recipe_entry(entry):
+    """The one place the recipe-entry shape is spelled, read by `extract` and the subdir check.
+
+    Two readers asking "is this a recipe" from two copies of this predicate is how one of them
+    silently stops agreeing with the other.
+    """
+    return entry.endswith(".json") and entry.startswith("assets/") and "/recipes/" in entry
+
+
 def extract(mods_dir, on_progress=None):
-    """Walk every jar under mods_dir and yield Recipe objects."""
+    """Walk every jar directly under mods_dir and yield Recipe objects.
+
+    Immediate subdirectories are NOT read; `unread_subdir_jars` reports them and says why.
+    """
     jars = sorted(
         os.path.join(mods_dir, f) for f in os.listdir(mods_dir) if f.lower().endswith(".jar")
     )
@@ -149,10 +197,7 @@ def extract(mods_dir, on_progress=None):
         except zipfile.BadZipFile:
             continue
         with zf:
-            entries = [
-                e for e in zf.namelist()
-                if e.endswith(".json") and e.startswith("assets/") and "/recipes/" in e
-            ]
+            entries = [e for e in zf.namelist() if _is_recipe_entry(e)]
             # Pass 1: per-namespace `_constants.json`, needed before any `#name`
             # reference can be resolved. Must precede recipe parsing.
             constants = {}

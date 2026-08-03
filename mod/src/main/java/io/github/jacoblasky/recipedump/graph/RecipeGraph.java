@@ -7,7 +7,7 @@ package io.github.jacoblasky.recipedump.graph;
  * dicts: a {@code Recipe} per recipe, an {@code Ingredient} per slot, a {@code str} per key
  * occurrence, and {@code dict} indexes over all of it. That is the right design for a
  * process with a machine's whole memory to itself. This one has to live in a Minecraft
- * 1.12.2 client already running 410 mods, under a 400 MB gate (#126), so every one of those
+ * 1.12.2 client already running 370-odd mods, under a 400 MB gate (#126), so every one of those
  * becomes an int into a flat table:
  *
  * <ul>
