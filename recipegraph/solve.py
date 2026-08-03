@@ -241,11 +241,13 @@ class Solver:
     def score_recipe(self, recipe, ancestors=frozenset()):
         """Higher is better: prefer recipes we can mostly satisfy from stock.
 
-        Recipes that feed back into an ancestor, OR into one of their own outputs, are
-        ranked LAST. Without this, `ingot -> block -> 9 ingots` scores well (one simple
-        input) and gets picked over a real production route, producing a plan that asks for
-        the very thing being crafted. The cycle guard still catches it; this stops us
-        choosing it.
+        A recipe that feeds back into an ANCESTOR is ranked below every recipe that does
+        not, at any price. Without that, `ingot -> block -> 9 ingots` scores well (one
+        simple input) and gets picked over a real production route, producing a plan that
+        asks for the very thing being crafted. The cycle guard still catches it; this stops
+        us choosing it. Feeding back into one of the recipe's OWN outputs is a weaker claim
+        and is ranked as a tiebreak -- see the #172 block below for why the two cannot share
+        one term.
 
         `own` catches two cases `ancestors` structurally cannot, both found by measuring #61:
 
@@ -257,12 +259,46 @@ class Solver:
             does (`server.recipes_page`, so the order shown to someone about to pin). There
             a self-consuming recipe ranked top and was the tool's recommendation.
 
-        A note on where it can bite: `cheap` outranks this, so it only ever settles a cost
-        TIE. In practice that is common, because every candidate for an unreachable item
-        prices at infinity and the whole comparison falls through to these terms.
+        THE TWO HALVES SIT ON OPPOSITE SIDES OF `cheap`, AND THAT IS THE WHOLE OF #172.
+        They used to be one counter below it, with a note here saying it "only ever settles
+        a cost TIE" -- true, and the defect: a route that consumes its own output wins
+        OUTRIGHT whenever it is cheaper, and a cheap impossible route beats an expensive
+        real one. Measured on the reference graph, 48 of 23,476 multi-producer keys had a
+        cyclic winner while a clean route existed, and 17 of them produced a plan that
+        bottoms out on a cycle leaf -- a plan for X whose shopping list contains X, which
+        cannot be executed and does not look wrong.
+
+        SO `-ancestor_cyclic` GOES ABOVE `cheap`: "this route consumes something already on
+        the path to it" is a statement about whether the plan can be performed at all, and
+        no price should outvote it. It is safe to promote, which was measured rather than
+        assumed: 2,079 keys have a field that prices entirely at infinity, and promotion
+        still moves only the keys the defect is about, because where the field ties at
+        infinity this term already decides.
+
+        AND `-own_cyclic` DELIBERATELY STAYS BELOW IT. Promoting the merged counter was
+        built and measured and REGRESSES the case #61 added the `own` half for:
+
+          * `minecraft:pumpkin` -- the Insolator takes Phyto-Gro, one Pumpkin Seed and
+            water and gives back a Pumpkin AND the seed, at 129.90. Promoted, the pumpkin
+            comes from transmuting a Melon at 164.18.
+          * `integrateddynamics:menril_log` -- one Menril Sapling gives 6 wood and the
+            sapling back, at 173.34, against 363.63 for crafting from Menril Essence.
+
+        The seed comes back. Those are sustainable farms, not cycles, and telling a player
+        to transmute melons rather than grow pumpkins is worse advice than the bug. So the
+        soft claim settles ties, exactly where the merged counter used to sit, and the hard
+        claim outranks price. Splitting moves 35 keys instead of 48 and keeps both farms.
+
+        `own` catches what it always did, and the gate on `available(alt) < qty` still
+        applies to both halves: an upgrade recipe you can feed from stock is a real route.
         """
         satisfied = 0
-        cyclic = 0
+        # TWO COUNTERS, NOT ONE, AND THEY SIT ON OPPOSITE SIDES OF `cheap`. See the
+        # docstring; the short version is that "consumes something already on the path to
+        # it" and "returns its own seed" are opposite claims and one counter cannot rank
+        # both. DO NOT merge them back.
+        ancestor_cyclic = 0
+        own_cyclic = 0
         # Scored on MERGED slots, the same view `_build` will expand. Per slot, nine cells
         # asking for one clump each read as nine satisfied ingredients when stock held a
         # single clump, and a 3x3 of one thing looked three times less simple than a
@@ -278,8 +314,15 @@ class Solver:
             if (self.available(alt) >= qty or alt in self.craftables
                     or alt in self.free_sources):
                 satisfied += 1
-            if (alt in ancestors or alt in own) and self.available(alt) < qty:
-                cyclic += 1
+            if self.available(alt) < qty:
+                # ANCESTOR FIRST, so a slot that is both counts once and counts as the
+                # worse of the two. `own` is the softer claim and must not shadow the hard
+                # one; measured on the reference graph no winning recipe has both, so this
+                # is a rule about what the numbers MEAN rather than one that moves a plan.
+                if alt in ancestors:
+                    ancestor_cyclic += 1
+                elif alt in own:
+                    own_cyclic += 1
         # simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines
         simple = 1.0 / (1 + len(slots))
         plain = 0.1 if is_hand_crafting(recipe.category) else 0.0
@@ -300,8 +343,8 @@ class Solver:
         # keys have. Above `simple + plain`, because that is the term it has to beat:
         # `plain` gives hand-crafting +0.1 and so prefers unpacking a decorative block
         # over smelting an ore. Moved below it, this goes inert. See `ore_backed`.
-        return (0 if recipe.transfer else 1, cheap, -cyclic, satisfied,
-                self.ore_backed(recipe, slots), simple + plain, avail)
+        return (0 if recipe.transfer else 1, -ancestor_cyclic, cheap, -own_cyclic,
+                satisfied, self.ore_backed(recipe, slots), simple + plain, avail)
 
     def ore_backed(self, recipe, slots=None):
         """1 when every raw leaf this recipe rests on is something you mine, else 0.

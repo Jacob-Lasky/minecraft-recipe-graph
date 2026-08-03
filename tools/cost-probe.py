@@ -19,6 +19,16 @@ like the best answer in the world and dies the moment the solver expands it. Mea
 the reference pack, raising BASE_RAW_COST to 20 reorders 1,962 of 21,468 items in the
 RANKING and changes almost nothing in real plans. Draw conclusions from the slow mode.
 
+RUN THE ARMS IN SEPARATE PROCESSES, AND CLEAR `__pycache__` BETWEEN THEM IF YOU PATCH
+SOURCE BY HAND. `/coding` is a FUSE shfs mount with one-second mtime granularity, so an
+edit that lands within the same second as the previous one AND leaves the file the same
+length is invisible to Python's bytecode cache -- the stale `.pyc` is served and the arm
+silently measures the previous one. That is not hypothetical: swapping two terms in a
+tuple is exactly such an edit (same characters, same length), and it produced an A/B result
+where two different orderings reported identical failures. `find . -name __pycache__ -prune
+-exec rm -rf {} +` before each arm. This tool's own `--raw` sweep is unaffected because it
+mutates a module attribute in one process rather than editing a file.
+
 Dev tooling only, alongside the other two audits. The tool itself is Python 3 stdlib.
 """
 

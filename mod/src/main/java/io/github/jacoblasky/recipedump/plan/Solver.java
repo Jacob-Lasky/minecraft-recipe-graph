@@ -372,10 +372,12 @@ public final class Solver {
     /**
      * Higher is better: prefer recipes we can mostly satisfy from stock.
      *
-     * Recipes that feed back into an ancestor, OR into one of their own outputs, are ranked
-     * LAST. Without this, `ingot -&gt; block -&gt; 9 ingots` scores well (one simple input) and
-     * gets picked over a real production route, producing a plan that asks for the very thing
-     * being crafted. The cycle guard still catches it; this stops us choosing it.
+     * A recipe that feeds back into an ANCESTOR is ranked below every recipe that does not,
+     * at any price. Without that, `ingot -&gt; block -&gt; 9 ingots` scores well (one simple
+     * input) and gets picked over a real production route, producing a plan that asks for the
+     * very thing being crafted. The cycle guard still catches it; this stops us choosing it.
+     * Feeding back into one of the recipe's OWN outputs is a weaker claim and is ranked as a
+     * tiebreak -- see the #172 block below for why the two cannot share one term.
      *
      * `own` catches two cases `ancestors` structurally cannot, both found by measuring #61:
      *
@@ -387,14 +389,32 @@ public final class Solver {
      *     -- the order shown to someone about to pin. There a self-consuming recipe ranked
      *     top and was the tool's recommendation.
      *
-     * A note on where it can bite: `cheap` outranks this, so it only ever settles a cost TIE.
-     * In practice that is common, because every candidate for an unreachable item prices at
-     * infinity and the whole comparison falls through to these terms.
+     * THE TWO HALVES SIT ON OPPOSITE SIDES OF `cheap`, AND THAT IS THE WHOLE OF #172. They
+     * used to be one counter below it, with a note here saying it "only ever settles a cost
+     * TIE" -- true, and the defect: a route that consumes its own output wins OUTRIGHT
+     * whenever it is cheaper, and a cheap impossible route beats an expensive real one.
+     * Measured on the reference graph, 48 of 23,476 multi-producer keys had a cyclic winner
+     * while a clean route existed, and 17 of them produced a plan that bottoms out on a cycle
+     * leaf -- a plan for X whose shopping list contains X, which cannot be executed and does
+     * not look wrong.
+     *
+     * SO `-ancestorCyclic` GOES ABOVE `cheap`: whether the plan can be performed at all is
+     * not a thing a price should outvote. AND `-ownCyclic` DELIBERATELY STAYS BELOW IT,
+     * because promoting the merged counter was measured and REGRESSES the case the `own` half
+     * was added for -- `minecraft:pumpkin` moves off an Insolator that gives the seed back at
+     * 129.90 and onto transmuting a Melon at 164.18. The seed comes back; that is a
+     * sustainable farm, not a cycle.
+     *
+     * MIRRORS `Solver.score_recipe` IN PYTHON AND IS HELD TO IT BY THE GOLDEN GATE. The field
+     * ORDER of {@link RecipeScore} is the tuple order there; do not reorder one side only.
      */
     RecipeScore scoreRecipe(int recipeId, Set<Integer> ancestors) {
         RecipeStore store = g.recipes();
         int satisfied = 0;
-        int cyclic = 0;
+        // TWO COUNTERS, NOT ONE, AND THEY SIT ON OPPOSITE SIDES OF `cheap`. See the javadoc.
+        // DO NOT merge them back.
+        int ancestorCyclic = 0;
+        int ownCyclic = 0;
         // Scored on MERGED slots, the same view the expansion will use. Per slot, nine cells
         // asking for one clump each read as nine satisfied ingredients when stock held a
         // single clump, and a 3x3 of one thing looked three times less simple than a recipe
@@ -411,9 +431,14 @@ public final class Solver {
                     || freeSources.containsKey(slot.keyId)) {
                 satisfied++;
             }
-            if ((ancestors.contains(slot.keyId) || own.contains(slot.keyId))
-                    && available(slot.keyId) < slot.qty) {
-                cyclic++;
+            if (available(slot.keyId) < slot.qty) {
+                // ANCESTOR FIRST, so a slot that is both counts once and counts as the worse
+                // of the two. `own` is the softer claim and must not shadow the hard one.
+                if (ancestors.contains(slot.keyId)) {
+                    ancestorCyclic++;
+                } else if (own.contains(slot.keyId)) {
+                    ownCyclic++;
+                }
             }
         }
         // Simplicity tiebreak: fewer ingredients, and prefer plain crafting over machines.
@@ -434,8 +459,8 @@ public final class Solver {
         // Above `simple + plain`, because that is the term it has to beat: `plain` gives
         // hand-crafting +0.1 and so prefers unpacking a decorative block over smelting an
         // ore. Moved below it, this goes inert.
-        return new RecipeScore(store.isTransfer(recipeId) ? 0 : 1, cheap, -cyclic, satisfied,
-                oreBacked(slots), simple + plain, avail);
+        return new RecipeScore(store.isTransfer(recipeId) ? 0 : 1, -ancestorCyclic, cheap,
+                -ownCyclic, satisfied, oreBacked(slots), simple + plain, avail);
     }
 
     /**
