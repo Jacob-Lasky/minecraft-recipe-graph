@@ -443,8 +443,14 @@ same reason at a larger scale.** Five mod-side issues in one jar, against one sc
 the expensive step is a launch of a 367-jar pack, not the code, and five increments would only
 buy a partial revert nobody can exercise, since reverting half a jar still costs the launch.
 
-**Schema 5 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the keys the
-reader computes and AE2 stock still matches. Upgrading 4 -> 5 is `/recipedump` then `build`,
+**#194 is v0.10.0 (dump schema 6), and it is additive.** `summary.json` gains `names` and
+`names_failed` -- the display names the dump wrote, and the ones `getDisplayName()` threw on,
+which used to be caught and forgotten. `build` will not read a `names.json` whose length
+disagrees with `names`: a short one means the bytes on disk are not the bytes the dump
+wrote, which no amount of stepping over makes safe.
+
+**Schema 5 and 6 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the
+keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then `build`,
 with **no re-run of `have`** -- the opposite of 3 -> 4, and why `nbt_digest.DIGEST_FORMAT_SCHEMA`
 deliberately stayed at 4. Moving it for a bump that did not touch the digest would make the
 loud "your stock reads as zero" warning fire on a graph that is fine, and a warning that cries

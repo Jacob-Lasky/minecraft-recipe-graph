@@ -456,6 +456,13 @@ written to run outside a GUI frame — and the irreplaceable thing here is the l
 game, not the pictures. It reports rendered/blank/threw counts in chat, so the launch itself
 says whether it worked.
 
+`summary.json` says what the dump could NOT do as well as what it did
+([#194](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/194)). `names` and
+`names_failed` are how many display names it wrote and how many it could not read — a few
+modded items throw on `getDisplayName()` outside a render pass, and before schema 6 that was
+caught and forgotten, so a dump that lost 40,000 names wrote a shorter `names.json` and said
+nothing. `recipegraph build` refuses a `names.json` whose length disagrees with `names`.
+
 It also writes `nbt_trace.json` by default: a per-top-level-tag digest of every key that
 carries identifying NBT, in two flavours per tag — lists in order, and lists sorted.
 `/recipedump notrace` skips it. That is a diagnostic for [#80](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/80),
@@ -522,10 +529,10 @@ rebuild and re-commit the jar rather than editing the expected numbers.
 **Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
 two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
 
-**This jar writes dump schema 5.** Schema 5 adds files and renames one summary field; it does
-NOT change how an NBT-bearing stack is digested, so a schema-4 graph's keys are still the keys
-this reader computes and AE2 stock still matches. Upgrading from 4 costs a `/recipedump` and a
-`recipegraph build` to pick up the new files, and no re-run of `have`.
+**This jar writes dump schema 6.** Schemas 5 and 6 add files and fields; neither changes how
+an NBT-bearing stack is digested, so a schema-4 graph's keys are still the keys this reader
+computes and AE2 stock still matches. Upgrading from 4 or 5 costs a `/recipedump` and a
+`recipegraph build` to pick up the new fields, and no re-run of `have`.
 
 **A schema-3 graph is a different matter and is not compatible.** The digest that identifies
 an NBT-bearing stack changed at schema 4 (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in

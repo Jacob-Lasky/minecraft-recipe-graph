@@ -454,6 +454,13 @@ class Graph:
         # and not the other. Shown in the UI footer so "which mod wrote the graph I am
         # looking at" is answerable without a terminal. See #38.
         self.dump_version = None
+        # How many item keys the dump could not read a display name for, None for a graph
+        # built from a dump older than schema 6 that never counted. NONE IS NOT ZERO here:
+        # zero is a dump that measured and lost nothing, None is a dump that cannot say, and
+        # collapsing them would let every pre-#194 graph claim a clean bill. Carried on the
+        # graph so `serve` can say it too -- the dump directory is long gone by then, and a
+        # loss reported only by the build that noticed it is a loss nobody sees twice.
+        self.dump_names_failed = None
         # The instance this graph was built from. Persisted so `serve` can find the dump
         # directory and rebuild itself without the user passing --instance again; a tool
         # that already knows the answer should not ask.
@@ -1277,6 +1284,7 @@ class Graph:
             "category_mods": self.category_mods,
             "dump_schema": self.dump_schema,
             "dump_version": self.dump_version,
+            "dump_names_failed": self.dump_names_failed,
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
@@ -1305,6 +1313,9 @@ class Graph:
         g.category_mods = d.get("category_mods") or {}
         g.dump_schema = d.get("dump_schema") or 0
         g.dump_version = d.get("dump_version") or None
+        # `.get`, NOT `or None`: 0 is a real answer here -- "the dump measured and lost
+        # nothing" -- and `or None` would turn every clean graph back into "cannot say".
+        g.dump_names_failed = d.get("dump_names_failed")
         g.instance_dir = d.get("instance_dir")
         # Absent from every graph built before #93, and absent from any pack without Modular
         # Machinery. An empty map means "priced by the controller recipe alone", which is the

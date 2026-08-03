@@ -75,10 +75,16 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     say(dump_meta.describe(meta))
     g.dump_schema = meta["schema"] or 0
     g.dump_version = meta["mod_version"] or None
+    g.dump_names_failed = meta["names_failed"]
 
     # After items.csv, and with setdefault, so the pack's own export stays authoritative
     # for anything it covers. This only has to reach the keys items.csv cannot express.
-    dumped_names = dump_names.load(dump_names.find(instance_dir, dump_dir))
+    dumped_names, on_disk = dump_names.load_with_count(
+        dump_names.find(instance_dir, dump_dir))
+    # BEFORE the names are merged, so a damaged dump cannot get a single label into the
+    # graph on its way to being refused. `check_names` raises rather than returning a
+    # verdict; see its docstring for why this one absence is not stepped over. #194
+    dump_meta.check_names(meta, on_disk)
     if dumped_names:
         added = 0
         for key, label in dumped_names.items():
