@@ -102,17 +102,34 @@ public class ScenarioSourceTest {
         // A warning with no reason is one a player cannot act on, and it is the reason rather
         // than the flag that stops "planned without: have" reading as a defect.
         //
-        // COUNTED, because the assertion is inside an `if` and this file's own comments say
-        // Phase 5 makes every source live. On the day that lands, "not live" selects nothing,
+        // COUNTED, because the assertion is inside an `if` and every source is expected to
+        // report live eventually. On the day the last one does, "not live" selects nothing,
         // the loop asserts nothing, and this test goes green forever over a rule it stopped
         // checking. The count is what makes that day a FAILURE that has to be looked at
         // rather than a silent no-op.
         //
         // WHAT THIS TEST COVERS IS THE DECLARED CONSTANTS, and only those.
         // `aReaderCanSayWHICHRefusalHappened` below asserts the same rule through a Reader
-        // and cannot go vacuous, so the rule itself survives Phase 5 without this test. That
-        // is why the failure message says to delete THIS sweep rather than to keep `note()`
-        // alive for it: `note()` is still how a runtime refusal names itself.
+        // and cannot go vacuous, so the rule itself outlives this test. That is why the
+        // failure message says to delete THIS sweep rather than to keep `note()` alive for
+        // it: `note()` is still how a runtime refusal names itself.
+        //
+        // A SECOND REASON THIS GUARD MATTERS, and it is the worse one: THE REASONS DO NOT
+        // REACH A SCREEN (#190). Be precise about which half is missing, because the two
+        // read alike from outside. `summary()` IS drawn -- `PlannerWidgets:290` wraps it into
+        // the caveat line -- but it is built from `source.field`, so what a player sees is
+        // "planned without: have, craftables, placed, visited_dimensions, emc_knowledge".
+        // The five hand-written `note()` strings, the ones carrying what to DO about it, are
+        // collected only by `missingNotes()`, whose sole callers are this test and
+        // `PinStoreTest`.
+        //
+        // That is exactly the failure `Status.unavailable`'s own javadoc argues against in
+        // the sentence justifying why it takes a string rather than a boolean: "AE2 stock is
+        // not read yet" tells a player nothing they can act on, "no wireless access point in
+        // range" tells them to walk toward their base. The strings were written for that
+        // reason and the player gets the boolean. Until `missingNotes()` is rendered, this
+        // loop is the only thing asserting those five strings exist at all -- which is
+        // precisely the state in which it must not quietly stop running.
         int asserted = 0;
         for (ScenarioSource source : ScenarioSource.values()) {
             if (!source.live()) {
@@ -121,8 +138,8 @@ public class ScenarioSourceTest {
                 asserted++;
             }
         }
-        assertTrue("no source declares itself not-live, so this test asserted nothing. Phase 5 "
-                   + "has landed: delete this sweep. Do NOT delete note() or "
+        assertTrue("no source declares itself not-live, so this test asserted nothing. Every "
+                   + "source now reports live: delete this sweep. Do NOT delete note() or "
                    + "aReaderCanSayWHICHRefusalHappened -- a runtime refusal still has to say "
                    + "why, and that test is where the rule lives afterwards", asserted > 0);
     }
@@ -154,9 +171,15 @@ public class ScenarioSourceTest {
 
     @Test
     public void theSummaryIsEmptyOnceEverythingIsLive() {
-        // Pins the shape of the end state rather than today's: when Phase 5 lands and every
-        // source reports live, the caveat must disappear instead of becoming an empty
-        // "planned without: " that reads like a bug.
+        // Pins the shape of the end state rather than today's: when every source reports
+        // live, the caveat must disappear instead of becoming an empty "planned without: "
+        // that reads like a bug.
+        //
+        // NOT "WHEN PHASE 5 LANDS". Phase 5's grid read already landed (#150 --
+        // `Ae2StockReader` walks the network through `IStorageGrid`); what is missing is the
+        // JOIN, and only the join: nothing calls `HAVE.readBy` and `liveScenario()` never
+        // feeds the read into the `have` field. That is #191, and naming a phase here dated
+        // the comment against work that is already half done.
         boolean anyMissing = false;
         for (ScenarioSource source : ScenarioSource.values()) {
             anyMissing |= !source.live();
@@ -174,7 +197,7 @@ public class ScenarioSourceTest {
         assertTrue(ScenarioSource.missingNotes().contains(ScenarioSource.HAVE.note()));
     }
 
-    // -- the runtime reader, which is how Phase 5 fills these in --------------------------
+    // -- the runtime reader, which is how a source goes live (#191) ----------------------
 
     @org.junit.After
     public void dropReaders() {
@@ -194,8 +217,10 @@ public class ScenarioSourceTest {
 
     @Test
     public void aReaderCanReportTheInputAsLiveAndTheCaveatDrops() {
-        // What Phase 5 lands: the grid read succeeded, so `have` stops being a warning and
-        // the summary stops naming it. Nothing else about the source changes.
+        // The state a successful read puts the source in: `have` stops being a warning and
+        // the summary stops naming it. Nothing else about the source changes. This is the
+        // half of #191 that is already built -- `Ae2StockReader` produces exactly this
+        // answer -- and the half that is missing is the caller that installs it.
         ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
             @Override
             public ScenarioSource.Status status() {
@@ -293,8 +318,9 @@ public class ScenarioSourceTest {
 
     @Test
     public void everySourceGoingLiveEmptiesTheCaveatEntirely() {
-        // The end state Phase 5 is heading for, asserted now so the caveat disappears rather
-        // than degrading into an empty "planned without: ".
+        // The end state, asserted now so the caveat disappears rather than degrading into an
+        // empty "planned without: ". Reached one source at a time as each read is joined up
+        // (#191); this asserts the destination rather than any particular phase.
         for (ScenarioSource source : ScenarioSource.values()) {
             source.readBy(new ScenarioSource.Reader() {
                 @Override

@@ -249,9 +249,15 @@ public class ModularUiLayoutTest {
     /**
      * Rows past the bottom of the viewport are still given real boxes.
      *
-     * Worth pinning because Phase 3b plans to cull off-screen nodes when drawing: culling has
-     * to be a DRAW-time decision, since the layout pass makes no such distinction and the
-     * scroll offset is what decides which rows are on screen at any moment.
+     * Worth pinning because {@code FlowCulling} culls at DRAW time (#149, constructed at
+     * {@code FlowCanvas.java:74}): the layout pass makes no such distinction, and the scroll
+     * offset is what decides which rows are on screen at any moment.
+     *
+     * DO NOT "OPTIMISE" THE LAYOUT PASS TO SKIP OFF-SCREEN ROWS. That is the same decision
+     * {@code FlowCanvas.preDraw} makes by toggling {@code enabled} rather than by overriding
+     * {@code getChildren}, and for the same reason: a row dropped from the resize pass
+     * because it happened to be below the fold arrives at zero size the first time someone
+     * scrolls to it, which is a bug with no symptom until they do.
      */
     @Test
     public void rowsBelowTheFoldAreStillLaidOutRatherThanCollapsedOrSkipped() {

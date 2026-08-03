@@ -175,15 +175,40 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
         # the thing that builds the list. It used to set `g.ore_members` by hand and read the
         # literal straight back, so it asserted that a Python list preserves its own order
         # and nothing about the reader -- `from_json` could have been `sorted(...)` or a
-        # `set` and this stayed green. Before this it had NO caller in tests/ at all.
+        # `set` and this stayed green.
         #
-        # The written order is `mod:z` then `mod:a`, so insertion order and alphabetical
-        # order disagree and a sorting reader fails here.
+        # `from_json` WAS being executed and its ORDER was asserted by nothing, in either
+        # language. Three tests reach it through `index.build`, and not one can see the
+        # order: `test_schema_five.py:611` passes `{}`, `test_sources.py:402` passes one
+        # member per group, and `test_dimensions.py:464` passes two whose only assertion
+        # sorts both sides -- and whose two keys are in alphabetical order anyway, so it
+        # would not discriminate even unsorted. Note which of the module's two functions was
+        # covered: `guess_from_names`, the best-effort FALLBACK, is tested directly at
+        # `test_core.py:488`. The one carrying the contract was not.
+        #
+        # WHY THIS IS NOT MERELY A MISSING UNIT TEST. The Java port never calls `from_json`.
+        # `DumpCommand.writeOreDict` emits oredict.json in game, Python's `from_json` turns
+        # it into ordered lists, and `GraphJsonReader` reads the ALREADY-BUILT graph. So
+        # member order is decided once, upstream of both implementations. If `from_json`
+        # built its lists wrong, both languages would inherit the identical wrong order,
+        # every golden fixture would be regenerated against it, and the cross-language gate
+        # would agree perfectly while both sides were wrong -- across the 27 resolved oredict
+        # slots `plan-same-name` and `plan-fluid-chain` carry between them. A golden-fixture
+        # gate proves the two implementations AGREE; it can prove neither of them right about
+        # anything they share an upstream for. This is the only test on that link.
+        #
+        # The spellings are the dump's real ones, so `_norm_entry` is exercised too -- it is
+        # reachable only from here and from `from_crafttweaker_log`, which has no test caller
+        # at all, so its bracket-stripping and `* 4` stack-size handling were uncovered.
+        expected = ["mod:z", "mod:a"]
+        self.assertNotEqual(expected, sorted(expected),
+                            "the fixture must not be in alphabetical order, or a sorting "
+                            "reader passes this test")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "oredict.json")
             with open(path, "w") as fh:
-                json.dump({"plateStuff": ["mod:z", "mod:a"]}, fh)
-            self.assertEqual(oredict.from_json(path)["plateStuff"], ["mod:z", "mod:a"])
+                json.dump({"plateStuff": ["<mod:z>", "mod:a * 4"]}, fh)
+            self.assertEqual(oredict.from_json(path)["plateStuff"], expected)
 
     def test_the_graph_reads_the_dumps_oredict_in_that_order_too(self):
         # And the whole way up: `index.build` is what puts `from_json`'s answer on the graph,
