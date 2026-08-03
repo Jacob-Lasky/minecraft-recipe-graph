@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -83,6 +84,77 @@ public class ShotHarnessTest {
             assertTrue("mod/build.gradle no longer reads " + prefix + property,
                     script.contains(prefix + property));
         }
+    }
+
+    /**
+     * A screen's verdict reaches the exit code, and the three outcomes stay three.
+     *
+     * THE THREE ARE NOT INTERCHANGEABLE. "The probe said nothing" is a harness fault or a
+     * flake, "the probe said no" is a finding about AE2, and "the probe said yes" is the only
+     * one that may exit 0. The `ae2-probe` defect this guards against was a screen that exited
+     * 0 on every failure and non-zero on success, so asserting only that a failure is non-zero
+     * would have passed on the inverted build; the success direction is half the assertion.
+     */
+    @Test
+    public void aVerdictDecidesTheExitCodeInEveryDirection() {
+        resetVerdict();
+        // No screen declared a verdict, so the harness's own code passes straight through.
+        assertEquals(0, ShotHarness.withVerdictCheck(0));
+
+        resetVerdict();
+        ShotScreens.expectReport("a verdict");
+        int silent = ShotHarness.withVerdictCheck(0);
+        assertTrue("a screen that never reported must not exit 0", silent != 0);
+
+        resetVerdict();
+        ShotScreens.expectReport("a verdict");
+        ShotScreens.reportPass();
+        assertEquals("a screen whose criteria held must exit 0", 0,
+                ShotHarness.withVerdictCheck(0));
+
+        resetVerdict();
+        ShotScreens.expectReport("a verdict");
+        ShotScreens.reportFail("stored==64 false");
+        int refused = ShotHarness.withVerdictCheck(0);
+        assertTrue("a NO verdict must not exit 0", refused != 0);
+
+        // AND THEY MUST BE TELLABLE APART. Collapsing them sends whoever reads the exit code
+        // back to guessing whether the probe broke or AE2 did.
+        assertTrue("silence and a NO verdict must not share an exit code", silent != refused);
+    }
+
+    @Test
+    public void aVerdictNeverOverwritesAFailureTheHarnessAlreadyHas() {
+        // Whatever the harness already decided is more specific than either verdict outcome
+        // and it happened first, so the guard may only turn a SUCCESS into a failure. The
+        // value is EXIT_WRITE_FAILED today and the assertion is about any non-zero surviving,
+        // which is why it is not reaching for the private constant.
+        int alreadyFailing = 4;
+
+        resetVerdict();
+        ShotScreens.expectReport("a verdict");
+        assertEquals(alreadyFailing, ShotHarness.withVerdictCheck(alreadyFailing));
+
+        resetVerdict();
+        ShotScreens.expectReport("a verdict");
+        ShotScreens.reportFail("stored==64 false");
+        assertEquals(alreadyFailing, ShotHarness.withVerdictCheck(alreadyFailing));
+    }
+
+    /**
+     * Clear the verdict state the way the harness does, through `ShotScreens.open`.
+     *
+     * There is deliberately no public reset: the fields are cleared by opening a screen, so
+     * that a screen which declares nothing cannot inherit the previous screen's verdict. Going
+     * through `open` here means these tests exercise that clearing rather than bypassing it.
+     */
+    private static void resetVerdict() {
+        ShotScreens.register("test-verdict", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+        assertNull(ShotScreens.open("test-verdict"));
     }
 
     /**

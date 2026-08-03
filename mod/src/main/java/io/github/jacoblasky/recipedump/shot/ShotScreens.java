@@ -54,6 +54,32 @@ public final class ShotScreens {
     /** Set by the current run's opener; null when the screen cannot be driven. */
     private static Animated animated;
 
+    /** See {@link #requestSettleFrames}. */
+    private static int settleRequest;
+
+    /**
+     * See {@link #expectReport}. Non-null means a verdict is still owed.
+     *
+     * VOLATILE BECAUSE THESE TWO CROSS THREADS AND THE OTHER FIELDS HERE DO NOT. `animated`
+     * and `settleRequest` are written by an opener on the client tick and read by the harness
+     * on the client thread, so they need nothing. A verdict is different: `Ae2ProbeShot` walks
+     * an AE2 grid on the SERVER thread -- it has to, a grid exists nowhere else -- and reports
+     * from there, while {@link ShotHarness} reads it on the client thread on the way out.
+     * Without the barrier the client is entitled to see the stale null and fail a run that did
+     * report, which is precisely the flake this machinery exists to make impossible.
+     */
+    private static volatile String pendingReport;
+
+    /**
+     * See {@link #reportFail}. Non-null means a verdict arrived and it was NO.
+     *
+     * A SECOND FIELD RATHER THAN A SENTINEL IN {@link #pendingReport}, because "said nothing"
+     * and "said no" are different outcomes and the whole point of this machinery is that they
+     * must not collapse into each other. One nullable field can carry one of those two facts.
+     * Volatile for the same reason as {@link #pendingReport}.
+     */
+    private static volatile String failedVerdict;
+
     /**
      * Offer the harness something to drive. Call from inside an {@link Opener}.
      *
@@ -70,9 +96,103 @@ public final class ShotScreens {
         return animated;
     }
 
+    /**
+     * Frames this screen needs before the capture, if more than the harness default.
+     *
+     * A SCREEN THAT NEEDS TIME MUST BE ABLE TO SAY SO. `ae2-probe` waits twenty SERVER ticks
+     * for AE2 to build and connect its grid, which is about a second, and the default settle
+     * of twenty RENDER frames is under a second on this rasteriser -- so the capture and the
+     * exit happened before the probe reached its verdict, and the log simply had no verdict
+     * line in it. That reads as "the probe did not run", which is indistinguishable from "the
+     * probe found nothing", and the fix was an incantation on the command line that the next
+     * person would not know to type.
+     *
+     * So the screen declares it and the harness takes the larger of the two. An opt-in flag
+     * the caller has to remember is a footgun; a requirement the screen states is a contract.
+     */
+    public static void requestSettleFrames(int frames) {
+        settleRequest = Math.max(settleRequest, frames);
+    }
+
+    /** {@link #requestSettleFrames}, or 0 if the screen asked for nothing. */
+    public static int settleRequest() {
+        return settleRequest;
+    }
+
+    /**
+     * Declare that this screen owes a verdict before the run may be called successful.
+     *
+     * BECAUSE A PROBE THAT SAYS NOTHING LOOKS EXACTLY LIKE A PROBE THAT WAS NEVER RUN. On
+     * 2026-08-03 the AE2 probe produced a full verdict on three runs and, on a fourth with no
+     * relevant change, produced its "placed" line and then nothing at all -- and the log of
+     * that run is indistinguishable from a build where the screen had been deleted. I could
+     * not reproduce it, which is precisely why silence must not be an available outcome: a
+     * flake that reports nothing gets read as a clean run by whoever greps for a failure.
+     *
+     * So the screen says up front that a verdict is owed, and {@link ShotHarness} treats a
+     * capture with a verdict still outstanding as a failed run rather than a successful one.
+     *
+     * THE DEBT IS CLEARED BY {@link #reportPass} OR {@link #reportFail} AND BY NOTHING ELSE.
+     * DO NOT add a bare `reported()` that clears it without saying which way the verdict went.
+     * The first version of this had one, and `Ae2ProbeShot` called it on all five of its
+     * FAILURE paths and not on its success path -- so a passing run would have turned EXIT_OK
+     * into a failure and every run that stopped at step 1 would have exited 0. A guard written
+     * to stop a silent success from passing had been wired to invert the signal, and would have
+     * lied in both directions at once.
+     *
+     * READ OFF THE CODE, NOT OFF A LOG, and worth saying which: the guard was written after the
+     * last recorded probe run, so no run ever executed it and no log shows the inversion. That
+     * is the good version of this outcome and it is also why the mapping now has unit tests --
+     * the live runs on this branch each exercise exactly one direction. A verdict-shaped API
+     * cannot be miswired this way, because there is no call that means only "I spoke".
+     */
+    public static void expectReport(String what) {
+        pendingReport = what;
+    }
+
+    /**
+     * The screen's criteria all held. Clears the debt declared by {@link #expectReport}.
+     *
+     * DELIBERATELY DOES NOT UNDO A {@link #reportFail}, so a screen that reports a failure and
+     * then a pass still fails the run. A screen doing both has a defect in it, and of the two
+     * ways to resolve the contradiction, failing closed costs a re-run while passing closed
+     * publishes a green result over a criterion that did not hold.
+     */
+    public static void reportPass() {
+        pendingReport = null;
+    }
+
+    /**
+     * The screen reached its verdict and the verdict is NO. Clears the debt and fails the run.
+     *
+     * `why` reaches the harness log and nothing else, so write it for whoever is reading the
+     * exit code six weeks from now: name the criterion that did not hold, not the fact that
+     * one did not.
+     */
+    public static void reportFail(String why) {
+        pendingReport = null;
+        failedVerdict = why == null || why.trim().isEmpty() ? "no reason given" : why.trim();
+    }
+
+    /** What the screen still owes, or null. */
+    public static String pendingReport() {
+        return pendingReport;
+    }
+
+    /** Why the screen's verdict was NO, or null if it did not fail. */
+    public static String failedVerdict() {
+        return failedVerdict;
+    }
+
     private static final Map<String, Opener> SCREENS = new LinkedHashMap<String, Opener>();
 
     static {
+        register("ae2-probe", new Opener() {
+            @Override
+            public void open(String arg) {
+                Ae2ProbeShot.open(arg);
+            }
+        });
         register("world-probe", new Opener() {
             @Override
             public void open(String arg) {
@@ -173,6 +293,9 @@ public final class ShotScreens {
             return "no screen named '" + name + "'; known screens: " + names();
         }
         animated = null;
+        settleRequest = 0;
+        pendingReport = null;
+        failedVerdict = null;
         try {
             opener.open(arg);
         } catch (Throwable t) {

@@ -54,17 +54,36 @@ rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zo
 instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
 looks entirely correct and is of the wrong thing.
 
-`flow-hit` is the one screen that asserts rather than photographs. It parks the real cursor
-over each node in turn and logs, side by side, which box `IWidget.isHovering()` reports and
-which box the layout says is there. They agree at zoom 0.5, 1.0 and 2.0 -- which is the
-evidence that ModularUI's own hit-testing is correct through the scroll viewport *and* the
-zoom matrix, and therefore that a diagram click should go through `getWidgetsAt` rather than
-through hand-rolled coordinate maths.
+`flow-hit` and `ae2-probe` are the two screens that ASSERT rather than photograph, and a screen
+in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
+and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the
+harness fails the run if the verdict never arrives OR if it is a NO. There is deliberately no
+call that means only "I spoke": the first cut of this had one, and `ae2-probe` called it on all
+five of its failure paths and none of its success path, which would have reported passing runs
+as failures and failing ones as clean. Caught by reading it rather than by a run, since the
+guard was written after the last probe run and never executed.
+
+`flow-hit` parks the real cursor over each node in turn and logs, side by side, which box
+`IWidget.isHovering()` reports and which box the layout says is there. They agree at zoom 0.5,
+1.0 and 2.0 -- which is the evidence that ModularUI's own hit-testing is correct through the
+scroll viewport *and* the zoom matrix, and therefore that a diagram click should go through
+`getWidgetsAt` rather than through hand-rolled coordinate maths.
 
 `jei` is the one screen that is not ours: it asks `JeiBridge` to open JEI's own recipe page,
 so the picture is evidence that the runtime was captured, a focus was created and the GUI was
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
 names another item.
+
+`ae2-probe` needs a world: `harness/shot.sh ae2-probe ae2probe
+-Dmcrecipedump.shotWorld=ae2`. Measured at 177 s and 189 s on a warm cache with one Java file
+changed -- above the table below because of the world load, and because both runs shared Tower
+with other builds. Without `shotWorld` it refuses and says so, because a
+grid exists only on the server. It also declares its own settle window through
+`ShotScreens.requestSettleFrames`, since it waits twenty SERVER ticks for AE2 to connect its
+nodes and the default twenty RENDER frames is shorter than that -- a screen that needs time
+says so in code rather than in an incantation the next person has to know to type. See the AE2
+bullet under Limits for what its verdict does and does not establish.
+
 Keep it to one line: the moment adding a screen costs more than that, people stop adding them
 and the harness stops being used.
 
@@ -166,11 +185,38 @@ running the check at all. So each bullet says whether it was measured.
 
   A player, a tile entity, and a server-side capability -- and `hasCapability` then
   `getCapability` on a tile entity is the same shape of call Phase 5's AE2 read needs. **So
-  the harness can host that test.** It does not follow that the test passes: AE2 is not in
-  the dev mod set, so what is proven is the mechanism, not the grid.
+  the harness can host that test.** What that bullet proved is the MECHANISM, and it was
+  careful to say so; the grid itself is the bullet below.
 
   Costs about 40 s on top of a normal run, and it is OFF BY DEFAULT -- a world changes what
   is behind every panel, so turning it on would move every existing screenshot.
+* **An AE2 GRID can form here. MEASURED on 2026-08-03, and it is a separate claim from the
+  bullet above.** A grid that never forms hands back null and a grid that forms empty hands
+  back an empty list, and both are indistinguishable from a working read of an empty network --
+  so "no error" is not evidence and `ae2-probe` fixes three criteria in advance instead:
+
+  ```
+  ae2-probe: grid formed, nodes=2, powered=true (criterion: nodes >= 2 AND powered)
+  ae2-probe: cell accepted at face null slot 1, leftover none
+  ae2-probe: injected 64 cobblestone, leftover=none, storage list reports 64
+             (criterion: stored == 64)
+  ae2-probe: VERDICT nodes>=2 true, powered true, stored==64 true
+  ```
+
+  Two nodes in ONE grid, so the connection actually formed; the grid reporting itself powered,
+  so the creative cell is recognised as a source and not merely present; and 64 cobblestone
+  injected through `IMEMonitor` coming back out of `getStorageList`, which nothing short of a
+  working grid produces. It FAILED TWICE before it passed -- once with no grid at all, once
+  with `stored` at 0 -- which is most of what makes the pass worth reading.
+
+  **WHAT IT DOES NOT PROVE: anything about production.** The two paths share only their last
+  two calls, `getGridNode(AEPartLocation.INTERNAL)` and `getGrid()`. `ae2-probe` reaches those
+  from a tile entity it placed itself; `Ae2StockReader` reaches them by finding a wireless
+  terminal in the player's inventory, reading its encryption key, resolving that through AE2's
+  locatable registry, and checking the player against an `IWirelessAccessPoint`'s range. **None
+  of those four steps is exercised here.** What is established is that the environment can HOST
+  the test, which is the thing that was in doubt. #191 is where the probe that drives the real
+  path belongs.
 * **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Seven mods is not 410. A
   screen that renders here can still collide with something in MeatballCraft -- a conflicting
   keybind, another mod's GUI overlay, a theme override. #19's verification plan keeps one live

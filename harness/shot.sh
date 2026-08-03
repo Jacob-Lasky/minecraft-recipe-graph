@@ -155,7 +155,18 @@ set -e
 ELAPSED=$(( $(date +%s) - STARTED ))
 
 if [ "$STATUS" -ne 0 ]; then
-    echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); no screenshot" >&2
+    # A FAILED RUN CAN STILL HAVE LEFT A GOOD PNG, and saying "no screenshot" over one is how
+    # the picture that explains the failure gets thrown away unlooked-at. A probe screen that
+    # captures fine and then reports that its own criteria did not hold exits non-zero with a
+    # valid capture on disk -- see `ShotHarness.EXIT_VERDICT_FAILED`. Tested by presence rather
+    # than by exit code because `runClient` is a Gradle task, so every harness code arrives
+    # here as Gradle's own 1; the log says which, and so does the PNG.
+    if [ -s "$OUT_PNG" ]; then
+        echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); the PNG at $OUT_PNG IS this" \
+             "run's -- read the verdict in the log above before believing the picture" >&2
+    else
+        echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); no screenshot" >&2
+    fi
     exit "$STATUS"
 fi
 if [ ! -s "$OUT_PNG" ]; then

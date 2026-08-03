@@ -92,11 +92,37 @@ public final class ShotHarness {
     /** 2 is what a player runs at; Minecraft's auto-scaler picks 4 at the shot resolution. */
     private static final int DEFAULT_GUI_SCALE = 2;
 
-    /** 0 is the PNG; everything else is the harness saying, in the log, why there is not one. */
+    /**
+     * 0 is the PNG; everything else is the harness saying, in the log, what went wrong.
+     *
+     * NOT ALWAYS "there is no PNG" any more. {@link #EXIT_VERDICT_FAILED} is returned by a run
+     * that captured a perfectly good picture and then reported that its own criteria did not
+     * hold, so 0 means BOTH that the PNG at the reported path is this run's AND that the screen
+     * did not fail itself.
+     *
+     * AND DO NOT EXPECT ANY OF THESE NUMBERS IN `$?`. The client runs under `runClient`, so a
+     * non-zero exit here fails the Gradle build and `gradlew` returns its own 1 -- every code
+     * below collapses to that by the time `harness/shot.sh` sees it. They survive in two places
+     * that are read by a person rather than by a script: Gradle's own "finished with non-zero
+     * exit value N" line, and the `!!` line this class logs on the way out. Which is why those
+     * log lines have to say what happened in words and not lean on the number.
+     */
     private static final int EXIT_OK = 0;
     private static final int EXIT_NO_SCREEN = 2;
     private static final int EXIT_TIMEOUT = 3;
     private static final int EXIT_WRITE_FAILED = 4;
+    /**
+     * A screen that declared a verdict never gave one. See {@link ShotScreens#expectReport}.
+     *
+     * DISTINCT FROM {@link #EXIT_VERDICT_FAILED} ON PURPOSE, and do not merge the two. "The
+     * probe said nothing" is a fault in the harness or a flake; "the probe said no" is a
+     * finding about the thing under test. Collapsing them puts the reader of a non-zero exit
+     * back to guessing which of those two happened, and that guess is the whole reason this
+     * machinery exists.
+     */
+    private static final int EXIT_NO_VERDICT = 5;
+    /** A screen reported that its own criteria did not hold. See {@link #EXIT_NO_VERDICT}. */
+    private static final int EXIT_VERDICT_FAILED = 6;
 
     private ShotHarness() {
     }
@@ -206,9 +232,16 @@ public final class ShotHarness {
                 exit(EXIT_NO_SCREEN);
                 return;
             }
+            // THE LARGER OF THE TWO. A screen that needs longer than the default says so
+            // through `requestSettleFrames`, and it says so during `open` -- which is why
+            // this is read here and not in the constructor.
+            int settle = Math.max(settleFrames, ShotScreens.settleRequest());
             log("opened " + mc.currentScreen.getClass().getName()
-                    + "; settling " + settleFrames + " frames");
-            framesLeft = settleFrames;
+                    + "; settling " + settle + " frames"
+                    + (settle > settleFrames
+                            ? " (the screen asked for " + ShotScreens.settleRequest() + ")"
+                            : ""));
+            framesLeft = settle;
         }
 
         @SubscribeEvent
@@ -549,16 +582,50 @@ public final class ShotHarness {
     }
 
     /**
-     * Stop the JVM with `code`.
+     * Let a screen's own verdict decide the exit code, in both directions.
+     *
+     * SILENCE IS NOT AN OUTCOME, and neither is a NO nobody reads. A probe screen that logs
+     * nothing produces a log identical to one where the screen was never wired up; a probe
+     * that logs "criterion false" and exits 0 produces a green run over a finding. Both get
+     * read as clean by whoever greps for a failure, so both are non-zero here, and with
+     * DIFFERENT codes -- see {@link #EXIT_NO_VERDICT}.
+     *
+     * ALL THREE OUTCOMES ARE PINNED BY `ShotHarnessTest`. Be precise about what that buys: the
+     * predecessor of this method was correct in isolation and the defect was in its CALLER --
+     * `Ae2ProbeShot` cleared the debt on all five of its failure paths and none of its success
+     * path, which would have inverted both directions at once. No test of this method would
+     * have caught that. What prevents it recurring is the API shape, where there is no call
+     * meaning only "I spoke"; what these tests prevent is the three outcomes being collapsed
+     * back into two by a later simplification.
+     *
+     * PACKAGE-VISIBLE so that mapping is assertable without a running client, since a client
+     * run costs 105 seconds and only ever exercises one of the three branches.
+     */
+    static int withVerdictCheck(int code) {
+        String owed = ShotScreens.pendingReport();
+        if (owed != null) {
+            log("!! the screen never reported '" + owed + "'. The PNG may be fine and the run is "
+                    + "NOT: a probe that says nothing looks exactly like a probe that never ran.");
+            return code == EXIT_OK ? EXIT_NO_VERDICT : code;
+        }
+        String failure = ShotScreens.failedVerdict();
+        if (failure != null) {
+            log("!! the screen's verdict was NO: " + failure + ". The PNG is this run's and the "
+                    + "run still failed, which is the screen reporting a finding rather than "
+                    + "the harness reporting a fault.");
+            return code == EXIT_OK ? EXIT_VERDICT_FAILED : code;
+        }
+        return code;
+    }
+
+    /**
+     * Flush, tear down any world, and quit with `code`.
      *
      * `FMLCommonHandler.exitJava` rather than `Minecraft.shutdown()`, because shutdown()
      * only asks the game loop to stop and then runs the full teardown, which can block on
      * the sound engine -- and a harness that sometimes hangs AFTER writing the PNG is a
      * harness nobody trusts the exit code of. The PNG is already flushed to disk by the time
      * this is called, so there is nothing left to lose by leaving early.
-     */
-    /**
-     * Flush, tear down any world, and quit.
      *
      * THE WORLD MUST GO FIRST OR THE PROCESS HANGS, and it hangs after writing a perfectly
      * good PNG. Measured: the first `-Dmcrecipedump.shotWorld` run captured its screenshot,
@@ -574,6 +641,7 @@ public final class ShotHarness {
      * exit path with an untested branch.
      */
     private static void exit(int code) {
+        code = withVerdictCheck(code);
         System.out.flush();
         try {
             Minecraft mc = Minecraft.getMinecraft();
