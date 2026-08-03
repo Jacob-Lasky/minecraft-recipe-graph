@@ -255,6 +255,35 @@ public strictfp final class Cost {
     public static final double EMC_COST = 0.5;
 
     /**
+     * What a key the graph has PROVEN it cannot explain costs. #176.
+     *
+     * {@link Unsourced#keys} is the set: nothing makes this exact key, and the graph
+     * demonstrably makes another form of it. Until #176 those seeded at
+     * {@link #BASE_RAW_COST} like any other leaf -- the CHEAPEST value in the model -- so
+     * the solver actively PREFERRED routes through items it had already badged
+     * "no known source".
+     *
+     * THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE:
+     *
+     * <pre>
+     *   BASE_RAW_COST &lt; LOOT_COST &lt; DIMENSION_COST &lt; GATE_COST &lt; UNSOURCED_COST
+     *                 &lt; MACHINE_COST[UNAVAILABLE]
+     * </pre>
+     *
+     * Above GATE_COST because the claims differ in kind: a locked chapter is a lock with a
+     * key somewhere in the story, while an unsourced item is one the TOOL cannot explain at
+     * all, on positive evidence rather than silence. Below the 5,000 wall because that means
+     * "you cannot have this machine", and #95's lesson is that two unrelated statements must
+     * never share a figure.
+     *
+     * MEASURED INERT ACROSS THE BAND: over eight targets on the reference graph, 200 and
+     * 2,000 give byte-identical plans, 5,000 diverges on one and is slightly worse there,
+     * and infinity strands 2,372 currently-priced keys while every finite candidate strands
+     * zero. Mirrors `cost.UNSOURCED_COST` in python; the golden gate holds them equal.
+     */
+    public static final double UNSOURCED_COST = 2000.0;
+
+    /**
      * What one unit from an infinite generator costs the ranker.
      *
      * FREE IS NOT ZERO. At zero the ranker cannot see quantity and will cheerfully plan a
@@ -677,6 +706,33 @@ public strictfp final class Cost {
         // makes it.
         for (int key : in.emcKeys()) {
             cost[key] = Math.min(cost[key], EMC_COST);
+        }
+
+        // THE KEYS THE GRAPH HAS PROVEN IT CANNOT EXPLAIN, the second seed that RAISES rather
+        // than lowers. See UNSOURCED_COST. Until #176 these were BASE_RAW_COST like any other
+        // leaf, so the solver preferred a route through an item it had already badged
+        // "no known source" over any route it could account for.
+        //
+        // SAME GUARD AS THE TOKEN LOOP BELOW: anything already priced under a raw leaf is
+        // stock, an infinite generator or a learned EMC item, and each is a stronger claim
+        // about THIS world than a structural inference is.
+        //
+        // `max`, not assignment, so a floor another rule raised higher is kept -- a
+        // dimension-gated leaf sits at BASE_RAW_COST + DIMENSION_COST.
+        //
+        // BEFORE THE TOKENS, so a token wins: `expand` returns at the token branch before it
+        // ever reaches the unsourced mark, so the price has to agree with the display about
+        // which of the two answers a reader gets. Mirrors `cost._seed` in python.
+        long[] unsourced = Unsourced.keys(graph);
+        for (int key = 0; key < cost.length; key++) {
+            if (!Bits.get(unsourced, key)) {
+                continue;
+            }
+            double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];
+            if (current < BASE_RAW_COST) {
+                continue;
+            }
+            cost[key] = Math.max(current, UNSOURCED_COST);
         }
 
         // And LAST, the placeholders, because this is the one seed that RAISES a price. Every

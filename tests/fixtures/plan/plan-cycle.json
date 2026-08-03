@@ -36,24 +36,6 @@
   ],
   "machines_to_build": [
    {
-    "category": "TechReborn.Grinder",
-    "machine": "Grinder",
-    "state": "buildable",
-    "why": "craftable: techreborn:grinder"
-   },
-   {
-    "category": "deepmoblearning.extraction_chamber",
-    "machine": "Loot Fabricator",
-    "state": "buildable",
-    "why": "craftable: deepmoblearning:extraction_chamber"
-   },
-   {
-    "category": "deepmoblearning.simulation_chamber",
-    "machine": "Simulation Chamber",
-    "state": "buildable",
-    "why": "craftable: deepmoblearning:simulation_chamber"
-   },
-   {
     "category": "forestry.squeezer",
     "machine": "Squeezer",
     "state": "buildable",
@@ -91,53 +73,29 @@
    }
   ],
   "max_nodes": 4000,
-  "nodes": 61,
+  "nodes": 44,
   "pins_overruled": {},
   "qty": 1,
   "shopping_list": [
    {
-    "key": "forestry:bee_drone_ge#438f0076b188",
+    "key": "forestry:bee_princess_ge#6f16eda873ae",
     "kind": "item",
-    "label": "Radiant Drone",
-    "name": "Radiant Drone",
-    "qty": 8,
-    "unsourced": true
+    "label": "Forest Princess",
+    "name": "Forest Princess",
+    "qty": 5
    },
    {
-    "key": "minecraft:gold_ore",
+    "key": "forestry:bee_princess_ge#00c16aad704a",
     "kind": "item",
-    "label": "Gold Ore",
-    "name": "Gold Ore",
+    "label": "Meadows Princess",
+    "name": "Meadows Princess",
     "qty": 3
-   },
-   {
-    "key": "chickens:spawn_egg#79d20a22828a",
-    "kind": "item",
-    "label": "Log Chicken",
-    "name": "Log Chicken",
-    "qty": 2,
-    "unsourced": true
    },
    {
     "key": "thermalfoundation:glass:*",
     "kind": "item",
     "label": "Hardened Copper Glass (*)",
     "name": "Hardened Copper Glass (*)",
-    "qty": 2
-   },
-   {
-    "key": "deepmoblearning:data_model_thermal_elemental#c7bccd46ac55",
-    "kind": "item",
-    "label": "Thermal Elemental Data Model (Basic)",
-    "name": "Thermal Elemental Data Model (Basic)",
-    "qty": 2,
-    "unsourced": true
-   },
-   {
-    "key": "minecraft:lapis_ore",
-    "kind": "item",
-    "label": "Lapis Lazuli Ore",
-    "name": "Lapis Lazuli Ore",
     "qty": 2
    },
    {
@@ -148,32 +106,52 @@
     "qty": 2
    },
    {
-    "key": "erebus:materials:11",
+    "key": "natura:sticks:*",
     "kind": "item",
-    "label": "Redgem",
-    "name": "Redgem",
+    "label": "Maple Sticks (*)",
+    "name": "Maple Sticks (*)",
     "qty": 2
    },
    {
-    "key": "techreborn:dust:35",
+    "key": "forestry:bee_princess_ge#d50933461234",
     "kind": "item",
-    "label": "Obsidian Dust",
-    "name": "Obsidian Dust",
-    "qty": 2,
-    "unsourced": true
+    "label": "Marshy Princess",
+    "name": "Marshy Princess",
+    "qty": 2
+   },
+   {
+    "key": "thermalfoundation:ore:6",
+    "kind": "item",
+    "label": "Platinum Ore",
+    "name": "Platinum Ore",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#49265408b3e4",
+    "kind": "item",
+    "label": "Tropical Princess",
+    "name": "Tropical Princess",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#c3e057183678",
+    "kind": "item",
+    "label": "Modest Princess",
+    "name": "Modest Princess",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#fe694d7cc286",
+    "kind": "item",
+    "label": "Mystical Princess",
+    "name": "Mystical Princess",
+    "qty": 1
    },
    {
     "key": "abyssalcraft:abynitore",
     "kind": "item",
     "label": "Abyssal Nitre Ore",
     "name": "Abyssal Nitre Ore",
-    "qty": 1
-   },
-   {
-    "key": "thermalfoundation:ore:2",
-    "kind": "item",
-    "label": "Silver Ore",
-    "name": "Silver Ore",
     "qty": 1
    },
    {
@@ -204,66 +182,292 @@
          "category": "minecraft.crafting",
          "children": [
           {
-           "alt_count": 3,
-           "alternatives": 8,
-           "category": "TechReborn.Grinder",
+           "alternatives": 204,
+           "category": "thermalexpansion.smelter",
            "children": [
             {
-             "alternatives": 243,
-             "category": "minecraft.smelting",
+             "alt_count": 3,
+             "key": "thermalfoundation:glass:*",
+             "kind": "item",
+             "label": "Hardened Copper Glass (*)",
+             "name": "Hardened Copper Glass (*)",
+             "need": 2,
+             "status": "raw"
+            },
+            {
+             "alt_count": 2,
+             "alternatives": 79,
+             "category": "minecraft.crafting",
              "children": [
               {
-               "alt_count": 137,
-               "alternatives": 24,
-               "category": "chickens.Laying",
+               "key": "thermalfoundation:ore:6",
+               "kind": "item",
+               "label": "Platinum Ore",
+               "name": "Platinum Ore",
+               "need": 1,
+               "note": "mined, not crafted",
+               "status": "raw"
+              },
+              {
+               "alternatives": 2,
+               "category": "crafting_shaped",
                "children": [
                 {
-                 "key": "chickens:spawn_egg#79d20a22828a",
-                 "kind": "item",
-                 "label": "Log Chicken",
-                 "name": "Log Chicken",
+                 "children": [
+                  {
+                   "alternatives": 172,
+                   "category": "minecraft.smelting",
+                   "children": [
+                    {
+                     "alt_count": 14,
+                     "key": "minecraft:iron_ore",
+                     "kind": "item",
+                     "label": "Iron Ore",
+                     "name": "Iron Ore",
+                     "need": 2,
+                     "note": "mined, not crafted",
+                     "status": "raw"
+                    }
+                   ],
+                   "key": "minecraft:iron_ingot",
+                   "kind": "item",
+                   "label": "Iron Ingot",
+                   "machine": "Smelting",
+                   "machine_state": "have",
+                   "name": "Iron Ingot",
+                   "need": 2,
+                   "per_run": 1,
+                   "recipe": "hei:minecraft.smelting:31344",
+                   "runs": 2,
+                   "status": "craft"
+                  }
+                 ],
+                 "key": "ore:ingotIron",
+                 "kind": "ore",
+                 "label": "ingotIron",
+                 "name": "[oredict] ingotIron",
                  "need": 2,
-                 "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
-                 "status": "raw",
-                 "unsourced": true
+                 "resolved_to": "minecraft:iron_ingot",
+                 "status": "oredict"
+                },
+                {
+                 "alternatives": 134,
+                 "category": "bdew.jeibees.produce.rootBees",
+                 "children": [
+                  {
+                   "alt_count": 4,
+                   "alternatives": 3,
+                   "category": "bdew.jeibees.mutation.rootBees",
+                   "children": [
+                    {
+                     "alt_count": 4,
+                     "key": "forestry:bee_princess_ge#49265408b3e4",
+                     "kind": "item",
+                     "label": "Tropical Princess",
+                     "name": "Tropical Princess",
+                     "need": 1,
+                     "status": "raw"
+                    },
+                    {
+                     "alt_count": 4,
+                     "alternatives": 3,
+                     "category": "bdew.jeibees.mutation.rootBees",
+                     "children": [
+                      {
+                       "alt_count": 4,
+                       "key": "forestry:bee_princess_ge#c3e057183678",
+                       "kind": "item",
+                       "label": "Modest Princess",
+                       "name": "Modest Princess",
+                       "need": 1,
+                       "status": "raw"
+                      },
+                      {
+                       "alt_count": 4,
+                       "alternatives": 12,
+                       "category": "bdew.jeibees.mutation.rootBees",
+                       "children": [
+                        {
+                         "alt_count": 4,
+                         "key": "forestry:bee_princess_ge#fe694d7cc286",
+                         "kind": "item",
+                         "label": "Mystical Princess",
+                         "name": "Mystical Princess",
+                         "need": 1,
+                         "status": "raw"
+                        },
+                        {
+                         "alt_count": 4,
+                         "alternatives": 42,
+                         "category": "bdew.jeibees.mutation.rootBees",
+                         "children": [
+                          {
+                           "alt_count": 4,
+                           "alternatives": 201,
+                           "category": "bdew.jeibees.mutation.rootBees",
+                           "children": [
+                            {
+                             "alt_count": 4,
+                             "key": "forestry:bee_princess_ge#6f16eda873ae",
+                             "kind": "item",
+                             "label": "Forest Princess",
+                             "name": "Forest Princess",
+                             "need": 1,
+                             "status": "raw"
+                            },
+                            {
+                             "alt_count": 4,
+                             "key": "forestry:bee_princess_ge#00c16aad704a",
+                             "kind": "item",
+                             "label": "Meadows Princess",
+                             "name": "Meadows Princess",
+                             "need": 1,
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                           "kind": "item",
+                           "label": "Common Drone",
+                           "machine": "Bee Breeding",
+                           "machine_state": "have",
+                           "name": "Common Drone",
+                           "need": 1,
+                           "per_run": 1,
+                           "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                           "runs": 1,
+                           "status": "craft"
+                          },
+                          {
+                           "alt_count": 4,
+                           "key": "forestry:bee_princess_ge#6f16eda873ae",
+                           "kind": "item",
+                           "label": "Forest Princess",
+                           "name": "Forest Princess",
+                           "need": 1,
+                           "status": "raw"
+                          }
+                         ],
+                         "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                         "kind": "item",
+                         "label": "Cultivated Drone",
+                         "machine": "Bee Breeding",
+                         "machine_state": "have",
+                         "name": "Cultivated Drone",
+                         "need": 1,
+                         "per_run": 1,
+                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                         "runs": 1,
+                         "status": "craft"
+                        }
+                       ],
+                       "key": "forestry:bee_drone_ge#e870ae142070",
+                       "kind": "item",
+                       "label": "Eldritch Drone",
+                       "machine": "Bee Breeding",
+                       "machine_state": "have",
+                       "name": "Eldritch Drone",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "forestry:bee_drone_ge#dd8d21c62d2e",
+                     "kind": "item",
+                     "label": "Skulking Drone",
+                     "machine": "Bee Breeding",
+                     "machine_state": "have",
+                     "name": "Skulking Drone",
+                     "need": 1,
+                     "per_run": 1,
+                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
+                     "runs": 1,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "forestry:bee_drone_ge#c59795af440a",
+                   "kind": "item",
+                   "label": "Spidery Drone",
+                   "machine": "Bee Breeding",
+                   "machine_state": "have",
+                   "name": "Spidery Drone",
+                   "need": 1,
+                   "per_run": 1,
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
+                   "runs": 1,
+                   "status": "craft"
+                  }
+                 ],
+                 "key": "minecraft:string",
+                 "kind": "item",
+                 "label": "String",
+                 "machine": "Bee Produce",
+                 "machine_state": "have",
+                 "name": "String",
+                 "need": 1,
+                 "per_run": 1,
+                 "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+                 "runs": 1,
+                 "status": "craft"
+                },
+                {
+                 "alt_count": 2,
+                 "children": [
+                  {
+                   "key": "natura:sticks:*",
+                   "kind": "item",
+                   "label": "Maple Sticks (*)",
+                   "name": "Maple Sticks (*)",
+                   "need": 2,
+                   "status": "raw"
+                  }
+                 ],
+                 "key": "ore:stickWood",
+                 "kind": "ore",
+                 "label": "stickWood",
+                 "name": "[oredict] stickWood",
+                 "need": 2,
+                 "resolved_to": "natura:sticks:*",
+                 "status": "oredict"
                 }
                ],
-               "key": "minecraft:log",
+               "key": "immersiveengineering:tool",
                "kind": "item",
-               "label": "Oak Wood",
-               "machine": "Laying Egg",
+               "label": "Engineer's Hammer",
+               "machine": "Crafting (shaped)",
                "machine_state": "have",
-               "name": "Oak Wood",
-               "need": 2,
+               "name": "Engineer's Hammer",
+               "need": 1,
                "per_run": 1,
-               "recipe": "hei:chickens.Laying:116939",
-               "runs": 2,
+               "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/tool/hammer.json",
+               "runs": 1,
                "status": "craft"
               }
              ],
-             "key": "minecraft:coal:1",
+             "key": "thermalfoundation:material:70",
              "kind": "item",
-             "label": "Charcoal",
-             "machine": "Smelting",
+             "label": "Pulverized Platinum",
+             "machine": "Crafting",
              "machine_state": "have",
-             "name": "Charcoal",
+             "name": "Pulverized Platinum",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:minecraft.smelting:31442",
+             "recipe": "hei:minecraft.crafting:25026",
              "runs": 1,
              "status": "craft"
             }
            ],
-           "key": "techreborn:dust:9",
+           "key": "thermalfoundation:material:865",
            "kind": "item",
-           "label": "Charcoal Dust",
-           "machine": "Grinder",
+           "label": "Rich Slag",
+           "machine": "Induction Smelter",
            "machine_state": "buildable",
-           "machine_why": "craftable: techreborn:grinder",
-           "name": "Charcoal Dust",
+           "machine_why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)",
+           "name": "Rich Slag",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:TechReborn.Grinder:251539",
+           "recipe": "hei:thermalexpansion.smelter:148578",
            "runs": 1,
            "status": "craft"
           },
@@ -296,673 +500,190 @@
            "status": "craft"
           },
           {
-           "alternatives": 204,
-           "category": "thermalexpansion.smelter",
+           "alternatives": 3,
+           "category": "bdew.jeibees.produce.rootBees",
            "children": [
             {
-             "alt_count": 3,
-             "key": "thermalfoundation:glass:*",
-             "kind": "item",
-             "label": "Hardened Copper Glass (*)",
-             "name": "Hardened Copper Glass (*)",
-             "need": 2,
-             "status": "raw"
-            },
-            {
-             "alt_count": 2,
-             "alternatives": 17,
-             "category": "minecraft.crafting",
+             "alt_count": 4,
+             "alternatives": 3,
+             "category": "bdew.jeibees.mutation.rootBees",
              "children": [
               {
-               "alt_count": 2,
-               "alternatives": 67,
-               "category": "minecraft.crafting",
-               "children": [
-                {
-                 "alt_count": 7,
-                 "key": "thermalfoundation:ore:2",
-                 "kind": "item",
-                 "label": "Silver Ore",
-                 "name": "Silver Ore",
-                 "need": 1,
-                 "note": "mined, not crafted",
-                 "status": "raw"
-                },
-                {
-                 "alternatives": 4,
-                 "category": "crafting_shapeless",
-                 "children": [
-                  {
-                   "children": [
-                    {
-                     "alternatives": 11,
-                     "category": "minecraft.crafting",
-                     "children": [
-                      {
-                       "alternatives": 6,
-                       "category": "deepmoblearning.extraction_chamber",
-                       "children": [
-                        {
-                         "alternatives": 3,
-                         "category": "deepmoblearning.simulation_chamber",
-                         "children": [
-                          {
-                           "key": "deepmoblearning:data_model_thermal_elemental#c7bccd46ac55",
-                           "kind": "item",
-                           "label": "Thermal Elemental Data Model (Basic)",
-                           "name": "Thermal Elemental Data Model (Basic)",
-                           "need": 1,
-                           "note": "no recipe reaches this state; the graph can only make Data Model Thermal Elemental",
-                           "status": "raw",
-                           "unsourced": true
-                          },
-                          {
-                           "alternatives": 2,
-                           "category": "crafting_shaped",
-                           "children": [
-                            {
-                             "alternatives": 132,
-                             "category": "minecraft.smelting",
-                             "children": [
-                              {
-                               "alt_count": 15,
-                               "key": "minecraft:gold_ore",
-                               "kind": "item",
-                               "label": "Gold Ore",
-                               "name": "Gold Ore",
-                               "need": 1,
-                               "note": "mined, not crafted",
-                               "status": "raw"
-                              }
-                             ],
-                             "key": "minecraft:gold_ingot",
-                             "kind": "item",
-                             "label": "Gold Ingot",
-                             "machine": "Smelting",
-                             "machine_state": "have",
-                             "name": "Gold Ingot",
-                             "need": 1,
-                             "per_run": 1,
-                             "recipe": "hei:minecraft.smelting:31637",
-                             "runs": 1,
-                             "status": "craft"
-                            },
-                            {
-                             "alternatives": 43,
-                             "category": "bdew.jeibees.produce.rootBees",
-                             "children": [
-                              {
-                               "alt_count": 4,
-                               "key": "forestry:bee_drone_ge#438f0076b188",
-                               "kind": "item",
-                               "label": "Radiant Drone",
-                               "name": "Radiant Drone",
-                               "need": 4,
-                               "note": "no recipe reaches this state; the graph can only make Forest Drone",
-                               "status": "raw",
-                               "unsourced": true
-                              }
-                             ],
-                             "key": "minecraft:clay_ball",
-                             "kind": "item",
-                             "label": "Clay",
-                             "machine": "Bee Produce",
-                             "machine_state": "have",
-                             "name": "Clay",
-                             "need": 4,
-                             "per_run": 1,
-                             "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
-                             "runs": 4,
-                             "status": "craft"
-                            },
-                            {
-                             "children": [
-                              {
-                               "alternatives": 55,
-                               "category": "minecraft.smelting",
-                               "children": [
-                                {
-                                 "alt_count": 5,
-                                 "key": "minecraft:lapis_ore",
-                                 "kind": "item",
-                                 "label": "Lapis Lazuli Ore",
-                                 "name": "Lapis Lazuli Ore",
-                                 "need": 1,
-                                 "note": "mined, not crafted",
-                                 "status": "raw"
-                                }
-                               ],
-                               "key": "minecraft:dye:4",
-                               "kind": "item",
-                               "label": "Lapis Lazuli",
-                               "machine": "Smelting",
-                               "machine_state": "have",
-                               "name": "Lapis Lazuli",
-                               "need": 1,
-                               "per_run": 1,
-                               "recipe": "hei:minecraft.smelting:31564",
-                               "runs": 1,
-                               "status": "craft"
-                              }
-                             ],
-                             "key": "ore:gemLapis",
-                             "kind": "ore",
-                             "label": "gemLapis",
-                             "name": "[oredict] gemLapis",
-                             "need": 1,
-                             "resolved_to": "minecraft:dye:4",
-                             "status": "oredict"
-                            },
-                            {
-                             "alternatives": 172,
-                             "category": "minecraft.smelting",
-                             "children": [
-                              {
-                               "alt_count": 14,
-                               "key": "minecraft:iron_ore",
-                               "kind": "item",
-                               "label": "Iron Ore",
-                               "name": "Iron Ore",
-                               "need": 1,
-                               "note": "mined, not crafted",
-                               "status": "raw"
-                              }
-                             ],
-                             "key": "minecraft:iron_ingot",
-                             "kind": "item",
-                             "label": "Iron Ingot",
-                             "machine": "Smelting",
-                             "machine_state": "have",
-                             "name": "Iron Ingot",
-                             "need": 1,
-                             "per_run": 1,
-                             "recipe": "hei:minecraft.smelting:31344",
-                             "runs": 1,
-                             "status": "craft"
-                            }
-                           ],
-                           "key": "deepmoblearning:polymer_clay",
-                           "kind": "item",
-                           "label": "Polymer Clay",
-                           "machine": "Crafting (shaped)",
-                           "machine_state": "have",
-                           "name": "Polymer Clay",
-                           "need": 1,
-                           "per_run": 16,
-                           "recipe": "DeepMobEvolution-1.12.2-1.2.3.jar!assets/deepmoblearning/recipes/misc/polymer_clay.json",
-                           "runs": 1,
-                           "status": "craft"
-                          }
-                         ],
-                         "key": "deepmoblearning:pristine_matter_thermal_elemental",
-                         "kind": "item",
-                         "label": "Pristine Matter Thermal Elemental",
-                         "machine": "Simulation Chamber",
-                         "machine_state": "buildable",
-                         "machine_why": "craftable: deepmoblearning:simulation_chamber",
-                         "name": "Pristine Matter Thermal Elemental",
-                         "need": 1,
-                         "per_run": 1,
-                         "recipe": "hei:deepmoblearning.simulation_chamber:171473",
-                         "runs": 1,
-                         "status": "craft"
-                        }
-                       ],
-                       "key": "thermalfoundation:material:2052",
-                       "kind": "item",
-                       "label": "Basalz Rod",
-                       "machine": "Loot Fabricator",
-                       "machine_state": "buildable",
-                       "machine_why": "craftable: deepmoblearning:extraction_chamber",
-                       "name": "Basalz Rod",
-                       "need": 1,
-                       "per_run": 8,
-                       "recipe": "hei:deepmoblearning.extraction_chamber:171751",
-                       "runs": 1,
-                       "status": "craft"
-                      }
-                     ],
-                     "key": "thermalfoundation:material:2053",
-                     "kind": "item",
-                     "label": "Basalz Powder",
-                     "machine": "Crafting",
-                     "machine_state": "have",
-                     "name": "Basalz Powder",
-                     "need": 2,
-                     "per_run": 2,
-                     "recipe": "hei:minecraft.crafting:12609",
-                     "runs": 1,
-                     "status": "craft"
-                    }
-                   ],
-                   "key": "ore:dustBasalz",
-                   "kind": "ore",
-                   "label": "dustBasalz",
-                   "name": "[oredict] dustBasalz",
-                   "need": 2,
-                   "resolved_to": "thermalfoundation:material:2053",
-                   "status": "oredict"
-                  },
-                  {
-                   "children": [
-                    {
-                     "alternatives": 88,
-                     "category": "crafting_shapeless",
-                     "children": [
-                      {
-                       "key": "erebus:materials:11",
-                       "kind": "item",
-                       "label": "Redgem",
-                       "name": "Redgem",
-                       "need": 1,
-                       "status": "raw"
-                      }
-                     ],
-                     "key": "minecraft:redstone",
-                     "kind": "item",
-                     "label": "Redstone",
-                     "machine": "Crafting (shapeless)",
-                     "machine_state": "have",
-                     "name": "Redstone",
-                     "need": 1,
-                     "per_run": 2,
-                     "recipe": "Erebus-1.0.32.jar!assets/erebus/recipes/redstone.json",
-                     "runs": 1,
-                     "status": "craft"
-                    }
-                   ],
-                   "key": "ore:dustRedstone",
-                   "kind": "ore",
-                   "label": "dustRedstone",
-                   "name": "[oredict] dustRedstone",
-                   "need": 1,
-                   "resolved_to": "minecraft:redstone",
-                   "status": "oredict"
-                  },
-                  {
-                   "children": [
-                    {
-                     "key": "techreborn:dust:35",
-                     "kind": "item",
-                     "label": "Obsidian Dust",
-                     "name": "Obsidian Dust",
-                     "need": 1,
-                     "note": "nothing makes this form; the graph can only make Pulverized Obsidian",
-                     "status": "raw",
-                     "unsourced": true
-                    }
-                   ],
-                   "key": "ore:dustObsidian",
-                   "kind": "ore",
-                   "label": "dustObsidian",
-                   "name": "[oredict] dustObsidian",
-                   "need": 1,
-                   "resolved_to": "techreborn:dust:35",
-                   "status": "oredict"
-                  }
-                 ],
-                 "key": "thermalfoundation:material:1027",
-                 "kind": "item",
-                 "label": "Petrotheum Dust",
-                 "machine": "Crafting (shapeless)",
-                 "machine_state": "have",
-                 "name": "Petrotheum Dust",
-                 "need": 1,
-                 "per_run": 2,
-                 "recipe": "ThermalFoundation-1.12.2-2.6.7.1-universal.jar!assets/thermalfoundation/recipes/dust_petrotheum.json",
-                 "runs": 1,
-                 "status": "craft"
-                }
-               ],
-               "key": "thermalfoundation:material:66",
+               "alt_count": 4,
+               "key": "forestry:bee_princess_ge#d50933461234",
                "kind": "item",
-               "label": "Pulverized Silver",
-               "machine": "Crafting",
-               "machine_state": "have",
-               "name": "Pulverized Silver",
+               "label": "Marshy Princess",
+               "name": "Marshy Princess",
                "need": 1,
-               "per_run": 2,
-               "recipe": "hei:minecraft.crafting:25058",
-               "runs": 1,
-               "status": "craft"
+               "status": "raw"
               },
               {
-               "alt_count": 2,
-               "alternatives": 68,
-               "category": "minecraft.crafting",
+               "alt_count": 4,
+               "alternatives": 3,
+               "category": "bdew.jeibees.mutation.rootBees",
                "children": [
                 {
-                 "alt_count": 5,
-                 "key": "minecraft:gold_ore",
+                 "alt_count": 4,
+                 "key": "forestry:bee_princess_ge#d50933461234",
                  "kind": "item",
-                 "label": "Gold Ore",
-                 "name": "Gold Ore",
+                 "label": "Marshy Princess",
+                 "name": "Marshy Princess",
                  "need": 1,
-                 "note": "mined, not crafted",
                  "status": "raw"
                 },
                 {
-                 "alternatives": 4,
-                 "category": "crafting_shapeless",
+                 "alt_count": 4,
+                 "alternatives": 3,
+                 "category": "bdew.jeibees.mutation.rootBees",
                  "children": [
                   {
+                   "alt_count": 4,
+                   "alternatives": 201,
+                   "category": "bdew.jeibees.mutation.rootBees",
                    "children": [
                     {
-                     "alternatives": 11,
-                     "category": "minecraft.crafting",
-                     "children": [
-                      {
-                       "alternatives": 6,
-                       "category": "deepmoblearning.extraction_chamber",
-                       "children": [
-                        {
-                         "alternatives": 3,
-                         "category": "deepmoblearning.simulation_chamber",
-                         "children": [
-                          {
-                           "key": "deepmoblearning:data_model_thermal_elemental#c7bccd46ac55",
-                           "kind": "item",
-                           "label": "Thermal Elemental Data Model (Basic)",
-                           "name": "Thermal Elemental Data Model (Basic)",
-                           "need": 1,
-                           "note": "no recipe reaches this state; the graph can only make Data Model Thermal Elemental",
-                           "status": "raw",
-                           "unsourced": true
-                          },
-                          {
-                           "alternatives": 2,
-                           "category": "crafting_shaped",
-                           "children": [
-                            {
-                             "alternatives": 132,
-                             "category": "minecraft.smelting",
-                             "children": [
-                              {
-                               "alt_count": 15,
-                               "key": "minecraft:gold_ore",
-                               "kind": "item",
-                               "label": "Gold Ore",
-                               "name": "Gold Ore",
-                               "need": 1,
-                               "note": "mined, not crafted",
-                               "status": "raw"
-                              }
-                             ],
-                             "key": "minecraft:gold_ingot",
-                             "kind": "item",
-                             "label": "Gold Ingot",
-                             "machine": "Smelting",
-                             "machine_state": "have",
-                             "name": "Gold Ingot",
-                             "need": 1,
-                             "per_run": 1,
-                             "recipe": "hei:minecraft.smelting:31637",
-                             "runs": 1,
-                             "status": "craft"
-                            },
-                            {
-                             "alternatives": 43,
-                             "category": "bdew.jeibees.produce.rootBees",
-                             "children": [
-                              {
-                               "alt_count": 4,
-                               "key": "forestry:bee_drone_ge#438f0076b188",
-                               "kind": "item",
-                               "label": "Radiant Drone",
-                               "name": "Radiant Drone",
-                               "need": 4,
-                               "note": "no recipe reaches this state; the graph can only make Forest Drone",
-                               "status": "raw",
-                               "unsourced": true
-                              }
-                             ],
-                             "key": "minecraft:clay_ball",
-                             "kind": "item",
-                             "label": "Clay",
-                             "machine": "Bee Produce",
-                             "machine_state": "have",
-                             "name": "Clay",
-                             "need": 4,
-                             "per_run": 1,
-                             "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
-                             "runs": 4,
-                             "status": "craft"
-                            },
-                            {
-                             "children": [
-                              {
-                               "alternatives": 55,
-                               "category": "minecraft.smelting",
-                               "children": [
-                                {
-                                 "alt_count": 5,
-                                 "key": "minecraft:lapis_ore",
-                                 "kind": "item",
-                                 "label": "Lapis Lazuli Ore",
-                                 "name": "Lapis Lazuli Ore",
-                                 "need": 1,
-                                 "note": "mined, not crafted",
-                                 "status": "raw"
-                                }
-                               ],
-                               "key": "minecraft:dye:4",
-                               "kind": "item",
-                               "label": "Lapis Lazuli",
-                               "machine": "Smelting",
-                               "machine_state": "have",
-                               "name": "Lapis Lazuli",
-                               "need": 1,
-                               "per_run": 1,
-                               "recipe": "hei:minecraft.smelting:31564",
-                               "runs": 1,
-                               "status": "craft"
-                              }
-                             ],
-                             "key": "ore:gemLapis",
-                             "kind": "ore",
-                             "label": "gemLapis",
-                             "name": "[oredict] gemLapis",
-                             "need": 1,
-                             "resolved_to": "minecraft:dye:4",
-                             "status": "oredict"
-                            },
-                            {
-                             "alternatives": 172,
-                             "category": "minecraft.smelting",
-                             "children": [
-                              {
-                               "alt_count": 14,
-                               "key": "minecraft:iron_ore",
-                               "kind": "item",
-                               "label": "Iron Ore",
-                               "name": "Iron Ore",
-                               "need": 1,
-                               "note": "mined, not crafted",
-                               "status": "raw"
-                              }
-                             ],
-                             "key": "minecraft:iron_ingot",
-                             "kind": "item",
-                             "label": "Iron Ingot",
-                             "machine": "Smelting",
-                             "machine_state": "have",
-                             "name": "Iron Ingot",
-                             "need": 1,
-                             "per_run": 1,
-                             "recipe": "hei:minecraft.smelting:31344",
-                             "runs": 1,
-                             "status": "craft"
-                            }
-                           ],
-                           "key": "deepmoblearning:polymer_clay",
-                           "kind": "item",
-                           "label": "Polymer Clay",
-                           "machine": "Crafting (shaped)",
-                           "machine_state": "have",
-                           "name": "Polymer Clay",
-                           "need": 1,
-                           "per_run": 16,
-                           "recipe": "DeepMobEvolution-1.12.2-1.2.3.jar!assets/deepmoblearning/recipes/misc/polymer_clay.json",
-                           "runs": 1,
-                           "status": "craft"
-                          }
-                         ],
-                         "key": "deepmoblearning:pristine_matter_thermal_elemental",
-                         "kind": "item",
-                         "label": "Pristine Matter Thermal Elemental",
-                         "machine": "Simulation Chamber",
-                         "machine_state": "buildable",
-                         "machine_why": "craftable: deepmoblearning:simulation_chamber",
-                         "name": "Pristine Matter Thermal Elemental",
-                         "need": 1,
-                         "per_run": 1,
-                         "recipe": "hei:deepmoblearning.simulation_chamber:171473",
-                         "runs": 1,
-                         "status": "craft"
-                        }
-                       ],
-                       "key": "thermalfoundation:material:2052",
-                       "kind": "item",
-                       "label": "Basalz Rod",
-                       "machine": "Loot Fabricator",
-                       "machine_state": "buildable",
-                       "machine_why": "craftable: deepmoblearning:extraction_chamber",
-                       "name": "Basalz Rod",
-                       "need": 1,
-                       "per_run": 8,
-                       "recipe": "hei:deepmoblearning.extraction_chamber:171751",
-                       "runs": 1,
-                       "status": "craft"
-                      }
-                     ],
-                     "key": "thermalfoundation:material:2053",
+                     "alt_count": 4,
+                     "key": "forestry:bee_princess_ge#6f16eda873ae",
                      "kind": "item",
-                     "label": "Basalz Powder",
-                     "machine": "Crafting",
-                     "machine_state": "have",
-                     "name": "Basalz Powder",
-                     "need": 2,
-                     "per_run": 2,
-                     "recipe": "hei:minecraft.crafting:12609",
-                     "runs": 1,
-                     "status": "craft"
+                     "label": "Forest Princess",
+                     "name": "Forest Princess",
+                     "need": 1,
+                     "status": "raw"
+                    },
+                    {
+                     "alt_count": 4,
+                     "key": "forestry:bee_princess_ge#00c16aad704a",
+                     "kind": "item",
+                     "label": "Meadows Princess",
+                     "name": "Meadows Princess",
+                     "need": 1,
+                     "status": "raw"
                     }
                    ],
-                   "key": "ore:dustBasalz",
-                   "kind": "ore",
-                   "label": "dustBasalz",
-                   "name": "[oredict] dustBasalz",
-                   "need": 2,
-                   "resolved_to": "thermalfoundation:material:2053",
-                   "status": "oredict"
+                   "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                   "kind": "item",
+                   "label": "Common Drone",
+                   "machine": "Bee Breeding",
+                   "machine_state": "have",
+                   "name": "Common Drone",
+                   "need": 1,
+                   "per_run": 1,
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                   "runs": 1,
+                   "status": "craft"
                   },
                   {
+                   "alt_count": 4,
+                   "alternatives": 42,
+                   "category": "bdew.jeibees.mutation.rootBees",
                    "children": [
                     {
-                     "alternatives": 88,
-                     "category": "crafting_shapeless",
+                     "alt_count": 4,
+                     "alternatives": 201,
+                     "category": "bdew.jeibees.mutation.rootBees",
                      "children": [
                       {
-                       "key": "erebus:materials:11",
+                       "alt_count": 4,
+                       "key": "forestry:bee_princess_ge#6f16eda873ae",
                        "kind": "item",
-                       "label": "Redgem",
-                       "name": "Redgem",
+                       "label": "Forest Princess",
+                       "name": "Forest Princess",
+                       "need": 1,
+                       "status": "raw"
+                      },
+                      {
+                       "alt_count": 4,
+                       "key": "forestry:bee_princess_ge#00c16aad704a",
+                       "kind": "item",
+                       "label": "Meadows Princess",
+                       "name": "Meadows Princess",
                        "need": 1,
                        "status": "raw"
                       }
                      ],
-                     "key": "minecraft:redstone",
+                     "key": "forestry:bee_drone_ge#e1904b1a26ba",
                      "kind": "item",
-                     "label": "Redstone",
-                     "machine": "Crafting (shapeless)",
+                     "label": "Common Drone",
+                     "machine": "Bee Breeding",
                      "machine_state": "have",
-                     "name": "Redstone",
+                     "name": "Common Drone",
                      "need": 1,
-                     "per_run": 2,
-                     "recipe": "Erebus-1.0.32.jar!assets/erebus/recipes/redstone.json",
+                     "per_run": 1,
+                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
                      "runs": 1,
                      "status": "craft"
-                    }
-                   ],
-                   "key": "ore:dustRedstone",
-                   "kind": "ore",
-                   "label": "dustRedstone",
-                   "name": "[oredict] dustRedstone",
-                   "need": 1,
-                   "resolved_to": "minecraft:redstone",
-                   "status": "oredict"
-                  },
-                  {
-                   "children": [
+                    },
                     {
-                     "key": "techreborn:dust:35",
+                     "alt_count": 4,
+                     "key": "forestry:bee_princess_ge#6f16eda873ae",
                      "kind": "item",
-                     "label": "Obsidian Dust",
-                     "name": "Obsidian Dust",
+                     "label": "Forest Princess",
+                     "name": "Forest Princess",
                      "need": 1,
-                     "note": "nothing makes this form; the graph can only make Pulverized Obsidian",
-                     "status": "raw",
-                     "unsourced": true
+                     "status": "raw"
                     }
                    ],
-                   "key": "ore:dustObsidian",
-                   "kind": "ore",
-                   "label": "dustObsidian",
-                   "name": "[oredict] dustObsidian",
+                   "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                   "kind": "item",
+                   "label": "Cultivated Drone",
+                   "machine": "Bee Breeding",
+                   "machine_state": "have",
+                   "name": "Cultivated Drone",
                    "need": 1,
-                   "resolved_to": "techreborn:dust:35",
-                   "status": "oredict"
+                   "per_run": 1,
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                   "runs": 1,
+                   "status": "craft"
                   }
                  ],
-                 "key": "thermalfoundation:material:1027",
+                 "key": "forestry:bee_drone_ge#bae1191223d2",
                  "kind": "item",
-                 "label": "Petrotheum Dust",
-                 "machine": "Crafting (shapeless)",
+                 "label": "Noble Drone",
+                 "machine": "Bee Breeding",
                  "machine_state": "have",
-                 "name": "Petrotheum Dust",
+                 "name": "Noble Drone",
                  "need": 1,
-                 "per_run": 2,
-                 "recipe": "ThermalFoundation-1.12.2-2.6.7.1-universal.jar!assets/thermalfoundation/recipes/dust_petrotheum.json",
+                 "per_run": 1,
+                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144491",
                  "runs": 1,
                  "status": "craft"
                 }
                ],
-               "key": "thermalfoundation:material:1",
+               "key": "forestry:bee_drone_ge#3d03dbb5ed10",
                "kind": "item",
-               "label": "Pulverized Gold",
-               "machine": "Crafting",
+               "label": "Miry Drone",
+               "machine": "Bee Breeding",
                "machine_state": "have",
-               "name": "Pulverized Gold",
+               "name": "Miry Drone",
                "need": 1,
-               "per_run": 2,
-               "recipe": "hei:minecraft.crafting:25113",
+               "per_run": 1,
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:144524",
                "runs": 1,
                "status": "craft"
               }
              ],
-             "key": "thermalfoundation:material:97",
+             "key": "forestry:bee_drone_ge#9725f6010626",
              "kind": "item",
-             "label": "Electrum Blend",
-             "machine": "Crafting",
+             "label": "Boggy Drone",
+             "machine": "Bee Breeding",
              "machine_state": "have",
-             "name": "Electrum Blend",
+             "name": "Boggy Drone",
              "need": 1,
-             "per_run": 2,
-             "recipe": "hei:minecraft.crafting:25745",
+             "per_run": 1,
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:144525",
              "runs": 1,
              "status": "craft"
             }
            ],
-           "key": "thermalfoundation:material:865",
+           "key": "forestry:peat",
            "kind": "item",
-           "label": "Rich Slag",
-           "machine": "Induction Smelter",
-           "machine_state": "buildable",
-           "machine_why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)",
-           "name": "Rich Slag",
+           "label": "Peat",
+           "machine": "Bee Produce",
+           "machine_state": "have",
+           "name": "Peat",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:thermalexpansion.smelter:148558",
+           "recipe": "hei:bdew.jeibees.produce.rootBees:144947",
            "runs": 1,
            "status": "craft"
           }
@@ -974,8 +695,8 @@
          "machine_state": "have",
          "name": "Rich Phyto-Gro",
          "need": 1,
-         "per_run": 16,
-         "recipe": "hei:minecraft.crafting:12572",
+         "per_run": 64,
+         "recipe": "hei:minecraft.crafting:28465",
          "runs": 1,
          "status": "craft"
         }
@@ -1039,7 +760,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 414,
+  "work": 304,
   "work_budget": 80000
  },
  "scenario": {

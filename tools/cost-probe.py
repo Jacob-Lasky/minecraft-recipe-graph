@@ -9,6 +9,7 @@ alone. #61 was left alone for exactly that reason.
 
     python3 tools/cost-probe.py                      # the default sweep
     python3 tools/cost-probe.py --raw 1 2.5 20       # your own values
+    python3 tools/cost-probe.py --unsourced 1 2000 5000   # #176's constant instead
     python3 tools/cost-probe.py --rank               # ranking only, ~50x faster
     python3 tools/cost-probe.py --item minecraft:diamond --explain
 
@@ -115,18 +116,31 @@ def route(graph, solver, tree_or_recipe):
     return "%-28s <- %s" % (cat[:28], ", ".join(marked) or "(nothing)")
 
 
-def sweep(graph, states, values, rank_only, items, machine_items=None, token_kinds=None):
-    """`{raw cost: ({label: route}, seconds)}`.
+def sweep(graph, states, values, rank_only, items, machine_items=None, token_kinds=None,
+          constant="BASE_RAW_COST"):
+    """`{value: ({label: route}, seconds)}`, sweeping ONE named constant in `cost`.
 
-    Restores `cost.BASE_RAW_COST` on the way out. The tool is a one-shot CLI so the leak
-    was harmless in practice, but a module constant left mutated is a trap for the next
-    caller and there is no reason to leave it set.
+    Restores it on the way out. The tool is a one-shot CLI so the leak was harmless in
+    practice, but a module constant left mutated is a trap for the next caller and there is
+    no reason to leave it set.
+
+    `constant` IS A PARAMETER BECAUSE AN AUDIT THAT CANNOT SEE THE THING BEING TUNED IS NOT
+    AN AUDIT. This swept `BASE_RAW_COST` and nothing else, so #176's `UNSOURCED_COST` would
+    have been invisible to it: the mandated cost audit for that change would have reported
+    "no probe moved" and been believed. That is the failure this module's own docstring
+    describes -- "a wrong constant does not raise, it just quietly reroutes plans" -- and it
+    was one commit away from happening inside the tool written to catch it.
+
+    MUTATING THE MODULE ATTRIBUTE IS DELIBERATE AND IS WHY THIS IS SAFE ON THIS FILESYSTEM.
+    `_seed` and `_relax` read these constants at call time, so one process can measure every
+    arm without touching a file -- see the note at the top of this module about `__pycache__`
+    and same-length edits, which is what patching source by hand would run into.
     """
-    was = cost_mod.BASE_RAW_COST
+    was = getattr(cost_mod, constant)
     rows = collections.OrderedDict()
     try:
         for value in values:
-            cost_mod.BASE_RAW_COST = value
+            setattr(cost_mod, constant, value)
             started = time.time()
             costs = cost_mod.estimate(graph, machine_states=states,
                                       machine_items=machine_items,
@@ -143,18 +157,18 @@ def sweep(graph, states, values, rank_only, items, machine_items=None, token_kin
                     answers[label] = route(graph, fresh, fresh.solve(key, 1)["tree"])
             rows[value] = (answers, time.time() - started)
     finally:
-        cost_mod.BASE_RAW_COST = was
+        setattr(cost_mod, constant, was)
     return rows
 
 
-def report(rows, items):
+def report(rows, items, constant="BASE_RAW_COST"):
     values = list(rows)
     base = rows[values[0]][0]
     for value in values:
         answers, seconds = rows[value]
         moved = sum(1 for _k, label in items if answers[label] != base[label])
-        print("=== BASE_RAW_COST=%s  (%d of %d probes differ from %s, %.0fs) ==="
-              % (value, moved, len(items), values[0], seconds))
+        print("=== %s=%s  (%d of %d probes differ from %s, %.0fs) ==="
+              % (constant, value, moved, len(items), values[0], seconds))
         for _key, label in items:
             flag = " " if answers[label] == base[label] else ">"
             print(" %s %-11s %s" % (flag, label, answers[label]))
@@ -196,6 +210,13 @@ def main():
     ap.add_argument("--graph", default=DEFAULT_GRAPH)
     ap.add_argument("--raw", nargs="+", type=float, default=[1.0, 2.5, 5.0, 20.0],
                     help="BASE_RAW_COST values to compare; the first is the baseline")
+    # #176's constant, and the reason `sweep` takes a name at all. The default arm list is
+    # the shipped value first (so it is the baseline every other arm is diffed against), then
+    # the two neighbours the ordering permits and the one it does not: 200 is LOOT_COST,
+    # 5,000 is the `unavailable` wall, and 1.0 is the pre-#176 behaviour, which is the arm
+    # that shows what the constant actually buys.
+    ap.add_argument("--unsourced", nargs="+", type=float, metavar="V",
+                    help="UNSOURCED_COST values to compare instead of --raw (#176)")
     ap.add_argument("--rank", action="store_true",
                     help="rank only, no solve: fast, and it LIES (see the module docstring)")
     ap.add_argument("--item", action="append", default=[],
@@ -211,6 +232,13 @@ def main():
 
     graph, states, targets = load(args.graph)
     token_kinds = tokens_mod.for_path(args.tokens)
+    # ONE CONSTANT PER RUN. Sweeping two at once would give a grid whose cells cannot be
+    # attributed to either, which is the shape of a measurement nobody can act on.
+    constant, values = "BASE_RAW_COST", args.raw
+    if args.unsourced:
+        if args.explain:
+            ap.error("--explain sweeps nothing; use --raw for its single value")
+        constant, values = "UNSOURCED_COST", args.unsourced
     if args.explain:
         if not args.item:
             ap.error("--explain needs --item")
@@ -230,7 +258,8 @@ def main():
         print("skipping %s: no real producers" % k, file=sys.stderr)
     if not kept:
         ap.error("none of the %d requested items has a real producer" % len(items))
-    report(sweep(graph, states, args.raw, args.rank, kept, targets, token_kinds), kept)
+    report(sweep(graph, states, values, args.rank, kept, targets, token_kinds,
+                 constant=constant), kept, constant=constant)
 
 
 if __name__ == "__main__":

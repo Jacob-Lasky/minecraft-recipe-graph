@@ -275,6 +275,49 @@ GATE_COST = 1000.0
 # 8 is not knowable from the graph, and no one has measured it.
 DIMENSION_COST = 800.0
 
+# What a key the graph has PROVEN it cannot explain costs. #176.
+#
+# `Graph.unsourced_keys` is the set: nothing makes this exact key, and the graph
+# demonstrably makes another form of it. Until now those seeded at `BASE_RAW_COST` like any
+# other leaf, which is the cheapest value in the model -- so the solver actively PREFERRED
+# routes through items it had already badged "no known source". #139 shipped that badge and
+# deliberately did not touch the price; this is the other half, and `solve.py`'s DO-NOT
+# comment deferring it pointed here.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, exactly as for DIMENSION_COST and EMC_COST:
+#
+#     BASE_RAW_COST < LOOT_COST < DIMENSION_COST < GATE_COST < UNSOURCED_COST
+#                   < MACHINE_COST["unavailable"]
+#
+# ABOVE GATE_COST because the claims are different in kind. A locked chapter is a lock with
+# a key somewhere in the story; an unsourced item is one the TOOL cannot explain at all, and
+# it has positive evidence rather than mere silence. Pricing it below a gate would put a
+# route the graph cannot account for ahead of one it can, which is the whole defect.
+# BELOW the 5,000 wall because `MACHINE_COST["unavailable"]` means "you cannot have this
+# machine", and #95's lesson is that two unrelated statements must never share a figure.
+#
+# AND THE MAGNITUDE IS MEASURED INERT ACROSS THE BAND THE ORDERING PERMITS, which is the
+# strongest evidence any constant in this file has. Measured over eight targets on the
+# reference graph:
+#
+#   * 200 and 2,000 produce BYTE-IDENTICAL plans on every one of them.
+#   * 5,000 diverges on exactly one, `fluid:nethengeic_fluid`, and is slightly WORSE there:
+#     5 unsourced nodes left in the plan instead of 4, and 75 shopping rows instead of 58.
+#   * Infinity is out. It strands 2,372 currently-priced keys -- the Actually Additions
+#     battery family, the Vertical Digger, `abyssalcraft:transmutator` -- and drops the
+#     finite table from 161,492 keys to 111,485. Every FINITE candidate strands zero.
+#
+# So moving this number is a one-line change with no re-derivation needed, as long as it
+# stays inside `(GATE_COST, MACHINE_COST["unavailable"])`. Asserted in
+# `tests/test_progression.py` rather than left to the reader.
+#
+# WHAT IT DOES NOT FIX, so nobody reads more into it than it earns: a field of alternatives
+# that are ALL unsourced ties at any uniform price and keeps whatever order it had.
+# `fluid:lifeessence` has 62 structurally identical Digital Mob Agonizer recipes, every slot
+# alternative unsourced, so it names Blaze Data Model at 1.0 and at 5,000 alike. That is
+# #181 and no constant can reach it.
+UNSOURCED_COST = 2000.0
+
 # Keyed by the kind rather than by the token, which is the honest granularity available. A
 # per-token number would be more truthful still -- Chapter 1 and a Sedna trip are not the
 # same afternoon -- and it needs a curated figure per id that nobody has measured. The kind
@@ -314,7 +357,7 @@ EMC_COST = 0.5
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 9
+FORMULA_VERSION = 10
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -692,6 +735,29 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     for key in emc_available or ():
         cost[key] = min(cost.get(key, math.inf), EMC_COST)
 
+    # THE KEYS THE GRAPH HAS PROVEN IT CANNOT EXPLAIN, which is the second seed that RAISES
+    # rather than lowers. See UNSOURCED_COST. Until #176 these were `BASE_RAW_COST` like any
+    # other leaf -- the CHEAPEST value in the model -- so the solver preferred a route through
+    # an item it had already badged "no known source" over any route it could account for.
+    # Measured across eight targets, this drives unsourced nodes in a plan from 54 to 5.
+    #
+    # SAME GUARD AS THE TOKEN LOOP BELOW, and for the same reason: anything already priced
+    # under a raw leaf is stock, an infinite generator or a learned EMC item, and every one
+    # of those is a stronger claim about THIS world than a structural inference is. If you
+    # are holding one, the graph's inability to explain where it came from is irrelevant.
+    #
+    # `max`, not assignment, so a floor another rule raised higher is kept. A dimension-gated
+    # leaf sits at BASE_RAW_COST + DIMENSION_COST and would be lowered by a bare assignment.
+    #
+    # BEFORE THE TOKENS, so a token wins. A placeholder is already an instruction with its
+    # own price for what the player must go and DO, and `Solver.expand` returns at the token
+    # branch before it ever reaches the unsourced mark -- so the price has to agree with the
+    # display about which of the two answers a reader gets.
+    for key in graph.unsourced_keys:
+        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+            continue
+        cost[key] = max(cost.get(key, BASE_RAW_COST), UNSOURCED_COST)
+
     # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
     # rule above answers "how cheaply can this be had"; a token answers "what does the
     # player have to go and do", and the generic leaf rule has already given it 1.0.
@@ -787,6 +853,22 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
               % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST, TRANSFER_PENALTY, PASSES,
                  FORMULA_VERSION, BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE, BUILD_SLOPE,
                  UNPRICED_MACHINE_COST, BLOCKED_FLOOR, BLOCKED_CEILING)).encode())
+    # AND EVERY CONSTANT `_seed` READS, which this hash did not cover until #176 added one.
+    # The docstring above has always claimed that "editing MACHINE_COST invalidates the cache
+    # instead of silently reusing prices computed under the old table" -- true of the
+    # relaxation's constants and, until now, false of the seed's. Editing GATE_COST from
+    # 1,000 to 1,500 moved no other input, so a warm `.cost-cache.json` went on serving
+    # 1,000 forever, and the symptom would read as "the tuning change did not work" rather
+    # than as a stale cache. That is the failure this whole function exists to prevent,
+    # sitting inside it.
+    #
+    # `dimension_gates` and `emc_available` are hashed further down because they are DATA
+    # that moves without any constant moving; these are the PRICES those data are charged
+    # at, and both halves are needed.
+    from .generators import SOURCE_COST
+    h.update(("%r %r %r %r %r"
+              % (LOOT_COST, GATE_COST, DIMENSION_COST, EMC_COST, UNSOURCED_COST)).encode())
+    h.update(("%r" % (SOURCE_COST,)).encode())
     # Beside the stock rather than with the constants: a gate depends on which dimensions
     # the SAVE has terrain for, so it moves when the player flies somewhere without the
     # graph or any tuning constant changing. Miss it and a cache written before the trip

@@ -451,6 +451,7 @@ class Graph:
         self._world_ores = None
         self._labels = None
         self._live_keys = None
+        self._unsourced_keys = None
         self._variant_index = None
         self._reshaped_only = None
         self._material_forms = None
@@ -782,6 +783,35 @@ class Graph:
             self._fluid_names = {}
             self._fluid_names = fluidnames.derive(self.recipes, self.bare_name)
         return self._fluid_names
+
+    @property
+    def unsourced_keys(self):
+        """Every live key `reachable_form` names another form for. 47,674 on the reference.
+
+        THE COST MODEL'S HALF OF #139/#136/#170, and the reason it is a set rather than a
+        predicate call inside `cost._seed`: `estimate` seeds TWICE, once per relaxation pass,
+        so a per-key predicate would run the whole enumeration twice for an answer that
+        cannot change between them. Cached here the way `reshaped_only` and `variant_index`
+        are, and for the same reason.
+
+        WHAT THESE KEYS ARE. `reachable_form` returns non-None only when nothing makes this
+        exact key AND the graph demonstrably makes another form of it -- another NBT state, a
+        processed form of the same material, or the same item under an NBT tag. So the graph
+        has positive evidence it cannot explain this route, which is a stronger and much
+        narrower claim than "no producer". See `reachable_form` for why the second clause is
+        what keeps it worth reading.
+
+        OVER `live_keys`, NOT `by_input`, AND THE DIFFERENCE IS 39 KEYS. Only a consumed key
+        can change a recipe's price, so restricting to `by_input` would price every route
+        identically and cost the same 0.4 seconds. The 39 are keys nothing consumes -- they
+        reach no plan, and they DO reach `/api/sweep` and `/api/cost`. Pricing a key one way
+        in the table and another way in the sweep is the drift #178 spent a PR removing.
+        """
+        if self._unsourced_keys is None:
+            self._unsourced_keys = frozenset(
+                key for key in self.live_keys
+                if not self.by_output.get(key) and self.reachable_form(key))
+        return self._unsourced_keys
 
     @property
     def live_keys(self):

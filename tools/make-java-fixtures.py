@@ -629,19 +629,45 @@ TARGETS = [
             "`producers` and its test still passes. A fixture asserting the route would be "
             "asserting the contested half."),
     Target(
+        "unsourced-price", "contenttweaker:heuf_fuel",
+        expect=("craft", "raw", "!unsourced", "shopping_list", "not_truncated"),
+        why="#176's reported case, and the fixture that exists BECAUSE it hits the "
+            "population rather than because it happens to. `UNSOURCED_COST` moves 47,674 "
+            "keys, and a fixture chosen for any other reason is coverage by luck.\n\n"
+            "Reported as \"HEUF Fuel requires a fissile drone. this is true, but how do i "
+            "get a fissile drone?\" Both routes to this fluid need a fissile bee; the "
+            "drone is unsourced and the graph had already badged it so, while `cost._seed` "
+            "priced it at BASE_RAW_COST -- the CHEAPEST value in the model -- so the "
+            "solver actively preferred the one route it could not explain.\n\nTHE "
+            "ASSERTION IS `!unsourced`, WHICH IS THE POINT. Before #176 this plan carried "
+            "one unsourced node, `forestry:bee_drone_ge#531347dffc8e`. After, the same "
+            "recipe takes a different slot alternative -- `bee_princess_ge#531347dffc8e` "
+            "-- and the mark is gone. A fixture asserting the mark PRESENT would have "
+            "passed before and after; asserting its ABSENCE is what makes the port prove "
+            "the price reached the routing.\n\nWhat it deliberately does not claim: "
+            "whether a Fissile Princess is obtainable in the pack is a progression "
+            "question the graph cannot answer and #176 raises separately. The plan is no "
+            "longer self-contradictory, which is all a price can buy."),
+    Target(
         "variant-table", "chisel:concrete_brown:1",
-        expect=("craft", "raw", "unsourced", "not_truncated"),
+        expect=("craft", "raw", "!unsourced", "not_truncated"),
         why="#110. Chisel publishes one entry per material listing all 37 variants in BOTH "
             "columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so "
             "all 341 tables were dropped and 6,856 variant keys were left with no producer "
             "at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is "
             "chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` "
             "are both build-time and both invisible except in a plan like this one.\n\n"
-            "It also carries exactly one #139 `unsourced` mark, on a chicken spawn egg -- a "
-            "node resting on an NBT state the graph has no route to, naming the plain item "
-            "it CAN make. That is a FIELD rather than a status, so a port could omit it and "
-            "still produce a structurally valid tree; one mark in a small plan is the "
-            "cheapest place to pin it."),
+            "IT USED TO CARRY A #139 `unsourced` MARK AND #176 PRICED IT AWAY, which is "
+            "why the claim is now negated rather than deleted. The plan rested on a chicken "
+            "spawn egg -- an NBT state the graph has no route to -- and `UNSOURCED_COST` "
+            "made that route lose to one the graph can account for, taking the plan from 10 "
+            "nodes to 15. The generator REFUSED to write this fixture until the claim was "
+            "corrected, which is the coverage check doing its job: a fixture that no longer "
+            "reaches the path it names passes forever while asserting nothing.\n\n"
+            "`!unsourced` rather than dropping the claim, because the absence is now the "
+            "interesting fact about this plan. `plan-unsourced-variant` is the sole fixture "
+            "carrying a live mark, and `plan-unsourced-price` is the one asserting that a "
+            "mark the price removed stays removed."),
     Target(
         "same-name", "thermalfoundation:material:32",
         expect=("craft", "raw", "oredict", "not_truncated"),
