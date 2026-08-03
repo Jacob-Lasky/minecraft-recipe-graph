@@ -128,19 +128,51 @@ public class JeiNodeActionsTest {
         assertTrue(NodeActionsHolder.actions() instanceof JeiNodeActions);
     }
 
+    /**
+     * The install log, asserted EXACTLY rather than by substring.
+     *
+     * A SUBSTRING ASSERTION HERE CANNOT FAIL IN THE DIRECTION THAT MATTERS, and one nearly
+     * shipped. The `GraphAccess` rename reworded this message specifically so it would stop
+     * saying "graph source" -- and loosened this line to `contains("no graph")`, which the
+     * OLD message satisfies too. That assertion passes before the rename, after it, and after
+     * a revert of it: it looks like coverage and it cannot detect the thing it guards.
+     *
+     * So both strings are asserted whole. Yes, that means a reword reddens this test; that IS
+     * the contract. Three properties ride on these strings and none of them survive a
+     * substring check: the two branches must DIFFER (a client that installed blind and one
+     * that never installed produce an identical menu, and nothing but this line can tell them
+     * apart), the wired branch must NAME the implementation, and NEITHER may contain
+     * "graph source", because `common.GraphSource` is a different class doing a different job.
+     *
+     * DO NOT EXTRACT THESE STRINGS INTO A SHARED CONSTANT to remove the duplication. The
+     * duplication IS the assertion: a constant that both sides read would compare the
+     * production string with itself and pass for any value of it, which is the same
+     * cannot-fail shape as the `contains` check, arrived at from the opposite direction.
+     */
     @Test
     public void theInstallLogSaysWhichOfTheTwoIndistinguishableStatesItIsIn() {
-        // The line exists because "installed and answering false" and "never installed" give
-        // the player an identical menu. If both branches ever said the same thing the line
-        // would still be there, still be printed, and be worth nothing -- and no screenshot
-        // or layout assertion in this repository could tell.
-        JeiNodeActions.GraphSource wired = source(graphOf("minecraft:stick"));
+        JeiNodeActions.GraphAccess wired = source(graphOf("minecraft:stick"));
         String blindly = JeiNodeActions.installMessage(JeiNodeActions.NO_GRAPH);
+        String named = JeiNodeActions.installMessage(wired);
 
-        assertNotEquals(blindly, JeiNodeActions.installMessage(wired));
-        assertTrue(blindly.contains("no graph source"));
-        // Names the source, so a log from a client that HAS one says which one.
-        assertTrue(JeiNodeActions.installMessage(wired).contains(wired.getClass().getName()));
+        assertEquals("JeiNodeActions installed with no graph access: the planner's"
+                     + " recipe-viewer entries stay hidden for as long as this install stands,"
+                     + " and no graph load will change that. DumpPlugin.onRuntimeAvailable"
+                     + " installs the live one, so this line means some other caller reached"
+                     + " install().",
+                     blindly);
+        assertEquals("JeiNodeActions installed, reading the graph from "
+                     + wired.getClass().getName() + ".",
+                     named);
+
+        // The three properties, restated as assertions rather than trusted to the two above,
+        // so a future reword is told WHICH rule it broke instead of just which characters.
+        assertNotEquals(blindly, named);
+        assertTrue("the wired branch must name the implementation",
+                   named.contains(wired.getClass().getName()));
+        assertFalse("neither message may say \"graph source\" -- common.GraphSource is a"
+                    + " different class, and naming it sends the reader there",
+                    blindly.contains("graph source") || named.contains("graph source"));
         assertEquals(blindly, JeiNodeActions.installMessage(null));
     }
 
@@ -189,7 +221,7 @@ public class JeiNodeActionsTest {
     }
 
     @Test
-    public void aNullGraphSourceBecomesNoGraphRatherThanBeingKept() {
+    public void aNullGraphAccessBecomesNoGraphRatherThanBeingKept() {
         // `iconFor` runs once per row per frame. A null field there is a crash per frame.
         NodeActions actions = new JeiNodeActions(null);
         assertSame(ItemStack.EMPTY, actions.iconFor(node("minecraft:stick")));
@@ -424,8 +456,8 @@ public class JeiNodeActionsTest {
         return builder.build();
     }
 
-    private static JeiNodeActions.GraphSource source(final RecipeGraph graph) {
-        return new JeiNodeActions.GraphSource() {
+    private static JeiNodeActions.GraphAccess source(final RecipeGraph graph) {
+        return new JeiNodeActions.GraphAccess() {
             @Override
             public RecipeGraph graph() {
                 return graph;
