@@ -143,32 +143,63 @@ Verify a row before relying on it; that is the whole lesson above. Commands are 
 | Serve the UI as a container | yes, this is where it runs | not where it lives |
 | Get the pack jars `checkPackJars` demands | yes, from the AMP server instance | yes |
 | Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
-| `recipegraph build` into a graph | yes, at a measured 1.2% gap (see below) | yes, authoritative |
-| **Run the game and `/recipedump`** | **no, and never** | **yes, and only here** |
+| `recipegraph build` into a graph | yes, at a measured **0-key** jar gap (see below) | yes, authoritative |
+| **Run the game and `/recipedump`** | **"no, and never" IS IN DOUBT** -- the command object can be driven with a null server, proven on a 5-jar dev set; the full-pack boot is untested | **yes, and today the only proven way** |
 
-**THE JAR-PARITY GAP IS 1.2%, NOT A WALL, AND IT HAD NEVER BEEN MEASURED.** "Tower cannot
-build" has functioned as a blocker for months on an unquantified claim -- the exact shape this
-file warns about two sections up. Measured 2026-08-01:
+**THE JAR-PARITY GAP IS ZERO KEYS, AND THE "1.2% / 539 / ~46 CLIENT-ONLY JARS" FIGURES THIS
+FILE USED TO CARRY WERE ALL WRONG.** They were the named unblock condition for six issues.
+Re-measured 2026-08-03:
 
 ```
-desktop graph.json            117,681 recipes   45,552 produced keys
-client dump (hei_dump) alone  114,231 recipes   52,518 produced keys
-keys only jar_json supplies                        802
-...the SERVER's 364 jars recover                   263
-a Tower build would MISS                           539   = 1.2% of 45,552
+client instance      367 jars      (NOT ~410; that number was never counted either)
+tower AMP server     364 jars
+shared               364, every one md5-identical (joined on FILENAME, not sort position)
+server-only            0
+client-only            3    esm-legacy (Extreme Sound Muffler), soundreloader, the dump mod
+mods/1.12.2/          13 jars both sides, identical (scala + ChickenASM libs)
 ```
 
-Missing by mod: plustic 219, aoa3 131, twilightforest 44, contenttweaker 28, divinerpg 24.
-Everything else a build reads is already on Tower: 364 jars, a 2.5 MB `items.csv`,
-`planetDefs.xml`, 260 Modular Machinery configs, and the CLIENT's own recipe dump, which
-carries full 410-mod parity because it was taken on the client. Only `jar_json`, which reads
-jars off disk, is degraded.
+**The two third-party client-only jars provably cannot contribute a key.** `jar_json.extract`
+selects entries on `endswith(".json") and startswith("assets/") and "/recipes/" in e`;
+esm-legacy's only `assets/` are two GUI PNGs, and soundreloader has no `assets/` at all.
+Measured anyway with two symlink farms -- arm A the client's 367 jars, arm B exactly the 364 the
+server has -- both giving **10,301 recipes / 8,784 produced keys, difference 0 both ways**, with
+a planted 5-key removal detected as 5 to prove the comparison discriminates.
 
-That matters because every build-time change is stranded until the desktop runs -- #110 and
-#112 both merged, deployed, and stayed invisible in the served data. Copying the ~46
-client-only jars to Tower would close the gap outright. Tracked in #119, which also records
-the odder finding: `jar_json` supplies 802 keys the client's own HEI dump does not, including
-`advancedrocketry:lathe`, which may be a dump gap rather than a parity one.
+**The tell was in the original measurement's own output.** Its server arm reported
+`10,301 recipes, 8,784 produced keys` -- exactly what the CLIENT's jars produce. Two arms
+supposed to differ by 46 jars returned identical numbers, which is this file's own rule that
+identical numbers across varied inputs are a bug report rather than a stable result. The
+802/263/539 arithmetic compared a processed `graph.json` (whose jar_json contribution has been
+through `index.build` -- oredict resolution, `expand_interconversion`, container marking)
+against a raw `jar_json.extract()`, then attributed the processing difference to jars on another
+machine.
+
+**So no jar copy is required and `jar_json` is not degraded on Tower.** Do not copy the two
+cosmetics in "for exactness" either: esm-legacy ships a mixin, a refmap and an access
+transformer, so it adds dev-workspace failure surface for provably zero recipe benefit. And
+never stage the dump mod's own jar into the pack -- two jars declaring modid `mcrecipedump` is a
+duplicate-mod startup failure.
+
+**What survives untouched:** `jar_json` really does supply 802 produced keys the client's own
+HEI dump lacks, including `advancedrocketry:lathe`. That is a possible DUMP gap and it is worth
+more than the parity question ever was.
+
+**THE DENOMINATOR, PINNED, because "410" was quoted repeatedly and matched nothing:** 367
+top-level jars in `mods/` (what `jar_json` walks), 370 distinct modids in `mcmod.info`, 22 jars
+with no usable `mcmod.info` (coremods declaring via MANIFEST), and 13 in `mods/1.12.2/` that
+`jar_json` never reads because it uses a non-recursive `os.listdir`. A loaded-mod count near 390
+is plausible and **has never been read off an FML log** -- do not write one down as though it
+had. Say "367 jars" and name the denominator in the same breath.
+
+**Two ways a jar diff lies, both hit while measuring this.** Pack filenames contain SPACES and
+APOSTROPHES (`AbyssalCraft Integration-1.12.2-1.11.3.jar`, `Fish's Undead Rising-1.6.0.jar`), so
+`ls | xargs -n1 basename` shreds the list into word fragments and dies on the quote; use
+`find -printf '%f\n'`. And `comm` must share COLLATION with the `sort` that fed it -- sorting
+under `LC_ALL=C` and running `comm` under the ambient locale put one jar on BOTH sides of the
+diff at once, which is impossible for a correct one and is the only reason the breakage was
+visible. Export `LC_ALL=C` for the whole pipeline, `sort -c` both files first, and **join on the
+filename, never on sort position.**
 
 The last row is the only permanent asymmetry, and it is Jake's hands on a keyboard rather
 than either machine's. Anything that needs a fresh dump ends there no matter who wrote the
@@ -184,7 +215,7 @@ registries. There is no on-disk index to search, in JEI or anywhere else.
 
 That is why the answer is a dump-at-runtime mod rather than decompilation. Decompiling is
 only ever the fallback for an isolated hardcoded constant (a search radius, a tick rate),
-never for recipes, because at ~410 jars it does not scale and NuclearCraft-style recipe
+never for recipes, because at 367 jars it does not scale and NuclearCraft-style recipe
 registration is procedural anyway.
 
 Fluids need no special handling: they arrive through the same
@@ -371,11 +402,17 @@ the wrong parent is a seconds-long test rather than a game launch. `ModularUiLay
 the worked example. Three things it cost, all of which will bite the next GUI change:
 
 * **`ModularScreen` cannot be linked without NeverEnoughAnimations.** `IMuiScreen` extends
-  `IAnimatedScreen` from that client-only mod, which is not in the 364-jar server pack, so the
+  `IAnimatedScreen`, which **no jar in EITHER pack provides** -- so the
   test tree carries an empty placeholder at
   `mod/src/test/java/com/cleanroommc/neverenoughanimations/api/IAnimatedScreen.java`. It is a
   link-time requirement only -- the same call succeeds under `-Xverify:none`, which is how
-  that was established rather than assumed.
+  that was established rather than assumed. **This placeholder is PERMANENT and no jar copy
+  removes it**, which is worth stating because the old note called NEA "client-only" and
+  therefore absent from the server pack, implying parity work would fix it. Measured
+  2026-08-03: NEA is in neither pack, and no jar among the client's 367 provides
+  `IAnimatedScreen` at all. `com/cleanroommc/modularui/api/IMuiScreen.class` names both
+  `IAnimatedScreen` and `neverenoughanimations` in its constant pool, so ModularUI 3.1.5
+  simply ships a soft reference MeatballCraft never satisfies.
 * **The harness reports the screen as an overlay**, which is what keeps every call to the
   absent `GuiScreen` wrapper out of the path. `isOverlay()` reaches nothing that sizes
   anything.
@@ -403,7 +440,7 @@ so rather than leaving it to be noticed.
 
 **#90, #118, #55, #50 and #36 are written and compiled as of v0.9.0 (dump schema 5), for the
 same reason at a larger scale.** Five mod-side issues in one jar, against one schema number:
-the expensive step is a launch of a 410-mod pack, not the code, and five increments would only
+the expensive step is a launch of a 367-jar pack, not the code, and five increments would only
 buy a partial revert nobody can exercise, since reverting half a jar still costs the launch.
 
 **Schema 5 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the keys the
@@ -470,12 +507,15 @@ standing claim and it is wrong: the AMP server instance has both prerequisites, 
 `/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` and a 2.5 MB
 `config/AppliedEnergistics2/items.csv`, and `data/mc-recipe-dump/` is already synced here.
 
-The real reason to keep building on the desktop is **jar parity, not availability**. The
-server pack carries 364 jars; #36 records the client instance at roughly 410, so a
-Tower-built graph would silently miss whatever client-only mods make up the difference, and
-a graph missing recipes is worse than no graph because nothing in the UI says so. Nobody has
-run the comparison, so treat the exact gap as unmeasured. If you ever want Tower to build,
-diff the two jar lists first and write down what is absent.
+**AND NOT BECAUSE OF JAR PARITY EITHER -- THE LISTS HAVE NOW BEEN DIFFED AND THE GAP IS ZERO
+KEYS.** This paragraph used to say "nobody has run the comparison, so treat the exact gap as
+unmeasured", and the unmeasured version then hardened into a "1.2% / 539 keys / ~46 client-only
+jars" figure that was quoted for days and was wrong. 367 client jars against 364 server jars,
+364 byte-identical, and the 3 client-only ones contain no recipe JSON at all. Full measurement
+and probes in the parity section above.
+
+The reason the desktop still builds is **the DUMP, not the jars**: `recipes.ndjson` only comes
+from `/recipedump`, which needs the game.
 
 `build` also needs a 165 MB `recipes.ndjson`, which only `/recipedump` produces. The gaming
 machine runs it, builds, and rsyncs the finished artifacts over:
@@ -1273,8 +1313,8 @@ RECIPEGRAPH_ORACLE=<oracle graph> python3 tools/make-java-fixtures.py --check   
 **Build a dedicated oracle outside `data/`. Do NOT point it at `data/graph.json`, even when
 that file is current.** It is the file the container serves, so it is replaced every time
 somebody redumps and rebuilds -- pinning fixtures to it makes the port's contract a function
-of the last game launch. It is also a desktop build off ~410 jars against a Tower build's
-367, a measured 1.2% of produced keys.
+of the last game launch. (The jar count is NOT a reason -- both machines read the same 364
+recipe-bearing jars; see the parity section above.)
 
 **Use current CODE, though.** #110, #112 and #117 all work in `index.build`, so a graph built
 before them has an empty `dimension_ores` and three fixtures would assert the pre-fix
