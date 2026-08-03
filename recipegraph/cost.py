@@ -192,7 +192,7 @@ FLUID_SCALE = 1.0 / 1000.0
 # thing you pick up, or it may be a PROCESSED FORM the pack simply never authored a recipe
 # for -- the Sednanite Nugget has no producer at all, and 9 of them at 1.0 beat mining the
 # ore at 801.0, so the shopping list named a step nobody can perform. Nothing structural
-# separates the two cases; `Solver.reachable_form` reports the ones it CAN identify rather
+# separates the two cases; `Graph.reachable_form` reports the ones it CAN identify rather
 # than repricing them, deliberately.
 #
 # THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED. Do not re-propose one

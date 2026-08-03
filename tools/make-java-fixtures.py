@@ -612,6 +612,23 @@ TARGETS = [
             "the two fixtures above and fails here, which is the whole reason this one "
             "exists."),
     Target(
+        "unsourced-variant", "animus:kama_bound",
+        expect=("raw", "unsourced", "shopping_list", "not_truncated"),
+        why="#170's reported case, and the only fixture that reaches the THIRD face of "
+            "`reachable_form`. The Alchemy Array makes `animus:kama_bound#fd1adc426e12` and "
+            "four recipes ask for the bare key, so the graph holds a 53.35 route and "
+            "`cost._seed` still prices the bare key at BASE_RAW_COST -- which reads to a "
+            "player as \"you already have this\". 96 bare keys are in that state with "
+            "4,193 produced variants behind them.\n\nIT EXISTS BECAUSE NOTHING ELSE "
+            "REACHED IT. The first regeneration after the mark landed moved no fixture at "
+            "all, so the Java port of that branch had unit tests on one side and no golden "
+            "gate across the two. One node and a note is the cheapest thing that makes the "
+            "port prove it agrees.\n\nThe mark is REPORTING ONLY: `status` is still `raw` "
+            "and the key is still on the shopping list, because whether the solver should "
+            "ROUTE through a produced variant is contested -- #28 refused that widening in "
+            "`producers` and its test still passes. A fixture asserting the route would be "
+            "asserting the contested half."),
+    Target(
         "variant-table", "chisel:concrete_brown:1",
         expect=("craft", "raw", "unsourced", "not_truncated"),
         why="#110. Chisel publishes one entry per material listing all 37 variants in BOTH "

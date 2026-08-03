@@ -1207,13 +1207,23 @@ Node badges: `in stock` (covered by AE2) · `part stock` · `craft` · `NEED` (r
 goes on the shopping list) · `no known source` · `loop` (cycle) · `cut off` (hit the node cap).
 
 **`no known source` is a NEED the tool cannot back, and it is display-only.** It fires when
-the graph can make the plain item but nothing reaches the NBT state being asked for --
-"Blaze Data Model (Superior)" against a craftable "Data Model Blaze". That usually means the
-pack gets there by a MECHANIC rather than a recipe (levelling in a Simulation Chamber, a kill
-counter, charging), which no recipe dump can see. It deliberately does NOT fire on a plain key
-nothing produces: cobblestone is that too, and marking it would badge most of a shopping list.
-The price is untouched -- `cost._seed` still seeds these at `BASE_RAW_COST`, which is what
-makes them win routes they should lose, and that is #136.
+nothing makes the exact key asked for AND the graph demonstrably makes another form of it,
+so there is somewhere specific to point the reader. Three shapes, and the note says which:
+
+* an NBT STATE of a producible item -- "Blaze Data Model (Superior)" against a craftable
+  "Data Model Blaze". Usually a MECHANIC rather than a recipe (levelling in a Simulation
+  Chamber, a kill counter, charging), which no recipe dump can see.
+* a PROCESSED FORM of a producible material -- a Sednanite Nugget nothing makes beside a
+  Sednanite Ingot with 27 producers, one material by Forge's `nugget*`/`ingot*` convention.
+* a BARE key the graph makes only under an NBT digest -- `animus:kama_bound`, which the
+  Alchemy Array makes as `animus:kama_bound#fd1adc426e12`.
+
+The SECOND clause is what keeps it worth reading: it does NOT fire on a plain key nothing
+produces and nothing resembles, because cobblestone is that too and marking it would badge
+most of a shopping list. The price is untouched -- `cost._seed` still seeds these at
+`BASE_RAW_COST`, which is what makes them win routes they should lose, and that is #176.
+One predicate answers all three shapes, `Graph.reachable_form`; `/api/sweep` exposes it as
+the `unsourced` field.
 
 The `you still need` list is the answer to most questions. `drawn from your AE2 stock` is
 the audit trail showing what it assumed you have.

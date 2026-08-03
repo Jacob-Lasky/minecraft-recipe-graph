@@ -27,15 +27,19 @@ public class PlanJsonTest {
     public void everyFixtureParsesAndCarriesTheNodeCountItClaims() {
         List<String> names = PlanFixtures.names();
         // A directory scan that found nothing passes vacuously; assert the population first.
-        // NINETEEN, not the 22 files in that directory: `cost.json`, `machines.json` and
+        // TWENTY, not the 23 files in that directory: `cost.json`, `machines.json` and
         // `machines-overridden.json` live there too and are inputs rather than plans.
-        assertEquals("19 plan fixtures were merged in #135; found " + names, 19, names.size());
+        //
+        // THIS NUMBER MOVES WHENEVER A TARGET IS ADDED, and that is the point rather than a
+        // maintenance cost -- a fixture added without anyone noticing is one the port was
+        // never held to. 19 at #135, 20 at #170's `plan-unsourced-variant`.
+        assertEquals("20 plan fixtures; found " + names, 20, names.size());
         for (String name : names) {
             PlanView plan = PlanFixtures.load(name);
             assertNotNull(name + " has no tree", plan.tree());
             assertFalse(name + " has no target", plan.target().isEmpty());
             // `nodes` is the solver's own count. If the reader dropped a child, or read one
-            // twice, this is where it shows -- across 571 nodes and 19 trees.
+            // twice, this is where it shows -- across 572 nodes and 20 trees.
             assertEquals(name + " lost or gained nodes in the read",
                          plan.nodes(), plan.flatten().size());
         }
