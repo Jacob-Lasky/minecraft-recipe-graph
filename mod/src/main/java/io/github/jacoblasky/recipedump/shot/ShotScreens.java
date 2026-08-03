@@ -73,6 +73,12 @@ public final class ShotScreens {
     private static final Map<String, Opener> SCREENS = new LinkedHashMap<String, Opener>();
 
     static {
+        register("world-probe", new Opener() {
+            @Override
+            public void open(String arg) {
+                WorldProbeShot.open(arg);
+            }
+        });
         register("fixture", new Opener() {
             @Override
             public void open(String arg) {
