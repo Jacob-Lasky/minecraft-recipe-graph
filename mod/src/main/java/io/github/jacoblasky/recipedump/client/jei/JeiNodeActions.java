@@ -29,14 +29,17 @@ import org.apache.logging.log4j.LogManager;
  *
  * <h2>Where the graph comes from</h2>
  *
- * Through {@link GraphSource}, injected, because nothing on the client loads a
- * {@link RecipeGraph} yet -- that holder belongs to the in-game provisioning work and lands
- * separately. Until it does, this is installed with {@link #NO_GRAPH} and every method answers
- * the way it would for a node with no item behind it: the menu simply does not draw the two
- * entries. Installing the false-answering version rather than leaving the seam empty is what
- * proves the registration works on the day a graph appears rather than the day after, and the
- * install log below is what keeps the two states from looking alike to whoever is debugging
- * the menu.
+ * Through {@link GraphAccess}, injected. `DumpPlugin.onRuntimeAvailable` installs the live one
+ * over {@code GraphService.get().graph()} (#161), so the graph arrives through this seam and
+ * nowhere else. DO NOT ADD A SECOND HOLDER -- no static field here, no graph cached in the
+ * constructor. The source is asked PER INVOCATION on purpose: `onRuntimeAvailable` fires long
+ * before the 5.47 s load finishes, so anything resolved once would be null for the rest of the
+ * session. A volatile field read is what makes asking per frame free.
+ *
+ * {@link #NO_GRAPH} remains the answer for a client whose graph has not loaded, and every
+ * method then answers the way it would for a node with no item behind it: the menu simply does
+ * not draw the two entries. The install log below is what keeps that state from looking like
+ * "never installed" to whoever is debugging the menu.
  *
  * NOTHING HERE MAY THROW. Every method is called from a GUI build, a render pass or a click
  * handler, and an exception in any of those takes the screen down. The two boundaries that
@@ -52,10 +55,17 @@ public final class JeiNodeActions implements NodeActions {
      * AN INTERFACE RATHER THAN A DIRECT CALL for the same reason {@link
      * io.github.jacoblasky.recipedump.client.StackIndex} takes its stacks as an argument: it
      * is what lets the whole of this class be asserted with no client, no JEI and no graph
-     * loader in the JVM. It is also the entire coupling to the in-game work -- wiring the real
-     * holder in is a one-line change at the {@link #install} call site and nothing else.
+     * loader in the JVM. It is also the entire coupling to the in-game work -- the real holder
+     * is one anonymous implementation at the {@link #install} call site in `DumpPlugin` and
+     * nothing else.
+     *
+     * DO NOT RENAME THIS BACK TO `GraphSource`. That was its first name and it collides with
+     * {@link io.github.jacoblasky.recipedump.common.GraphSource}, which does an unrelated job
+     * -- it decides WHERE the graph file lives on disk. Two unrelated types under one name in
+     * one mod is ten minutes lost to importing the wrong one and finding that it compiles.
+     * `JeiNodeActionsTest` names both, which is how close together they actually sit.
      */
-    public interface GraphSource {
+    public interface GraphAccess {
 
         /** The graph the planner is planning against. Null before one is loaded. */
         RecipeGraph graph();
@@ -64,19 +74,20 @@ public final class JeiNodeActions implements NodeActions {
     /**
      * A source that never has a graph.
      *
-     * NOT A TEST DOUBLE -- it is the production wiring until the client-side graph holder
-     * lands, and it is also the honest answer on a client that has one and has not loaded it.
+     * NOT A TEST DOUBLE -- it is the honest answer on a client that has a graph and has not
+     * loaded it, and it is the target a null {@link GraphAccess} collapses to in the
+     * constructor. Production wiring is `DumpPlugin`'s live source, not this.
      */
-    public static final GraphSource NO_GRAPH = new GraphSource() {
+    public static final GraphAccess NO_GRAPH = new GraphAccess() {
         @Override
         public RecipeGraph graph() {
             return null;
         }
     };
 
-    private final GraphSource graphs;
+    private final GraphAccess graphs;
 
-    public JeiNodeActions(GraphSource graphs) {
+    public JeiNodeActions(GraphAccess graphs) {
         // Null collapses to NO_GRAPH rather than being kept, matching NodeActionsHolder's own
         // rule: a null in a field every render pass reads is a crash per frame.
         this.graphs = graphs == null ? NO_GRAPH : graphs;
@@ -90,7 +101,7 @@ public final class JeiNodeActions implements NodeActions {
      * from a screenshot is impossible -- so the difference is written down at the only moment
      * anything knows it.
      */
-    public static void install(GraphSource graphs) {
+    public static void install(GraphAccess graphs) {
         NodeActionsHolder.install(new JeiNodeActions(graphs));
         LogManager.getLogger(RecipeDumpMod.MODID).info(installMessage(graphs));
     }
@@ -98,17 +109,29 @@ public final class JeiNodeActions implements NodeActions {
     /**
      * What {@link #install} says it did.
      *
-     * SEPARATE SO THE TWO STATES CAN BE ASSERTED TO DIFFER, which is the only property of
-     * this string that matters. An edit that collapsed both branches onto one message would
-     * undo the whole reason the line exists while every other test stayed green -- and a log
-     * line is not something a screenshot or a layout assertion can notice.
+     * SEPARATE SO THE STRINGS CAN BE ASSERTED. An edit that collapsed both branches onto one
+     * message would undo the whole reason the line exists while every other test stayed green
+     * -- and a log line is not something a screenshot or a layout assertion can notice.
+     *
+     * ASSERTED WHOLE, NOT BY SUBSTRING, and that is deliberate rather than fussy: a
+     * `contains` check on these was already caught passing in both directions across a
+     * reword. Expect `theInstallLogSaysWhichOfTheTwoIndistinguishableStatesItIsIn` to redden
+     * if you touch a character here; that test carries the three rules these strings encode.
      */
-    static String installMessage(GraphSource graphs) {
+    static String installMessage(GraphAccess graphs) {
+        // NEITHER BRANCH MAY SAY "graph source". `common.GraphSource` exists and does
+        // something else entirely, so a log line naming it sends the reader to the wrong
+        // class -- the same collision the interface above is named `GraphAccess` to avoid.
+        // `theInstallLogSaysWhichOfTheTwoIndistinguishableStatesItIsIn` asserts both strings
+        // exactly and asserts the phrase is absent, so this rule cannot rot back.
         if (graphs == null || graphs == NO_GRAPH) {
-            return "JeiNodeActions installed with no graph source: the planner's recipe-viewer"
-                    + " entries stay hidden until a client graph holder is wired in.";
+            return "JeiNodeActions installed with no graph access: the planner's recipe-viewer"
+                    + " entries stay hidden for as long as this install stands, and no graph"
+                    + " load will change that. DumpPlugin.onRuntimeAvailable installs the live"
+                    + " one, so this line means some other caller reached install().";
         }
-        return "JeiNodeActions installed, graph source " + graphs.getClass().getName() + ".";
+        return "JeiNodeActions installed, reading the graph from "
+                + graphs.getClass().getName() + ".";
     }
 
     /**

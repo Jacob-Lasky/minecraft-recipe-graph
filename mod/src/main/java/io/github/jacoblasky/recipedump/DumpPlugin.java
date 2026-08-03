@@ -75,7 +75,7 @@ public class DumpPlugin implements IModPlugin {
         // per invocation, not resolved once here: `onRuntimeAvailable` fires long before the
         // load finishes, so a value captured now would be null for the rest of the session.
         // It is a volatile field read, which is what makes calling it per frame free.
-        JeiNodeActions.install(new JeiNodeActions.GraphSource() {
+        JeiNodeActions.install(new JeiNodeActions.GraphAccess() {
             @Override
             public RecipeGraph graph() {
                 return GraphService.get().graph();

@@ -5,11 +5,13 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
 /**
  * What the planner's widgets can DO when clicked.
  *
- * SPLIT FROM {@link NodeActions} ON PURPOSE, because the two have different owners and
- * different lifetimes. `NodeActions` is the Phase 4 seam -- the things that need JEI and an
- * ItemStack, which this phase deliberately does not implement. This interface is the things
- * the planner can already do today: open its own sub-panels, and edit the plan book that #140
- * built. Folding them together would make the whole menu unimplementable until Phase 4 lands.
+ * SPLIT FROM {@link NodeActions} ON PURPOSE, AND DO NOT FOLD THEM BACK TOGETHER, because the
+ * two have different owners and different lifetimes. `NodeActions` is the JEI seam -- the
+ * things that need JEI and an ItemStack, implemented in `client.jei` (#157) and installed at
+ * `onRuntimeAvailable`, so that a client without JEI never loads any of it. This interface is
+ * the things the planner does on its own, from the moment a panel is built: open its
+ * sub-panels, and edit the plan book that #140 built. One interface for both would pull
+ * `mezz.jei` across the seam and make every entry in the menu wait on a JEI runtime.
  *
  * An interface rather than direct calls because opening a sub-panel needs the parent panel,
  * which only exists once a screen has been built -- and because it makes every entry in the
@@ -17,7 +19,7 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
  */
 public interface PlannerActions {
 
-    /** The Phase 4 seam. Never null; {@link NodeActions#NONE} when nothing is installed. */
+    /** The JEI seam. Never null; {@link NodeActions#NONE} when nothing is installed. */
     NodeActions nodeActions();
 
     /** Clicking a tree row. Implementations select the node too; see {@link #selectNode}. */

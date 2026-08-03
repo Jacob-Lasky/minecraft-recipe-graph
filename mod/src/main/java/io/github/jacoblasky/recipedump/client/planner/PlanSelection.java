@@ -7,8 +7,9 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
  *
  * A HOLDER, matching {@link NodeActionsHolder}, and for the same reason: the thing that
  * selects is a click deep inside a widget and the things that want to know are a renderer in
- * another package and a menu that has not been built yet. Threading it through every widget
- * factory would put a parameter nobody reads on every signature here and in `client.flow`.
+ * another package (`client.flow`) and the node menu that {@link PlannerActions#openNodeMenu}
+ * opens. Threading it through every widget factory would put a parameter nobody reads on
+ * every signature here and in `client.flow`.
  *
  * CLIENT-SIDE AND SINGLE-THREADED. Every caller is the client thread -- a click handler or a
  * draw -- so this needs no synchronisation and would be misleading with it: a volatile field

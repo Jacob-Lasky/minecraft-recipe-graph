@@ -16,6 +16,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
+import io.github.jacoblasky.recipedump.common.GraphDocuments;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.GraphSource;
 import io.github.jacoblasky.recipedump.common.PlanBook;
@@ -65,7 +66,7 @@ public class PlannerEntryTest {
         File file = new File(folder.getRoot(), "graph.json");
         FileOutputStream out = new FileOutputStream(file);
         try {
-            out.write(TINY.getBytes("UTF-8"));
+            out.write(GraphDocuments.TINY.getBytes("UTF-8"));
         } finally {
             out.close();
         }
@@ -79,18 +80,6 @@ public class PlannerEntryTest {
             Thread.sleep(5L);
         }
     }
-
-    /** Same document as the common-side tests; duplicated only because packages differ. */
-    private static final String TINY = "{"
-            + "\"dump_schema\":5,"
-            + "\"names\":{\"mod:plate\":\"Plate\",\"mod:ingot\":\"Ingot\"},"
-            + "\"recipes\":[{"
-            + "\"cat\":\"minecraft.crafting\","
-            + "\"id\":\"plate-from-ingot\","
-            + "\"in\":[{\"alt\":[\"mod:ingot\"],\"qty\":1}],"
-            + "\"out\":[{\"key\":\"mod:plate\",\"qty\":1}],"
-            + "\"src\":\"hei_dump\"}]"
-            + "}";
 
     private static PlannerState state() {
         return PlannerEntry.stateFor(GraphService.get(), PlannerService.get());

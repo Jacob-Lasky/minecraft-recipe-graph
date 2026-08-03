@@ -33,7 +33,9 @@ artifact that `/sr-dev-review` Q5 demands for a UI claim comes from.
    MeatballCraft is not the point.
 4. The mod sees `-Dmcrecipedump.shot=<screen>`, waits for the main menu, opens that screen,
    lets it settle, reads the framebuffer with vanilla's `ScreenShotHelper.createScreenshot`,
-   writes the PNG and exits. No world is loaded and no menu is clicked through.
+   writes the PNG and exits. No menu is clicked through, and no world is loaded *by default* --
+   `-Dmcrecipedump.shotWorld=<name>` loads a superflat first, for about 40 s. See the world
+   bullet under [Limits](#limits-and-what-this-is-not).
 
 ## Adding a screen
 

@@ -47,8 +47,11 @@
  * 2.7, which is affordable once at startup. Anyone adding one must fingerprint the FORMULA as
  * well as the inputs; {@code Cost.estimate} says why.
  *
- * `machines.py`'s reporting surface -- `responsibilities`, `mod_state_counts`,
- * `state_totals`, `mod_order`, the `machines.json` reader and writer -- is not ported either.
- * Those exist for the web UI's machines page, and #19 is retiring it.
+ * `machines.py`'s reporting surface -- `responsibilities` (`machines.py:484`),
+ * `mod_state_counts` (`:631`), `state_totals` (`:653`), `mod_order` (`:671`), and the
+ * `machines.json` reader and writer -- is not ported yet. NOT BECAUSE IT IS BEING RETIRED:
+ * #19 Phase 6 deletes the web UI only ONCE THE MACHINES PAGE EXISTS IN GAME, so those four
+ * functions are the arithmetic that work needs and this is a to-port list rather than a
+ * won't-port one. Port them here, against the Python as oracle, the same as everything above.
  */
 package io.github.jacoblasky.recipedump.plan;
