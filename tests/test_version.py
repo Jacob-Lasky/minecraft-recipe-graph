@@ -25,13 +25,37 @@ class BuildTest(unittest.TestCase):
         self.assertIn(version.BUILD.version, line)
         self.assertTrue(version.BUILD.version.strip())
 
+    @staticmethod
+    def _from_a_checkout(case):
+        """A `Build` that really consulted git, or a skip when there is no checkout to ask.
+
+        SKIPS ON THE ABSENCE OF `.git`, NOT ON `from_git`, and the difference is the whole
+        point. `from_git` is also False when `_git` TIMED OUT, and it does time out here:
+        `git describe` costs 1.7-2.0s on this FUSE mount idle and blows the 5s ceiling
+        during a `tools/check.sh` fixture regeneration. Skipping on it meant both assertions
+        below stopped running during the pre-merge run and nothing said so -- a skip reads
+        exactly like a pass, which is the failure `tools/check.sh` exists to surface and did
+        (`python: 2 skipped`).
+
+        So: no `.git` means genuinely no checkout, and the fallback tests cover that case.
+        A `.git` that exists means git CAN answer, and one fresh `Build()` is built here
+        rather than reusing the import-time singleton, because the singleton may have been
+        sampled during exactly the load spike that caused the timeout.
+        """
+        if not version.in_a_checkout():
+            case.skipTest("no .git at the package root; the fallback tests cover this")
+        build = version.Build()
+        case.assertTrue(build.from_git,
+                        "a .git exists but `git describe` gave nothing -- this is a git "
+                        "failure to investigate, NOT a reason to skip the assertions")
+        return build
+
     def test_a_checkout_reports_its_commit_and_date(self):
         # Not asserted unconditionally: CI runs from a checkout, but the Docker image
         # ships no .git and the fallback branch below is what it takes.
-        if not version.BUILD.from_git:
-            self.skipTest("not a git checkout")
-        self.assertRegex(version.BUILD.date, r"^\d{4}-\d{2}-\d{2}$")
-        self.assertIn(version.BUILD.date, version.BUILD.describe())
+        build = self._from_a_checkout(self)
+        self.assertRegex(build.date, r"^\d{4}-\d{2}-\d{2}$")
+        self.assertIn(build.date, build.describe())
 
     @staticmethod
     def _without_git(env=None):
@@ -81,8 +105,7 @@ class BuildTest(unittest.TestCase):
         The env var is right for the image and wrong for anyone editing the code, which is
         precisely the reader this whole module is for.
         """
-        if not version.BUILD.from_git:
-            self.skipTest("not a git checkout")
+        self._from_a_checkout(self)
         saved = os.environ.get(version.VERSION_ENV)
         os.environ[version.VERSION_ENV] = "v0.0.1-stale"
         try:
@@ -97,6 +120,56 @@ class BuildTest(unittest.TestCase):
         # It runs at import. A git binary blocked on a lock, or none at all, must not stop
         # the server from starting.
         self.assertIsNone(version._git("definitely-not-a-git-subcommand"))
+
+
+class InACheckoutTest(unittest.TestCase):
+    """"Is there a `.git`" is a different question from "did git answer", and both are asked.
+
+    Conflating them is what let two assertions in `BuildTest` skip themselves out of the
+    pre-merge run: `git describe` costs 1.7-2.0s on this FUSE mount and exceeds `_git`'s 5s
+    ceiling under load, `from_git` went False, and the tests read that as "Docker image".
+    """
+
+    def test_a_worktree_counts_as_a_checkout(self):
+        """A git WORKTREE's `.git` is a FILE, and every agent here works from one.
+
+        This is the case an `isdir` test gets wrong, and getting it wrong would restore the
+        original bug wearing a different cause: every worktree would report "no checkout"
+        and skip the version assertions permanently rather than intermittently.
+        """
+        root = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(root, ".git"), "w") as fh:
+                fh.write("gitdir: /somewhere/.git/worktrees/wt\n")
+            saved = version._ROOT
+            version._ROOT = root
+            try:
+                self.assertTrue(version.in_a_checkout())
+            finally:
+                version._ROOT = saved
+        finally:
+            for name in os.listdir(root):
+                os.unlink(os.path.join(root, name))
+            os.rmdir(root)
+
+    def test_no_dot_git_means_no_checkout(self):
+        # The Docker image and a released archive. The fallback tests above cover what the
+        # build reports in that state; this is only the detector.
+        root = tempfile.mkdtemp()
+        try:
+            saved = version._ROOT
+            version._ROOT = root
+            try:
+                self.assertFalse(version.in_a_checkout())
+            finally:
+                version._ROOT = saved
+        finally:
+            os.rmdir(root)
+
+    def test_this_repository_is_one(self):
+        # The tests are being run from a checkout right now, worktree or otherwise, so a
+        # False here means the detector is broken rather than that the environment is odd.
+        self.assertTrue(version.in_a_checkout())
 
 
 class SourceStampTest(unittest.TestCase):
