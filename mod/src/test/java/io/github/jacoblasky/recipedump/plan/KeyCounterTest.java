@@ -1,9 +1,11 @@
 package io.github.jacoblasky.recipedump.plan;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.Test;
@@ -49,6 +51,40 @@ public class KeyCounterTest {
         counter.add(11, 7);
         counter.add(12, 7);
         assertEquals("[10=7, 11=7, 12=7]", render(counter.mostCommon()));
+    }
+
+    @Test
+    public void aTiedRunKeepsInsertionOrderWhenItDisagreesWithTheKeyIds() {
+        // THE ONE ORDERING CASE IN THIS FILE THAT CAN FAIL, and every other one was written
+        // before anybody noticed that. This counter is keyed by `int`, so for small
+        // non-negative Integer keys `HashMap`'s spread function is the identity and a table
+        // that stays at 16 buckets iterates them ASCENDING -- which is exactly the order the
+        // cases above insert them in (0..5, 10..12, 1..2, 4..6). Swapping the LinkedHashMap
+        // for a HashMap, or for a TreeMap<Integer>, changes not one of their expected values.
+        //
+        // MEASURED BY DOING IT, not reasoned from java.util: with the field swapped to
+        // `HashMap` this case fails (it returns [3=1, 7=1, 9=1]) and all five of the others
+        // still pass; with `TreeMap<Integer>` the same. See #192 and the PR that closed it.
+        KeyCounter counter = new KeyCounter();
+        counter.add(9, 1);
+        counter.add(3, 1);
+        counter.add(7, 1);
+        assertEquals("[9=1, 3=1, 7=1]", render(counter.mostCommon()));
+    }
+
+    @Test
+    public void theTiedFixtureIsOrderedInNeitherDirection() {
+        // The guard on the guard, in the idiom of
+        // `RecipeGraphOrderTest.theFixtureItselfIsNotAccidentallySorted`. 9, 3, 7 is neither
+        // ascending nor descending, and both halves matter: ascending is what a HashMap and a
+        // TreeMap<Integer> reproduce, descending is what "sort ascending then reverse the
+        // list" reproduces. If a later edit tidies those ids into either order, the case above
+        // silently stops discriminating between a correct implementation and both wrong ones,
+        // and would keep passing forever. The literals are restated rather than shared so this
+        // fails on the tidy-up rather than following it.
+        List<Integer> expected = Arrays.asList(9, 3, 7);
+        assertFalse("the tied ids must not be ascending", isOrdered(expected, 1));
+        assertFalse("the tied ids must not be descending", isOrdered(expected, -1));
     }
 
     @Test
@@ -107,6 +143,16 @@ public class KeyCounterTest {
             org.junit.Assert.assertTrue(expected.getMessage(),
                     expected.getMessage().contains("base-key index"));
         }
+    }
+
+    /** True when `ids` runs monotonically in `direction` (+1 ascending, -1 descending). */
+    private static boolean isOrdered(List<Integer> ids, int direction) {
+        for (int i = 1; i < ids.size(); i++) {
+            if (direction * ids.get(i - 1).compareTo(ids.get(i)) > 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String render(List<KeyCounter.Entry> entries) {

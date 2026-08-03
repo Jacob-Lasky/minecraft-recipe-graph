@@ -1,13 +1,18 @@
 package io.github.jacoblasky.recipedump.plan;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -22,6 +27,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.GraphJsonReader;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 
@@ -29,21 +35,23 @@ import org.junit.Assume;
 import org.junit.Test;
 
 /**
- * The golden plan fixtures, and what this port can be held to by them TODAY.
+ * The golden plan fixtures, and everything this port is held to by them.
  *
- * THE END-TO-END GATE IS NOT RUNNING YET, AND SAYING SO IS THE POINT. Each
- * `tests/fixtures/plan/plan-*.json` carries a `scenario` block of PLACED TILE ENTITIES,
- * visited dimensions and machine overrides -- not of solver inputs. Turning that into the
- * `freeSources`, `machineStates` and `CostTable` a {@link Solver} takes is
- * `generators.resolve`, `machines.resolve`, `tokens.resolve` and `cost.estimate`, all of
- * which are the other half of this port and none of which exist in Java yet. Wiring the
- * comparison against placeholder inputs would produce a green suite that proves nothing,
- * which is worse than an honest gap.
+ * THE END-TO-END GATE RUNS. An earlier version of this comment said it did not, and that each
+ * fixture's `scenario` block of placed tile entities, visited dimensions and machine overrides
+ * could not be turned into the `freeSources`, `machineStates` and `CostTable` a {@link Solver}
+ * takes because `generators.resolve`, `machines.resolve`, `tokens.resolve` and `cost.estimate`
+ * had no Java side. {@link ScenarioInputs} is that Java side, and the gate below calls its
+ * `resolve`, `price` and `solverFor` on every fixture. Corrected under #192, which found the
+ * sentence still here after the work landed.
  *
- * What IS assertable now, and is: that the wire format this port emits uses exactly the field
- * names the oracle wrote. That catches a snake_case slip, a dropped optional key and a
- * misspelled status against real oracle output rather than against a hand-typed guess, and it
- * is the failure mode most likely to survive every unit test in {@link SolverTest}.
+ * THE GATE IS ORACLE-GATED, THOUGH, so the cheaper assertions around it carry a run that has
+ * no oracle -- CI has no 121 MB graph and never will. They check that the wire format this port
+ * emits uses exactly the field names and statuses the oracle wrote, that every fixture still
+ * names the same oracle, and that the gate's refusal of a graph the fixtures do NOT name works
+ * in both directions. That catches a snake_case slip, a dropped optional key and a misspelled
+ * status against real oracle output rather than against a hand-typed guess, and it is the
+ * failure mode most likely to survive every unit test in {@link SolverTest}.
  */
 public class PlanFixtureTest {
 
@@ -173,6 +181,144 @@ public class PlanFixtureTest {
         }
     }
 
+    @Test
+    public void everyFixtureNamesTheSameOracle() throws IOException {
+        // Mirrors `tests/test_plan_fixtures.py:test_every_fixture_names_the_same_oracle`, and
+        // deliberately needs NO oracle, so it runs in CI. Two fixtures generated against
+        // different graphs would be internally consistent and jointly meaningless, and a
+        // half-finished regeneration is exactly how that happens. The gate below then rests on
+        // this: it loads ONE graph and refuses it against ONE recorded identity.
+        List<File> fixtures = planFixtures();
+        Assume.assumeFalse("no tests/fixtures/plan/plan-*.json yet", fixtures.isEmpty());
+        JsonObject identity = theOneOracleTheFixturesName(fixtures);
+        assertTrue("the oracle had no dimension_ores, so it predates #112/#117",
+                identity.get("dimension_ores").getAsLong() > 0);
+    }
+
+    // -- the refusal, proven WITHOUT the 121 MB oracle -------------------------------------
+
+    /**
+     * The refusal itself, exercised on a graph small enough to build here.
+     *
+     * WHY THIS EXISTS RATHER THAN "I RAN IT AGAINST THE WRONG ORACLE ONCE". The guard below
+     * only executes when someone sets `$RECIPEGRAPH_ORACLE`, which CI never does, so without
+     * these three it would be a guard whose failing path had been observed exactly once, by
+     * hand, by the person who wrote it -- the shape this repository keeps getting caught by.
+     * A `GraphBuilder` graph and a fabricated identity block reach every branch in
+     * milliseconds and run on every pull request.
+     */
+    @Test
+    public void aGraphWhoseCountsDisagreeWithTheFixturesIsRefused() throws IOException {
+        RecipeGraph graph = tinyGraph();
+        File file = tinyFile();
+        JsonObject identity = identityOf(graph, file);
+        identity.addProperty("recipes", identity.get("recipes").getAsLong() + 1);
+        try {
+            refuseAnOracleTheFixturesDoNotName(identity, graph, file);
+            fail("a graph with a different recipe count must be refused");
+        } catch (AssertionError expected) {
+            // The message has to name the FIELD and both numbers, because "wrong oracle" with
+            // no detail sends the reader to regenerate fixtures they may not need to.
+            assertTrue(expected.getMessage(), expected.getMessage().contains("recipes: "));
+            assertTrue(expected.getMessage(), expected.getMessage().contains("this graph has"));
+        }
+    }
+
+    @Test
+    public void aRebuiltOracleIsNotRefusedAndSaysSoInTheFailureMessage() throws IOException {
+        // Same graph, a sha and byte count from somewhere else: the path-dependent-rebuild
+        // case, which MUST still run the comparison. Refusing it would strand the gate on the
+        // other machine, and the caveat is what stops a red diff being read as a port bug.
+        RecipeGraph graph = tinyGraph();
+        File file = tinyFile();
+        JsonObject identity = identityOf(graph, file);
+        identity.addProperty("sha256", "00000000000000000000000000000000"
+                + "00000000000000000000000000000000");
+        identity.addProperty("bytes", file.length() + 10);
+
+        String caveat = refuseAnOracleTheFixturesDoNotName(identity, graph, file);
+        assertFalse("a rebuild must be reported, not swallowed", caveat.isEmpty());
+        assertTrue(caveat, caveat.contains("REBUILD"));
+        assertTrue("the caveat must carry both digests, or it cannot be checked",
+                caveat.contains("0000000000") && caveat.contains(sha256(file)));
+    }
+
+    @Test
+    public void anIdentityFieldThisRefusalDoesNotCheckIsItselfARefusal() throws IOException {
+        // `graph_identity` growing a field that nothing here compares is the `cost.fingerprint`
+        // defect exactly: a guard that enumerates, and is outgrown, and keeps passing.
+        RecipeGraph graph = tinyGraph();
+        File file = tinyFile();
+        JsonObject identity = identityOf(graph, file);
+        identity.addProperty("emc_values", 4321);
+        try {
+            refuseAnOracleTheFixturesDoNotName(identity, graph, file);
+            fail("a field the refusal does not check must fail rather than go unchecked");
+        } catch (AssertionError expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("emc_values"));
+        }
+    }
+
+    @Test
+    public void theMatchingCaseIsSilent() throws IOException {
+        // The control: without it the three above would all pass on a refusal that refused
+        // EVERYTHING, which is a guard that has stopped discriminating rather than one that
+        // works.
+        RecipeGraph graph = tinyGraph();
+        File file = tinyFile();
+        assertEquals("", refuseAnOracleTheFixturesDoNotName(identityOf(graph, file), graph,
+                file));
+    }
+
+    /** A graph with one of everything the identity block counts. */
+    private static RecipeGraph tinyGraph() {
+        GraphBuilder b = new GraphBuilder();
+        b.dumpSchema(5);
+        b.name("mod:out", "Out");
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("mod:in"));
+        b.endSlot();
+        b.output(b.key("mod:out"), 1);
+        b.endRecipe("r:1", "crafting_shaped", null, "jar_json", false, false);
+        b.beginOreGroup("ingotThing");
+        b.oreMember(b.key("mod:in"));
+        b.endOreGroup();
+        b.dimensionOre(b.key("mod:in"), 1, "The Nether");
+        return b.build();
+    }
+
+    /**
+     * A file for the digest to run over. CONTENT IRRELEVANT, LENGTH AND HASH NOT: the identity
+     * block records both, and {@link #identityOf} reads them off this rather than off a
+     * constant, so the matching case cannot pass by accident.
+     */
+    private static File tinyFile() throws IOException {
+        File file = File.createTempFile("plan-fixture-oracle", ".json");
+        file.deleteOnExit();
+        FileOutputStream out = new FileOutputStream(file);
+        try {
+            out.write("{\"not\": \"a real graph\"}".getBytes(StandardCharsets.UTF_8));
+        } finally {
+            out.close();
+        }
+        return file;
+    }
+
+    /** What `tools/make-java-fixtures.py:graph_identity` would write for this pair. */
+    private static JsonObject identityOf(RecipeGraph graph, File file) throws IOException {
+        JsonObject identity = new JsonObject();
+        identity.addProperty("sha256", sha256(file));
+        identity.addProperty("bytes", file.length());
+        identity.addProperty("dump_schema", graph.dumpSchema());
+        identity.addProperty("recipes", graph.recipes().count());
+        identity.addProperty("names", graph.namedKeyCount());
+        identity.addProperty("ore_members", graph.oreGroupCount());
+        identity.addProperty("multiblocks", graph.multiblocks().count());
+        identity.addProperty("dimension_ores", graph.dimensionOreCount());
+        return identity;
+    }
+
     // -- the golden gate ------------------------------------------------------------------
 
     /**
@@ -180,10 +326,14 @@ public class PlanFixtureTest {
      *
      * ORACLE-GATED, exactly as `tests/test_plan_fixtures.py` is and for the same reasons: the
      * graph is 121 MB, is not in git, and CI will never have it. Point
-     * `$RECIPEGRAPH_ORACLE` at it to run this. The fixtures record the sha256 of the graph
-     * they were generated against and this REFUSES a graph that does not match -- a plan
-     * compared against a different graph fails for reasons that have nothing to do with the
-     * port, and the natural response to that is to weaken the comparison.
+     * `$RECIPEGRAPH_ORACLE` at it to run this.
+     *
+     * AND IT REFUSES A GRAPH THE FIXTURES DO NOT NAME, which until #192 this javadoc claimed
+     * and the code did not do -- `sha256` was read into a local and used only inside a failure
+     * string, and nothing in `mod/src/main/java` computed a digest at all. See
+     * {@link #refuseAnOracleTheFixturesDoNotName} for what "match" means and why the sha alone
+     * is not it. A plan compared against a different graph fails for reasons that have nothing
+     * to do with the port, and the natural response to that is to weaken the comparison.
      *
      * Reports EVERY disagreeing fixture with its path, not just the first. Sixteen plans and
      * a single "expected ... but was ..." would mean sixteen runs to learn the shape of the
@@ -197,13 +347,17 @@ public class PlanFixtureTest {
         List<File> fixtures = planFixtures();
         Assume.assumeFalse("no plan fixtures", fixtures.isEmpty());
 
-        RecipeGraph graph = GraphJsonReader.read(new File(oracle));
+        File oracleFile = new File(oracle);
+        JsonObject identity = theOneOracleTheFixturesName(fixtures);
+        RecipeGraph graph = GraphJsonReader.read(oracleFile);
+        // BEFORE A SINGLE PLAN IS SOLVED, so a wrong oracle says "wrong oracle" rather than
+        // producing twenty structural diffs that read as a broken port.
+        String rebuilt = refuseAnOracleTheFixturesDoNotName(identity, graph, oracleFile);
         Map<String, CostTable> priced = new LinkedHashMap<String, CostTable>();
         List<String> failures = new ArrayList<String>();
 
         for (File fixture : fixtures) {
             JsonObject doc = read(fixture);
-            String want = doc.getAsJsonObject("graph").get("sha256").getAsString();
             JsonObject request = doc.getAsJsonObject("request");
 
             ScenarioInputs.Resolved resolved =
@@ -219,7 +373,7 @@ public class PlanFixtureTest {
             int target = graph.keyId(request.get("item").getAsString());
             if (target < 0) {
                 failures.add(fixture.getName() + ": the oracle graph has no key "
-                        + request.get("item").getAsString() + " (graph sha " + want + ")");
+                        + request.get("item").getAsString());
                 continue;
             }
             PlanResult plan = ScenarioInputs.solverFor(graph, resolved, costs, maxNodes)
@@ -232,8 +386,142 @@ public class PlanFixtureTest {
             }
         }
         assertTrue(failures.size() + " of " + fixtures.size()
-                + " fixtures disagree with the oracle:\n  "
+                + " fixtures disagree with the oracle:" + rebuilt + "\n  "
                 + join(failures, "\n  "), failures.isEmpty());
+    }
+
+    /**
+     * The one `graph` identity block every fixture records, which they must agree on.
+     *
+     * Compared as whole JSON objects rather than field by field, so a field ADDED to
+     * `graph_identity` is covered without anyone remembering to extend this.
+     */
+    private static JsonObject theOneOracleTheFixturesName(List<File> fixtures)
+            throws IOException {
+        JsonObject first = read(fixtures.get(0)).getAsJsonObject("graph");
+        for (File fixture : fixtures) {
+            assertEquals(fixture.getName() + " was generated against another graph than "
+                            + fixtures.get(0).getName(),
+                    first, read(fixture).getAsJsonObject("graph"));
+        }
+        return first;
+    }
+
+    /**
+     * Refuse an oracle the fixtures were not generated against, and return the caveat, if any,
+     * that a later failure has to be read with.
+     *
+     * WHAT "MATCH" MEANS, BECAUSE THE SHA ALONE IS THE WRONG TEST. `graph.instance_dir` is an
+     * absolute path recorded INSIDE the graph, so two builds from the identical preserved dump
+     * on machines whose instance lives at different paths differ by exactly the length of that
+     * string and hash differently -- measured, two oracles from `mc-recipe-dump.s5-run1` came
+     * out 121,448,519 and 121,448,529 bytes with byte-identical recipe counts. Refusing on the
+     * sha would therefore refuse a PERFECTLY GOOD oracle on the other machine and leave
+     * regenerating all 20 fixtures as the only way to run the gate at all, which is how a gate
+     * gets switched off.
+     *
+     * So the SEMANTIC identity is the refusal: `dump_schema` and the five counts, which is the
+     * tuple `graph_identity` records for exactly this reason and the one the skill says to
+     * compare when a hash moves. Any of those differing is a different graph and throws here.
+     * The sha and byte count are compared too and are a CAVEAT rather than a refusal: they are
+     * appended to the failure message of the comparison below, so the reader of a red gate is
+     * told the other possible cause at the moment it matters and is not asked to notice a
+     * warning that scrolled past twenty minutes earlier.
+     *
+     * The counts are checked on EVERY run, including the sha-matches fast path, on purpose. A
+     * fallback that only runs when something has already gone wrong is a fallback nobody has
+     * ever executed; this way a wrong accessor on the Java side is a red gate on the first run
+     * rather than a surprise years later. It costs one comparison against a loaded graph.
+     */
+    private static String refuseAnOracleTheFixturesDoNotName(JsonObject identity,
+                                                             RecipeGraph graph, File oracle)
+            throws IOException {
+        Map<String, Long> got = new LinkedHashMap<String, Long>();
+        got.put("dump_schema", (long) graph.dumpSchema());
+        got.put("recipes", (long) graph.recipes().count());
+        got.put("names", (long) graph.namedKeyCount());
+        got.put("ore_members", (long) graph.oreGroupCount());
+        got.put("multiblocks", (long) graph.multiblocks().count());
+        got.put("dimension_ores", (long) graph.dimensionOreCount());
+        // AND EVERY FIELD `graph_identity` WRITES IS CHECKED BY SOMETHING HERE. A guard that
+        // enumerates is a guard that can be outgrown: `cost.fingerprint` hashed every constant
+        // `_relax` used and none `_seed` used, and served a stale table as current for it. So a
+        // field added to `graph_identity` fails HERE, naming itself, rather than being silently
+        // unchecked -- which is the same class of defect as the missing comparison this method
+        // was written to fix.
+        Set<String> checked = new LinkedHashSet<String>(got.keySet());
+        checked.addAll(Arrays.asList("sha256", "bytes"));
+        // `entrySet()` and not `keySet()`: gson 2.8.0 is the version Minecraft 1.12.2 ships
+        // and its JsonObject has no keySet().
+        Set<String> unchecked = new TreeSet<String>();
+        for (Map.Entry<String, JsonElement> field : identity.entrySet()) {
+            unchecked.add(field.getKey());
+        }
+        unchecked.removeAll(checked);
+        assertTrue("`graph_identity` in tools/make-java-fixtures.py has grown " + unchecked
+                + ", which this refusal does not compare against the loaded graph. Add it to"
+                + " `got` above, or say here why it cannot be read off a RecipeGraph.",
+                unchecked.isEmpty());
+
+        List<String> wrong = new ArrayList<String>();
+        for (Map.Entry<String, Long> entry : got.entrySet()) {
+            long want = identity.get(entry.getKey()).getAsLong();
+            if (want != entry.getValue().longValue()) {
+                wrong.add(entry.getKey() + ": the fixtures were generated against " + want
+                        + ", this graph has " + entry.getValue());
+            }
+        }
+        assertTrue("$RECIPEGRAPH_ORACLE=" + oracle + " IS NOT THE GRAPH THE FIXTURES WERE"
+                + " GENERATED AGAINST, so comparing plans to them would fail for reasons that"
+                + " have nothing to do with the port:\n  " + join(wrong, "\n  ")
+                + "\n  Regenerate with tools/make-java-fixtures.py, or point"
+                + " $RECIPEGRAPH_ORACLE at the right graph.", wrong.isEmpty());
+
+        String wantSha = identity.get("sha256").getAsString();
+        String gotSha = sha256(oracle);
+        long wantBytes = identity.get("bytes").getAsLong();
+        if (wantSha.equals(gotSha) && wantBytes == oracle.length()) {
+            return "";
+        }
+        return "\n  NOTE: every count above matches, so this IS the same dump, but this"
+                + " oracle is a REBUILD of it: " + oracle.length() + " bytes / " + gotSha
+                + " against the fixtures' " + wantBytes + " / " + wantSha + ". That is"
+                + " expected when the graph was built on another machine, because"
+                + " `graph.instance_dir` is an absolute path inside the file. Rule out a"
+                + " genuine behaviour change before reading the diffs below as a port bug.";
+    }
+
+    /**
+     * The sha256 of a file, over the SAME BYTES `graph_identity` digests.
+     *
+     * `hashlib.sha256()` over the whole file in 1 MB blocks in
+     * `tools/make-java-fixtures.py:graph_identity`, so this is the plain file digest and NOT a
+     * digest over parsed content -- a guard computed over anything else would be a guard that
+     * fails for the wrong reason, which is worse than the missing one it replaced.
+     */
+    private static String sha256(File file) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("every JVM ships SHA-256", impossible);
+        }
+        FileInputStream in = new FileInputStream(file);
+        try {
+            byte[] block = new byte[1 << 20];
+            int read;
+            while ((read = in.read(block)) > 0) {
+                digest.update(block, 0, read);
+            }
+        } finally {
+            in.close();
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : digest.digest()) {
+            hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+            hex.append(Character.forDigit(b & 0xf, 16));
+        }
+        return hex.toString();
     }
 
     private static String join(List<String> parts, String separator) {
