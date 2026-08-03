@@ -262,7 +262,7 @@ public enum ScenarioSource {
      * planner used to restate all ten when building its document, with a test asserting the
      * two lists matched -- which catches the drift but only after someone has written it, and
      * says nothing about the field that was added to both and typed wrongly in one.
-     * `emptyDocument` now derives the document from these entries, so a new input is one line
+     * `liveDocument` now derives the document from these entries, so a new input is one line
      * here and correct everywhere.
      */
     public boolean isArray() {
@@ -285,34 +285,27 @@ public enum ScenarioSource {
     }
 
     /**
-     * A scenario document with every field present and empty.
+     * The scenario document: every field present, and every field an installed reader read
+     * filled in.
      *
-     * EVERY FIELD PRESENT, because the shape is the contract: `ScenarioInputs` treats an
-     * absent field and an empty one the same, but a fixture states all ten and a document
-     * that omitted some would be a different document to read even where it resolves the
-     * same. It is also what makes the in-game inputs comparable with a fixture by eye.
-     */
-    public static JsonObject emptyDocument() {
-        JsonObject out = new JsonObject();
-        for (ScenarioSource source : values()) {
-            out.add(source.field(), source.emptyForm());
-        }
-        return out;
-    }
-
-    /**
-     * The same document, with every field an installed reader read filled in.
-     *
-     * THIS IS WHAT THE GAME PLANS AGAINST -- see {@link PlannerService#liveScenario}. A source
-     * with no reader, or one that refused, contributes its empty form and a caveat, so the
-     * document is always the full shape and the difference between "empty" and "not read" is
-     * carried by {@link #missingNotes} rather than by a missing key.
+     * EVERY FIELD PRESENT EVEN WHEN EMPTY, because the shape is the contract. `ScenarioInputs`
+     * treats an absent field and an empty one the same, but a fixture states all ten and a
+     * document that omitted some would be a different document to read even where it resolves
+     * identically. It is also what makes the in-game inputs comparable with a fixture by eye.
+     * A source with no reader, or one that refused, contributes its empty form and a caveat,
+     * so "empty" and "not read" are told apart by {@link #missingNotes} rather than by a
+     * missing key.
      *
      * DERIVED FROM THE READERS RATHER THAN ASSEMBLED BY THE PLANNER. The planner used to add
      * the one field it could fill by name, which meant the second field to go live was a line
      * somebody had to remember to write -- and the failure when they did not was a plan
      * silently costed as though the player owned nothing, which is the exact bug #191 found on
      * `have`. Installing a reader is now the whole of wiring an input up.
+     *
+     * ONE FIELD IS STILL FILLED BY HAND AND IT IS `pins`. A reader's contents are dropped when
+     * its status is unavailable, deliberately, and pins made this session must survive a pin
+     * FILE that could not be written -- so {@link PlannerService#liveScenario} adds them after
+     * this and says why. DO NOT assume every value here came from a reader.
      */
     public static JsonObject liveDocument() {
         JsonObject out = new JsonObject();

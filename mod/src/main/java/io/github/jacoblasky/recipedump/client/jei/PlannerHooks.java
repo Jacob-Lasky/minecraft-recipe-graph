@@ -15,13 +15,20 @@ import net.minecraft.item.ItemStack;
  * into either is not something those APIs allow.
  *
  * ONE CLASS RATHER THAN A SETTER ON EACH, so that "what does the planner have to wire up" has
- * a single answer a reader can find. Both default to doing nothing, and doing nothing is a
- * correct and shippable state: JEI lays out exactly as it does today, and the keybind
- * resolves a target and discards it.
+ * a single answer a reader can find.
  *
- * NEITHER DEFAULT PRETENDS. An unwired area source reports no rectangles rather than a
- * guessed one, and an unwired target listener does not open a window it has no plan for --
- * the alternative in both cases is a feature that looks connected and is not.
+ * BOTH ARE INSTALLED IN THE SHIPPED MOD, and it is worth stating because for the whole of #19
+ * phase 4 only one was. `PlannerScreen` installs `PlannerAreaSource` on every panel it opens;
+ * `ClientProxy.init` installs `PlanTarget` beside the keybind registration. The defaults below
+ * are what a client sees before init and what a test sees, not what a player gets --
+ * `SeamInstallationTest` is what keeps that true, because nothing else notices when it stops
+ * being (#191).
+ *
+ * NEITHER DEFAULT PRETENDS, which is why they were survivable for as long as they shipped. An
+ * unwired area source reports no rectangles rather than a guessed one, and an unwired target
+ * listener does not open a window it has no plan for -- the alternative in both cases is a
+ * feature that looks connected and is not. It is also exactly why nobody noticed: a
+ * well-behaved no-op raises nothing.
  */
 public final class PlannerHooks {
 

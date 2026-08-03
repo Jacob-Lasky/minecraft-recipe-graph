@@ -146,12 +146,70 @@ public class SeamInstallationTest {
                 unwired.add(seam.label() + seam.descriptor);
             }
         }
+        // PRINTED ON SUCCESS, NOT ONLY ON FAILURE. A derived gate that says nothing when it
+        // passes cannot be told from one whose predicate has stopped matching -- the count in
+        // the log is what makes "it found six" checkable by a reader instead of a claim in a
+        // PR body. The floor assertion above catches the collapse to zero; this shows the
+        // drift from six to four, which no assertion can, because the right number is not
+        // knowable in advance.
+        System.out.println("seams found (" + scan.seams.size() + "), " + scan);
+        for (Seam seam : scan.seams.values()) {
+            System.out.println("  " + seam.label() + " <- "
+                    + (seam.callers.isEmpty() ? "NOTHING" : seam.callers.toString()));
+        }
         if (!unwired.isEmpty()) {
             fail("these seams exist, and nothing in the shipped mod installs one -- so the"
                  + " feature behind each is present, tested, and absent in the game:\n  "
                  + String.join("\n  ", unwired)
                  + "\n(install one from production, or delete the seam)");
         }
+    }
+
+    /**
+     * THE OTHER SHAPE OF THE SAME DEFECT: a proxy hook with an empty body and no override.
+     *
+     * `CommonProxy`'s hooks are empty deliberately -- a dedicated server has no screen to open
+     * and receives no snapshot -- which is exactly what makes an unimplemented one invisible.
+     * `applyStockSnapshot` was empty on both sides from the day the packet was written: the
+     * server read the grid, sent a megabyte of it, and every reply fell into the braces (#191).
+     * The scan above cannot see this, because an override is not a settable field.
+     *
+     * IF A HOOK IS EVER GENUINELY A NO-OP ON BOTH SIDES, this fails and should: overriding it
+     * with an empty body and a comment saying why is a cheap way to say so, and the comment is
+     * the thing that was missing.
+     */
+    @Test
+    public void everyEmptyProxyHookIsOverriddenByTheClientProxy() throws Exception {
+        byte[] common = ClassFiles.read(classFile("common/CommonProxy"));
+        byte[] client = ClassFiles.read(classFile("client/ClientProxy"));
+        Set<String> stubs = ClassFiles.emptyMethods(common);
+        Set<String> overridden = ClassFiles.emptyMethods(client);
+        Set<String> implemented = ClassFiles.declaredMethods(client);
+
+        // The population, before the property. A detector that found no empty methods would
+        // pass this test on any codebase forever, and one that called everything empty would
+        // pass it too once the overrides existed. Both directions are pinned.
+        assertTrue("CommonProxy's hooks are empty on purpose, so some must be found; got "
+                   + stubs, stubs.size() >= 3);
+        assertTrue("applyStockSnapshot's body on the common side is the empty one this whole"
+                   + " test is about; got " + stubs,
+                   stubs.contains("applyStockSnapshot(Lnet/minecraft/nbt/NBTTagCompound;)V"));
+        assertFalse("preInit registers a capability and loads the graph, so a detector that"
+                    + " calls it empty is matching nothing in particular",
+                    stubs.contains("preInit(Lnet/minecraftforge/fml/common/event/"
+                                   + "FMLPreInitializationEvent;)V"));
+
+        List<String> unimplemented = new ArrayList<String>();
+        for (String stub : stubs) {
+            if (!implemented.contains(stub)) {
+                unimplemented.add(stub);
+            } else if (overridden.contains(stub)) {
+                unimplemented.add(stub + " (overridden, but the override is empty too)");
+            }
+        }
+        assertEquals("CommonProxy hooks with an empty body that ClientProxy never fills, so"
+                     + " whatever the server sends lands in a pair of braces",
+                     Collections.emptyList(), unimplemented);
     }
 
     // -- teeth ---------------------------------------------------------------------------------

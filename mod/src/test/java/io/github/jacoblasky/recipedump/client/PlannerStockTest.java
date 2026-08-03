@@ -155,12 +155,26 @@ public class PlannerStockTest {
         // let it win and the one on screen lose.
         Ran abandoned = new Ran();
         Ran current = new Ran();
-        PlannerStock.hold(abandoned, true);
-        PlannerStock.hold(current, true);
+        assertTrue("the first question sends the ask", PlannerStock.hold(abandoned, true));
+        assertFalse("and the second must NOT send a second one -- the reply to the first is"
+                    + " already coming, and a read is a megabyte on the wire",
+                    PlannerStock.hold(current, true));
         PlannerStock.accept(
                 StockSnapshot.of(Collections.<String, Long>emptyMap()).serializeNBT());
         assertFalse(abandoned.ran);
         assertTrue(current.ran);
+    }
+
+    @Test
+    public void theAskGoesOutAgainOnceTheReplyHasLanded() {
+        // The other side of the no-second-ask rule: it must suppress a DUPLICATE ask, not
+        // every later one. A snapshot that has aged out is asked for again.
+        assertTrue(PlannerStock.hold(new Ran(), true));
+        PlannerStock.accept(
+                StockSnapshot.unavailable(StockSnapshot.Reason.NO_AE2).serializeNBT());
+        LiveStock.forget();
+        assertTrue("nothing is outstanding any more, so a new question asks",
+                   PlannerStock.hold(new Ran(), true));
     }
 
     @Test

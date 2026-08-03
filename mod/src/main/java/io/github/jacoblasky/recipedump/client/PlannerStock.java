@@ -117,13 +117,18 @@ public final class PlannerStock {
     }
 
     /**
-     * Decide whether `plan` waits. True when it is now waiting and a read must be asked for;
-     * false when it has already run.
+     * Decide whether `plan` waits. True when it is now waiting AND a read must be asked for;
+     * false when it has already run or when an ask is already out.
      *
      * SPLIT FROM THE ASK SO THE DECISION CAN BE EXERCISED WITHOUT A NETWORK.
      * {@link LiveStock#request} writes to the server channel, which needs a connection to
      * write to -- so a test that reached it could only ever cover the branch that does not.
      * Everything worth getting wrong is above this line.
+     *
+     * A SECOND QUESTION DOES NOT SEND A SECOND ASK. Replacing the waiting plan is right -- the
+     * player moved on -- but re-asking would put another megabyte of item list on the wire for
+     * a reply that is already coming, which is the cost this whole class is arranged to avoid.
+     * Safe to skip because a reply is guaranteed; see the class note.
      */
     static boolean hold(Runnable plan, boolean canAsk) {
         if (!canAsk || LiveStock.isFresh()) {
@@ -131,8 +136,9 @@ public final class PlannerStock {
             plan.run();
             return false;
         }
+        boolean alreadyAsked = waiting != null;
         waiting = plan;
-        return true;
+        return !alreadyAsked;
     }
 
     /**

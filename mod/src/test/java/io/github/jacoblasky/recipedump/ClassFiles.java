@@ -121,85 +121,176 @@ public final class ClassFiles {
      * dead code still counts. That is the safe direction for the only question asked of this:
      * a seam reported as installed when the call is unreachable is a false PASS this cannot
      * produce, because javac does not emit a `Methodref` for a call it did not compile.
+     */
+    public static Set<String> methodReferences(byte[] classFile) {
+        Parsed parsed = Parsed.of(classFile);
+        Set<String> out = new LinkedHashSet<String>();
+        for (int i = 1; i < parsed.refs.length; i++) {
+            if (parsed.refs[i] == null) {
+                continue;
+            }
+            String owner = parsed.utf8[parsed.classNameIndex[parsed.refs[i][0]]];
+            int[] signature = parsed.nameAndType[parsed.refs[i][1]];
+            out.add(owner + "." + parsed.utf8[signature[0]] + parsed.utf8[signature[1]]);
+        }
+        return out;
+    }
+
+    /** The `nameDescriptor` of every method this class DECLARES, inherited ones excluded. */
+    public static Set<String> declaredMethods(byte[] classFile) {
+        return Parsed.of(classFile).methods(false);
+    }
+
+    /**
+     * The same, narrowed to the ones whose body is a bare `return`.
+     *
+     * WHY EMPTINESS IS WORTH DETECTING. `CommonProxy`'s hooks are empty on purpose -- a
+     * dedicated server has no screen to open and no snapshot to receive -- which makes an
+     * empty body indistinguishable from a hook nobody got round to overriding. That is the
+     * shape `applyStockSnapshot` had from the day the packet was written: the reply arrived
+     * and fell into the braces, silently (#191).
+     *
+     * "BARE RETURN" IS THE WHOLE TEST, and it is exact rather than heuristic: a `void` method
+     * with no statements compiles to a one-byte Code attribute holding `return` (0xB1). A body
+     * that logs, assigns or calls anything is longer, so this cannot mistake a real
+     * implementation for a stub -- and a stub that got a comment is still one byte, which is
+     * the direction that matters.
+     */
+    public static Set<String> emptyMethods(byte[] classFile) {
+        return Parsed.of(classFile).methods(true);
+    }
+
+    /**
+     * A class file walked far enough to answer the questions this repository asks of one.
      *
      * PARSED BY HAND RATHER THAN WITH ASM. ASM is on the workspace classpath by accident of
      * Forge rather than by declaration, so depending on it here would make a test gate turn on
      * a transitive dependency nobody chose. The pool format is fixed by the JVM spec and this
-     * module compiles at Java 8, so the tag list below is complete for what javac can emit.
+     * module compiles at Java 8, so the tag list below is complete for what javac can emit --
+     * and an unknown tag throws rather than being skipped, because a wrong skip length
+     * desynchronises every later entry and the damage shows up as nonsense rather than as a
+     * failure.
      */
-    public static Set<String> methodReferences(byte[] classFile) {
-        int count = u2(classFile, 8);
-        String[] utf8 = new String[count];
-        int[][] refs = new int[count][];
-        int[] classNameIndex = new int[count];
-        int[][] nameAndType = new int[count][];
-        int at = 10;
-        for (int i = 1; i < count; i++) {
-            int tag = classFile[at] & 0xFF;
-            at++;
-            switch (tag) {
-                case 1: { // Utf8
-                    int length = u2(classFile, at);
-                    utf8[i] = new String(classFile, at + 2, length, StandardCharsets.UTF_8);
-                    at += 2 + length;
-                    break;
-                }
-                case 7: // Class
-                    classNameIndex[i] = u2(classFile, at);
-                    at += 2;
-                    break;
-                case 8: // String
-                case 16: // MethodType
-                    at += 2;
-                    break;
-                case 10: // Methodref
-                case 11: // InterfaceMethodref
-                    refs[i] = new int[] {u2(classFile, at), u2(classFile, at + 2)};
-                    at += 4;
-                    break;
-                case 9: // Fieldref
-                case 12: // NameAndType
-                case 17: // Dynamic
-                case 18: // InvokeDynamic
-                    if (tag == 12) {
-                        nameAndType[i] = new int[] {u2(classFile, at), u2(classFile, at + 2)};
+    private static final class Parsed {
+
+        private final byte[] bytes;
+        private final String[] utf8;
+        private final int[] classNameIndex;
+        private final int[][] refs;
+        private final int[][] nameAndType;
+        /** Offset of `access_flags`, which is the first thing after the pool. */
+        private final int afterPool;
+
+        private Parsed(byte[] bytes, int count) {
+            this.bytes = bytes;
+            this.utf8 = new String[count];
+            this.classNameIndex = new int[count];
+            this.refs = new int[count][];
+            this.nameAndType = new int[count][];
+            int at = 10;
+            for (int i = 1; i < count; i++) {
+                int tag = bytes[at] & 0xFF;
+                at++;
+                switch (tag) {
+                    case 1: { // Utf8
+                        int length = u2(bytes, at);
+                        utf8[i] = new String(bytes, at + 2, length, StandardCharsets.UTF_8);
+                        at += 2 + length;
+                        break;
                     }
-                    at += 4;
-                    break;
-                case 3: // Integer
-                case 4: // Float
-                    at += 4;
-                    break;
-                case 5: // Long
-                case 6: // Double
-                    at += 8;
-                    // A long or a double TAKES TWO POOL SLOTS. The JVM spec calls this a
-                    // historical mistake and it is still the format; skipping the second slot
-                    // is what keeps every later index aligned.
-                    i++;
-                    break;
-                case 15: // MethodHandle
-                    at += 3;
-                    break;
-                case 19: // Module
-                case 20: // Package
-                    at += 2;
-                    break;
-                default:
-                    throw new IllegalStateException("unknown constant pool tag " + tag
-                            + " at entry " + i);
+                    case 7: // Class
+                        classNameIndex[i] = u2(bytes, at);
+                        at += 2;
+                        break;
+                    case 8: // String
+                    case 16: // MethodType
+                    case 19: // Module
+                    case 20: // Package
+                        at += 2;
+                        break;
+                    case 15: // MethodHandle
+                        at += 3;
+                        break;
+                    case 10: // Methodref
+                    case 11: // InterfaceMethodref
+                        refs[i] = new int[] {u2(bytes, at), u2(bytes, at + 2)};
+                        at += 4;
+                        break;
+                    case 12: // NameAndType
+                        nameAndType[i] = new int[] {u2(bytes, at), u2(bytes, at + 2)};
+                        at += 4;
+                        break;
+                    case 3: // Integer
+                    case 4: // Float
+                    case 9: // Fieldref
+                    case 17: // Dynamic
+                    case 18: // InvokeDynamic
+                        at += 4;
+                        break;
+                    case 5: // Long
+                    case 6: // Double
+                        at += 8;
+                        // A long or a double TAKES TWO POOL SLOTS. The JVM spec calls this a
+                        // historical mistake and it is still the format; skipping the second
+                        // slot is what keeps every later index aligned.
+                        i++;
+                        break;
+                    default:
+                        throw new IllegalStateException("unknown constant pool tag " + tag
+                                + " at entry " + i);
+                }
             }
+            this.afterPool = at;
         }
-        Set<String> out = new LinkedHashSet<String>();
-        for (int i = 1; i < count; i++) {
-            if (refs[i] == null) {
-                continue;
+
+        static Parsed of(byte[] classFile) {
+            return new Parsed(classFile, u2(classFile, 8));
+        }
+
+        /** Declared methods as `nameDescriptor`; `onlyEmpty` keeps the bare-`return` ones. */
+        Set<String> methods(boolean onlyEmpty) {
+            int at = afterPool + 6; // access_flags, this_class, super_class
+            at += 2 + 2 * u2(bytes, at); // interfaces
+            at = members(at, false, null); // fields
+            Set<String> out = new LinkedHashSet<String>();
+            members(at, onlyEmpty, out);
+            return out;
+        }
+
+        /** Walk one member table. Returns the offset just past it. */
+        private int members(int at, boolean onlyEmpty, Set<String> into) {
+            int count = u2(bytes, at);
+            at += 2;
+            for (int i = 0; i < count; i++) {
+                at += 2; // access_flags
+                String signature = utf8[u2(bytes, at)] + utf8[u2(bytes, at + 2)];
+                at += 4;
+                int attributes = u2(bytes, at);
+                at += 2;
+                boolean empty = false;
+                for (int a = 0; a < attributes; a++) {
+                    String attribute = utf8[u2(bytes, at)];
+                    int length = readInt(bytes, at + 2);
+                    if ("Code".equals(attribute) && isBareReturn(at + 6)) {
+                        empty = true;
+                    }
+                    at += 6 + length;
+                }
+                if (into != null && (empty || !onlyEmpty)) {
+                    into.add(signature);
+                }
             }
-            String owner = utf8[classNameIndex[refs[i][0]]];
-            int[] signature = nameAndType[refs[i][1]];
-            out.add(owner + "." + utf8[signature[0]] + utf8[signature[1]]);
+            return at;
         }
-        return out;
+
+        /** A Code attribute holding exactly `return`. `at` is its `max_stack`. */
+        private boolean isBareReturn(int at) {
+            return readInt(bytes, at + 4) == 1 && (bytes[at + 8] & 0xFF) == 0xB1;
+        }
+    }
+
+    private static int readInt(byte[] bytes, int at) {
+        return (u2(bytes, at) << 16) | u2(bytes, at + 2);
     }
 
     private static int u2(byte[] bytes, int at) {
