@@ -542,7 +542,7 @@ class Solver:
                 self.tokens_needed[key] += remainder
                 return node
             node["status"] = STATUS_RAW
-            other = self.reachable_form(key)
+            other = self.g.reachable_form(key)
             if other:
                 # SAY WHAT WE CANNOT DO, rather than pricing it. #136
                 #
@@ -565,12 +565,7 @@ class Solver:
                 # tier of it is out of reach"; a processed FORM means "this shape of the
                 # material is not made at all, use the other one". Collapsing them into one
                 # sentence would make the second read as though levelling were involved.
-                node["note"] = (
-                    "no recipe reaches this state; the graph can only make %s"
-                    % self.g.bare_name(other)
-                    if base_key(key) != key else
-                    "nothing makes this form; the graph can only make %s"
-                    % self.g.bare_name(other))
+                node["note"] = self._unsourced_note(key, other)
             self.leaf_totals[key] += remainder
             return node
 
@@ -631,58 +626,21 @@ class Solver:
                 "every recipe you pinned for %s loops back on its own ingredients, so "
                 "the plan uses another route" % self.g.bare_name(key))
 
-    def reachable_form(self, key):
-        """The base item, when `key` is an NBT STATE of something the graph CAN make.
+    def _unsourced_note(self, key, other):
+        """Which of the three things the graph's `reachable_form` found, in actionable words.
 
-        None otherwise, which is the common case and the whole reason this is narrow.
-
-        WHY NOT "NOTHING PRODUCES IT", WHICH IS THE OBVIOUS RULE. Cobblestone has no producer
-        either. Marking every producerless leaf would badge most of a shopping list, and a
-        mark that fires on almost everything carries no information -- which is the failure
-        #136 measured for every rule keying on `producers == 0` alone.
-
-        WHY NOT `base_key(key) != key` ON ITS OWN. That matches 47,417 keys on the reference
-        graph, and the top of that list is every Forestry bee species -- `bee_drone_ge#...`
-        Forest Drone, consumed by 247 recipes. A Forest Drone with no producer is CORRECT and
-        unremarkable: you get one out of a hive. What makes the data-model tier different is
-        the second clause, that the graph demonstrably CAN make the plain item -- so the plan
-        is resting on a state it has no route to, and there is a specific other form to point
-        the reader at. Without something to name, the mark would just be "no recipe", which
-        the NEED badge already says.
-
-        A PLAIN KEY NOTHING MAKES IS NOW COVERED TOO, on the same terms and no looser. This
-        docstring used to say the Sednanite Nugget could not be badged because "there is no
-        other form to name" -- correct at the time, and #136's measurement supplied the
-        missing name. The pack registers `nuggetSednanite` and `ingotSednanite`, so Forge's
-        own convention says those are one material, and the ingot has 27 producers. There IS
-        a specific other form to point at, so the second clause is satisfied exactly as the
-        NBT case satisfies it.
-
-        It stays narrow for the same reason. Cobblestone is in no `<form><Material>` group
-        and is not badged. A mob drop is not badged. A material whose every form is
-        unobtainable is not badged, because then there is nothing to name and the mark
-        would collapse to "no recipe", which the NEED badge already says.
-
-        STILL DISPLAY-ONLY, and that is the whole bargain -- see the caller. Pricing an
-        unobtainable processed form was measured for #136 and produces a plan whose shopping
-        list contains the item being planned, which is worse than the bug. This says what
-        the tool does not know; it does not pretend to fix the routing.
+        THREE WORDINGS FOR THREE CLAIMS, and collapsing them would lose the action. A STATE
+        means "you have the item, this tier is out of reach"; a FORM means "this shape is
+        not made, use the other one"; a VARIANT means "the thing IS made, just carrying
+        NBT this row does not name" -- which is the one where the player's next move is to
+        go and look at the variant rather than to substitute anything.
         """
-        if self.g.real_producers(key):
-            return None
-        # A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is not evidence of
-        # anything. `Graph.producers` gathers `base:*` for a concrete meta and never the
-        # other way round, so `natura:sticks:*` comes back empty while `natura:sticks:0` is
-        # perfectly craftable. Measured: without this the first regeneration badged
-        # "nothing makes this form" on Maple Sticks and pointed the reader at Sawdust. The
-        # same inflation #136's own comment flags for `ore:` group keys, which are
-        # producerless for the same structural reason.
-        if split_key(key)[1] == "*":
-            return None
-        stem = base_key(key)
-        if stem != key and self.g.real_producers(stem):
-            return stem
-        return self.g.obtainable_sibling(key)
+        name = self.g.bare_name(other)
+        if base_key(key) != key:
+            return "no recipe reaches this state; the graph can only make %s" % name
+        if base_key(other) == key:
+            return "nothing makes this exact item; the graph makes %s" % name
+        return "nothing makes this form; the graph can only make %s" % name
 
     def _snapshot(self):
         """Everything a discarded branch must not leave behind.
@@ -769,12 +727,12 @@ class Solver:
         item -- and on infinite-source and token rows, each of which already carries its own
         and contradictory answer to "how do I get this".
 
-        Recomputed from `reachable_form` rather than copied off the tree node, so the list
-        and the tree cannot disagree about the same key. The tree is the diagnosis; this is
-        what gets acted on while gathering.
+        Recomputed from `Graph.reachable_form` rather than copied off the tree node, so the
+        list and the tree cannot disagree about the same key. The tree is the diagnosis; this
+        is what gets acted on while gathering.
         """
         row = self._entry(key, qty)
-        if self.reachable_form(key):
+        if self.g.reachable_form(key):
             row["unsourced"] = True
         return row
 

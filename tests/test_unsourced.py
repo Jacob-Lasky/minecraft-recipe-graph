@@ -16,20 +16,31 @@ WHAT THIS DOES **NOT** CLAIM, because #136 measured both alternatives and reject
   * It does not say "nothing produces this", which is true of cobblestone too and would badge
     most of a shopping list.
   * It does not change any price. The cost model's seeding of unreachable leaves at
-    BASE_RAW_COST is the underlying defect and it stays open on #136; a display badge that
+    BASE_RAW_COST is the underlying defect and it stays open on #176; a display badge that
     quietly moved a number would be the worst of both.
 
 It claims exactly one thing: THE GRAPH CAN MAKE THIS MATERIAL, BUT NOT IN THE SHAPE BEING
 ASKED FOR. That is checkable, non-obvious, and it is the sentence a reader needs in order to
 distrust the line.
 
-TWO WAYS A KEY CAN BE THE WRONG SHAPE, and both are covered:
+THREE WAYS A KEY CAN BE THE WRONG SHAPE, and all three are covered, one class each:
 
-  * an NBT STATE of a producible item -- a levelled data model, the case above;
+  * an NBT STATE of a producible item -- a levelled data model, the case above.
+    `TheReportedFailureTest`.
   * a PROCESSED FORM of a producible material -- the Sednanite Nugget that opened #136.
     `nuggetSednanite` and `ingotSednanite` are one material by Forge's own convention, and
-    the ingot has 27 producers, so there is a specific other form to name. That second
-    clause is what this file's `ScopeTest` refuses to badge without.
+    the ingot has 27 producers, so there is a specific other form to name. `ProcessedFormTest`.
+  * a BARE key made only under an NBT digest -- `animus:kama_bound`, #170.
+    `ProducedOnlyAsAVariantTest`.
+
+The second clause -- that there is a specific other form to NAME -- is what every one of
+them refuses to badge without, and `ScopeTest` is where that refusal is pinned.
+
+ONE PREDICATE ANSWERS ALL THREE, and it lives on `Graph`. It used to live on `Solver` with a
+hand-kept copy in `api._reachable_form`, and the second and third shapes above were each
+added to one spelling and not the other, so `/api/sweep` under-reported for both while a
+test comparing the two copies passed. `ThereIsOnlyOneSpellingOfThePredicateTest` is what
+replaced that comparison; see it for why the assertion is structural rather than behavioural.
 """
 
 import os
@@ -318,8 +329,88 @@ class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
         self.assertIsNone(split_ore_group("plankWood".replace("plank", "zzz")))
 
 
-if __name__ == "__main__":
-    unittest.main()
+class ProducedOnlyAsAVariantTest(unittest.TestCase):
+    """The bare key nothing makes, while an NBT variant of it IS made. #170's half.
+
+    Reported as "`animus:kama_bound` just says need, but the way it is made is via the
+    alchemy array". The recipe is in the dump and the graph has it -- filed under
+    `animus:kama_bound#fd1adc426e12`, while four recipes ask for the bare key. So the graph
+    knows a 53.35 route and prices the bare key at `BASE_RAW_COST`, which reads to a player
+    as "you already have this". 96 bare keys are in that state on the reference graph with
+    4,193 produced variants behind them, the worst underpriced by a factor of 7,277.
+
+    REPORTED, NOT REPRICED. Whether the solver should ROUTE a bare demand through a produced
+    variant is contested and stays open: #28 rejected exactly that widening in `producers`
+    and `test_machines.CatalystVariantTest.test_the_solver_is_not_widened` pins the refusal.
+    Nothing here touches `producers`, so that test still passes and this file makes no claim
+    about it.
+    """
+
+    BARE = "mod:kama_bound"
+    MADE = "mod:kama_bound#fd1adc426e12"
+
+    @staticmethod
+    def _graph(variant_producible=True):
+        g = Graph()
+        g.names = {ProducedOnlyAsAVariantTest.BARE: "Bound Khopesh",
+                   ProducedOnlyAsAVariantTest.MADE: "Bound Khopesh",
+                   "mod:reagent": "Binding Reagent", "mod:out": "Ritual Output"}
+        # Four recipes ask for the BARE key, as the report describes.
+        g.add(Recipe("use", "test", [("mod:out", 1)],
+                     [Ingredient([ProducedOnlyAsAVariantTest.BARE], 1)]))
+        if variant_producible:
+            g.add(Recipe("array", "bloodmagic:alchemyArray",
+                         [(ProducedOnlyAsAVariantTest.MADE, 1)],
+                         [Ingredient(["mod:reagent"], 1)]))
+        return g
+
+    def _leaf(self, g):
+        return Solver(g).solve("mod:out", 1)["tree"]["children"][0]
+
+    def test_the_bare_key_is_marked(self):
+        leaf = self._leaf(self._graph())
+        self.assertEqual(leaf["key"], self.BARE)
+        self.assertTrue(leaf.get("unsourced"))
+
+    def test_the_note_says_the_item_IS_made_rather_than_that_a_shape_is_missing(self):
+        # The player's next move here is to go and look at the variant, not to substitute a
+        # different form. Reusing the FORM wording would send them looking for another item.
+        note = self._leaf(self._graph())["note"]
+        self.assertIn("nothing makes this exact item", note)
+        self.assertIn("Bound Khopesh", note)
+        self.assertNotIn("this form", note)
+
+    def test_with_no_producible_variant_it_is_NOT_marked(self):
+        # Same refusal as the other two faces: nothing to name, so the mark would collapse
+        # to "no recipe", which the NEED badge already says.
+        self.assertFalse(self._leaf(self._graph(variant_producible=False)).get("unsourced"))
+
+    def test_the_solver_is_still_not_widened(self):
+        # THE #28 CONSTRAINT, asserted here too rather than only in test_machines, because
+        # this is the file that would be tempted to relax it. Marking must not reprice: the
+        # bare key still has no producers and the plan still says NEED.
+        g = self._graph()
+        self.assertEqual(g.real_producers(self.BARE), [])
+        leaf = self._leaf(g)
+        self.assertEqual(leaf["status"], "raw")
+
+    def test_the_choice_of_variant_is_deterministic(self):
+        # It reaches a plan tree and the fixtures freeze those for the Java port, so with two
+        # producible variants the answer cannot depend on dict order. `variant_index` is
+        # insertion-ordered off `by_output`, so the first the dump saw wins -- the same
+        # invariant `RecipeGraphOrderTest` pins for producer lists.
+        def built():
+            g = self._graph()
+            g.names["mod:kama_bound#aaaaaaaaaaaa"] = "Bound Khopesh"
+            g.add(Recipe("array2", "bloodmagic:alchemyArray",
+                         [("mod:kama_bound#aaaaaaaaaaaa", 1)],
+                         [Ingredient(["mod:reagent"], 1)]))
+            return g
+
+        first = self._leaf(built())["note"]
+        for _ in range(20):
+            self.assertEqual(first, self._leaf(built())["note"])
+        self.assertEqual(self.MADE, built().reachable_form(self.BARE))
 
 
 class ItMarksOnlyTheShoppingListTest(unittest.TestCase):
@@ -383,34 +474,49 @@ class RenderedSurfacesTest(unittest.TestCase):
         self.assertIn(present.UNSOURCED_BADGE, self._html().split('class="foot"')[1])
 
 
-class TheTwoPredicatesAgreeTest(unittest.TestCase):
-    """`api._reachable_form` is `Solver.reachable_form` without a Solver, and must stay so.
+class ThereIsOnlyOneSpellingOfThePredicateTest(unittest.TestCase):
+    """The badge, the sweep and the shopping list must be one predicate, not three copies.
 
-    `api` deliberately does not import `solve`: a sweep answers questions about a GRAPH,
-    while a Solver carries an inventory, pins and a cost table it has no business needing.
-    That leaves two spellings of one predicate, which is exactly how a page and a sweep come
-    to disagree about the same key -- so they are compared here rather than trusted.
+    THIS TEST REPLACES ONE THAT PASSED WHILE THE THING IT GUARDED WAS BROKEN, which is worth
+    stating because the replacement is a different KIND of assertion. `api` used to keep its
+    own `_reachable_form` on the reasoning that a sweep must not import `solve` -- a true
+    constraint with the wrong remedy -- and the old `TheTwoPredicatesAgreeTest` compared the
+    two spellings on five keys. Every one of those five was an NBT-variant shape, so when
+    #136 added the processed-form branch and #170 added the produced-variant branch to the
+    solver's copy and neither touched api's, the comparison kept passing and `/api/sweep`
+    silently under-reported `unsourced` on two of the four shapes.
+
+    A COMPARISON TEST CANNOT CATCH THAT, because the cases it compares are written by the
+    same person who forgot the branch. So the assertion is structural instead: there is ONE
+    definition, and everything reads it. Behaviour is covered by the four shape classes
+    above, which now exercise the single implementation by construction.
     """
 
-    def _cases(self):
-        g = _graph()
-        # A variant nothing reaches whose base IS made; the base itself; an ordinary leaf;
-        # a variant whose base is also unreachable; and a key that is simply produced.
-        g.names["mod:orphan#zz"] = "Orphan (odd)"
-        return g, [SUPERIOR, BASE, "minecraft:cobblestone", "mod:orphan#zz", GOO,
-                   "mod:blank"]
+    def test_the_predicate_is_defined_exactly_once_in_the_package(self):
+        import glob
+        import os
+        import re
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        found = []
+        for path in sorted(glob.glob(os.path.join(root, "*.py"))):
+            with open(path) as fh:
+                for line in fh:
+                    if re.match(r"\s*def _?reachable_form\b", line):
+                        found.append(os.path.basename(path))
+        self.assertEqual(["model.py"], found,
+                         "reachable_form must live on Graph and nowhere else; a second "
+                         "spelling is how #136 and #170 drifted out of /api/sweep")
 
-    def test_they_answer_identically_on_every_shape(self):
-        from recipegraph import api
-        g, keys = self._cases()
-        solver = Solver(g)
-        for key in keys:
-            self.assertEqual(bool(api._reachable_form(g, key)),
-                             bool(solver.reachable_form(key)), key)
+    def test_the_solver_reads_the_graph_rather_than_carrying_its_own(self):
+        # `Solver` deliberately has no `reachable_form` of its own. Asserted rather than
+        # assumed, because re-adding one is the exact regression this class exists for and
+        # it would not fail any behavioural test in this file.
+        self.assertFalse(hasattr(Solver(_graph()), "reachable_form"))
 
     def test_the_sweep_field_is_wired_to_it(self):
         from recipegraph import api
-        g, _keys = self._cases()
+        g = _graph()
 
         class _Ctx:
             graph = g
@@ -419,6 +525,28 @@ class TheTwoPredicatesAgreeTest(unittest.TestCase):
 
         self.assertTrue(api.FIELDS["unsourced"][0](_Ctx(), SUPERIOR))
         self.assertFalse(api.FIELDS["unsourced"][0](_Ctx(), "minecraft:cobblestone"))
+
+    def test_the_sweep_sees_the_branches_it_used_to_miss(self):
+        """The two shapes the old comparison test never covered, through `/api/sweep`'s field.
+
+        This is the regression in its reported form: before the unification the sweep
+        answered False on both of these while the plan badged them, so "how many keys would
+        the badge fire on" was answerable only by running the solver.
+        """
+        from recipegraph import api
+
+        def sweep(graph, key):
+            class _Ctx:
+                pass
+            ctx = _Ctx()
+            ctx.graph, ctx.have, ctx.costs = graph, {}, {}
+            return api.FIELDS["unsourced"][0](ctx, key)
+
+        # #136's processed form: a nugget nothing makes beside an ingot the graph does.
+        self.assertTrue(sweep(ProcessedFormTest._graph(), "mod:nugget"))
+        # #170's produced variant: a bare key nothing makes, made under an NBT digest.
+        self.assertTrue(sweep(ProducedOnlyAsAVariantTest._graph(),
+                              ProducedOnlyAsAVariantTest.BARE))
 
 
 class TheTreeRowDoesNotCrushItsIconTest(unittest.TestCase):
@@ -454,3 +582,7 @@ class TheTreeRowDoesNotCrushItsIconTest(unittest.TestCase):
         base = CSS[:CSS.rindex("@media")]
         self.assertIn("min-width:0", base)
         self.assertIn("overflow-wrap:anywhere", base)
+
+
+if __name__ == "__main__":
+    unittest.main()

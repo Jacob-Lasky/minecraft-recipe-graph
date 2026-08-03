@@ -592,7 +592,7 @@ class Graph:
 
         The fix for the PRICE is deliberately not here -- measured, it produces a worse plan
         than the bug (see #136), and it needs both cost audits. What this supports is the
-        REPORTING half: `Solver.reachable_form` uses it to name the form the graph CAN make,
+        REPORTING half: `reachable_form` below uses it to name the form the graph CAN make,
         so the shopping list says "the graph can only make Sednanite Ingot" instead of
         listing a nugget beside 128 Granite as though it were an ordinary thing to fetch.
 
@@ -640,6 +640,95 @@ class Graph:
                 if made and (best is None or (-made, member) < best[0]):
                     best = ((-made, member), member)
         return best[1] if best else None
+
+    def reachable_form(self, key):
+        """The other form of `key` the graph CAN make, when `key` itself is unsourced.
+
+        None otherwise, which is the common case and the whole reason this is narrow.
+
+        ON `Graph` AND NOWHERE ELSE, BECAUSE TWO SPELLINGS OF IT ALREADY DRIFTED. This lived
+        on `Solver` with a hand-kept copy in `api._reachable_form`, whose docstring said the
+        copy existed because "a sweep answers questions about a GRAPH, and a solver carries
+        an inventory, pins and a cost table it has no business needing" -- correct about the
+        dependency and wrong about the remedy, because the right conclusion from "this is a
+        question about a graph" is to put it ON the graph. #136 and #170 each added a branch
+        to the solver's copy and neither touched api's, so `/api/sweep` under-reported
+        `unsourced` on two of the four shapes below while a test named
+        `TheTwoPredicatesAgreeTest` passed -- it compared them on NBT variants only, which is
+        the one branch nobody changed. DO NOT reintroduce a second spelling; a caller that
+        must not import `solve` can import this.
+
+        WHY NOT "NOTHING PRODUCES IT", WHICH IS THE OBVIOUS RULE. Cobblestone has no producer
+        either. Marking every producerless leaf would badge most of a shopping list, and a
+        mark that fires on almost everything carries no information -- which is the failure
+        #136 measured for every rule keying on `producers == 0` alone.
+
+        WHY NOT `base_key(key) != key` ON ITS OWN. That matches 47,417 keys on the reference
+        graph, and the top of that list is every Forestry bee species -- `bee_drone_ge#...`
+        Forest Drone, consumed by 247 recipes. A Forest Drone with no producer is CORRECT and
+        unremarkable: you get one out of a hive. What makes the data-model tier different is
+        the second clause, that the graph demonstrably CAN make the plain item -- so the plan
+        is resting on a state it has no route to, and there is a specific other form to point
+        the reader at. Without something to name, the mark would just be "no recipe", which
+        the NEED badge already says.
+
+        A PLAIN KEY NOTHING MAKES IS COVERED TOO, on the same terms and no looser. The rule
+        used to stop at NBT states because "there is no other form to name" -- correct at the
+        time, and #136's measurement supplied the missing name. The pack registers
+        `nuggetSednanite` and `ingotSednanite`, so Forge's own convention says those are one
+        material, and the ingot has 27 producers. There IS a specific other form to point at,
+        so the second clause is satisfied exactly as the NBT case satisfies it.
+
+        It stays narrow for the same reason. Cobblestone is in no `<form><Material>` group
+        and is not badged. A mob drop is not badged. A material whose every form is
+        unobtainable is not badged, because then there is nothing to name and the mark would
+        collapse to "no recipe", which the NEED badge already says.
+
+        STILL DISPLAY-ONLY, and that is the whole bargain -- see the raw-leaf branch of
+        `Solver.expand`, which carries the reasoning. Pricing an unobtainable processed form
+        was measured for #136 and produces a plan whose shopping list contains the item being
+        planned, which is worse than the bug. This says what the tool does not know; it does
+        not pretend to fix the routing. The repricing question is #176.
+        """
+        if self.real_producers(key):
+            return None
+        # A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is not evidence of
+        # anything. `Graph.producers` gathers `base:*` for a concrete meta and never the
+        # other way round, so `natura:sticks:*` comes back empty while `natura:sticks:0` is
+        # perfectly craftable. Measured: without this the first regeneration badged
+        # "nothing makes this form" on Maple Sticks and pointed the reader at Sawdust. The
+        # same inflation `material_forms` flags for `ore:` group keys, which are
+        # producerless for the same structural reason.
+        if split_key(key)[1] == "*":
+            return None
+        stem = base_key(key)
+        if stem != key:
+            # A STATE of a producible item: #139's half.
+            return stem if self.real_producers(stem) else None
+        # A BARE key nothing makes, while a VARIANT of it IS made: #170's half, and the
+        # third face of one subsumption rule. `animus:kama_bound` is consumed by four
+        # recipes and produced by none, while the Alchemy Array makes
+        # `animus:kama_bound#fd1adc426e12` -- so the graph knows a 53.35 route and
+        # `cost._seed` still prices the bare key at BASE_RAW_COST and tells the player they
+        # already have it. 96 keys on the reference graph, 4,193 produced variants behind
+        # them, the worst underpriced by a factor of 7,277.
+        #
+        # REPORTED, NOT REPRICED, and that is the whole of what is settled. Whether the
+        # SOLVER should route a bare demand through a produced variant is contested: #28
+        # rejected exactly that in `producers` -- "the solver asks for exactly this stack"
+        # -- and `test_the_solver_is_not_widened` pins the refusal. #170 argues the
+        # opposite from 1.12 ingredient matching. The dump cannot settle it, because
+        # `stackKey` writes a digest whenever the REPRESENTATIVE stack carries NBT and
+        # never records whether the slot would have accepted one. So the routing question
+        # goes to Jake with #171's `raw` split; saying what the tool knows does not need it.
+        made = [v for v in self.variant_index.get(key, ())
+                if self.real_producers(v)]
+        if made:
+            # Deterministic and meaningful: `variant_index` is insertion-ordered off
+            # `by_output`, and the cheapest-to-name answer would need prices the reporter
+            # does not have. First produced variant, which is the first one the dump saw.
+            return made[0]
+        return self.obtainable_sibling(key)
 
     @property
     def labels(self):

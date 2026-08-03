@@ -743,9 +743,11 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
   from the AE2 network in the world save. Items marked <b>NEED</b> have no known
   recipe in the current graph &mdash; which may mean the recipe is a machine recipe
   not yet dumped, rather than that none exists. <b>no known source</b> is the stronger
-  case: the graph can make the plain item but nothing reaches the state asked for, which
-  usually means the pack gets there by a mechanic rather than a recipe (levelling, charging,
-  a kill counter) and no recipe dump can see it.</div>
+  case: nothing makes this exact key, and the graph does make another form of it &mdash;
+  another NBT state, another shape of the same material, or the same item under an NBT
+  tag this row does not name. The row says which. That usually means the pack gets there
+  by a mechanic rather than a recipe (levelling, charging, a kill counter) and no recipe
+  dump can see it.</div>
 </div>
 <script>%s</script>""" % (
         CSS, DIAGRAM_CSS,

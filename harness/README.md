@@ -23,7 +23,9 @@ artifact that `/sr-dev-review` Q5 demands for a UI claim comes from.
 ## How it works
 
 1. A container (`Dockerfile`) with JDK 25, Xvfb and mesa's llvmpipe. 1.12.2 is LWJGL 2 and
-   OpenGL 2.1, comfortably inside what a software rasteriser covers.
+   OpenGL 2.1, comfortably inside what a software rasteriser covers -- the context llvmpipe
+   actually hands it is `4.5 (Compatibility Profile) Mesa 26.0.3`, measured from the client's
+   own banner.
 2. `entrypoint.sh` starts Xvfb on `:99` and execs the command.
 3. RetroFuturaGradle's `runClient` launches a dev client against a **small mod set** --
    Forge, MixinBooter, ModularUI, HEI, AE2-UEL, JEC and this mod -- staged into `mod/run/mods`
@@ -134,13 +136,32 @@ be the rasteriser, or another container on the box. Quote a pass; do not quote a
   spec. If real input ever becomes necessary,
   [HeadlessMC](https://github.com/headlesshq/headlessmc) has a command channel with `gui` and
   `click` verbs and is the fallback #124 named; it was not needed, because llvmpipe carried
-  it.
+  it. Read "Why not HeadlessMC" below before reaching for it -- take its command channel, not
+  its LWJGL stubs.
 * **It is a dev client, so ModularUI's dev behaviour is on.** The widget-outline overlay is
   suppressed for the shot (see the table above), but `ModularUI.isDev` stays true and other
   dev-only branches inside ModularUI are not suppressed.
 * **llvmpipe is a software rasteriser.** Frame timings taken here are a floor, not a
   prediction of the desktop's -- see "Measuring frame cost" above for what that does and does
   not license, and for why the number to read is the draw rather than the period.
+
+## Why not HeadlessMC
+
+#124 named [HeadlessMC](https://github.com/headlesshq/headlessmc) as the fallback if llvmpipe
+failed. It did not fail, and the reason to keep it that way is sharper than "we did not need
+to": **HeadlessMC goes headless by patching LWJGL so every function returns a stub**, and a
+stubbed GL renders nothing. Every screenshot in this project, and #36's icon atlas, come out
+of a real render pass. Swapping in the stubs would produce blank output with no error, which
+is the worst failure shape available.
+
+DO NOT reach for HeadlessMC's LWJGL patching to "simplify" this container away. Its own docs
+agree: they say you can "achieve headless mode without patching lwjgl by running headlessmc
+with a virtual framebuffer like Xvfb", which is exactly what this Dockerfile is.
+
+The half of HeadlessMC that *is* still interesting is launching a **production** instance,
+which RetroFuturaGradle's dev-workspace `runClient` cannot do -- see #146, where the answer is
+that we want a launch command rather than a launcher, because this pack runs on Cleanroom and
+HeadlessMC's loader list is Fabric, Forge and NeoForge.
 
 ## Traps worth knowing before you change this
 
