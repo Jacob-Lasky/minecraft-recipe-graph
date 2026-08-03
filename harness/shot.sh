@@ -36,6 +36,12 @@ OUT_NAME="${2:-$(printf '%s' "$SCREEN" | tr ':' '-')}"
 if [ "$#" -gt 0 ]; then shift; fi
 if [ "$#" -gt 0 ]; then shift; fi
 
+# The container gate, so this counts against the same one-at-a-time budget as a build or a
+# check: a client container is the HEAVIEST of the three, and a gate two of the three runners
+# take is an unenforced rule wearing a lock. Sourced by path because this script does not cd to
+# the repository root.
+. "$(dirname "$0")/../tools/gate.sh"
+
 HOST_CODING="${HOST_CODING:-/mnt/user/misc/coding}"
 REPO_NAME="${REPO_NAME:-$(basename "$(cd "$(dirname "$0")/.." && pwd)")}"
 HOST_REPO="${HOST_REPO:-$HOST_CODING/$REPO_NAME}"
@@ -121,7 +127,7 @@ set +e
 # mount, but the Java test suite would not: DigestFixtureTest reads
 # tests/fixtures/nbt_digest.json from above `mod/` and fails with a bare IOException that
 # names nothing. Keep the mount the same shape as the one the skill documents for `build`.
-docker run --rm \
+gated docker run --rm \
     --user 99:100 \
     --memory="$MEMORY" --memory-swap="$MEMORY" \
     -v "$HOST_REPO:/repo" \
