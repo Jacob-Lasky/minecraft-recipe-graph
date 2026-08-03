@@ -22,7 +22,7 @@ import org.junit.Test;
  *
  * WHAT THIS IS FOR, given that the PR also carries screenshots: a screenshot costs about two
  * minutes and shows one plan. This runs every fixture in seconds and can assert things a
- * picture cannot -- that no row overlaps the next across 347 of them, that nothing overflows
+ * picture cannot -- that no row overlaps the next across 388 of them, that nothing overflows
  * the panel, that the deepest chain in the pack still leaves room for a label. Screenshots
  * answer "does it look right"; this answers "is it right", and it is the one a future change
  * gets immediately.
@@ -109,11 +109,12 @@ public class PlannerLayoutTest {
 
     @Test
     public void aThreeHundredNodeTreeStillFitsInTheViewportAndOverflowsIt() {
-        // The hard case the scroll area exists for: 347 nodes in a 400x220 panel.
+        // The hard case the scroll area exists for: 388 nodes in a 400x220 panel, 347
+        // before #172 reordered the cycle term.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(347, tree.getChildren().size());
+        assertEquals(388, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
@@ -303,8 +304,9 @@ public class PlannerLayoutTest {
      *
      * The assertion that was missing. `everyFixtureLaysOutWithEveryWidgetGettingARealBox`
      * asserts a widget HAS a box; it says nothing about whether the box is on the screen. The
-     * TODO panel sized itself to its contents, and `plan-truncated`'s 20-row shopping list
-     * made it 23 rows tall -- a panel running off the top and bottom of a 240-pixel screen,
+     * TODO panel sized itself to its contents, and `plan-truncated`'s shopping list (20 rows
+     * then, 19 since #172) made it 23 rows tall -- a panel running off the top and bottom of
+     * a 240-pixel screen,
      * which only the screenshot showed. A panel that does not fit is clipped, and Minecraft
      * clips silently.
      */
@@ -339,11 +341,15 @@ public class PlannerLayoutTest {
 
     @Test
     public void aTodoListLongerThanTheScreenScrollsRatherThanGrowing() {
-        // `plan-truncated` is the fixture with a 20-row shopping list, which is what made the
-        // panel taller than the screen before it scrolled.
+        // `plan-truncated` is the fixture with the long shopping list -- 19 rows, 20 before
+        // #172 -- which is what made the panel taller than the screen before it scrolled.
+        // The floor is a FIXTURE-SELECTION check and nothing more: the assertion that the
+        // list really overflows its cap is the one below, and it measures rather than
+        // assumes. Kept anyway, so that a fixture quietly becoming short fails HERE with a
+        // clear reason instead of failing there with a confusing one.
         PlanView plan = PlanFixtures.load("plan-truncated");
         assertTrue("the fixture should have a long shopping list",
-                   plan.shoppingList().size() >= 20);
+                   plan.shoppingList().size() >= 15);
         ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook());
         HeadlessLayout.layOut(panel);
         ListWidget<?, ?> list = findList(panel);
@@ -514,8 +520,8 @@ public class PlannerLayoutTest {
     @Test
     public void aPopulatedTodoPanelIsTallerThanAnEmptyOne() {
         // BELOW the cap, which is where the panel still sizes to its contents.
-        // `plan-in-stock` has an empty shopping list; `plan-truncated` has twenty rows and is
-        // already at the cap either way, so it would compare two identical heights and pass
+        // `plan-in-stock` has an empty shopping list; `plan-truncated` has nineteen rows and
+        // is already at the cap either way, so it would compare two identical heights and pass
         // for the wrong reason. `aTodoListLongerThanTheScreenScrollsRatherThanGrowing` covers
         // the other side.
         PlanView plan = PlanFixtures.load("plan-in-stock");
