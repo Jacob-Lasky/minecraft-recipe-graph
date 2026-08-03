@@ -62,6 +62,7 @@ public final class PlannerService {
     private volatile String detail = "";
     private volatile String targetKey = "";
     private volatile long targetQty;
+    private volatile long generation;
 
     private PlannerService() {
     }
@@ -72,6 +73,26 @@ public final class PlannerService {
 
     public State state() {
         return state;
+    }
+
+    /**
+     * How many times this service has had something new to say. Strictly increasing.
+     *
+     * A COUNTER RATHER THAN A LISTENER, because the one subscriber is an open GUI and the
+     * publisher is a worker thread. A callback would run the panel rebuild on that thread,
+     * off the client thread, which in 1.12.2 is the classic way to get a
+     * ConcurrentModificationException out of a GUI and blame the GUI. A counter lets the
+     * screen ask once per tick, on the thread that is allowed to redraw, and costs a volatile
+     * read.
+     *
+     * BUMPED ON EVERY TRANSITION, not only on a finished plan. "Planning 64x borax" is a
+     * different thing to draw than the previous plan's tree, and a window that kept showing
+     * the old answer through a re-solve would be showing a route the player has just
+     * overridden. It is bumped LAST in each case, after the state it describes, so a reader
+     * that sees a new number sees everything behind it.
+     */
+    public long generation() {
+        return generation;
     }
 
     public PlanResult result() {
@@ -134,7 +155,15 @@ public final class PlannerService {
         // new input cannot be declared in one place and forgotten in the other -- which was
         // the shape of this code until the review, with a test to catch the drift rather than
         // a structure that prevented it.
-        return ScenarioSource.emptyDocument();
+        JsonObject document = ScenarioSource.emptyDocument();
+        // THE ONE FIELD THE GAME ACTUALLY FILLS SO FAR. `emptyDocument` gives every field its
+        // empty form, which for `pins` was the claim "this player has chosen nothing" -- and
+        // that claim was true only for as long as there was no way to choose. The recipe
+        // picker writes to `PinStore`; leaving this line out would make the picker a control
+        // that saves a file nothing reads, which is the worst of the three possible states
+        // because it looks like it worked.
+        document.add(ScenarioSource.PINS.field(), PinStore.get().document());
+        return document;
     }
 
     /**
@@ -153,11 +182,13 @@ public final class PlannerService {
         if (graph == null) {
             state = State.FAILED;
             detail = graphs.describe();
+            generation++;
             return false;
         }
         if (graph.keyId(key) < 0) {
             state = State.FAILED;
             detail = "no such item in the graph: " + key;
+            generation++;
             return false;
         }
         targetKey = key;
@@ -166,6 +197,7 @@ public final class PlannerService {
         resultJson = null;
         detail = "";
         state = State.PLANNING;
+        generation++;
         Thread worker = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -176,6 +208,24 @@ public final class PlannerService {
         worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
         return true;
+    }
+
+    /**
+     * Ask the same question again, because an INPUT changed rather than the target.
+     *
+     * The caller is the recipe picker: a pin does not change what the player wants, it
+     * changes which route is allowed to it, and re-deriving the target from the plan book
+     * would get it wrong the moment the book's first entry stops being what is on screen.
+     *
+     * Returns false when there is nothing to repeat or a run is already going, which is the
+     * same refusal {@link #plan} makes and for the same reason.
+     */
+    public synchronized boolean replan() {
+        String key = targetKey;
+        if (key.isEmpty()) {
+            return false;
+        }
+        return plan(key, Math.max(1L, targetQty), Solver.DEFAULT_MAX_NODES);
     }
 
     private void runPlan(RecipeGraph graph, String key, long qty, int maxNodes) {
@@ -191,6 +241,7 @@ public final class PlannerService {
             result = plan;
             resultJson = json;
             state = State.DONE;
+            generation++;
         } catch (RuntimeException e) {
             fail(e);
         } catch (OutOfMemoryError e) {
@@ -204,6 +255,7 @@ public final class PlannerService {
         detail = "planning failed: " + e.getClass().getSimpleName()
                 + (e.getMessage() == null ? "" : ": " + e.getMessage());
         state = State.FAILED;
+        generation++;
     }
 
     private CostTable costsFor(RecipeGraph graph, ScenarioInputs.Resolved resolved) {
@@ -251,6 +303,7 @@ public final class PlannerService {
         detail = "";
         targetKey = "";
         targetQty = 0L;
+        generation++;
         synchronized (priced) {
             priced.clear();
         }

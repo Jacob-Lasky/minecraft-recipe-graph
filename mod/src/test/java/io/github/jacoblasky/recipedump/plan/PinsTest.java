@@ -3,6 +3,7 @@ package io.github.jacoblasky.recipedump.plan;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -12,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import com.google.gson.JsonObject;
 
 import org.junit.Test;
 
@@ -377,6 +380,63 @@ public class PinsTest {
         assertContains(source, "EXACT = \"" + Pins.EXACT + "\"");
         assertContains(source, "CATEGORY = \"" + Pins.CATEGORY + "\"");
         assertContains(source, "DEAD = \"" + Pins.DEAD + "\"");
+    }
+
+    /**
+     * The four field names of the stored form, against the Python that writes the same file.
+     *
+     * A DIFFERENT CONTRACT FROM THE SEPARATORS ABOVE, and a quieter one. A separator that
+     * drifted changes every fingerprint and every pin lapses loudly enough to notice. A field
+     * name that drifted makes one side write `"fp"` where the other reads `"fingerprint"`,
+     * and the reader skips the entry -- so the player's choices simply stop applying, with no
+     * error anywhere and a picker that still looks right. `pins.save` and `pins.load` spell
+     * all four; so do {@link Pins#toJson} and {@link Pins#fromJson}.
+     */
+    @Test
+    public void pinsPyStillSpellsTheStoredFieldsThisPortReadsAndWrites() throws IOException {
+        String source = readPinsPy();
+        // `pins.load` reads them off the document, so the names appear as literals there.
+        assertContains(source, "doc.get(\"pins\")");
+        assertContains(source, "pin.get(\"fingerprint\")");
+        assertContains(source, "pin.get(\"category\")");
+        assertContains(source, "pin.get(\"label\")");
+        // And this side must be spelling the same four, not merely have a constant each.
+        JsonObject written = Pins.toJson(java.util.Collections.singletonMap(
+                "mod:plate", new Pins.Pin("abc", "cat", "a label")));
+        JsonObject one = written.getAsJsonObject("mod:plate");
+        assertEquals("abc", one.get("fingerprint").getAsString());
+        assertEquals("cat", one.get("category").getAsString());
+        assertEquals("a label", one.get("label").getAsString());
+    }
+
+    /**
+     * {@link Pins#fromJson} is the one reader of the stored shape, and it tolerates rubbish.
+     *
+     * `ScenarioInputs.resolvePins` used to parse this shape a second time and had drifted: it
+     * called `getAsJsonObject()` with no guard, so a hand-edited file whose entry is a string
+     * threw an IllegalStateException from inside a plan, while `Pins.read` reading the same
+     * file skipped it. One shape, one reader, and this is the case that told them apart.
+     */
+    @Test
+    public void aPinEntryThatIsNotAnObjectIsSkippedRatherThanThrown() {
+        JsonObject stored = new JsonObject();
+        stored.addProperty("mod:plate", "somebody edited this by hand");
+        JsonObject good = new JsonObject();
+        good.addProperty("fingerprint", "abc");
+        stored.add("mod:gear", good);
+
+        Map<String, Pins.Pin> read = Pins.fromJson(stored);
+        assertEquals(1, read.size());
+        assertEquals("abc", read.get("mod:gear").fingerprint);
+        // The whole reason it matters: a plan built on this document must not throw.
+        assertNotNull(ScenarioInputs.resolve(ironBlockGraph(), scenarioWith(stored)));
+    }
+
+    /** The live scenario document's shape, with `pins` set to `stored`. */
+    private static JsonObject scenarioWith(JsonObject stored) {
+        JsonObject scenario = new JsonObject();
+        scenario.add("pins", stored);
+        return scenario;
     }
 
     // -- helpers ---------------------------------------------------------------------

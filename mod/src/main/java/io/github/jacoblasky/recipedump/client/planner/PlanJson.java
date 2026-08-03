@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -26,8 +27,8 @@ import com.google.gson.JsonParser;
  * hand, and it is already checked in.
  *
  * IT READS A SUBSET OF THE RESULT AND IGNORES THE REST, on purpose. `target`, `qty`, `tree`,
- * `truncated`, `exhausted`, `nodes`, `max_nodes`, `shopping_list` and `machines_to_build` are
- * what the panel draws; `work`, `work_budget`, `pins_overruled`, `used_from_stock`,
+ * `truncated`, `exhausted`, `nodes`, `max_nodes`, `shopping_list`, `machines_to_build` and
+ * `pins_overruled` are what the panel draws; `work`, `work_budget`, `used_from_stock`,
  * `from_emc`, `from_sources` and `tokens_needed` are read past without complaint. An unknown
  * field is not an error -- the solver is free to add one -- and a panel that refused to render
  * a plan because it carried a field nobody draws would be the worse failure.
@@ -92,12 +93,24 @@ public final class PlanJson {
                                                      string(o, "why")));
             }
         }
+        // SORTED BY THE MESSAGE, matching `render.py`'s warnbar and `cli.cmd_plan`, so a plan
+        // reads the same way in game as it does in the browser and the terminal.
+        List<String> overruled = new ArrayList<String>();
+        if (result.has("pins_overruled") && result.get("pins_overruled").isJsonObject()) {
+            for (Map.Entry<String, JsonElement> e
+                    : result.getAsJsonObject("pins_overruled").entrySet()) {
+                if (e.getValue().isJsonPrimitive()) {
+                    overruled.add(e.getValue().getAsString());
+                }
+            }
+        }
+        Collections.sort(overruled);
         return new PlanView(string(result, "target"), string(result, "target_name"),
                             number(result, "qty", 1L), readNode(treeJson),
                             bool(result, "truncated"), bool(result, "exhausted"),
                             (int) number(result, "nodes", 0L),
                             (int) number(result, "max_nodes", 0L),
-                            shopping, machines);
+                            shopping, machines, overruled);
     }
 
     /**

@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Pins;
 
 import java.util.List;
 
@@ -87,10 +88,63 @@ public final class PlannerWidgets {
      * cut "Choose another recipe (172)" and the picker cut its own explanation.
      */
     public static final int MENU_WIDTH = 200;
-    public static final int PICKER_WIDTH = 330;
+    /**
+     * 400, WIDENED FROM 330 BY A SCREENSHOT. At 330 the picker for `minecraft:iron_ingot`
+     * -- 172 candidates, the worst case in the fixture set -- cut the category off most of
+     * its rows, which is the one column that tells them apart. 400 is the main panel's width
+     * and still fits the 427-pixel smallest screen.
+     */
+    public static final int PICKER_WIDTH = 400;
+
+    /**
+     * The state column in the recipe picker, wide enough for every word it can hold.
+     *
+     * Derived from {@link #choiceState} rather than measured by eye; see
+     * {@link #widestChoiceState}.
+     */
+    public static final int CHOICE_STATE = widestChoiceState();
+
+    /**
+     * The tallest the picker's list may get before it scrolls.
+     *
+     * {@link RecipeChoices#MAX_SHOWN} is 24 and a row is 11 pixels, so an uncapped list is
+     * 264 -- taller than the 240-pixel screen the whole package is sized for, before the
+     * heading and the two footer lines. The same failure the TODO panel had, found the same
+     * way, so it is capped the same way rather than waiting to be photographed again.
+     */
+    public static final int PICKER_MAX_LIST_HEIGHT = 154;
+
+    /**
+     * The most of a category name the picker will show, in characters.
+     *
+     * A CAP AND NOT A FIXED WIDTH, because pack categories run from `smelting` to
+     * `modularmachinery.recipes.ender_stone` and a column sized for the longest would spend
+     * 36 characters on every picker to serve one. Sized to the longest actually shown; see
+     * {@link #categoryWidth}.
+     */
+    public static final int MAX_CATEGORY_CHARS = 24;
 
     private PlannerWidgets() {
     }
+
+    /**
+     * How many warning lines the planner panel will show before it summarises the rest.
+     *
+     * A CAP BECAUSE THE TREE PAYS FOR THEM. There is one warning per pin the solver could not
+     * honour and a player has as many of those as they made choices, so an uncapped list eats
+     * the panel from the top and eventually leaves the tree no height at all -- and a
+     * ListWidget sized to nothing is a plan that silently does not render. What is left out
+     * is counted rather than dropped, for the reason the picker's cap is.
+     */
+    public static final int MAX_WARNINGS = 3;
+
+    /**
+     * How many lines the "planned without" caveat may wrap over.
+     *
+     * Two fits today's five unread inputs at 64 characters a line with room to spare; three
+     * leaves headroom for the ones Phase 5 has not turned live yet without the tree noticing.
+     */
+    public static final int MAX_CAVEAT_LINES = 3;
 
     /**
      * The narrowest label worth drawing, in pixels: eight characters.
@@ -206,10 +260,13 @@ public final class PlannerWidgets {
         body.child(heading(NodeRowText.heading(plan), CONTENT_WIDTH).pos(0, y));
         y += LINE + 1;
 
-        String warning = NodeRowText.truncationWarning(plan);
-        if (!warning.isEmpty()) {
-            // RED, and above the tree rather than under it. A truncated plan is shaped like a
-            // complete one, so a reader who has to scroll to find out has already been misled.
+        // RED, AND ABOVE THE TREE rather than under it. Both of these are reasons the tree
+        // below is not what it appears to be -- a truncated plan is shaped like a complete
+        // one, and an overruled pin produces the route the player just rejected -- so a
+        // reader who has to scroll to find out has already been misled. `render.py` puts the
+        // same two in one warnbar, in this order, and `PlanView.pinsOverruled` says why the
+        // second of them went unsaid in game until a screenshot caught it.
+        for (String warning : warnings(plan)) {
             body.child(line(warning, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y));
             y += LINE;
         }
@@ -220,21 +277,55 @@ public final class PlannerWidgets {
         // fetch iron they are standing beside. Folding it in next to "15 nodes" would read as
         // another count. See `common.ScenarioSource`.
         //
+        // WRAPPED RATHER THAN CUT, which is the one place in this class that is true. The
+        // caveat is a LIST that grows with the number of unread inputs -- five of them at the
+        // time of writing, 74 characters, and a 64-character line -- so `fit` was dropping
+        // `emc_knowledge` off the end of the sentence whose entire job is to be complete.
+        // A truncated label is a name you can still guess at; a truncated list of what the
+        // planner could not see is a shorter, wrong list.
+        //
         // RESERVED BEFORE THE TREE IS SIZED, not appended after. The tree takes whatever is
         // left, so a line added below it without taking its height out first is drawn past
         // the bottom of the panel -- ModularUI neither clamps nor clips a child (#125).
-        String caveat = ScenarioSource.summary();
-        int footerLines = caveat.isEmpty() ? 1 : 2;
+        List<String> caveat = NodeRowText.wrap(ScenarioSource.summary(), CONTENT_WIDTH,
+                                               MAX_CAVEAT_LINES);
+        int footerLines = 1 + caveat.size();
         int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE * footerLines - 2;
         body.child(tree(plan, CONTENT_WIDTH, treeHeight, actions).pos(0, y));
         y += treeHeight + 2;
         body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
-        if (!caveat.isEmpty()) {
-            body.child(line(caveat, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y + LINE));
+        for (String caveatLine : caveat) {
+            y += LINE;
+            body.child(line(caveatLine, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y));
         }
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
                 .child(body);
+    }
+
+    /**
+     * Every reason the tree below should not be taken at face value, in `render.py`'s order.
+     *
+     * NOT CAPPED, deliberately, unlike the picker's list. There is one entry per pin the
+     * solver could not honour and a player has as many of those as they made choices -- but
+     * dropping one means a click that appears to have worked and did not, which is the whole
+     * failure this line exists to report. The panel reserves room for what this returns; see
+     * {@link #plannerPanel}.
+     */
+    static List<String> warnings(PlanView plan) {
+        List<String> all = new java.util.ArrayList<String>();
+        String truncation = NodeRowText.truncationWarning(plan);
+        if (!truncation.isEmpty()) {
+            all.add(truncation);
+        }
+        all.addAll(plan.pinsOverruled());
+        if (all.size() <= MAX_WARNINGS) {
+            return all;
+        }
+        List<String> out = new java.util.ArrayList<String>(all.subList(0, MAX_WARNINGS - 1));
+        out.add("+" + (all.size() - (MAX_WARNINGS - 1))
+                + " more recipe choice(s) could not be used");
+        return out;
     }
 
     /**
@@ -452,40 +543,178 @@ public final class PlannerWidgets {
     }
 
     /**
-     * The recipe picker: every recipe that makes this node's key.
+     * The recipe picker: every recipe that makes this node's key, and clicking one takes it.
      *
-     * `alternatives` is a COUNT, not a list -- the plan shape carries how many there are and
-     * which one was taken, not their contents, because the tree would be enormous if it
-     * inlined every candidate. So the picker lists what it can say truthfully today: the
-     * chosen recipe and its category, and how many others there are. Filling the rest needs
-     * the graph, which arrives with the Java solver in #141.
+     * `alternatives` on the node is a COUNT, not a list -- the plan shape carries how many
+     * candidates there are and which one was taken, not their contents, because a tree that
+     * inlined every candidate would be enormous. So the list comes from {@link RecipeChoices},
+     * which asks the graph once when the picker opens. This method still takes only data:
+     * nothing here touches a graph, which is what keeps the layout assertions windowless.
+     *
+     * A ROW IS A COMMITMENT, SO IT SAYS WHICH ONE IT IS. Every row carries its state as a
+     * WORD in a fixed column -- "in use", "pinned" -- and not only as a colour, for the
+     * reason `NodeStatus` exists at all: a status drawn as a colour alone is a status a
+     * colour-blind player cannot read, and `present.py` already lost that argument once.
+     *
+     * @param choices the candidates, or {@link RecipeChoices#none} carrying why there are
+     *                none. The empty case prints that reason rather than an empty box.
      */
-    public static ModularPanel recipePicker(PlanNode node) {
+    public static ModularPanel recipePicker(final PlanNode node, RecipeChoices choices,
+                                            final PlannerActions actions) {
         int width = PICKER_WIDTH;
-        int rows = 3;
-        int height = PADDING * 2 + LINE + 1 + rows * ROW_HEIGHT;
+        int inner = width - PADDING * 2;
+
         Group body = new Group();
         body.pos(PADDING, PADDING);
-        body.size(width - PADDING * 2, height - PADDING * 2);
-        int inner = width - PADDING * 2;
-        body.child(line("Recipes for " + NodeRowText.label(node), inner,
-                        NodeStatus.INK_MUTED).pos(0, 0));
+        body.child(line("Recipes for " + NodeRowText.label(node), inner, NodeStatus.INK_MUTED)
+                           .pos(0, 0));
+
         int y = LINE + 1;
-        body.child(line("in use: " + orDash(node.category()), inner, NodeStatus.INK_CRAFT)
-                           .pos(0, y));
-        y += ROW_HEIGHT;
-        body.child(line("id: " + orDash(node.recipe()), inner, NodeStatus.INK_MUTED).pos(0, y));
-        y += ROW_HEIGHT;
-        body.child(line(alternativesLine(node), inner, NodeStatus.INK_MUTED).pos(0, y));
+        int listHeight = 0;
+        if (choices.isEmpty()) {
+            body.child(line(choices.why(), inner, NodeStatus.INK_NEED).pos(0, y));
+            y += ROW_HEIGHT;
+        } else {
+            listHeight = Math.min(choices.shown().size() * ROW_HEIGHT, PICKER_MAX_LIST_HEIGHT);
+            body.child(choiceList(node, choices, actions, inner, listHeight).pos(0, y));
+            y += listHeight;
+            for (String footer : pickerFooter(choices)) {
+                body.child(line(footer, inner, NodeStatus.INK_MUTED).pos(0, y));
+                y += ROW_HEIGHT;
+            }
+        }
+
+        int height = y + PADDING * 2;
+        body.size(inner, height - PADDING * 2);
         return ModularPanel.defaultPanel("mcrecipedump_recipe_picker", width, height)
                 .child(body);
     }
 
-    static String alternativesLine(PlanNode node) {
-        if (node.alternatives() <= 1) {
-            return "no other recipe makes this";
+    /**
+     * The lines under the list: what a click does, and what the cap left out.
+     *
+     * THE CAP IS REPORTED RATHER THAN SILENT, for the same reason a truncated plan is. A list
+     * of 24 out of 172 that does not say so is a player concluding the pack has 24 ways to
+     * make a thing.
+     */
+    static List<String> pickerFooter(RecipeChoices choices) {
+        List<String> out = new java.util.ArrayList<String>(2);
+        out.add("click one to use it; click the pinned one to unpin");
+        if (choices.more() > 0) {
+            out.add("showing " + choices.shown().size() + " of " + choices.total()
+                    + NodeRowText.SEPARATOR + choices.more() + " not shown");
         }
-        return (node.alternatives() - 1) + " other recipe(s) -- pinning arrives with the solver";
+        return out;
+    }
+
+    /** One clickable row per candidate, scrolled. Same `ListWidget` reasoning as {@link #tree}. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static ListWidget<?, ?> choiceList(final PlanNode node, RecipeChoices choices,
+                                               final PlannerActions actions, int width,
+                                               int height) {
+        ListWidget list = new ListWidget();
+        list.size(width, height);
+        list.crossAxisAlignment(Alignment.CrossAxis.START);
+        // ONE WIDTH FOR THE WHOLE LIST, computed once from every row, so the columns line up
+        // down the panel. Per-row would give a ragged right edge and make the categories
+        // unscannable, which is the only thing they are there for.
+        int categoryWidth = categoryWidth(choices, width);
+        for (final RecipeChoice choice : choices.shown()) {
+            list.child(choiceRow(node, choice, actions, width, categoryWidth));
+        }
+        return list;
+    }
+
+    /**
+     * How wide the category column gets: the longest one shown, capped, and never at the
+     * cost of the label falling under {@link #MIN_LABEL}.
+     *
+     * THE CATEGORY WINS HERE AND THE LABEL IS CUT, WHICH IS THE OPPOSITE OF {@link #row}, and
+     * the inversion is the point rather than an inconsistency. On a tree row the label is the
+     * item's name and is the whole reason the row exists. In the picker EVERY row is the same
+     * item, so every label starts with the same words -- the screenshot of the 172-candidate
+     * iron-ingot picker was fourteen rows all reading "Iron Ingot from ..." with the category
+     * cut off the end, which is a list with no distinguishing column at all. Here the
+     * category is what tells the rows apart.
+     */
+    static int categoryWidth(RecipeChoices choices, int rowWidth) {
+        int longest = 0;
+        for (RecipeChoice choice : choices.shown()) {
+            longest = Math.max(longest, choice.category().length());
+        }
+        int wanted = Math.min(longest, MAX_CATEGORY_CHARS) * NodeRowText.CHAR_WIDTH;
+        int room = rowWidth - CHOICE_STATE - GAP - GAP - MIN_LABEL;
+        return Math.max(0, Math.min(wanted, room));
+    }
+
+    /** One candidate: its state, what it makes from what, and the category that names it. */
+    static ParentWidget<?> choiceRow(final PlanNode node, final RecipeChoice choice,
+                                     final PlannerActions actions, int width,
+                                     int categoryWidth) {
+        ClickableGroup row = new ClickableGroup(new Runnable() {
+            @Override
+            public void run() {
+                actions.pinRecipe(node, choice);
+            }
+        });
+        row.size(width, ROW_HEIGHT);
+        int colour = choiceColour(choice);
+        row.child(line(choiceState(choice), CHOICE_STATE, colour).pos(0, 0));
+        int x = CHOICE_STATE + GAP;
+        int labelWidth = Math.max(GAP, width - x
+                - (categoryWidth > 0 ? categoryWidth + GAP : 0));
+        row.child(line(choice.label(), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
+        if (categoryWidth > 0) {
+            row.child(line(choice.category(), categoryWidth, colour)
+                              .pos(width - categoryWidth, 0));
+        }
+        return row;
+    }
+
+    /**
+     * "in use", "pinned", "in use, pinned", or nothing.
+     *
+     * BOTH AT ONCE IS A REAL STATE and worth spelling out: pinning the recipe the solver
+     * already chose is the whole point of a pin -- it stops the ranking moving off it when
+     * the pack or the player's stock changes. A row that showed only one of the two would
+     * make that click look like it had done nothing.
+     */
+    static String choiceState(RecipeChoice choice) {
+        if (choice.inUse() && choice.pinned()) {
+            return "both";
+        }
+        if (choice.inUse()) {
+            return "in use";
+        }
+        return choice.pinned() ? "pinned" : "";
+    }
+
+    /** Pinned outranks in-use: a pin is the player's decision, the other is the solver's. */
+    static int choiceColour(RecipeChoice choice) {
+        if (choice.pinned()) {
+            return NodeStatus.INK_OK;
+        }
+        return choice.inUse() ? NodeStatus.INK_CRAFT : NodeStatus.INK_MUTED;
+    }
+
+    /**
+     * The widest word {@link #choiceState} can produce, in pixels. Derived, like {@link #BADGE}.
+     *
+     * BY ASKING THE METHOD, not by restating its vocabulary in a list beside it. The badge
+     * column was sized from a list once and came out at 66 pixels, and the screenshot read
+     * "no known..." -- a fixed vocabulary truncated is always a bug, and a second copy of the
+     * vocabulary is how the first one gets a word added without the column noticing.
+     */
+    private static int widestChoiceState() {
+        int widest = 0;
+        Pins.Pin ignored = new Pins.Pin("", "", "");
+        for (int combination = 0; combination < 4; combination++) {
+            RecipeChoice choice = new RecipeChoice(-1, "", ignored,
+                                                   (combination & 1) != 0,
+                                                   (combination & 2) != 0);
+            widest = Math.max(widest, choiceState(choice).length());
+        }
+        return widest * NodeRowText.CHAR_WIDTH;
     }
 
     /**
@@ -585,10 +814,6 @@ public final class PlannerWidgets {
             sb.append(NodeRowText.SEPARATOR).append(book.todoKeys().size()).append(" on TODO");
         }
         return sb.toString();
-    }
-
-    private static String orDash(String value) {
-        return value == null || value.isEmpty() ? "--" : value;
     }
 
     /**

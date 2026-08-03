@@ -68,6 +68,48 @@ public final class NodeRowText {
     }
 
     /**
+     * Break `text` over up to `maxLines` lines of `widthPx`, cutting the last one if it still
+     * does not fit.
+     *
+     * WRAPPING IS A CALLER'S DECISION HERE, WHICH IS THE OPPOSITE OF {@link #fit}, and the
+     * two exist together on purpose. A `TextWidget` that wraps ITSELF draws over the row
+     * beneath and the sizer reports nothing, which is why `fit` is the default everywhere. A
+     * caller that has laid out N stacked boxes and asked for N lines is not that case: it
+     * knows how much vertical room it reserved.
+     *
+     * ON WORD BOUNDARIES WHERE IT CAN, because the one caller is `ScenarioSource.summary` --
+     * a comma-separated list of scenario field names -- and splitting `visited_dimensions`
+     * across two lines makes it read as two inputs rather than one.
+     */
+    public static List<String> wrap(String text, int widthPx, int maxLines) {
+        List<String> lines = new ArrayList<String>();
+        if (text == null || text.isEmpty() || maxLines <= 0) {
+            return lines;
+        }
+        int budget = Math.max(1, widthPx / CHAR_WIDTH);
+        String rest = text;
+        while (!rest.isEmpty() && lines.size() < maxLines) {
+            if (rest.length() <= budget) {
+                lines.add(rest);
+                return lines;
+            }
+            if (lines.size() == maxLines - 1) {
+                // The last line cuts rather than dropping the tail silently, which is `fit`'s
+                // whole argument: an ellipsis says there was more, an absence does not.
+                lines.add(fit(rest, widthPx));
+                return lines;
+            }
+            int cut = rest.lastIndexOf(' ', budget);
+            if (cut <= 0) {
+                cut = budget;
+            }
+            lines.add(rest.substring(0, cut).trim());
+            rest = rest.substring(cut).trim();
+        }
+        return lines;
+    }
+
+    /**
      * The quantity, grouped: `934,400x`.
      *
      * GROUPED WITH COMMAS AND NOT ABBREVIATED. `934400x fluid:water` is a real row from a
@@ -92,12 +134,28 @@ public final class NodeRowText {
     }
 
     /**
-     * The dimmed trailing detail: stock, machine, alternatives, notes.
+     * The dimmed trailing detail: pinned, stock, machine, alternatives, notes.
      *
      * Empty when there is nothing to say, which is most leaf rows.
+     *
+     * `pinned` FIRST, WHICH IS THE ONE DEPARTURE FROM `render.py`'S PART ORDER, and the
+     * departure is what preserves the property that order was copied for. In the browser
+     * `pinned` is not part of the meta run at all -- `render.py` emits it as a `badge` span,
+     * set apart from the dotted list beside it -- so a reader's eye finds it whatever else
+     * the row says. This port flattened the badge into the meta text and appended it last,
+     * where {@link #fit} cuts it: a screenshot of the reference pack showed a pinned iron
+     * ingot rendering as `Iron Ingot -- Crafting -- 172 recip...`, with the one word saying
+     * the route was the PLAYER'S choice being the first thing dropped. Front of the run is
+     * the closest a single truncatable line gets to "set apart", and a fact the reader can
+     * see beats one in the same position as the browser's and invisible.
+     *
+     * Everything after it stays in `render.py`'s order; do not reshuffle the rest.
      */
     public static String meta(PlanNode node) {
         List<String> parts = new ArrayList<String>();
+        if (node.pinned()) {
+            parts.add("pinned");
+        }
         if (node.fromStock() > 0) {
             parts.add(quantityPlain(node.fromStock()) + " from stock");
         }
@@ -120,9 +178,6 @@ public final class NodeRowText {
         }
         if (node.resolvedTo() != null && !node.resolvedTo().isEmpty()) {
             parts.add("-> " + node.resolvedTo());
-        }
-        if (node.pinned()) {
-            parts.add("pinned");
         }
         return join(parts);
     }

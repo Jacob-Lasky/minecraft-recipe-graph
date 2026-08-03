@@ -81,6 +81,21 @@ public final class Pins {
     public static final String CATEGORY = "category";
     public static final String DEAD = "dead";
 
+    /**
+     * The field names of the stored form, spelled ONCE.
+     *
+     * They were spelled four times: here, in {@link #save}, in `PinStore.document` and again
+     * in `ScenarioInputs.resolvePins` -- four hand-written copies of a four-word schema, on
+     * the path between a click in the recipe picker and the recipe a plan takes. The failure
+     * mode of a mismatch is not an exception: it is a pin that quietly does not apply, which
+     * is the one bug the whole pin feature exists to prevent. `PinsTest` asserts these
+     * against `recipegraph/pins.py`, which writes the same file.
+     */
+    static final String PINS_FIELD = "pins";
+    static final String FINGERPRINT_FIELD = "fingerprint";
+    static final String CATEGORY_FIELD = "category";
+    static final String LABEL_FIELD = "label";
+
     private Pins() {
     }
 
@@ -291,11 +306,53 @@ public final class Pins {
      * until #19 phase 6 retires the Python UI -- a player who pins from the web page and then
      * opens the in-game planner has to see the same choice. Anything malformed is skipped
      * rather than rejected, entry by entry: one bad pin costs that pin and not the file.
+     *
+     * PREFER {@link #read} WHEN SOMEBODY IS WATCHING. This form cannot distinguish "no pins"
+     * from "your pin file is corrupt and every choice you made is being ignored", and the
+     * two look identical to a player: the plan simply takes a route they thought they had
+     * ruled out, with nothing on screen to explain it. Keep this overload for the offline
+     * paths, where returning `{}` really is the whole answer.
      */
     public static Map<String, Pin> load(File path) {
+        return read(path).pins;
+    }
+
+    /**
+     * What {@link #read} found, and what it had to throw away to find it.
+     *
+     * `problem` is empty when the file was read cleanly OR was simply absent -- no pin file
+     * is the normal state and not a fault. It is non-empty only when something WAS there and
+     * did not survive, which is the case the silent load cannot express.
+     */
+    public static final class Loaded {
+
+        public final Map<String, Pin> pins;
+
+        /** Empty when nothing went wrong. Otherwise a sentence to show a player verbatim. */
+        public final String problem;
+
+        Loaded(Map<String, Pin> pins, String problem) {
+            this.pins = Collections.unmodifiableMap(pins);
+            this.problem = problem;
+        }
+    }
+
+    /**
+     * {@link #load}, and a sentence about anything the file lost on the way in.
+     *
+     * SAME PARSE, NOT A SECOND ONE. The report is a by-product of the read that already
+     * happens; a separate "is this file healthy" probe would be a second spelling of the
+     * predicate, free to disagree with the one whose answer is actually used.
+     *
+     * Python has no counterpart and does not need one -- `pins.load` is called by a CLI that
+     * can print to a terminal, whereas this one is called by a game with a caveat line and no
+     * console anybody reads. The PARSING RULES are the contract and those still match
+     * `pins.load` exactly, entry for entry; only the reporting is extra.
+     */
+    public static Loaded read(File path) {
         Map<String, Pin> out = new LinkedHashMap<String, Pin>();
         if (path == null || !path.isFile()) {
-            return out;
+            return new Loaded(out, "");
         }
         JsonObject doc;
         try {
@@ -310,24 +367,76 @@ public final class Pins {
         } catch (RuntimeException | IOException broken) {
             // Matches Python catching (ValueError, OSError): unreadable and unparseable are
             // the same answer here, which is "you have no pins", not a crash on the way to a
-            // plan the player asked for.
+            // plan the player asked for. Said out loud, though, because a file that exists
+            // and cannot be read is not the same situation as not having one.
+            return new Loaded(out, "cannot read " + path.getName() + ": "
+                    + broken.getClass().getSimpleName()
+                    + (broken.getMessage() == null ? "" : ": " + broken.getMessage()));
+        }
+        if (doc == null || !doc.has(PINS_FIELD) || !doc.get(PINS_FIELD).isJsonObject()) {
+            return new Loaded(out, path.getName() + " has no `" + PINS_FIELD + "` object; "
+                    + "every recipe choice in it is being ignored");
+        }
+        JsonObject stored = doc.getAsJsonObject(PINS_FIELD);
+        out.putAll(fromJson(stored));
+        int skipped = stored.entrySet().size() - out.size();
+        return new Loaded(out, skipped == 0 ? "" : skipped + " recipe choice(s) in "
+                + path.getName() + " name no fingerprint and are being ignored");
+    }
+
+    /**
+     * `{item key: pin}` out of the `pins` object of a pin file or a scenario document.
+     *
+     * THE ONE READER OF THE STORED SHAPE, and it has to be, because the shape travels: it is
+     * written to disk by two languages and passed through a scenario document to the solver.
+     * `ScenarioInputs.resolvePins` used to parse it a second time and the copy had drifted --
+     * it called `getAsJsonObject()` with no `isJsonObject()` guard, so a hand-edited file with
+     * one entry that is a string threw an IllegalStateException from inside a plan, where this
+     * one skips it. Neither behaviour is wrong in isolation; having both is.
+     *
+     * SKIPS RATHER THAN REJECTS, entry by entry, matching `pins.load`: one bad pin costs that
+     * pin and not the file. Callers that need to know how many were skipped compare sizes.
+     */
+    public static Map<String, Pin> fromJson(JsonObject stored) {
+        Map<String, Pin> out = new LinkedHashMap<String, Pin>();
+        if (stored == null) {
             return out;
         }
-        if (doc == null || !doc.has("pins") || !doc.get("pins").isJsonObject()) {
-            return out;
-        }
-        for (Map.Entry<String, JsonElement> entry : doc.getAsJsonObject("pins").entrySet()) {
+        for (Map.Entry<String, JsonElement> entry : stored.entrySet()) {
             if (!entry.getValue().isJsonObject()) {
                 continue;
             }
             JsonObject pin = entry.getValue().getAsJsonObject();
             // The fingerprint is the only REQUIRED field, exactly as in Python: a pin without
             // one identifies nothing, while a missing category or label merely reads worse.
-            if (!pin.has("fingerprint") || !pin.get("fingerprint").isJsonPrimitive()) {
+            if (!pin.has(FINGERPRINT_FIELD) || !pin.get(FINGERPRINT_FIELD).isJsonPrimitive()) {
                 continue;
             }
-            out.put(entry.getKey(), new Pin(pin.get("fingerprint").getAsString(),
-                    optionalString(pin, "category"), optionalString(pin, "label")));
+            out.put(entry.getKey(), new Pin(pin.get(FINGERPRINT_FIELD).getAsString(),
+                    optionalString(pin, CATEGORY_FIELD), optionalString(pin, LABEL_FIELD)));
+        }
+        return out;
+    }
+
+    /**
+     * The counterpart of {@link #fromJson}: the `pins` object a scenario document carries.
+     *
+     * NOT USED BY {@link #save}, which writes through a `JsonWriter` to control the key order
+     * and the indent -- see that method for why those are a contract rather than a style. The
+     * FIELD NAMES are shared, which is the part that can silently break a pin.
+     */
+    public static JsonObject toJson(Map<String, Pin> pins) {
+        JsonObject out = new JsonObject();
+        if (pins == null) {
+            return out;
+        }
+        for (Map.Entry<String, Pin> entry : pins.entrySet()) {
+            Pin pin = entry.getValue();
+            JsonObject one = new JsonObject();
+            one.addProperty(FINGERPRINT_FIELD, pin.fingerprint);
+            one.addProperty(CATEGORY_FIELD, pin.category);
+            one.addProperty(LABEL_FIELD, pin.label);
+            out.add(entry.getKey(), one);
         }
         return out;
     }
@@ -352,13 +461,15 @@ public final class Pins {
             w.setIndent(" ");
             w.beginObject();
             w.name("_comment").value(SAVE_COMMENT);
-            w.name("pins").beginObject();
+            w.name(PINS_FIELD).beginObject();
             for (Map.Entry<String, Pin> entry : new TreeMap<String, Pin>(pins).entrySet()) {
                 Pin pin = entry.getValue();
                 w.name(entry.getKey()).beginObject();
-                w.name("category").value(pin.category);
-                w.name("fingerprint").value(pin.fingerprint);
-                w.name("label").value(pin.label);
+                // ALPHABETICAL, because Python's `json.dump(..., sort_keys=True)` sorts the
+                // inner objects too. Not the declaration order above it.
+                w.name(CATEGORY_FIELD).value(pin.category);
+                w.name(FINGERPRINT_FIELD).value(pin.fingerprint);
+                w.name(LABEL_FIELD).value(pin.label);
                 w.endObject();
             }
             w.endObject();

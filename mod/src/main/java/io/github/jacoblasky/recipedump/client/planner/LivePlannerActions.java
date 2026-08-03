@@ -3,9 +3,13 @@ package io.github.jacoblasky.recipedump.client.planner;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 import com.cleanroommc.modularui.api.IPanelHandler;
+import com.cleanroommc.modularui.api.widget.Interactable;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.SecondaryPanel;
 
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.common.PinStore;
+import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.net.PlanBookEdit;
 import io.github.jacoblasky.recipedump.common.net.PlanBookEditMessage;
 import io.github.jacoblasky.recipedump.common.net.PlanBookNetwork;
@@ -60,6 +64,38 @@ public final class LivePlannerActions implements PlannerActions {
         open(picker());
     }
 
+    /**
+     * Write the pin, then ask for the plan again.
+     *
+     * NOT SENT TO THE SERVER, unlike the plan-book edits above, and the difference is what
+     * each thing IS. A favourite is per-player state the server owns and syncs; a pin is a
+     * statement about the pack, held in a file beside `graph.json`, and the planner that
+     * reads it runs on this client. #140's one-writer rule is about the book, not about
+     * everything a click can touch.
+     *
+     * THE SAVE IS NOT CHECKED HERE and that is deliberate. `PinStore.pin` returns false when
+     * the file could not be written and records why, and the reader it installed on
+     * `ScenarioSource.PINS` puts that sentence on the planner's caveat line -- which the
+     * re-solve below is about to redraw. Handling it here as well would be a second place
+     * that decides how a failed pin is phrased.
+     */
+    @Override
+    public void pinRecipe(PlanNode node, RecipeChoice choice) {
+        Interactable.playButtonClickSound();
+        if (choice.pinned()) {
+            PinStore.get().unpin(node.key());
+        } else {
+            PinStore.get().pin(node.key(), choice.pin());
+        }
+        closePicker();
+        closeMenu();
+        // A pin changes an INPUT, so the answer has to be computed again -- there is no way
+        // to patch one subtree, because another recipe takes other ingredients and the cost
+        // of the whole branch moves. Cheap in the usual case: `costSignature` does not
+        // mention pins, so the cached cost table survives and only the solve is repeated.
+        PlannerService.get().replan();
+    }
+
     @Override
     public void addToTodo(PlanNode node) {
         PlanBookNetwork.CHANNEL.sendToServer(
@@ -83,7 +119,7 @@ public final class LivePlannerActions implements PlannerActions {
         // The click sound lives here rather than in the widget: it reaches the sound handler
         // and therefore LWJGL, and a widget that made a noise could not be clicked in a
         // headless test.
-        com.cleanroommc.modularui.api.widget.Interactable.playButtonClickSound();
+        Interactable.playButtonClickSound();
         if (handler == null) {
             return;
         }
@@ -96,6 +132,12 @@ public final class LivePlannerActions implements PlannerActions {
     private void closeMenu() {
         if (menu != null) {
             menu.closePanel();
+        }
+    }
+
+    private void closePicker() {
+        if (picker != null) {
+            picker.closePanel();
         }
     }
 
@@ -126,7 +168,15 @@ public final class LivePlannerActions implements PlannerActions {
                 @Override
                 public ModularPanel build(ModularPanel opener,
                                           net.minecraft.entity.player.EntityPlayer player) {
-                    return PlannerWidgets.recipePicker(current);
+                    // THE CANDIDATES ARE LOOKED UP HERE, at open time, and not inside the
+                    // widget. `PlannerWidgets` takes data and nothing else, which is what
+                    // lets every layout assertion in this package run with no graph and no
+                    // window; a widget that reached for `GraphService` would end that.
+                    return PlannerWidgets.recipePicker(
+                            current,
+                            RecipeChoices.forNode(GraphService.get().graph(), current,
+                                                  PinStore.get().pins()),
+                            LivePlannerActions.this);
                 }
             }, true);
         }

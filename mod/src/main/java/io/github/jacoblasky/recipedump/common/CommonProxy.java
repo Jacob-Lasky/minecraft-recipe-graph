@@ -37,6 +37,11 @@ public class CommonProxy {
         // a real AE2 grid, so a server loading it now is the intended end state rather than
         // waste. `GraphService` names no client class.
         GraphService.get().startLoad(event.getModConfigurationDirectory());
+        // BESIDE THE GRAPH AND NOT BEHIND IT. The pin file is kilobytes and read inline, so
+        // there is no thread and no ordering with the graph load -- but it must happen before
+        // the first plan, because a plan built without pins takes a route the player has
+        // already ruled out and looks exactly like a plan built with them.
+        PinStore.get().load(event.getModConfigurationDirectory());
     }
 
     public void init(FMLInitializationEvent event) {

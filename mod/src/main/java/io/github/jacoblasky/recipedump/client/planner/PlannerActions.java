@@ -26,6 +26,26 @@ public interface PlannerActions {
     /** "Choose another recipe". */
     void openRecipePicker(PlanNode node);
 
+    /**
+     * Take `choice` for this node's key, or give up the pin when `choice` is already pinned.
+     *
+     * A TOGGLE, UNLIKE {@link #toggleFavourite}, WHICH ONLY ADDS -- and the asymmetry is
+     * evidence, not taste. That method cannot toggle because the panel is built from a plan
+     * and has no copy of the book to consult, so "remove" would be a guess that deletes
+     * something. The picker is built from `RecipeChoices`, which read the pins to mark the
+     * rows: {@link RecipeChoice#pinned} is the stored state rather than an inference from it,
+     * so a click on a pinned row can safely mean "stop pinning this".
+     *
+     * Takes the whole {@link RecipeChoice} rather than a recipe id because the choice carries
+     * the fingerprint that was computed against the graph the picker was opened on. See that
+     * class for the reload window an id would leave open.
+     *
+     * A PIN IS NOT AN EDIT TO THE PLAN. It changes an INPUT and the plan has to be solved
+     * again; there is no way to patch one subtree, because a different recipe takes different
+     * ingredients and the whole cost of the branch moves. Implementations re-solve.
+     */
+    void pinRecipe(PlanNode node, RecipeChoice choice);
+
     /** "Add to TODO" -- asks the SERVER to add it, per #140's one-writer rule. */
     void addToTodo(PlanNode node);
 
@@ -60,6 +80,10 @@ public interface PlannerActions {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void pinRecipe(PlanNode node, RecipeChoice choice) {
         }
 
         @Override

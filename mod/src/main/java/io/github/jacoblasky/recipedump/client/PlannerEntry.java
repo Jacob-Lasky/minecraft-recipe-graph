@@ -3,6 +3,7 @@ package io.github.jacoblasky.recipedump.client;
 import java.util.List;
 
 import io.github.jacoblasky.recipedump.client.planner.PlanJson;
+import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
@@ -63,33 +64,39 @@ public final class PlannerEntry {
         }
     }
 
-    /** Open whichever window suits the current state. */
+    /**
+     * The plan to draw. Only meaningful when {@link #stateFor} returned null.
+     *
+     * THE JSON ROUND TRIP IS THE SEAM, NOT A SHORTCUT. `PlanJson.readResult` parses what
+     * `plan.PlanJson.toJson` writes, and that is the exact text `PlanFixtureTest` compares
+     * against `tests/fixtures/plan/*.json` -- so the panel draws from bytes provably
+     * identical to the ones proven to match Python, and there is no fourth place for the plan
+     * shape to live. An adapter mapping `PlanResult` to `PlanView` field by field fails by
+     * dropping a field and rendering a blank row rather than by erroring.
+     *
+     * #158 CONVERGED `PlanNode` AND THIS ROUND TRIP SURVIVED IT, which is worth recording
+     * because the plan was that it would not. One `PlanNode` removed the duplicated node
+     * class; `PlanView` still has no constructor over a `PlanResult`, so `readResult` remains
+     * the only door and the serialise/parse is still here. Removing it needs a
+     * `PlanView.of(PlanResult)`, and the property to preserve when someone adds one is the
+     * one the round trip is standing in for: the object the golden gate tested must be the
+     * object the panel draws, with no second representation in between. Do NOT replace this
+     * with a field-by-field adapter, which is the third thing and fails by rendering a blank
+     * row.
+     */
+    public static PlanView planFor(PlannerService planner) {
+        return PlanJson.readResult(planner.resultJson());
+    }
+
+    /**
+     * Open the planner and, if there is nothing to draw yet, set it going.
+     *
+     * WHICH OF THE FIVE THINGS TO SHOW IS DECIDED BY THE WINDOW, not here, because it is
+     * decided AGAIN every time the window rebuilds itself -- see `PlannerScreen`. Choosing
+     * once at open time is what made a plan arriving a second later invisible.
+     */
     public static void open(PlanBook book) {
-        GraphService graphs = GraphService.get();
-        PlannerService planner = PlannerService.get();
-        PlannerState state = stateFor(graphs, planner);
-        if (state == null) {
-            // THE JSON ROUND TRIP IS THE SEAM, NOT A SHORTCUT. `PlanJson.readResult` parses
-            // what `plan.PlanJson.toJson` writes, and that is the exact text
-            // `PlanFixtureTest` compares against `tests/fixtures/plan/*.json` -- so the panel
-            // draws from bytes provably identical to the ones proven to match Python, and
-            // there is no fourth place for the plan shape to live. An adapter mapping
-            // `PlanResult` to `PlanView` field by field fails by dropping a field and
-            // rendering a blank row rather than by erroring.
-            //
-            // #158 CONVERGED `PlanNode` AND THIS ROUND TRIP SURVIVED IT, which is worth
-            // recording because the plan was that it would not. One `PlanNode` removed the
-            // duplicated node class; `PlanView` still has no constructor over a
-            // `PlanResult`, so `readResult` remains the only door and the serialise/parse is
-            // still here. Removing it needs a `PlanView.of(PlanResult)`, and the property to
-            // preserve when someone adds one is the one the round trip is standing in for:
-            // the object the golden gate tested must be the object the panel draws, with no
-            // second representation in between. Do NOT replace this with a field-by-field
-            // adapter, which is the third thing and fails by rendering a blank row.
-            PlannerScreen.openPlan(PlanJson.readResult(planner.resultJson()), book);
-        } else {
-            PlannerScreen.openState(state);
-        }
+        PlannerScreen.openPlanner(book);
         startPlan(book);
     }
 
@@ -117,8 +124,34 @@ public final class PlannerEntry {
             return;
         }
         List<String> todo = book.todoKeys();
-        long qty = todo.contains(target) ? book.todoQuantity(target) : 1L;
-        PlannerService.get().plan(target, Math.max(1L, qty), Solver.DEFAULT_MAX_NODES);
+        long qty = Math.max(1L, todo.contains(target) ? book.todoQuantity(target) : 1L);
+        PlannerService planner = PlannerService.get();
+        if (alreadyAnswered(planner, target, qty)) {
+            return;
+        }
+        planner.plan(target, qty, Solver.DEFAULT_MAX_NODES);
+    }
+
+    /**
+     * True when the service is already holding the answer to this exact question.
+     *
+     * NOT AN OPTIMISATION -- it stops the window flickering. Opening the planner used to be
+     * "draw once, then start a solve", which was harmless while the window never redrew:
+     * the second solve of an already-solved target finished behind a picture nobody was
+     * updating. Now that the window follows the service, the same second solve throws the
+     * tree away, shows "planning 1x minecraft:hopper" for as long as it takes, and puts back
+     * a plan identical to the one it replaced. Caught by a screenshot of the harness, which
+     * plans and then opens and so hits it every time.
+     *
+     * KEYED ON THE TARGET AND THE QUANTITY, not on "a plan exists". Changing the TODO and
+     * reopening is a different question and must be asked again; the pins path does not come
+     * through here at all, because {@link PlannerService#replan} is explicit about wanting
+     * the same question re-answered.
+     */
+    static boolean alreadyAnswered(PlannerService planner, String target, long qty) {
+        return planner.state() == PlannerService.State.DONE
+                && target.equals(planner.targetKey())
+                && qty == planner.targetQty();
     }
 
     /** The book's first TODO, else its first favourite, else null. */

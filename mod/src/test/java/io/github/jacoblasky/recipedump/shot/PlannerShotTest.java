@@ -121,4 +121,32 @@ public class PlannerShotTest {
         }
         return seen;
     }
+
+    /**
+     * The recipe-picker shot photographs the node with the MOST candidates, not the root.
+     *
+     * WHY IT MATTERS FOR A PICTURE. The fixtures' roots carry between 1 and 22 alternatives
+     * and nodes deeper in reach 172, so shooting the root produced pickers with a single row
+     * -- a screenshot of the feature not doing its job. It is also the only way to photograph
+     * the capped list, which no fixture root can produce.
+     *
+     * DETERMINISTIC, because a shot of a given fixture has to be the same picture every time
+     * or a reviewer cannot compare two of them. Ties go to the first in depth-first order.
+     */
+    @Test
+    public void theRecipePickerShotPicksTheNodeWithTheMostCandidates() {
+        PlanView plan = PlanFixtureFiles.load(FIXTURE);
+        PlanNode picked = PlannerShot.mostAlternatives(plan.tree());
+
+        int best = 0;
+        for (PlanNode node : plan.flatten()) {
+            best = Math.max(best, node.alternatives());
+        }
+        assertTrue("the fixture must contain a node with alternatives", best > 1);
+        assertEquals(best, picked.alternatives());
+        assertTrue("and it must not be the root, or this test proves nothing about "
+                   + FIXTURE, picked.alternatives() > plan.tree().alternatives());
+        assertSame("the same fixture must give the same picture every time",
+                   picked, PlannerShot.mostAlternatives(plan.tree()));
+    }
 }
