@@ -409,7 +409,8 @@ python3 tools/cost-probe.py                    # what a cost-model constant rero
 ```
 
 **This is dev tooling only.** The tool itself is Python 3 stdlib with no install step, the
-container image copies `recipegraph/` and nothing else, and CI stays stdlib-only. The
+container image copies `recipegraph/` and nothing else, and the Python side of CI stays
+stdlib-only. The
 `package.json` exists so the audit's one dependency is pinned and reproducible rather than
 a version someone happened to have.
 
@@ -536,8 +537,13 @@ keys the new graph does not use, and `have` says so rather than letting it pass.
 Java 8 toolchain while running on a modern JDK:
 
 ```bash
-cd mod && ./gradlew build -Phei_jar=/path/to/HadEnoughItems_1.12.2-4.28.1.jar
+cd mod && ./gradlew build -Ppack_mods='/path/to/instance/minecraft/mods'
 ```
+
+`pack_mods` is a DIRECTORY and `-Phei_jar` alone no longer builds: the build resolves
+HadEnoughItems, ModularUI and AE2-UEL out of it by glob and reports all the missing ones at
+once. The single-jar flags survive as per-entry overrides. See
+[docs/BUILD.md](docs/BUILD.md).
 
 It deliberately does **not** use ForgeGradle 2.3, the plugin every 1.12.2 tutorial names:
 Forge's maven no longer publishes the `userdev` artifact FG2 requires, only the FG3-format
@@ -687,8 +693,16 @@ same code runs inside a server container where `pip` is unavailable.
 That extends to the tests, which is worth knowing before reaching for the usual runner:
 
 ```bash
-python3 -m unittest discover -s tests -q      # what CI runs; takes about 4 seconds
+python3 -m unittest discover -s tests -q      # the python half of CI; about 4 seconds
 ```
+
+CI runs two jobs: that suite on 3.8 and 3.14, and `tools/ci-java.sh`, which compiles and runs
+the Java port's pure core — the graph reader, the solver and the cost model, everything that
+imports nothing but `java.*` and gson — on JDK 25 with no Gradle, no Minecraft and none of the
+pack jars, because those exact mod builds are not on maven. **Neither job runs the golden plan
+gate**, which needs a 121 MB oracle graph that is not in git; `tools/ci-java.sh` reports that
+skip on every run and fails on any other one. `tools/check.sh` is the pre-merge gate and is the
+only thing that runs the whole of both languages.
 
 There is deliberately no pytest, so `pytest` fails with `No module named pytest`, which reads
 as a broken environment rather than the wrong command. Run the suite through discovery rather
