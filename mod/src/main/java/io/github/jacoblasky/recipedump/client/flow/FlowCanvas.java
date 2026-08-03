@@ -65,23 +65,39 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      */
     private final IntArray visibleBoxes = new IntArray();
 
+    /** Screen pixels per layout pixel. See {@link FlowZoom} for what depends on it. */
+    private float zoom = FlowZoom.DEFAULT;
+
     public FlowCanvas(PlanNode tree) {
         super(new HorizontalScrollData(), new VerticalScrollData());
         this.laid = FlowLayout.of(tree);
         this.culling = new FlowCulling(laid);
         this.boxWidgets = new ArrayList<IWidget>(laid.size());
         for (FlowLayout.Box box : laid.boxes) {
-            // A BACKGROUND, unlike the tree's rows. In a list a row is bounded by the rows
-            // above and below it; on a canvas it is text floating on a panel, and the first
-            // screenshot of this showed exactly that -- three nodes and an elbow that read as
-            // unrelated captions. The box is what makes it a graph.
+            // A BACKGROUND, unlike the tree's rows: on a canvas a row is text floating on a
+            // panel rather than something bounded by its neighbours.
             //
-            // `MC_BACKGROUND` AND NOT `MC_BUTTON`, which was the second screenshot's lesson.
-            // The row colours its label with `NodeStatus.INK_MUTED`, chosen against the light
-            // panel the tree sits on; on the button's dark face the quantity and badge stayed
-            // legible and the item NAME disappeared entirely -- a diagram of boxes that will
-            // not tell you what is in them. The node keeps the panel's own surface and is
-            // delimited by the nine-slice's border instead.
+            // DO NOT CHANGE THIS TO `MC_BUTTON`, OR TO ANY OTHER DARK BACKGROUND. The
+            // background here is load-bearing for a decision made in a file this one does not
+            // own, and getting it wrong costs a word rather than a crash.
+            //
+            // `NodeStatus`'s inks are the web UI's LIGHT theme, chosen because a ModularUI
+            // panel is vanilla's light grey -- that is documented on the constants, and it
+            // makes the surface underneath the shared row part of the row's contract. On the
+            // button's dark face the quantity and the badge stayed legible and the item NAME
+            // disappeared entirely, because it is drawn in `INK_MUTED`. A diagram of boxes
+            // that will not tell you what is in them, and nothing fails: the widget is there,
+            // sized, hit-testable and the right colour for a panel it is not on.
+            //
+            // Found by screenshot, and only by screenshot. If a dark canvas is ever actually
+            // wanted, the fix is a dark-theme ink set in `NodeStatus` -- s2layout owns it --
+            // and not a background swap here. Selection highlighting composes with this by
+            // swapping the BACKGROUND rather than the ink, for the same reason.
+            //
+            // The node keeps the panel's own surface and is delimited by the nine-slice's
+            // border. That border is also what makes this read as a graph at all: in a list a
+            // row is bounded by the rows above and below it, and the first screenshot of this
+            // canvas was three nodes and an elbow that read as unrelated captions.
             IWidget widget = PlannerWidgets
                     .planNodeContent(box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT)
                     .background(GuiTextures.MC_BACKGROUND)
@@ -110,8 +126,22 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
                 childrenOf[parent][at[parent]++] = i;
             }
         }
-        getScrollArea().getScrollX().setScrollSize(laid.width);
-        getScrollArea().getScrollY().setScrollSize(laid.height);
+        applyScrollSize();
+    }
+
+    /**
+     * The scroll extents, in SCREEN pixels at the current zoom.
+     *
+     * SCALED HERE RATHER THAN THE OFFSET BEING SCALED LATER, per {@link FlowZoom}'s note:
+     * `ScrollData` clamps the offset against this size minus the widget area and knows nothing
+     * about a scale, so telling it the size in screen pixels is what keeps its own clamp
+     * correct. The alternative -- layout-unit offsets -- lets the view run off the end of a
+     * zoomed-out diagram by a factor of the zoom, and the scrollbar thumb sizes itself wrong
+     * as well.
+     */
+    private void applyScrollSize() {
+        getScrollArea().getScrollX().setScrollSize(FlowZoom.scaledExtent(laid.width, zoom));
+        getScrollArea().getScrollY().setScrollSize(FlowZoom.scaledExtent(laid.height, zoom));
     }
 
     /**
@@ -123,16 +153,120 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      * player never sees.
      */
     public void panTo(int x, int y) {
+        // AGAINST THE SCALED EXTENT, not `laid.width`. The offset is screen pixels, so at zoom
+        // 2 the diagram is twice as many pixels wide and wrapping at the layout width would
+        // park the timing run halfway along, quietly measuring only the left half of the plan.
         getScrollArea().getScrollX().scrollTo(getScrollArea(),
-                wrap(x, laid.width, getArea().width));
+                wrap(x, FlowZoom.scaledExtent(laid.width, zoom), getArea().width));
         getScrollArea().getScrollY().scrollTo(getScrollArea(),
-                wrap(y, laid.height, getArea().height));
+                wrap(y, FlowZoom.scaledExtent(laid.height, zoom), getArea().height));
+    }
+
+    /**
+     * Set the zoom, keeping the point at the centre of the viewport where it is.
+     *
+     * ANCHORED ON THE CENTRE, NOT THE ORIGIN. Scaling around (0,0) drags the diagram out from
+     * under the pointer -- zoom in on a node you are reading and it leaves the panel, so you
+     * pan it back, which is the interaction feeling broken rather than being broken. Keeping
+     * the centre fixed is what makes repeated zooming usable, and it is two lines: convert the
+     * centre to layout coordinates at the old zoom, then back at the new one.
+     */
+    public FlowCanvas setZoom(float wanted) {
+        float next = FlowZoom.clamp(wanted);
+        if (next == zoom) {
+            return this;
+        }
+        int x = FlowZoom.reanchor(getScrollX(), getArea().width, zoom, next);
+        int y = FlowZoom.reanchor(getScrollY(), getArea().height, zoom, next);
+        zoom = next;
+        // SIZE BEFORE OFFSET. `scrollTo` clamps against the scroll size, so setting the offset
+        // first clamps it against the OLD extent -- which on a zoom in silently parks the view
+        // at the old right-hand limit, a third of the way along the diagram it just enlarged.
+        applyScrollSize();
+        getScrollArea().getScrollX().scrollTo(getScrollArea(), x);
+        getScrollArea().getScrollY().scrollTo(getScrollArea(), y);
+        return this;
+    }
+
+    /** Screen pixels per layout pixel. */
+    public float zoom() {
+        return zoom;
+    }
+
+    /**
+     * Control-scroll zooms; a bare scroll still pans, which is what `AbstractScrollWidget`
+     * already does and what every other scrollable panel in this GUI does.
+     *
+     * CONTROL RATHER THAN A BARE WHEEL. A canvas that zooms on an unmodified wheel is a canvas
+     * you cannot scroll down, and this one is taller than it is wide on any real plan -- a
+     * 4,000 node fan is a hundred screens tall and two columns across, so vertical scrolling
+     * is the common gesture by a wide margin and it keeps the wheel.
+     */
+    @Override
+    public boolean onMouseScroll(com.cleanroommc.modularui.api.UpOrDown scroll, int amount) {
+        if (!com.cleanroommc.modularui.api.widget.Interactable.hasControlDown()) {
+            return super.onMouseScroll(scroll, amount);
+        }
+        // A RATIO PER NOTCH, NOT AN INCREMENT. Adding 0.1 per notch takes five notches to go
+        // from 0.5 to 1.0 and ten to go from 1.0 to 2.0, so zooming out feels twice as fast as
+        // zooming in over the same visual change. Multiplying is symmetric by construction.
+        setZoom(scroll.isUp() ? zoom * ZOOM_PER_NOTCH : zoom / ZOOM_PER_NOTCH);
+        return true;
+    }
+
+    /** Ratio per wheel notch. Six notches cover the whole 0.5..2.0 range, which is two flicks. */
+    private static final float ZOOM_PER_NOTCH = 1.25f;
+
+    /**
+     * Scale the children, on top of the scroll translate `super` applies.
+     *
+     * THROUGH THE VIEWPORT STACK RATHER THAN A GL MATRIX IN `draw`. This is the same hook
+     * `getWidgetsAt` walks, so hit-testing goes through the inverse automatically -- which is
+     * exactly the "hand-rolled canvases get panning right and hit-testing wrong" trap this
+     * class's header already names, one step further along. A `GlStateManager.scale` in the
+     * draw call would look identical and would leave every click landing on the wrong node.
+     */
+    @Override
+    public void transformChildren(com.cleanroommc.modularui.api.layout.IViewportStack stack) {
+        super.transformChildren(stack);
+        if (zoom != 1.0f) {
+            stack.scale(zoom, zoom);
+        }
     }
 
     /** Wrap rather than clamp, so a long timing run keeps moving instead of parking. */
     private static int wrap(int value, int extent, int viewport) {
         int range = Math.max(1, extent - viewport);
         return Math.abs(value % range);
+    }
+
+    /**
+     * Move the viewport to a FRACTION of each scroll range, 0 to 1.
+     *
+     * FOR THE TIMING HARNESS, and it exists because {@link #panTo} in pixels was measuring the
+     * wrong thing. A fixed pixel stride over a few hundred frames covers a few thousand pixels,
+     * and a 4,000 node plan is around seventy THOUSAND pixels tall -- so the sweep never left
+     * the top-left corner. Worse, the corner it never left is column zero, which on this layout
+     * holds one node: the root, centred on the pixel midpoint of the whole diagram and
+     * therefore nowhere near the top. Instrumenting `drawnLastFrame` showed the run drawing
+     * 0, 1 and 4 nodes at the frames it sampled. Every frame timing quoted for this diagram
+     * before 2026-08-03 was measured on a mostly empty viewport.
+     *
+     * A fraction cannot do that: 0 to 1 is the whole diagram whatever its size and whatever
+     * the zoom, because the ranges come from the scroll data the zoom already scaled.
+     */
+    public void panToFraction(double fractionX, double fractionY) {
+        getScrollArea().getScrollX().scrollTo(getScrollArea(),
+                atFraction(fractionX, FlowZoom.scaledExtent(laid.width, zoom),
+                        getArea().width));
+        getScrollArea().getScrollY().scrollTo(getScrollArea(),
+                atFraction(fractionY, FlowZoom.scaledExtent(laid.height, zoom),
+                        getArea().height));
+    }
+
+    private static int atFraction(double fraction, int extent, int viewport) {
+        int range = Math.max(0, extent - viewport);
+        return (int) Math.round(Math.max(0.0, Math.min(1.0, fraction)) * range);
     }
 
     /** How many boxes the layout produced. */
@@ -169,8 +303,15 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         if (transformed) {
             return;
         }
-        IntArray shown = culling.visibleIn(getScrollX(), getScrollY(),
-                getArea().width, getArea().height);
+        // CONVERTED, because the scroll offset is screen pixels and the culler works in layout
+        // pixels. `FlowZoom` rounds the two edges outward; passing `getScrollX() / zoom` and
+        // `width / zoom` directly rounds both inward and hides a strip of nodes along the
+        // right and bottom edges at any zoom that is not a whole number.
+        IntArray shown = culling.visibleIn(
+                FlowZoom.layoutOrigin(getScrollX(), zoom),
+                FlowZoom.layoutOrigin(getScrollY(), zoom),
+                FlowZoom.layoutExtent(getScrollX(), getArea().width, zoom),
+                FlowZoom.layoutExtent(getScrollY(), getArea().height, zoom));
         for (IWidget widget : visible) {
             widget.setEnabled(false);
         }
