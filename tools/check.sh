@@ -114,7 +114,11 @@ report_python_skips() {
     skipped=$(sed -n 's/.*skipped=\([0-9]*\).*/\1/p' "$PYLOG" | tail -1)
     [ -n "$skipped" ] || skipped=0
     echo "python: $skipped skipped"
-    if [ "$skipped" -gt 0 ] && [ -n "$jar_warning" ]; then
+    # ONLY WHEN THE JAR IS ABSENT, which is the state that makes `test_dist_jar` SKIP. A STALE
+    # jar makes it FAIL instead, and attributing the oracle gate's skip to a jar that is sitting
+    # right there sends the reader to rebuild something that is not the problem. Caught by
+    # running the stale case: this line fired next to `skipped=1` where the 1 was the oracle.
+    if [ "$skipped" -gt 0 ] && [ "$jar_state" = absent ]; then
         echo "!! those skips include test_dist_jar; build the jar or they prove nothing"
     fi
     # The summary always, and the failures themselves when there are any.
@@ -270,9 +274,15 @@ if [ "$jar_state" != ok ]; then
     fi
 fi
 
+# SAID ON EVERY ARM, and not only inside the python one where this line used to live. `--java`
+# is the arm that never looks at the jar and the one most likely to LEAVE a stale one behind
+# for somebody's later full run to trip over, so an iteration run is exactly where the warning
+# is worth most and exactly where it was not being printed. The two behaviours -- a full run
+# that builds and an iteration run that does not -- are each right and were jointly a trap.
+[ -z "$jar_warning" ] || echo "!! $jar_warning"
+
 if [ "$want_python" -eq 1 ]; then
     echo "== python =="
-    [ -z "$jar_warning" ] || echo "!! $jar_warning"
     if [ -f "$ORACLE" ]; then
         RECIPEGRAPH_ORACLE="$ORACLE" python3 -m unittest discover -s tests -q 2>"$PYLOG" || fail=1
         report_python_skips
