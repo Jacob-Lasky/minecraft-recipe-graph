@@ -78,18 +78,37 @@ fi
 fail=0
 
 PYLOG=$(mktemp)
-trap 'rm -f "$PYLOG"' EXIT
+keep_pylog=0
+# Keep the log when something failed, since that is exactly when its contents are wanted.
+trap '[ "$keep_pylog" -eq 1 ] || rm -f "$PYLOG"' EXIT
 
 # COUNT THE PYTHON SKIPS AND SAY SO, exactly as the java arm below already does. `unittest -q`
 # prints `OK (skipped=N)` and exits 0, so a run whose most important assertions all skipped is
 # indistinguishable from a clean one in this script's output -- which is the failure this file
 # exists to prevent, one level up from the gate it was written for.
+# AND SHOW THE FAILURES, because `unittest` writes ALL of its output to stderr and capturing
+# it to count the skips silently swallowed the rest. A failing run then printed a skip count,
+# nothing else, and `== FAILURES ==` at the very end with no indication of what failed -- which
+# sent me looking for a broken container. Introduced by the fix for the skip-counting problem
+# and caught by it happening: exactly the shape this file exists to prevent, in this file.
 report_python_skips() {
-    skipped=$(sed -n 's/^OK (skipped=\([0-9]*\))$/\1/p' "$PYLOG")
+    # BOTH summary forms. `unittest` writes `OK (skipped=N)` when everything passed and
+    # `FAILED (failures=1, skipped=N)` when it did not, and matching only the first reported
+    # "0 skipped" next to a summary line saying skipped=1 -- a tool for catching silent skips,
+    # under-reporting skips.
+    skipped=$(sed -n 's/.*skipped=\([0-9]*\).*/\1/p' "$PYLOG" | tail -1)
     [ -n "$skipped" ] || skipped=0
     echo "python: $skipped skipped"
     if [ "$skipped" -gt 0 ] && [ -n "$jar_warning" ]; then
         echo "!! those skips include test_dist_jar; build the jar or they prove nothing"
+    fi
+    # The summary always, and the failures themselves when there are any.
+    grep -E '^(OK|FAILED|Ran )' "$PYLOG" || true
+    if grep -qE '^(FAIL|ERROR):' "$PYLOG"; then
+        echo "-- python failures --"
+        grep -E '^(FAIL|ERROR):' "$PYLOG"
+        echo "-- full python output: $PYLOG (kept because the run failed) --"
+        keep_pylog=1
     fi
 }
 
