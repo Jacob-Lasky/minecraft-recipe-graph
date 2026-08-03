@@ -23,11 +23,34 @@
 # RFG build is ~9 minutes) so hitting it means something is wedged, and it FAILS rather than
 # waiting forever, because a legible failure beats an invisible hang.
 #
+# THE LOCK FILE MUST LIVE ON A LOCAL FILESYSTEM, AND `/coding` IS NOT ONE. DO NOT move this
+# default onto `/coding`, `/appdata`, `/home/claude` or any other share for "durability": every
+# one of those is `fuse.shfs` here, and `flock -w`'s timeout is delivered as a signal to a
+# waiter that FUSE parks in uninterruptible D state, where it cannot be delivered. The cap then
+# never fires. Measured, same code, one holder sleeping 12s and a waiter capped at 3:
+#
+#     /tmp/gatefs.lock                        waited  3s, exit 75   the cap fired
+#     /coding/.recipegraph-build/gatefs.lock  waited 11s, exit 0    the cap did nothing
+#
+# So a guard that is correct everywhere it is tested and inert where it is used -- the shape
+# this project keeps re-finding, and the first version of this file shipped it, because the
+# probe that "proved" GATE_WAIT was run on /tmp while the default pointed at /coding. A case
+# picked for convenience is immune to the defect.
+#
+# The second consequence is worse than the first: a D-state waiter cannot be interrupted at
+# all, so ^C does not free it. A pending SIGKILL lands when the lock releases and the process
+# dies instead of running, which leaves zombie `flock` entries behind and no explanation.
+#
+# The lock only has to be shared by the things that LAUNCH containers, and all of those run
+# inside this one container, so a local path is not a compromise -- it is the correct scope.
+# IF YOU WRAP A CONTAINER BY HAND, WRAP IT ON THIS PATH, or you are queuing in a different
+# lock's line and serialising nothing.
+#
 # DO NOT NEST IT. `flock` is not recursive: a gated script calling another gated script
 # deadlocks against itself, with the second waiting on a lock its own parent holds. Each script
 # that runs a container takes the gate around its OWN `docker run`, and callers do not wrap it.
 
-GATE_LOCK=${GATE_LOCK-/coding/.recipegraph-build/.gate.lock}
+GATE_LOCK=${GATE_LOCK-/tmp/recipegraph-container.gate.lock}
 GATE_WAIT=${GATE_WAIT:-3600}
 
 gated() {
