@@ -30,14 +30,24 @@ import com.google.gson.JsonObject;
 public enum ScenarioSource {
 
     /**
-     * AE2 network contents. Phase 5 reads the live grid through `IStorageGrid`; until then
-     * the planner assumes an empty pool and says so.
+     * AE2 network contents. THE READ EXISTS AND THE JOIN DOES NOT (#191).
+     * `Ae2StockReader` walks the live grid through `IStorageGrid` server-side and the
+     * snapshot reaches the client in `LiveStock` (#150). What is missing is two wires:
+     * nothing calls {@link #readBy} for this source, and `PlannerService.liveScenario()`
+     * never feeds `LiveStock.latest()` into the `have` field. Until both land the planner
+     * still plans against an empty pool, so this stays not-live and says so.
      */
-    HAVE("have", false, "AE2 stock is not read yet (#19 phase 5), so this plan assumes you "
+    HAVE("have", false, "AE2 stock is not used by this plan (#191), so it assumes you "
             + "own nothing"),
 
-    /** AE2 autocraftable patterns. Same grid read, same phase. */
-    CRAFTABLES("craftables", false, "AE2 autocrafting patterns are not read yet (#19 phase 5)"),
+    /**
+     * AE2 autocraftable patterns. Needs the same join as {@link #HAVE} AND a read of its own:
+     * `Ae2StockReader.countsOf` deliberately SKIPS craftable-only entries, because counting a
+     * pattern as stock would tell a player they already own something they would have to
+     * make. So a craftables list is a separate pass, then the same `readBy` plus
+     * `liveScenario()` wiring.
+     */
+    CRAFTABLES("craftables", false, "AE2 autocrafting patterns are not read (#191)"),
 
     /**
      * Placed tile entities, which decide machine availability and infinite sources. A world
@@ -150,8 +160,12 @@ public enum ScenarioSource {
     private final Status declared;
 
     /**
-     * The runtime reader, when something has installed one. Volatile because Phase 5's grid
-     * read is installed from a world-load event and read while a panel is drawing.
+     * The runtime reader, when something has installed one.
+     *
+     * VOLATILE, AND DO NOT DROP IT TO A PLAIN FIELD. `PinStore.load` installs one from
+     * `CommonProxy.preInit`, which is the mod-loading thread, and {@link #status} is read
+     * while a panel is drawing on the client thread; the two share no lock. #191's live-stock
+     * reader adds a third writer off a world event. The callers only LOOK single-threaded.
      */
     private volatile Reader reader;
 

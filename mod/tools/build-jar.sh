@@ -37,6 +37,7 @@ PACK_MODS=${PACK_MODS:-/coding/.recipegraph-build/deps}
 # cache", which reads as a broken build rather than as a busy directory. Seed an alternative
 # with `cp -a` from this one to skip the ~9m fernflower decompile.
 GRADLE_CACHE=${GRADLE_CACHE:-/coding/.recipegraph-build/gradle-cache}
+. tools/gate.sh
 
 current=$(sed -n 's/^mod_version=//p' "$PROPS")
 next=${1:-$current}
@@ -72,7 +73,10 @@ host_path() {
     echo "$1" | sed 's|^/coding|/mnt/user/misc/coding|'
 }
 
-docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
+# GATED: one heavy container at a time on this host, announced while it waits. This script
+# takes the gate itself rather than trusting its callers to, which is also why `tools/check.sh`
+# invokes it plainly -- `flock` is not recursive and a nested gate would deadlock on itself.
+gated docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
     -v "$(host_path "$ROOT")":/repo \
     -v "$(host_path "$PACK_MODS")":/deps:ro \
     -v "$(host_path "$GRADLE_CACHE")":/gradle \

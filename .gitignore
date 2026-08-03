@@ -22,3 +22,8 @@ node_modules/
 ASK-JAKE.md
 .planning/
 dist/
+
+# `tools/ci-java.sh`'s scratch tree: downloaded junit/gson jars and the class files of the
+# pure-Java core. Outside `mod/build/` on purpose -- a `mod/build/` written by a container
+# running as another uid is the "the tests pass and the build still fails" trap in the skill.
+.ci-java/

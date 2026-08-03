@@ -175,6 +175,14 @@ public class DigestFixtureTest {
     public void everyCaseRendersTheRecordedCanonicalString() {
         // Asserted separately from the digest because a hash mismatch says only "these
         // differ"; the canonical string says where.
+        //
+        // COUNTED, because the `continue` is how this test can pass without running.
+        // `c.get("canonical")` is null both when the field is absent and when it is null, so
+        // a regenerated fixture that stopped writing it turns every case into a skip and
+        // leaves a green no-op where the cross-language string contract used to be. 42 of
+        // the 46 cases carry one. `NodeStatusTest` counts its rows out of present.py for the
+        // same reason and is the pattern here; `tests/test_nbt_digest.py` counts the same 42.
+        int checked = 0;
         for (JsonElement element : cases) {
             JsonObject c = element.getAsJsonObject();
             String expected = asStringOrNull(c.get("canonical"));
@@ -188,7 +196,11 @@ public class DigestFixtureTest {
             StringBuilder sb = new StringBuilder();
             DumpCommand.canonical(tag, sb);
             assertEquals(c.get("name").getAsString(), expected, sb.toString());
+            checked++;
         }
+        assertEquals("the fixture must carry 42 canonical strings; a case that stopped "
+                     + "recording one is skipped silently and asserts nothing",
+                     42, checked);
     }
 
     private static NBTTagCompound compoundFor(JsonObject c) {

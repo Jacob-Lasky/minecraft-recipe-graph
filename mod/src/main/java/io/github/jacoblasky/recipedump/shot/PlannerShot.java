@@ -490,7 +490,7 @@ final class PlannerShot {
         intern(plan.tree(), builder);
         final RecipeGraph graph = builder.build();
         JeiBridge.indexFor(graph);
-        JeiNodeActions.install(new JeiNodeActions.GraphSource() {
+        JeiNodeActions.install(new JeiNodeActions.GraphAccess() {
             @Override
             public RecipeGraph graph() {
                 return graph;

@@ -12,7 +12,7 @@ import java.util.Map;
  * CONTRACT, NOT AN ACCIDENT OF THE IMPLEMENTATION. `most_common` sorts by count descending
  * and breaks ties by INSERTION order, which is the order the solver first reached each key --
  * roughly the order a player would work through the tree. It is deliberately NOT alphabetical
- * and NOT by key. {@link Counters#mostCommon} is the only thing that may build them.
+ * and NOT by key. {@link KeyCounter#mostCommon} is the only thing that may build them.
  *
  * `machinesToBuild` is the odd one out and IS sorted by category, on purpose: it is a
  * checklist rather than a worklist, so a stable alphabetical order is easier to scan than one

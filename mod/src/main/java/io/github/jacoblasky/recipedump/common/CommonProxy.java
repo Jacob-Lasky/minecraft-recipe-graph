@@ -33,9 +33,12 @@ public class CommonProxy {
         // resolves to MISSING without touching a thread -- so a pack that never supplies one
         // pays only a `File.isFile()`.
         //
-        // COMMON, not client. The graph is pack data and Phase 5 wants it server-side to read
-        // a real AE2 grid, so a server loading it now is the intended end state rather than
-        // waste. `GraphService` names no client class.
+        // COMMON, not client, AND DO NOT MOVE THIS CALL INTO `ClientProxy`. The graph is pack
+        // data rather than a client resource, so a dedicated server has loaded it since #19
+        // Phase 2. Phase 5's AE2 read landed server-side (#150) without needing the graph, so
+        // nothing on a server consumes it today -- that is the argument someone will reach for
+        // and it is the wrong one. `GraphService` names no client class and
+        // `CommonSideSafetyTest` is what holds that.
         GraphService.get().startLoad(event.getModConfigurationDirectory());
         // BESIDE THE GRAPH AND NOT BEHIND IT. The pin file is kilobytes and read inline, so
         // there is no thread and no ordering with the graph load -- but it must happen before
