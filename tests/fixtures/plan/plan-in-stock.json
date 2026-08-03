@@ -34,12 +34,6 @@
     "why": "craftable: chisel:chisel_iron"
    },
    {
-    "category": "packager",
-    "machine": "Packager",
-    "state": "buildable",
-    "why": "craftable: cyclicmagic:auto_packager"
-   },
-   {
     "category": "tconstruct.casting_table",
     "machine": "Casting",
     "state": "buildable",
@@ -167,7 +161,7 @@
     "qty": 2
    }
   ],
-  "work": 11,
+  "work": 8,
   "work_budget": 80000
  },
  "scenario": {

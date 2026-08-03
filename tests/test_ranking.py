@@ -29,6 +29,14 @@ from recipegraph import cost  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
+# WHERE THE TWO CYCLE TERMS SIT IN `score_recipe`'s tuple, named rather than spelled as
+# index literals. #172 split one counter into two and moved one of them across `cheap`, and
+# four assertions here were reading `[2]`: with literals that reordering is four silent index
+# bumps, and with these it is a constant a reader has to look at and agree with.
+ANCESTOR_CYCLIC = 1
+OWN_CYCLIC = 3
+SIMPLE_PLAIN = 6
+
 # `minecraft.crafting` and `minecraft.smelting` are what `machines.is_hand_crafting`
 # recognises, so using those names keeps the fixtures on the same code path as the pack.
 STATES = {
@@ -320,8 +328,8 @@ class SelfConsumingRecipeTest(unittest.TestCase):
         ranked = sorted(g.real_producers("mod:gem"),
                         key=lambda r: solver.score_recipe(r), reverse=True)
         self.assertEqual(ranked[0].rid, "smelt")
-        self.assertEqual(solver.score_recipe(by_id["upgrade"])[2], -1)
-        self.assertEqual(solver.score_recipe(by_id["smelt"])[2], 0)
+        self.assertEqual(solver.score_recipe(by_id["upgrade"])[OWN_CYCLIC], -1)
+        self.assertEqual(solver.score_recipe(by_id["smelt"])[OWN_CYCLIC], 0)
 
     def test_a_byproduct_that_feeds_back_is_still_a_cycle(self):
         # `_build` passes `ancestors | {key}`, so the key being planned is always covered.
@@ -338,7 +346,7 @@ class SelfConsumingRecipeTest(unittest.TestCase):
                      category="minecraft.crafting"))
         _g, solver = self._solver(graph=g)
         by_id = {r.rid: r for r in g.recipes}
-        self.assertEqual(solver.score_recipe(by_id["recycle"])[2], -1)
+        self.assertEqual(solver.score_recipe(by_id["recycle"])[OWN_CYCLIC], -1)
         self.assertEqual(solver.pick_recipe("mod:gem").rid, "forge")
 
     def test_stock_still_makes_an_upgrade_recipe_usable(self):
@@ -347,7 +355,7 @@ class SelfConsumingRecipeTest(unittest.TestCase):
         # every repair and upgrade recipe in the pack.
         g, solver = self._solver(have={"mod:gem": 4, "mod:junk": 4})
         by_id = {r.rid: r for r in g.recipes}
-        self.assertEqual(solver.score_recipe(by_id["upgrade"])[2], 0)
+        self.assertEqual(solver.score_recipe(by_id["upgrade"])[OWN_CYCLIC], 0)
 
     def test_it_is_still_chosen_when_it_is_the_only_producer(self):
         # Ranked last is not forbidden. `pick_recipe` takes the best of what exists, and a
@@ -361,6 +369,297 @@ class SelfConsumingRecipeTest(unittest.TestCase):
         _g, solver = self._solver(graph=g)
         self.assertEqual(solver.pick_recipe("mod:gem").rid, "upgrade")
         self.assertEqual(solver.solve("mod:gem", 1)["tree"]["recipe"], "upgrade")
+
+
+class TheNamedScorePositionsMatchTheTupleTest(unittest.TestCase):
+    """The three constants above must point at the terms they are named for.
+
+    THEY ARE INDEX LITERALS WEARING A NAME, AND THAT IS ALL. Naming them stopped four
+    assertions being four silent index bumps when #172 reordered the tuple, but it does not
+    stop the NEXT reordering leaving a constant pointing at the wrong element -- and then
+    `score[OWN_CYCLIC]` reads some other term, the assertion still compares two numbers, and
+    it can quite easily still pass. Same shape as the drift #178 found, where a comparison
+    test agreed with itself for two releases.
+
+    EVERY NAMED POSITION HOLDS A DISTINCT VALUE IN THIS FIXTURE, AND THAT IS THE WHOLE
+    DESIGN. The first version of this class used a one-slot recipe, so `own_cyclic` was 0 --
+    and so was `satisfied` next door. Moving `OWN_CYCLIC` from 3 to 4 read `satisfied`, got
+    0, and the pin PASSED. Measured, not imagined: the drift arm was run and came back OK.
+    A pin whose neighbours share its value is not a pin.
+
+    So: one ancestor slot, TWO own-output slots, nothing satisfied. `-1` and `-2` cannot be
+    confused with each other or with anything else in the tuple, and the whole tuple is
+    asserted rather than three positions out of eight.
+    """
+
+    @staticmethod
+    def _scored():
+        """A score whose every term is known by construction. `(score, expected)`."""
+        g = Graph()
+        g.names = {"mod:gem": "Gem", "mod:slag": "Slag", "mod:dross": "Dross"}
+        # Consumes the key being planned (ANCESTOR, and the elif puts a both-slot here),
+        # plus two of its own other outputs (OWN, twice). Nothing is in stock, so all three
+        # count and `satisfied` is 0.
+        g.add(Recipe("loop", "t",
+                     [("mod:gem", 1), ("mod:slag", 1), ("mod:dross", 1)],
+                     [Ingredient(["mod:gem"], 1), Ingredient(["mod:slag"], 1),
+                      Ingredient(["mod:dross"], 1)],
+                     category="minecraft.crafting"))
+        costs = cost.estimate(g, machine_states=STATES)
+        solver = Solver(g, machine_states=STATES, costs=costs)
+        recipe = g.real_producers("mod:gem")[0]
+        return solver.score_recipe(recipe, frozenset(["mod:gem"]))
+
+    def test_the_whole_tuple_is_what_the_constants_assume(self):
+        """Every position, not only the named three.
+
+        Asserting the whole thing is what makes ANY reordering fail here rather than
+        somewhere confusing. `cheap` is the one computed term and is checked for shape.
+        """
+        scored = self._scored()
+        self.assertEqual(8, len(scored))
+        self.assertEqual(1, scored[0], "real production, not a container transfer")
+        self.assertEqual(-1, scored[ANCESTOR_CYCLIC], "one ancestor slot")
+        self.assertIsInstance(scored[2], float)
+        self.assertLess(scored[2], 0.0, "`cheap` is -cost and the cost here is positive")
+        self.assertEqual(-2, scored[OWN_CYCLIC], "two own-output slots")
+        self.assertEqual(0, scored[4], "nothing is in stock")
+        self.assertEqual(0, scored[5], "no raw leaf, so not ore-backed")
+        # Three merged slots: 1/(1+3) plus the 0.1 hand-crafting bonus.
+        self.assertAlmostEqual(0.35, scored[SIMPLE_PLAIN], places=9)
+        self.assertEqual(2, scored[7], "minecraft.crafting is a machine you have")
+
+    def test_no_named_position_shares_a_value_with_another(self):
+        """The property that makes the assertions above a pin rather than a coincidence.
+
+        If two positions held the same number, a constant could drift onto its neighbour and
+        every assertion would still pass. Checked here so that a future edit to the fixture
+        cannot quietly remove the thing that makes this class work.
+        """
+        scored = self._scored()
+        named = [scored[ANCESTOR_CYCLIC], scored[OWN_CYCLIC], scored[SIMPLE_PLAIN]]
+        for position, value in enumerate(scored):
+            for name_value in named:
+                if value == name_value:
+                    self.assertIn(position, (ANCESTOR_CYCLIC, OWN_CYCLIC, SIMPLE_PLAIN),
+                                  "position %d holds %r, which a named constant also "
+                                  "reads -- a drift onto it would go unnoticed"
+                                  % (position, value))
+
+    def test_the_ancestor_term_outranks_price_and_the_own_term_does_not(self):
+        """The ordering claim itself, read off the tuple rather than off the docstring.
+
+        This is what #172 changed and the one thing a future reordering must not undo
+        quietly. `cheap` sits between the two cycle terms; if either constant crosses it,
+        the split is gone and only this assertion says so.
+        """
+        self.assertLess(ANCESTOR_CYCLIC, OWN_CYCLIC)
+        cheap_position = ANCESTOR_CYCLIC + 1
+        self.assertLess(cheap_position, OWN_CYCLIC)
+        self.assertIsInstance(self._scored()[cheap_position], float)
+
+
+class CheapCycleBeatsExpensiveRealRouteTest(unittest.TestCase):
+    """Issue #172: a route that cannot be performed must not win on price.
+
+    THE SHAPE, reduced from the reported one. Planning a Sednanite Ingot produced
+
+        craft  Sednanite Ingot    <- casting table
+          craft  Molten Sednanite <- smeltery
+            craft  Sednanite Dust <- crafting
+              cycle Sednanite Ingot            <- the TARGET
+
+    and a shopping list containing Sednanite Ingot. A plan for X whose shopping list
+    contains X cannot be executed, and unlike an expensive answer it does not look wrong.
+    The cheap route scored 110 against the real one's 802, so `cheap` decided outright and
+    the cycle term never voted.
+
+    EVERY TEST HERE WAS RUN AGAINST THE TWO ORDERINGS IT EXISTS TO REJECT, because a test
+    that has only ever been observed passing is worth less than none when the change is an
+    ordering nobody can eyeball. Measured by patching `score_recipe`'s tuple and running
+    this class:
+
+      * the OLD ordering, `(transfer, cheap, -cyclic, ...)` with one merged counter below
+        the price: 5 of 7 fail, including all three behavioural claims.
+      * the NAIVE FIX, the merged counter promoted whole to `(transfer, -cyclic, cheap,
+        ...)`: 3 of 7 fail, and the one that matters is
+        `test_a_returned_seed_is_NOT_demoted_by_this` -- the naive fix passes every
+        cycle assertion in this class and breaks the farm.
+      * the shipped split ordering: all 7 pass.
+
+    So the class separates three designs rather than merely agreeing with the one that
+    shipped.
+
+    Measured on the reference graph: 48 of 23,476 multi-producer keys have a cyclic winner
+    with a clean route available, 17 of them bottom out on a cycle leaf today, and the
+    split ordering moves 35 while keeping both measured byproduct farms.
+    """
+
+    @staticmethod
+    def _graph():
+        """One cheap self-consuming route and one expensive real one, NOT priced level.
+
+        Deliberately unlike `SelfConsumingRecipeTest._graph`, which prices both at infinity
+        so the comparison falls through to the cycle term. That is the case the old ordering
+        already handled. This is the case it did not: a REAL price difference, where `cheap`
+        decides before the cycle term is ever consulted.
+
+        THE LOOP IS ONE STEP, NOT TWO, AND THAT IS A LIMIT OF THE TERM RATHER THAN A
+        SIMPLIFICATION OF THE FIXTURE. `score_recipe` sees one recipe and one ancestor set;
+        it cannot see `ingot -> molten -> dust -> ingot` from the ingot's own candidate
+        list, because at that level the casting recipe's only slot is molten metal and
+        looks clean. What it CAN see is a recipe for X that consumes X, which is what
+        `expand` ranks it against -- it passes `ancestors | {key}`, so the key being planned
+        is always in the set. Every one of the 35 keys the reference measurement moves has
+        that shape. A deeper loop is caught by `_build`'s backtracking instead, and where
+        backtracking also fails there is nothing in a one-recipe score that could have
+        helped.
+
+        THE FOUR IS WHAT MAKES THE CYCLE CHEAP, and it is the mechanism rather than a
+        convenience. Amortising a recipe over its output count is correct and is
+        `BatchAmortisationTest` above; the consequence is that a self-consuming recipe with
+        a yield converges DOWNWARDS under relaxation. Here the gem settles at 0.667 against
+        the smelter's 9, so `cheap` decides outright and the cycle term never votes. With
+        `polish` yielding one gem the loop settles above the smelter and there is no bug.
+        """
+        g = Graph()
+        g.names = {"mod:gem": "Gem", "mod:dust": "Dust", "mod:ore": "Gem Ore"}
+        # The cheap cycle: four polished gems out of one gem and some dust. Realistic --
+        # this is the shape of every upgrade, repair and exchange recipe in the pack.
+        g.add(Recipe("polish", "t", [("mod:gem", 4)],
+                     [Ingredient(["mod:gem"], 1), Ingredient(["mod:dust"], 1)],
+                     category="minecraft.crafting"))
+        # The expensive real route: smelting eight ore.
+        g.add(Recipe("smelt", "t", [("mod:gem", 1)], [Ingredient(["mod:ore"], 8)],
+                     category="minecraft.smelting"))
+        return g
+
+    def _solver(self):
+        g = self._graph()
+        costs = cost.estimate(g, machine_states=STATES)
+        return g, Solver(g, machine_states=STATES, costs=costs)
+
+    def test_the_cheap_route_really_is_cheaper(self):
+        # Without this the other assertions could pass because the cycle happened to be
+        # dearer, which is the bug not reproducing rather than the fix working.
+        g, solver = self._solver()
+        by_id = {r.rid: r for r in g.recipes}
+        self.assertLess(solver.estimated_cost(by_id["polish"]),
+                        solver.estimated_cost(by_id["smelt"]))
+
+    def test_the_expensive_real_route_wins(self):
+        # THE ASSERTION THAT FAILS BEFORE THE FIX. `expand` ranks with `ancestors | {key}`,
+        # so planning an ingot makes `cast`'s dust slot cyclic one level down.
+        g, solver = self._solver()
+        ranked = sorted(g.real_producers("mod:gem"),
+                        key=lambda r: solver.score_recipe(r, frozenset(["mod:gem"])),
+                        reverse=True)
+        self.assertEqual(ranked[0].rid, "smelt")
+
+    def test_the_plan_does_not_bottom_out_on_the_target(self):
+        """The reported symptom end to end, with the safety net removed.
+
+        `branch_tries=1` ON PURPOSE, and the test is worth much less without it. At the
+        default of 4 the backtracker rescues this fixture even on the OLD ordering -- it
+        enters the cheap cycle, finds the cycle leaf, discards the attempt and takes the
+        smelt -- so an assertion here would pass before and after and prove nothing about
+        the change. That is not hypothetical: it is what this assertion did when it was
+        first written, and it is why the ranking-level tests above are the real proof.
+
+        One try models the 17 keys on the reference graph whose plans bottom out on a
+        cycle leaf TODAY, where backtracking is not the safety net it looks like -- every
+        alternative it tries also cycles, or the work budget runs out first.
+        """
+        g = self._graph()
+        costs = cost.estimate(g, machine_states=STATES)
+        solver = Solver(g, machine_states=STATES, costs=costs, branch_tries=1)
+        result = solver.solve("mod:gem", 1)
+        self.assertEqual(result["tree"]["recipe"], "smelt")
+        self.assertNotIn("mod:gem", [row["key"] for row in result["shopping_list"]])
+
+    def test_price_cannot_outvote_the_ancestor_term(self):
+        # The promotion stated directly: make the cycle absurdly cheap and the real route
+        # absurdly dear, and the answer must not change. `cheap` sits BELOW this term now.
+        g = self._graph()
+        costs = cost.estimate(g, machine_states=STATES)
+        costs["mod:gem"] = 0.001
+        costs["mod:dust"] = 0.001
+        costs["mod:ore"] = 9999.0
+        solver = Solver(g, machine_states=STATES, costs=costs)
+        ranked = sorted(g.real_producers("mod:gem"),
+                        key=lambda r: solver.score_recipe(r, frozenset(["mod:gem"])),
+                        reverse=True)
+        self.assertEqual(ranked[0].rid, "smelt")
+
+    @staticmethod
+    def _farm():
+        """The Insolator shape: a recipe that eats a seed and gives the seed back.
+
+        `(graph, solver, {rid: recipe})`. Costs are pinned by hand rather than relaxed so
+        the farm is unambiguously the CHEAPER route -- if it were dearer the assertions
+        below would pass under any ordering, which is the fixture failing to express the
+        case rather than the code getting it right.
+        """
+        g = Graph()
+        g.names = {"mod:fruit": "Fruit", "mod:seed": "Seed", "mod:fert": "Fertiliser",
+                   "mod:crystal": "Crystal"}
+        # The farm: eats a seed, gives the seed back. `own`-cyclic, and cheaper.
+        g.add(Recipe("grow", "t", [("mod:fruit", 4), ("mod:seed", 1)],
+                     [Ingredient(["mod:seed"], 1), Ingredient(["mod:fert"], 1)],
+                     category="minecraft.crafting"))
+        # The alternative: no cycle at all, and dearer.
+        g.add(Recipe("transmute", "t", [("mod:fruit", 1)],
+                     [Ingredient(["mod:crystal"], 4)],
+                     category="minecraft.crafting"))
+        costs = cost.estimate(g, machine_states=STATES)
+        costs["mod:seed"] = 1.0
+        costs["mod:fert"] = 1.0
+        costs["mod:crystal"] = 50.0
+        return (g, Solver(g, machine_states=STATES, costs=costs),
+                {r.rid: r for r in g.recipes})
+
+    def test_a_returned_seed_is_NOT_demoted_by_this(self):
+        """The reason the counter is SPLIT rather than promoted whole.
+
+        Promoting the merged counter was measured and it regresses #61's case: on the
+        reference graph `minecraft:pumpkin` moves off the Insolator (Phyto-Gro + 1 Pumpkin
+        Seed + water -> 1 Pumpkin + 1 Pumpkin Seed, 129.90) and onto transmuting a Melon at
+        164.18, and `integrateddynamics:menril_log` off the Insolator tree at 173.34 and
+        onto Menril Essence at 363.63. The seed comes back; those are sustainable farms, and
+        telling a player to transmute melons rather than grow pumpkins is worse advice than
+        the bug being fixed.
+        """
+        g, solver, by_id = self._farm()
+        # THE BEHAVIOURAL CLAIM FIRST, and alone, because it is the one that fails under
+        # the naive fix. Asserting the tuple positions ahead of it means a merged-counter
+        # regression trips the index assertion and the run never reaches the claim that
+        # actually matters -- which is how a test comes to look like proof of something it
+        # never evaluated.
+        self.assertLess(solver.estimated_cost(by_id["grow"]),
+                        solver.estimated_cost(by_id["transmute"]))
+        self.assertEqual(solver.pick_recipe("mod:fruit").rid, "grow")
+
+    def test_the_returned_seed_counts_as_own_and_not_as_an_ancestor(self):
+        # The mechanism behind the test above, kept separate so a failure says which of
+        # the two broke: the counting or the ordering.
+        g, solver, by_id = self._farm()
+        self.assertEqual(solver.score_recipe(by_id["grow"])[OWN_CYCLIC], -1)
+        self.assertEqual(solver.score_recipe(by_id["grow"])[ANCESTOR_CYCLIC], 0)
+
+    def test_the_two_halves_are_counted_apart(self):
+        # A slot that is BOTH an ancestor and an own output counts once, as the ancestor.
+        # `own` is the softer claim and must not shadow the hard one.
+        g = Graph()
+        g.names = {"mod:gem": "Gem", "mod:junk": "Junk"}
+        g.add(Recipe("loop", "t", [("mod:gem", 1)],
+                     [Ingredient(["mod:gem"], 1), Ingredient(["mod:junk"], 1)],
+                     category="minecraft.crafting"))
+        costs = cost.estimate(g, machine_states=STATES)
+        solver = Solver(g, machine_states=STATES, costs=costs)
+        recipe = g.real_producers("mod:gem")[0]
+        scored = solver.score_recipe(recipe, frozenset(["mod:gem"]))
+        self.assertEqual(scored[ANCESTOR_CYCLIC], -1)
+        self.assertEqual(scored[OWN_CYCLIC], 0)
 
 
 class WorldOreTiebreakTest(unittest.TestCase):
@@ -400,7 +699,8 @@ class WorldOreTiebreakTest(unittest.TestCase):
         score = solver.score_recipe
         self.assertGreater(score(by_id["smelt"]), score(by_id["uncraft"]))
         # ...and the panel really does win everything below the new term.
-        self.assertGreater(score(by_id["uncraft"])[5], score(by_id["smelt"])[5])
+        self.assertGreater(score(by_id["uncraft"])[SIMPLE_PLAIN],
+                           score(by_id["smelt"])[SIMPLE_PLAIN])
 
     def test_a_real_price_difference_still_outranks_the_ore(self):
         # The tiebreak settles ties and must never override cost. Price the smelter out

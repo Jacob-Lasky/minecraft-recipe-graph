@@ -1,7 +1,7 @@
 package io.github.jacoblasky.recipedump.plan;
 
 /**
- * `Solver.score_recipe`'s return value: a seven-element tuple, compared left to right.
+ * `Solver.score_recipe`'s return value: an eight-element tuple, compared left to right.
  *
  * A CLASS RATHER THAN A `double`, because the terms are not commensurable and collapsing them
  * into one number needs weights that do not exist. Python compares the tuple lexicographically
@@ -16,10 +16,25 @@ final class RecipeScore implements Comparable<RecipeScore> {
 
     /** 0 for a container fill/empty, 1 for real production. A transfer is never production. */
     private final int production;
+    /**
+     * Negated slots that consume something already on the path to this recipe.
+     *
+     * ABOVE {@link #cheap} ON PURPOSE, and this is #172. Whether a plan can be performed at
+     * all is not a thing a price should outvote: a route consuming an ancestor produces a
+     * plan for X whose shopping list contains X.
+     */
+    private final int negatedAncestorCyclic;
     /** `-cost`, or negative infinity when the recipe prices at infinity. */
     private final double cheap;
-    /** Negated, so fewer cyclic slots ranks higher. */
-    private final int negatedCyclic;
+    /**
+     * Negated slots that consume one of this recipe's OWN outputs and no ancestor.
+     *
+     * BELOW {@link #cheap}, settling ties, and that is deliberate. An Insolator that eats a
+     * seed and gives the seed back is a sustainable farm rather than a cycle; ranking it
+     * above price was measured and sends the plan to a dearer route. See `Solver.score_recipe`
+     * in python for the two measured cases.
+     */
+    private final int negatedOwnCyclic;
     /** How many merged slots stock, a free source or AE2 already covers. */
     private final int satisfied;
     /** 1 when every raw leaf the recipe rests on is something you mine. */
@@ -29,11 +44,12 @@ final class RecipeScore implements Comparable<RecipeScore> {
     /** 2 = machine on hand, 1 = buildable or unidentified, 0 = proven unavailable. */
     private final int availability;
 
-    RecipeScore(int production, double cheap, int negatedCyclic, int satisfied,
-                int oreBacked, double simplePlain, int availability) {
+    RecipeScore(int production, int negatedAncestorCyclic, double cheap, int negatedOwnCyclic,
+                int satisfied, int oreBacked, double simplePlain, int availability) {
         this.production = production;
+        this.negatedAncestorCyclic = negatedAncestorCyclic;
         this.cheap = cheap;
-        this.negatedCyclic = negatedCyclic;
+        this.negatedOwnCyclic = negatedOwnCyclic;
         this.satisfied = satisfied;
         this.oreBacked = oreBacked;
         this.simplePlain = simplePlain;
@@ -46,11 +62,15 @@ final class RecipeScore implements Comparable<RecipeScore> {
         if (cmp != 0) {
             return cmp;
         }
+        cmp = Integer.compare(negatedAncestorCyclic, other.negatedAncestorCyclic);
+        if (cmp != 0) {
+            return cmp;
+        }
         cmp = compareDoubles(cheap, other.cheap);
         if (cmp != 0) {
             return cmp;
         }
-        cmp = Integer.compare(negatedCyclic, other.negatedCyclic);
+        cmp = Integer.compare(negatedOwnCyclic, other.negatedOwnCyclic);
         if (cmp != 0) {
             return cmp;
         }

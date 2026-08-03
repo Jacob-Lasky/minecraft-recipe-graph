@@ -66,28 +66,22 @@
     "why": "craftable: thaumcraft:infusion_matrix"
    },
    {
+    "category": "TechReborn.RollingMachine",
+    "machine": "Rolling Machine",
+    "state": "buildable",
+    "why": "craftable: techreborn:rolling_machine"
+   },
+   {
     "category": "agricraft.produce",
     "machine": "Crop Produce",
     "state": "buildable",
     "why": "craftable: agricraft:crop_sticks"
    },
    {
-    "category": "botania.manaPool",
-    "machine": "Mana Infusion",
-    "state": "buildable",
-    "why": "craftable: botania:pool"
-   },
-   {
     "category": "botania.runicAltar",
     "machine": "Runic Altar",
     "state": "buildable",
     "why": "craftable: botania:runealtar"
-   },
-   {
-    "category": "deepmoblearning.extraction_chamber",
-    "machine": "Loot Fabricator",
-    "state": "buildable",
-    "why": "craftable: deepmoblearning:extraction_chamber"
    },
    {
     "category": "deepmoblearning.simulation_chamber",
@@ -138,6 +132,12 @@
     "why": "craftable: modularmachinery:mythical_resource_miner_tier5_controller"
    },
    {
+    "category": "nuclearcraft_alloy_furnace",
+    "machine": "Alloy Furnace",
+    "state": "buildable",
+    "why": "craftable: nuclearcraft:alloy_furnace_idle"
+   },
+   {
     "category": "nuclearcraft_centrifuge",
     "machine": "Centrifuge",
     "state": "buildable",
@@ -154,6 +154,12 @@
     "machine": "Melter",
     "state": "buildable",
     "why": "craftable: nuclearcraft:melter_idle"
+   },
+   {
+    "category": "nuclearcraft_pressurizer",
+    "machine": "Pressurizer",
+    "state": "buildable",
+    "why": "craftable: nuclearcraft:pressurizer_idle"
    },
    {
     "category": "tconstruct.alloy",
@@ -178,10 +184,16 @@
     "machine": "Centrifugal Separator",
     "state": "buildable",
     "why": "craftable: thermalexpansion:machine:10 (as thermalexpansion:machine:10#f56885268ad5)"
+   },
+   {
+    "category": "zmaster587.AR.chemicalReactor",
+    "machine": "Chemical Reactor",
+    "state": "buildable",
+    "why": "craftable: advancedrocketry:chemicalreactor"
    }
   ],
   "max_nodes": 4000,
-  "nodes": 347,
+  "nodes": 388,
   "pins_overruled": {},
   "qty": 1,
   "shopping_list": [
@@ -239,6 +251,14 @@
     "qty": 93
    },
    {
+    "key": "techreborn:nuggets",
+    "kind": "item",
+    "label": "Aluminium Nugget",
+    "name": "Aluminium Nugget",
+    "qty": 90,
+    "unsourced": true
+   },
+   {
     "key": "thermalfoundation:ore:6",
     "kind": "item",
     "label": "Platinum Ore",
@@ -287,7 +307,7 @@
     "kind": "item",
     "label": "Iron Ore",
     "name": "Iron Ore",
-    "qty": 27
+    "qty": 29
    },
    {
     "key": "mysticalagriculture:void_metal_seeds#852d339dde2e",
@@ -324,6 +344,14 @@
     "label": "Quartz Shard",
     "name": "Quartz Shard",
     "qty": 16,
+    "unsourced": true
+   },
+   {
+    "key": "forestry:bee_drone_ge#438f0076b188",
+    "kind": "item",
+    "label": "Radiant Drone",
+    "name": "Radiant Drone",
+    "qty": 12,
     "unsourced": true
    },
    {
@@ -393,14 +421,6 @@
     "unsourced": true
    },
    {
-    "key": "forestry:bee_drone_ge#438f0076b188",
-    "kind": "item",
-    "label": "Radiant Drone",
-    "name": "Radiant Drone",
-    "qty": 8,
-    "unsourced": true
-   },
-   {
     "key": "minecraft:quartz_ore",
     "kind": "item",
     "label": "Nether Quartz Ore",
@@ -427,6 +447,27 @@
     "label": "Fiery Pyrite",
     "name": "Fiery Pyrite",
     "qty": 5
+   },
+   {
+    "key": "railcraft:ore_metal_poor:2",
+    "kind": "item",
+    "label": "Poor Copper Ore",
+    "name": "Poor Copper Ore",
+    "qty": 4
+   },
+   {
+    "key": "thermalfoundation:ore:4",
+    "kind": "item",
+    "label": "Aluminum Ore",
+    "name": "Aluminum Ore",
+    "qty": 4
+   },
+   {
+    "key": "libvulpes:ore0:8",
+    "kind": "item",
+    "label": "Rutile Ore",
+    "name": "Rutile Ore",
+    "qty": 4
    },
    {
     "key": "forestry:bee_drone_ge#f392e71caed6",
@@ -472,6 +513,34 @@
     "name": "Meadows Drone",
     "qty": 2,
     "unsourced": true
+   },
+   {
+    "key": "tconstruct:slime",
+    "kind": "item",
+    "label": "Slime Block",
+    "name": "Slime Block",
+    "qty": 1
+   },
+   {
+    "key": "industrialforegoing:artificial_dye:10",
+    "kind": "item",
+    "label": "Purple Artificial Dye",
+    "name": "Purple Artificial Dye",
+    "qty": 1
+   },
+   {
+    "key": "divinerpg:frozen_stone",
+    "kind": "item",
+    "label": "Frozen Stone",
+    "name": "Frozen Stone",
+    "qty": 1
+   },
+   {
+    "key": "botania:manasteelboots:*",
+    "kind": "item",
+    "label": "Manasteelboots (*)",
+    "name": "Manasteelboots (*)",
+    "qty": 1
    },
    {
     "key": "erebus:materials:21",
@@ -611,46 +680,629 @@
          "children": [
           {
            "alternatives": 15,
-           "category": "botania.manaPool",
+           "category": "crafting_shaped",
            "children": [
             {
-             "alternatives": 172,
-             "category": "minecraft.smelting",
              "children": [
               {
-               "alt_count": 14,
-               "key": "minecraft:iron_ore",
+               "alternatives": 6,
+               "category": "tconstruct.casting_table",
+               "children": [
+                {
+                 "alternatives": 486,
+                 "category": "tconstruct.casting_table",
+                 "children": [
+                  {
+                   "alternatives": 4,
+                   "category": "crafting_shapeless",
+                   "children": [
+                    {
+                     "children": [
+                      {
+                       "alternatives": 13,
+                       "category": "crafting_shapeless",
+                       "children": [
+                        {
+                         "alternatives": 9,
+                         "category": "crafting_shapeless",
+                         "children": [
+                          {
+                           "alternatives": 35,
+                           "category": "crafting_shaped",
+                           "children": [
+                            {
+                             "key": "tconstruct:slime",
+                             "kind": "item",
+                             "label": "Slime Block",
+                             "name": "Slime Block",
+                             "need": 1,
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "minecraft:slime_ball",
+                           "kind": "item",
+                           "label": "Slimeball",
+                           "machine": "Crafting (shaped)",
+                           "machine_state": "have",
+                           "name": "Slimeball",
+                           "need": 1,
+                           "per_run": 9,
+                           "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/common/slime/green/slimeball_from_block.json",
+                           "runs": 1,
+                           "status": "craft"
+                          },
+                          {
+                           "children": [
+                            {
+                             "key": "industrialforegoing:artificial_dye:10",
+                             "kind": "item",
+                             "label": "Purple Artificial Dye",
+                             "name": "Purple Artificial Dye",
+                             "need": 1,
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "ore:dyePurple",
+                           "kind": "ore",
+                           "label": "dyePurple",
+                           "name": "[oredict] dyePurple",
+                           "need": 1,
+                           "resolved_to": "industrialforegoing:artificial_dye:10",
+                           "status": "oredict"
+                          }
+                         ],
+                         "key": "tconstruct:edible:2",
+                         "kind": "item",
+                         "label": "Purple Slimeball",
+                         "machine": "Crafting (shapeless)",
+                         "machine_state": "have",
+                         "name": "Purple Slimeball",
+                         "need": 1,
+                         "per_run": 1,
+                         "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/tools/slime/slimeball_purple.json",
+                         "runs": 1,
+                         "status": "craft"
+                        },
+                        {
+                         "children": [
+                          {
+                           "alternatives": 172,
+                           "category": "minecraft.smelting",
+                           "children": [
+                            {
+                             "alt_count": 14,
+                             "key": "minecraft:iron_ore",
+                             "kind": "item",
+                             "label": "Iron Ore",
+                             "name": "Iron Ore",
+                             "need": 1,
+                             "note": "mined, not crafted",
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "minecraft:iron_ingot",
+                           "kind": "item",
+                           "label": "Iron Ingot",
+                           "machine": "Smelting",
+                           "machine_state": "have",
+                           "name": "Iron Ingot",
+                           "need": 1,
+                           "per_run": 1,
+                           "recipe": "hei:minecraft.smelting:31344",
+                           "runs": 1,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "ore:ingotIron",
+                         "kind": "ore",
+                         "label": "ingotIron",
+                         "name": "[oredict] ingotIron",
+                         "need": 1,
+                         "resolved_to": "minecraft:iron_ingot",
+                         "status": "oredict"
+                        },
+                        {
+                         "children": [
+                          {
+                           "key": "divinerpg:frozen_stone",
+                           "kind": "item",
+                           "label": "Frozen Stone",
+                           "name": "Frozen Stone",
+                           "need": 1,
+                           "status": "raw"
+                          }
+                         ],
+                         "key": "ore:stone",
+                         "kind": "ore",
+                         "label": "stone",
+                         "name": "[oredict] stone",
+                         "need": 1,
+                         "resolved_to": "divinerpg:frozen_stone",
+                         "status": "oredict"
+                        }
+                       ],
+                       "key": "tconstruct:ingots:3",
+                       "kind": "item",
+                       "label": "Knightslime Ingot",
+                       "machine": "Crafting (shapeless)",
+                       "machine_state": "have",
+                       "name": "Knightslime Ingot",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/tools/materials/ingot/knightslime_ingot.json",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "ore:ingotKnightslime",
+                     "kind": "ore",
+                     "label": "ingotKnightslime",
+                     "name": "[oredict] ingotKnightslime",
+                     "need": 1,
+                     "resolved_to": "tconstruct:ingots:3",
+                     "status": "oredict"
+                    }
+                   ],
+                   "key": "tconstruct:nuggets:3",
+                   "kind": "item",
+                   "label": "Knightslime Nugget",
+                   "machine": "Crafting (shapeless)",
+                   "machine_state": "have",
+                   "name": "Knightslime Nugget",
+                   "need": 9,
+                   "per_run": 9,
+                   "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/common/metals/knightslime/knightslime_nugget.json",
+                   "runs": 1,
+                   "status": "craft"
+                  },
+                  {
+                   "alternatives": 5,
+                   "category": "tconstruct.alloy",
+                   "children": [
+                    {
+                     "alternatives": 63,
+                     "category": "tconstruct.smeltery",
+                     "children": [
+                      {
+                       "key": "railcraft:ore_metal_poor:2",
+                       "kind": "item",
+                       "label": "Poor Copper Ore",
+                       "name": "Poor Copper Ore",
+                       "need": 4,
+                       "note": "mined, not crafted",
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "fluid:copper",
+                     "kind": "fluid",
+                     "label": "Molten Copper",
+                     "machine": "Smelting",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: tconstruct:smeltery_controller",
+                     "name": "[fluid] Molten Copper",
+                     "need": 324,
+                     "per_run": 96,
+                     "recipe": "hei:tconstruct.smeltery:129556",
+                     "runs": 4,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 54,
+                     "category": "tconstruct.smeltery",
+                     "children": [
+                      {
+                       "alt_count": 4,
+                       "key": "thermalfoundation:ore:4",
+                       "kind": "item",
+                       "label": "Aluminum Ore",
+                       "name": "Aluminum Ore",
+                       "need": 4,
+                       "note": "mined, not crafted",
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "fluid:aluminum",
+                     "kind": "fluid",
+                     "label": "Molten Aluminum",
+                     "machine": "Smelting",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: tconstruct:smeltery_controller",
+                     "name": "[fluid] Molten Aluminum",
+                     "need": 972,
+                     "per_run": 288,
+                     "recipe": "hei:tconstruct.smeltery:129799",
+                     "runs": 4,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "fluid:alubrass",
+                   "kind": "fluid",
+                   "label": "Molten Aluminum Brass",
+                   "machine": "Alloying",
+                   "machine_state": "buildable",
+                   "machine_why": "craftable: tconstruct:smeltery_controller",
+                   "name": "[fluid] Molten Aluminum Brass",
+                   "need": 1296,
+                   "per_run": 4,
+                   "recipe": "hei:tconstruct.alloy:133637",
+                   "runs": 324,
+                   "status": "craft"
+                  }
+                 ],
+                 "key": "tconstruct:cast_custom:1",
+                 "kind": "item",
+                 "label": "Nugget Cast",
+                 "machine": "Casting",
+                 "machine_state": "buildable",
+                 "machine_why": "craftable: tconstruct:casting",
+                 "name": "Nugget Cast",
+                 "need": 9,
+                 "per_run": 1,
+                 "recipe": "hei:tconstruct.casting_table:135085",
+                 "runs": 9,
+                 "status": "craft"
+                },
+                {
+                 "alternatives": 14,
+                 "category": "tconstruct.smeltery",
+                 "children": [
+                  {
+                   "alternatives": 3,
+                   "category": "zmaster587.AR.chemicalReactor",
+                   "children": [
+                    {
+                     "key": "botania:manasteelboots:*",
+                     "kind": "item",
+                     "label": "Manasteelboots (*)",
+                     "name": "Manasteelboots (*)",
+                     "need": 1,
+                     "status": "raw"
+                    },
+                    {
+                     "alternatives": 3,
+                     "category": "crafting_shaped",
+                     "children": [
+                      {
+                       "alternatives": 43,
+                       "category": "bdew.jeibees.produce.rootBees",
+                       "children": [
+                        {
+                         "alt_count": 4,
+                         "key": "forestry:bee_drone_ge#438f0076b188",
+                         "kind": "item",
+                         "label": "Radiant Drone",
+                         "name": "Radiant Drone",
+                         "need": 4,
+                         "note": "no recipe reaches this state; the graph can only make Forest Drone",
+                         "status": "raw",
+                         "unsourced": true
+                        }
+                       ],
+                       "key": "minecraft:clay_ball",
+                       "kind": "item",
+                       "label": "Clay",
+                       "machine": "Bee Produce",
+                       "machine_state": "have",
+                       "name": "Clay",
+                       "need": 4,
+                       "per_run": 1,
+                       "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
+                       "runs": 4,
+                       "status": "craft"
+                      },
+                      {
+                       "children": [
+                        {
+                         "alternatives": 3,
+                         "category": "crafting_shaped",
+                         "children": [
+                          {
+                           "children": [
+                            {
+                             "alternatives": 172,
+                             "category": "minecraft.smelting",
+                             "children": [
+                              {
+                               "alt_count": 14,
+                               "key": "minecraft:iron_ore",
+                               "kind": "item",
+                               "label": "Iron Ore",
+                               "name": "Iron Ore",
+                               "need": 2,
+                               "note": "mined, not crafted",
+                               "status": "raw"
+                              }
+                             ],
+                             "key": "minecraft:iron_ingot",
+                             "kind": "item",
+                             "label": "Iron Ingot",
+                             "machine": "Smelting",
+                             "machine_state": "have",
+                             "name": "Iron Ingot",
+                             "need": 2,
+                             "per_run": 1,
+                             "recipe": "hei:minecraft.smelting:31344",
+                             "runs": 2,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "ore:ingotIron",
+                           "kind": "ore",
+                           "label": "ingotIron",
+                           "name": "[oredict] ingotIron",
+                           "need": 2,
+                           "resolved_to": "minecraft:iron_ingot",
+                           "status": "oredict"
+                          }
+                         ],
+                         "key": "immersiveengineering:material:1",
+                         "kind": "item",
+                         "label": "Iron Rod",
+                         "machine": "Crafting (shaped)",
+                         "machine_state": "have",
+                         "name": "Iron Rod",
+                         "need": 1,
+                         "per_run": 4,
+                         "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/material/stick_iron.json",
+                         "runs": 1,
+                         "status": "craft"
+                        }
+                       ],
+                       "key": "ore:stickIron",
+                       "kind": "ore",
+                       "label": "stickIron",
+                       "name": "[oredict] stickIron",
+                       "need": 1,
+                       "resolved_to": "immersiveengineering:material:1",
+                       "status": "oredict"
+                      }
+                     ],
+                     "key": "advancedrocketry:pipesealer",
+                     "kind": "item",
+                     "label": "Pipe Seal",
+                     "machine": "Crafting (shaped)",
+                     "machine_state": "have",
+                     "name": "Pipe Seal",
+                     "need": 1,
+                     "per_run": 1,
+                     "recipe": "advancedrocketry-2.2.4.jar!assets/advancedrocketry/recipes/pipesealer.json",
+                     "runs": 1,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 2,
+                     "category": "TechReborn.RollingMachine",
+                     "children": [
+                      {
+                       "alternatives": 5,
+                       "category": "nuclearcraft_pressurizer",
+                       "children": [
+                        {
+                         "alternatives": 15,
+                         "category": "minecraft.crafting",
+                         "children": [
+                          {
+                           "alternatives": 2,
+                           "category": "nuclearcraft_alloy_furnace",
+                           "children": [
+                            {
+                             "alt_count": 6,
+                             "alternatives": 10,
+                             "category": "minecraft.crafting",
+                             "children": [
+                              {
+                               "alt_count": 3,
+                               "alternatives": 3,
+                               "category": "crafting_shaped",
+                               "children": [
+                                {
+                                 "children": [
+                                  {
+                                   "key": "techreborn:nuggets",
+                                   "kind": "item",
+                                   "label": "Aluminium Nugget",
+                                   "name": "Aluminium Nugget",
+                                   "need": 90,
+                                   "note": "nothing makes this form; the graph can only make Aluminum Ingot",
+                                   "status": "raw",
+                                   "unsourced": true
+                                  }
+                                 ],
+                                 "key": "ore:nuggetAluminum",
+                                 "kind": "ore",
+                                 "label": "nuggetAluminum",
+                                 "name": "[oredict] nuggetAluminum",
+                                 "need": 90,
+                                 "resolved_to": "techreborn:nuggets",
+                                 "status": "oredict"
+                                }
+                               ],
+                               "key": "tconstruct:common_ingots:2",
+                               "kind": "item",
+                               "label": "Aluminum Ingot",
+                               "machine": "Crafting (shaped)",
+                               "machine_state": "have",
+                               "name": "Aluminum Ingot",
+                               "need": 10,
+                               "per_run": 1,
+                               "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/common/common_metals/aluminum/aluminum_ingot_nugget.json",
+                               "runs": 10,
+                               "status": "craft"
+                              }
+                             ],
+                             "key": "thermalfoundation:material:196",
+                             "kind": "item",
+                             "label": "Aluminum Nugget",
+                             "machine": "Crafting",
+                             "machine_state": "have",
+                             "name": "Aluminum Nugget",
+                             "need": 84,
+                             "per_run": 9,
+                             "recipe": "hei:minecraft.crafting:25036",
+                             "runs": 10,
+                             "status": "craft"
+                            },
+                            {
+                             "alt_count": 2,
+                             "alternatives": 4,
+                             "category": "minecraft.crafting",
+                             "children": [
+                              {
+                               "alternatives": 34,
+                               "category": "minecraft.smelting",
+                               "children": [
+                                {
+                                 "alt_count": 2,
+                                 "key": "libvulpes:ore0:8",
+                                 "kind": "item",
+                                 "label": "Rutile Ore",
+                                 "name": "Rutile Ore",
+                                 "need": 4,
+                                 "note": "mined, not crafted",
+                                 "status": "raw"
+                                }
+                               ],
+                               "key": "techreborn:ingot:14",
+                               "kind": "item",
+                               "label": "Titanium Ingot",
+                               "machine": "Smelting",
+                               "machine_state": "have",
+                               "name": "Titanium Ingot",
+                               "need": 4,
+                               "per_run": 1,
+                               "recipe": "hei:minecraft.smelting:31768",
+                               "runs": 4,
+                               "status": "craft"
+                              }
+                             ],
+                             "key": "techreborn:nuggets:14",
+                             "kind": "item",
+                             "label": "Titanium Nugget",
+                             "machine": "Crafting",
+                             "machine_state": "have",
+                             "name": "Titanium Nugget",
+                             "need": 36,
+                             "per_run": 9,
+                             "recipe": "hei:minecraft.crafting:25215",
+                             "runs": 4,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "advancedrocketry:productnugget",
+                           "kind": "item",
+                           "label": "Titanium Aluminide Nugget",
+                           "machine": "Alloy Furnace",
+                           "machine_state": "buildable",
+                           "machine_why": "craftable: nuclearcraft:alloy_furnace_idle",
+                           "name": "Titanium Aluminide Nugget",
+                           "need": 36,
+                           "per_run": 3,
+                           "recipe": "hei:nuclearcraft_alloy_furnace:331686",
+                           "runs": 12,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "advancedrocketry:productingot",
+                         "kind": "item",
+                         "label": "Titanium Aluminide Ingot",
+                         "machine": "Crafting",
+                         "machine_state": "have",
+                         "name": "Titanium Aluminide Ingot",
+                         "need": 4,
+                         "per_run": 1,
+                         "recipe": "hei:minecraft.crafting:17183",
+                         "runs": 4,
+                         "status": "craft"
+                        }
+                       ],
+                       "key": "advancedrocketry:productplate",
+                       "kind": "item",
+                       "label": "Titanium Aluminide Plate",
+                       "machine": "Pressurizer",
+                       "machine_state": "buildable",
+                       "machine_why": "craftable: nuclearcraft:pressurizer_idle",
+                       "name": "Titanium Aluminide Plate",
+                       "need": 4,
+                       "per_run": 1,
+                       "recipe": "hei:nuclearcraft_pressurizer:333000",
+                       "runs": 4,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "advancedrocketry:productsheet",
+                     "kind": "item",
+                     "label": "Titanium Aluminide Sheet",
+                     "machine": "Rolling Machine",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: techreborn:rolling_machine",
+                     "name": "Titanium Aluminide Sheet",
+                     "need": 4,
+                     "per_run": 1,
+                     "recipe": "hei:TechReborn.RollingMachine:250102",
+                     "runs": 4,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "botania:manasteelboots",
+                   "kind": "item",
+                   "label": "Manasteelboots",
+                   "machine": "Chemical Reactor",
+                   "machine_state": "buildable",
+                   "machine_why": "craftable: advancedrocketry:chemicalreactor",
+                   "name": "Manasteelboots",
+                   "need": 1,
+                   "per_run": 1,
+                   "recipe": "hei:zmaster587.AR.chemicalReactor:113323",
+                   "runs": 1,
+                   "status": "craft"
+                  }
+                 ],
+                 "key": "fluid:manasteel",
+                 "kind": "fluid",
+                 "label": "Molten Manasteel",
+                 "machine": "Smelting",
+                 "machine_state": "buildable",
+                 "machine_why": "craftable: tconstruct:smeltery_controller",
+                 "name": "[fluid] Molten Manasteel",
+                 "need": 144,
+                 "per_run": 576,
+                 "recipe": "hei:tconstruct.smeltery:132787",
+                 "runs": 1,
+                 "status": "craft"
+                }
+               ],
+               "key": "botania:manaresource:17",
                "kind": "item",
-               "label": "Iron Ore",
-               "name": "Iron Ore",
-               "need": 1,
-               "note": "mined, not crafted",
-               "status": "raw"
+               "label": "Manasteel Nugget",
+               "machine": "Casting",
+               "machine_state": "buildable",
+               "machine_why": "craftable: tconstruct:casting",
+               "name": "Manasteel Nugget",
+               "need": 9,
+               "per_run": 1,
+               "recipe": "hei:tconstruct.casting_table:140027",
+               "runs": 9,
+               "status": "craft"
               }
              ],
-             "key": "minecraft:iron_ingot",
-             "kind": "item",
-             "label": "Iron Ingot",
-             "machine": "Smelting",
-             "machine_state": "have",
-             "name": "Iron Ingot",
-             "need": 1,
-             "per_run": 1,
-             "recipe": "hei:minecraft.smelting:31344",
-             "runs": 1,
-             "status": "craft"
+             "key": "ore:nuggetManasteel",
+             "kind": "ore",
+             "label": "nuggetManasteel",
+             "name": "[oredict] nuggetManasteel",
+             "need": 9,
+             "resolved_to": "botania:manaresource:17",
+             "status": "oredict"
             }
            ],
            "key": "botania:manaresource",
            "kind": "item",
            "label": "Manasteel Ingot",
-           "machine": "Mana Infusion",
-           "machine_state": "buildable",
-           "machine_why": "craftable: botania:pool",
+           "machine": "Crafting (shaped)",
+           "machine_state": "have",
            "name": "Manasteel Ingot",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:botania.manaPool:125557",
+           "recipe": "Botania r1.10-364.4.jar!assets/botania/recipes/manaresource_0_alt.json",
            "runs": 1,
            "status": "craft"
           },
@@ -5396,7 +6048,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 809,
+  "work": 400,
   "work_budget": 80000
  },
  "scenario": {

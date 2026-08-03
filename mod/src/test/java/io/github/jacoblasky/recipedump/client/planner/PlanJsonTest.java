@@ -91,7 +91,9 @@ public class PlanJsonTest {
     public void aTruncatedPlanSaysSoAndCountsWhatItCutAt() {
         PlanView plan = PlanFixtures.load("plan-truncated");
         assertTrue("plan-truncated is the fixture for exactly this", plan.truncated());
-        assertEquals(49, plan.nodes());
+        // 49 before #172. Splitting the cycle term stopped the ranking entering cyclic
+        // routes first, so the same node budget now buys three more real nodes.
+        assertEquals(52, plan.nodes());
         assertTrue(plan.maxNodes() > 0);
     }
 
@@ -247,7 +249,10 @@ public class PlanJsonTest {
     @Test
     public void theMachinesToBuildListReadsBackWithItsReasons() {
         PlanView plan = PlanFixtures.load("plan-in-stock");
-        assertEquals(4, plan.machinesToBuild().size());
+        // 4 before #172. The Packager dropped out: it was only on the list because the plan
+        // routed through a cyclic recipe that needed it, and the ranking no longer picks
+        // that route. A machine leaving this list is the plan getting SHORTER, not a loss.
+        assertEquals(3, plan.machinesToBuild().size());
         PlanView.MachineRow first = plan.machinesToBuild().get(0);
         assertEquals("chisel.chiseling", first.category());
         assertEquals("Chiseling", first.machine());
@@ -258,10 +263,12 @@ public class PlanJsonTest {
 
     @Test
     public void theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive() {
-        // 347 nodes in one viewport. Named here so a future change that makes the tree panel
-        // O(n^2) has something to fail against rather than just feeling slow in game.
+        // 388 nodes in one viewport, 347 before #172. Named here so a future change that
+        // makes the tree panel O(n^2) has something to fail against rather than just feeling
+        // slow in game -- so when this number MOVES UP it is the test getting harder, and the
+        // only wrong response is to stop asserting it.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(347, plan.flatten().size());
+        assertEquals(388, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {
