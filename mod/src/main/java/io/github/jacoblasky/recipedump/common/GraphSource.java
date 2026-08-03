@@ -38,9 +38,12 @@ import java.util.List;
  *     entry is the right answer the day a player needs to change it without editing a launch
  *     profile; nobody does yet.
  *
- * NOTHING HERE TOUCHES `net.minecraft.client`. The graph is pack data and Phase 5 wants it
- * server-side to read a real AE2 grid, so this is common from the start rather than moved
- * later. `CommonSideSafetyTest` enforces that for the mod class; this file keeps to it too.
+ * NOTHING HERE TOUCHES `net.minecraft.client`, AND DO NOT ADD AN IMPORT THAT DOES. The graph
+ * is pack data rather than a client resource, so this is common from the start rather than
+ * moved later, and a dedicated server has loaded it since #19 Phase 2. Phase 5's live AE2 read
+ * landed server-side (#150) and turned out not to need the graph, so every graph consumer
+ * today is client-side -- that is NOT a reason to move this file under `client.`.
+ * `CommonSideSafetyTest` enforces the rule for the mod class; this file keeps to it too.
  */
 public final class GraphSource {
 

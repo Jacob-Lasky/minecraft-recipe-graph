@@ -17,9 +17,9 @@ import org.junit.Test;
  * The plan reader, against all 19 frozen plan fixtures.
  *
  * These are real solved plans from the reference pack, so this is not a reader tested on
- * inputs written to suit it -- it is a reader tested on the contract #135 froze. When the
- * Java solver lands in #141 it produces this same shape, and anything the reader gets wrong
- * here it would get wrong there.
+ * inputs written to suit it -- it is a reader tested on the contract #135 froze. The Java
+ * solver landed in #141 and produces this same shape, so anything the reader gets wrong here
+ * it gets wrong on the in-game path too.
  */
 public class PlanJsonTest {
 

@@ -10,8 +10,9 @@ import java.util.List;
  * A whole solved plan, as the panel needs to read it.
  *
  * The same decoupling as {@link PlanNode}: this is the frozen `result` object from
- * `tests/fixtures/plan/*.json`, which is what the Java solver will hand back when #141
- * lands. Nothing here computes a plan; it reads one.
+ * `tests/fixtures/plan/*.json`, and it is also what the Java solver hands back since #141 --
+ * `PlannerService` runs `plan.PlanJson.toJson` and `client.planner.PlanJson.readResult`
+ * parses it into this. Nothing here computes a plan; it reads one.
  */
 public final class PlanView {
 

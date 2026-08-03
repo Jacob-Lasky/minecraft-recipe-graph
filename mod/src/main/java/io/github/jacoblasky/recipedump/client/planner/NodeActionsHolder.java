@@ -1,7 +1,8 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 /**
- * The one installed {@link NodeActions}, for Phase 4 to replace.
+ * The one installed {@link NodeActions}. `client.jei.JeiNodeActions.install` replaces the
+ * no-op at `onRuntimeAvailable` (#157).
  *
  * A HOLDER RATHER THAN A CONSTRUCTOR PARAMETER, because the thing that knows how to talk to
  * JEI is the JEI plugin, and it learns it can at `onRuntimeAvailable` -- long after the
@@ -24,7 +25,7 @@ public final class NodeActionsHolder {
         return installed;
     }
 
-    /** Phase 4 calls this once, from the JEI plugin. Null restores the no-op. */
+    /** Called once from the JEI plugin via `JeiNodeActions.install`. Null restores the no-op. */
     public static void install(NodeActions actions) {
         installed = actions == null ? NodeActions.NONE : actions;
     }

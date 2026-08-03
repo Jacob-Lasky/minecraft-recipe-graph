@@ -56,7 +56,13 @@ public final class PlannerWidgets {
      */
     public static final int MAX_INDENT_DEPTH = 8;
 
-    /** Reserved for Phase 4's item icons. See {@link NodeActions#iconFor}. */
+    /**
+     * The item-icon column, filled by {@link NodeActions#iconFor}.
+     *
+     * CHARGED UNCONDITIONALLY, EVEN WHEN NO ICON IS DRAWN -- see the row builder. A width
+     * that depended on whether a stack came back would re-flow every row the moment a
+     * `NodeActions` was installed or a graph finished loading.
+     */
     public static final int ICON = 10;
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
     public static final int QTY = 52;
@@ -458,10 +464,11 @@ public final class PlannerWidgets {
         int indent = Math.min(depth, MAX_INDENT_DEPTH) * INDENT;
         int x = indent;
 
-        // The icon column is RESERVED whether or not anything fills it, so installing
-        // NodeActions in Phase 4 does not re-flow every row. The widget is only added when
-        // there is a stack, because an `ItemDisplayWidget` holding EMPTY still draws its slot
-        // frame -- 49 empty boxes down the left edge of the first real screenshot.
+        // `x` ADVANCES BY ICON UNCONDITIONALLY, below, whether or not a stack came back. DO
+        // NOT make the column width conditional on the stack: installing a `NodeActions`, or
+        // a graph finishing its load mid-session, would then re-flow every row. The WIDGET is
+        // added only when there is a stack, because an `ItemDisplayWidget` holding EMPTY still
+        // draws its slot frame -- 49 empty boxes down the left edge of the first screenshot.
         net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
         if (!stack.isEmpty()) {
             row.child(icon(stack).pos(x, 0));

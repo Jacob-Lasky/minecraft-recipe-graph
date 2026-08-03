@@ -29,14 +29,17 @@ import org.apache.logging.log4j.LogManager;
  *
  * <h2>Where the graph comes from</h2>
  *
- * Through {@link GraphSource}, injected, because nothing on the client loads a
- * {@link RecipeGraph} yet -- that holder belongs to the in-game provisioning work and lands
- * separately. Until it does, this is installed with {@link #NO_GRAPH} and every method answers
- * the way it would for a node with no item behind it: the menu simply does not draw the two
- * entries. Installing the false-answering version rather than leaving the seam empty is what
- * proves the registration works on the day a graph appears rather than the day after, and the
- * install log below is what keeps the two states from looking alike to whoever is debugging
- * the menu.
+ * Through {@link GraphSource}, injected. `DumpPlugin.onRuntimeAvailable` installs the live one
+ * over {@code GraphService.get().graph()} (#161), so the graph arrives through this seam and
+ * nowhere else. DO NOT ADD A SECOND HOLDER -- no static field here, no graph cached in the
+ * constructor. The source is asked PER INVOCATION on purpose: `onRuntimeAvailable` fires long
+ * before the 5.47 s load finishes, so anything resolved once would be null for the rest of the
+ * session. A volatile field read is what makes asking per frame free.
+ *
+ * {@link #NO_GRAPH} remains the answer for a client whose graph has not loaded, and every
+ * method then answers the way it would for a node with no item behind it: the menu simply does
+ * not draw the two entries. The install log below is what keeps that state from looking like
+ * "never installed" to whoever is debugging the menu.
  *
  * NOTHING HERE MAY THROW. Every method is called from a GUI build, a render pass or a click
  * handler, and an exception in any of those takes the screen down. The two boundaries that
@@ -52,8 +55,9 @@ public final class JeiNodeActions implements NodeActions {
      * AN INTERFACE RATHER THAN A DIRECT CALL for the same reason {@link
      * io.github.jacoblasky.recipedump.client.StackIndex} takes its stacks as an argument: it
      * is what lets the whole of this class be asserted with no client, no JEI and no graph
-     * loader in the JVM. It is also the entire coupling to the in-game work -- wiring the real
-     * holder in is a one-line change at the {@link #install} call site and nothing else.
+     * loader in the JVM. It is also the entire coupling to the in-game work -- the real holder
+     * is one anonymous implementation at the {@link #install} call site in `DumpPlugin` and
+     * nothing else.
      */
     public interface GraphSource {
 
@@ -64,8 +68,9 @@ public final class JeiNodeActions implements NodeActions {
     /**
      * A source that never has a graph.
      *
-     * NOT A TEST DOUBLE -- it is the production wiring until the client-side graph holder
-     * lands, and it is also the honest answer on a client that has one and has not loaded it.
+     * NOT A TEST DOUBLE -- it is the honest answer on a client that has a graph and has not
+     * loaded it, and it is the target a null {@link GraphSource} collapses to in the
+     * constructor. Production wiring is `DumpPlugin`'s live source, not this.
      */
     public static final GraphSource NO_GRAPH = new GraphSource() {
         @Override
@@ -106,7 +111,8 @@ public final class JeiNodeActions implements NodeActions {
     static String installMessage(GraphSource graphs) {
         if (graphs == null || graphs == NO_GRAPH) {
             return "JeiNodeActions installed with no graph source: the planner's recipe-viewer"
-                    + " entries stay hidden until a client graph holder is wired in.";
+                    + " entries will never appear. DumpPlugin.onRuntimeAvailable installs the"
+                    + " live source, so some other caller reached install() instead.";
         }
         return "JeiNodeActions installed, graph source " + graphs.getClass().getName() + ".";
     }
