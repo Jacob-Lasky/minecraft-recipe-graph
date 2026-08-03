@@ -302,18 +302,39 @@ if [ "$want_java" -eq 1 ]; then
         echo "!! Everything else will pass and prove nothing about the port."
     fi
     log=$(mktemp)
+    # CONTAINER ON TOWER, DIRECT GRADLE ON A WORKSTATION. This arm hard-coded `docker run`, so
+    # on cachyos-desktop -- JDK 25, no docker -- it exited 127 and this script reported
+    # "java: 0 passed, 0 failed, 0 skipped" and carried on. Same defect `mod/tools/build-jar.sh`
+    # had, one file over, and worse here: see the passed-nothing guard below for why 0/0/0 was
+    # nearly a silent pass.
+    #
     # 8g, not 4g: the gate holds the whole 121 MB graph in the test JVM. 4g dies partway
     # through with an OOM that looks like a hang.
-    gated docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
-        -v "$(host_path "$ROOT")":/repo \
-        -v "$(host_path "$PACK_MODS")":/deps:ro \
-        -v "$(host_path "$BUILD_DIR")":/build:ro \
-        -v "$(host_path "$GRADLE_CACHE")":/gradle \
-        -e GRADLE_USER_HOME=/gradle \
-        -e RECIPEGRAPH_ORACLE="/build/$(basename "$ORACLE")" \
-        -w /repo/mod eclipse-temurin:25-jdk \
-        ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods=/deps \
-            cleanTest test > "$log" 2>&1 || fail=1
+    if command -v docker >/dev/null 2>&1; then
+        gated docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
+            -v "$(host_path "$ROOT")":/repo \
+            -v "$(host_path "$PACK_MODS")":/deps:ro \
+            -v "$(host_path "$BUILD_DIR")":/build:ro \
+            -v "$(host_path "$GRADLE_CACHE")":/gradle \
+            -e GRADLE_USER_HOME=/gradle \
+            -e RECIPEGRAPH_ORACLE="/build/$(basename "$ORACLE")" \
+            -w /repo/mod eclipse-temurin:25-jdk \
+            ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods=/deps \
+                cleanTest test > "$log" 2>&1 || fail=1
+    elif command -v java >/dev/null 2>&1; then
+        # Gradle's own default GRADLE_USER_HOME when the shared cache is absent: naming a
+        # missing directory does not fail, it makes RFG re-decompile Minecraft (~9 min) every run.
+        if [ -d "$GRADLE_CACHE" ]; then
+            GRADLE_USER_HOME=$GRADLE_CACHE
+            export GRADLE_USER_HOME
+        fi
+        RECIPEGRAPH_ORACLE="$ORACLE" gated sh -c 'cd mod && ./gradlew --no-daemon \
+            -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods="$1" cleanTest test' -- "$PACK_MODS" \
+            > "$log" 2>&1 || fail=1
+    else
+        echo "!! neither docker nor java found -- THE JAVA ARM DID NOT RUN AT ALL."
+        fail=1
+    fi
 
     passed=$(grep -c ' PASSED$' "$log" || true)
     failed=$(grep -c ' FAILED$' "$log" || true)
@@ -321,9 +342,36 @@ if [ "$want_java" -eq 1 ]; then
     echo "java: $passed passed, $failed failed, $skipped skipped"
     grep -E '^[A-Za-z].* > .* (FAILED|SKIPPED)$' "$log" || true
 
+    # AN ARM THAT ASSERTED NOTHING IS A FAILURE, NOT A COUNT OF ZERO. Every guard below reads
+    # the log for a string, so all of them go SILENT when the run produced no log at all: the
+    # golden-gate check greps for `... SKIPPED` and finds nothing, which is indistinguishable
+    # from the gate having passed. Observed: docker missing, arm exits 127, output reads
+    # "java: 0 passed, 0 failed, 0 skipped" with no alarm, and only the `|| fail=1` above kept
+    # it from printing "all green" over a port nothing checked.
+    #
+    # This also covers the case that `|| fail=1` cannot see: a run that exits 0 having collected
+    # nothing -- a `--tests` filter matching no class, a Gradle no-op, or a changed output format,
+    # since `passed` comes from grepping ' PASSED$', which is Gradle's presentation and not a
+    # contract this repository controls.
+    if [ "$passed" -eq 0 ]; then
+        echo "!! THE JAVA ARM ASSERTED NOTHING: 0 tests reported PASSED."
+        echo "!! That is not an empty suite -- it means the run did not happen, or its output"
+        echo "!! format changed and every check below is reading a log that says nothing."
+        echo "!! full log: $log"
+        fail=1
+    fi
+
     # A SKIPPED gate is reported as a problem, not as a detail. This is the whole point.
     if grep -q 'everyFixturePlansExactlyAsThePythonOracleDoes SKIPPED' "$log"; then
         echo "!! THE GOLDEN PLAN GATE SKIPPED. The Java port was NOT checked against the oracle."
+        fail=1
+    fi
+    # And the gate PASSING has to be observed, not inferred from the absence of a SKIPPED line.
+    # Those are different claims, and the check above only ever made the weaker one.
+    if [ -f "$ORACLE" ] \
+       && ! grep -q 'everyFixturePlansExactlyAsThePythonOracleDoes PASSED' "$log"; then
+        echo "!! THE GOLDEN PLAN GATE DID NOT PASS, and did not report SKIPPED either."
+        echo "!! An oracle is present at $ORACLE, so it should have run. full log: $log"
         fail=1
     fi
     [ "$fail" -eq 0 ] || echo "full log: $log"
