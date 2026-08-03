@@ -532,6 +532,7 @@
   "unpriced item": 33
  },
  "sample": {
+  "animus:kama_bound": 1.0,
   "aoa3:heart_fruit_seeds": null,
   "chisel:concrete_brown:1": 122.7236261478781,
   "contenttweaker:dungeon_drop": 200.0,
