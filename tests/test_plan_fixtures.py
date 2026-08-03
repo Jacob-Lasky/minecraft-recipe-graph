@@ -229,6 +229,41 @@ class TheCostConstantsHaveNotMovedUnderTheFixturesTest(unittest.TestCase):
             self.assertTrue(hasattr(cost_mod, name), name)
             self.assertIn(name, self.doc["constants"], "%s; %s" % (name, REGENERATE))
 
+    def test_every_cost_constant_is_pinned_or_explicitly_exempt(self):
+        """The other direction, and the one that was missing until #176.
+
+        `test_every_pinned_constant_still_exists` catches a constant being RENAMED out of the
+        recorded set. Nothing caught one being ADDED and never entering it, so the tripwire
+        this class exists to be simply did not cover it -- measured, not hypothetical:
+        `EMC_COST` had been unpinned since it was introduced, and #176's `UNSOURCED_COST`
+        would have been the second.
+
+        A NEW CONSTANT NOW FAILS HERE UNTIL SOMEONE DECIDES, which is the point. Pin it, or
+        name it in `maker.NOT_PINNED` with a reason. Both are cheap; neither is silent.
+        """
+        live = set(name for name in dir(cost_mod)
+                   if name.isupper() and not name.startswith("_")
+                   and isinstance(getattr(cost_mod, name), (int, float))
+                   and not isinstance(getattr(cost_mod, name), bool))
+        unaccounted = live - set(maker.PINNED_CONSTANTS) - maker.NOT_PINNED
+        self.assertEqual(
+            set(), unaccounted,
+            "cost.py declares %s, which is neither in PINNED_CONSTANTS nor in NOT_PINNED. "
+            "A constant nothing records can move without any fixture changing, which is the "
+            "one failure this file exists to prevent." % sorted(unaccounted))
+
+    def test_nothing_is_both_pinned_and_exempt(self):
+        # The two lists disagreeing would make the exemption a lie: the constant would be
+        # recorded anyway and the reason beside it would describe a decision nobody took.
+        self.assertEqual(set(), set(maker.PINNED_CONSTANTS) & maker.NOT_PINNED)
+
+    def test_every_exempt_constant_still_exists(self):
+        # Same rot as a renamed pinned constant, one list over: a stale exemption silently
+        # widens what the test above accepts.
+        for name in sorted(maker.NOT_PINNED):
+            self.assertTrue(hasattr(cost_mod, name),
+                            "%s is exempt from pinning but no longer exists" % name)
+
     def test_every_entry_cost_lands_inside_the_band(self):
         # The census is the shape a flattening makes, and "OUTSIDE THE BAND" is the shape a
         # broken derivation makes. Neither is visible in any single price.

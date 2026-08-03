@@ -21,8 +21,8 @@ import com.google.gson.JsonParser;
  *
  * WHY A READER EXISTS AT ALL, given that #141 will hand back objects directly: because the
  * shape is the contract, and reading it is how the panel can be built and tested before a
- * Java solver exists. The 22 fixtures under `tests/fixtures/plan/` are real solved plans
- * from the reference pack -- a 347-node fluid chain, a truncated tree, a cycle, six items
+ * Java solver exists. The 21 plan fixtures under `tests/fixtures/plan/` are real solved plans
+ * from the reference pack -- a 634-node fluid chain, a truncated tree, a cycle, six items
  * called "Iron Plate" -- which is far better test data than anything anyone would write by
  * hand, and it is already checked in.
  *
@@ -116,7 +116,7 @@ public final class PlanJson {
     /**
      * One node and its whole subtree.
      *
-     * ITERATIVE WOULD BE SAFER AND IS NOT WORTH IT: the deepest fixture is a 347-node chain
+     * ITERATIVE WOULD BE SAFER AND IS NOT WORTH IT: the deepest fixture is a 634-node chain
      * whose depth is nowhere near a stack frame limit, and the planner's own `--depth` cap
      * bounds it. If a plan ever arrives deep enough to overflow this, the tree was already
      * too deep to read.

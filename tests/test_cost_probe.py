@@ -11,6 +11,7 @@ Only the pure display layer is covered: a sweep needs the 115 MB graph and minut
 relaxation, which does not belong in a suite CI runs on every push.
 """
 
+import collections
 import importlib.util
 import io
 import os
@@ -145,6 +146,65 @@ class SweepHygieneTest(unittest.TestCase):
         finally:
             cost_mod.estimate = real
         self.assertEqual(seen, [1.0, 9.0])
+
+
+class ItCanSweepMoreThanOneConstantTest(unittest.TestCase):
+    """`sweep` takes the constant's NAME, because #176 added one it could not see.
+
+    The tool swept `BASE_RAW_COST` and nothing else, so the cost audit mandated for a
+    change that introduces a new constant would have reported "no probe moved" and been
+    believed. That is the failure this tool's own docstring describes -- "a wrong constant
+    does not raise, it just quietly reroutes plans" -- arriving inside the tool written to
+    catch it.
+    """
+
+    def test_it_applies_and_restores_the_named_constant(self):
+        g = graph_with_a_choice_of_alternatives()
+        seen = []
+        real = cost_mod.estimate
+        was = cost_mod.UNSOURCED_COST
+
+        def spy(*a, **k):
+            seen.append(cost_mod.UNSOURCED_COST)
+            return real(*a, **k)
+
+        cost_mod.estimate = spy
+        try:
+            probe.sweep(g, machines.resolve(g), [11.0, 22.0], True,
+                        [("mod:ingot", "Ingot")], constant="UNSOURCED_COST")
+        finally:
+            cost_mod.estimate = real
+            cost_mod.UNSOURCED_COST = was
+        self.assertEqual(seen, [11.0, 22.0])
+        self.assertEqual(cost_mod.UNSOURCED_COST, was)
+
+    def test_sweeping_one_constant_leaves_the_other_alone(self):
+        # The reason `sweep` takes a name rather than a flag choosing between two
+        # hard-coded branches: a run that moved both would produce a grid whose cells
+        # cannot be attributed to either constant.
+        g = graph_with_a_choice_of_alternatives()
+        raw_was = cost_mod.BASE_RAW_COST
+        try:
+            probe.sweep(g, machines.resolve(g), [11.0], True, [("mod:ingot", "Ingot")],
+                        constant="UNSOURCED_COST")
+            self.assertEqual(cost_mod.BASE_RAW_COST, raw_was)
+        finally:
+            cost_mod.BASE_RAW_COST = raw_was
+            cost_mod.UNSOURCED_COST = cost_mod.UNSOURCED_COST
+
+    def test_the_heading_names_the_constant_that_moved(self):
+        # A report headed BASE_RAW_COST while UNSOURCED_COST was swept is worse than no
+        # report: it is a wrong answer in the shape of a right one.
+        rows = collections.OrderedDict([(11.0, ({"Ingot": "x"}, 0.0))])
+        buffer = io.StringIO()
+        stdout = sys.stdout
+        sys.stdout = buffer
+        try:
+            probe.report(rows, [("mod:ingot", "Ingot")], constant="UNSOURCED_COST")
+        finally:
+            sys.stdout = stdout
+        self.assertIn("UNSOURCED_COST=11.0", buffer.getvalue())
+        self.assertNotIn("BASE_RAW_COST", buffer.getvalue())
 
 
 class TheProbeCanSeeWhatItIsTuningTest(unittest.TestCase):

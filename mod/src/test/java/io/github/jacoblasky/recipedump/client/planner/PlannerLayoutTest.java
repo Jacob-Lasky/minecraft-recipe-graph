@@ -25,7 +25,7 @@ import org.junit.Test;
  *
  * WHAT THIS IS FOR, given that the PR also carries screenshots: a screenshot costs about two
  * minutes and shows one plan. This runs every fixture in seconds and can assert things a
- * picture cannot -- that no row overlaps the next across 388 of them, that nothing overflows
+ * picture cannot -- that no row overlaps the next across 634 of them, that nothing overflows
  * the panel, that the deepest chain in the pack still leaves room for a label. Screenshots
  * answer "does it look right"; this answers "is it right", and it is the one a future change
  * gets immediately.
@@ -111,13 +111,19 @@ public class PlannerLayoutTest {
     }
 
     @Test
-    public void aThreeHundredNodeTreeStillFitsInTheViewportAndOverflowsIt() {
-        // The hard case the scroll area exists for: 388 nodes in a 400x220 panel, 347
-        // before #172 reordered the cycle term.
+    public void theBiggestTreeStillFitsInTheViewportAndOverflowsIt() {
+        // The hard case the scroll area exists for: 634 nodes in a 400x220 panel. 347 before
+        // #172 reordered the cycle term, 388 before #176 priced the unsourced set and the
+        // plan stopped dead-ending on 40 items the graph could not explain.
+        //
+        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved twice
+        // and the method was still called `aThreeHundredNodeTree` at 388. A test name that
+        // states a number goes stale silently -- the assertion below is the thing that must
+        // fail when the number moves, and it does.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(388, tree.getChildren().size());
+        assertEquals(634, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
@@ -267,11 +273,18 @@ public class PlannerLayoutTest {
     }
 
     /**
-     * The window the calculator item actually opens today.
+     * The window the calculator item actually opens.
      *
-     * This is the user path -- there is no solver yet, so right-clicking the item shows the
-     * plan book. It replaces the equivalent assertion in #140's `PlannerScreenLayoutTest`,
-     * which tested the placeholder this PR removes.
+     * THE EMPTY PLAN IS A REAL STATE, NOT A PLACEHOLDER, and that is why this still asserts
+     * something. {@link io.github.jacoblasky.recipedump.client.PlannerEntry#open} shows the
+     * book and calls `startPlan`, and the solve runs off-thread -- so every open renders the
+     * book against {@link PlanView#empty()} first and swaps the tree in when the solve lands.
+     * A panel that only lays out once a plan exists would be broken for that whole window.
+     *
+     * Replaces the equivalent assertion in #140's `PlannerScreenLayoutTest`. Said "there is
+     * no solver yet" until #176 corrected it; the solver was ported in fe445a2 (#141) and
+     * `PlannerService` has solved since, so the claim had been false for 35 merged PRs while
+     * reading as the reason the test exists.
      */
     @Test
     public void theWindowTheCalculatorItemOpensLaysOutWithAPopulatedBook() {

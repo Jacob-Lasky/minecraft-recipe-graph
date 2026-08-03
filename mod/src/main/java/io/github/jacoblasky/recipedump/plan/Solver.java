@@ -930,86 +930,18 @@ public final class Solver {
         return "nothing makes this form; the graph can only make ";
     }
 
-    int reachableForm(int keyId) {
-        if (hasRealProducers(keyId)) {
-            return -1;
-        }
-        String key = g.key(keyId);
-        // A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is evidence of
-        // nothing: `producers` widens a concrete meta to `base:*` and never the reverse.
-        // Measured on the reference graph -- without this, `natura:sticks:*` is badged
-        // "nothing makes this form" while its concrete metas are ordinary craftable sticks.
-        if (isWildcard(keyId)) {
-            return -1;
-        }
-        String stem = Keys.baseKey(key);
-        if (!stem.equals(key)) {
-            // A STATE of a producible item: #139's half.
-            int stemId = g.keyId(stem);
-            return stemId >= 0 && hasRealProducers(stemId) ? stemId : -1;
-        }
-        // A BARE key nothing makes while a VARIANT of it IS made: #170's half, and the
-        // third face of one subsumption rule. REPORTED, NOT REPRICED -- whether the solver
-        // should ROUTE a bare demand through a produced variant is contested (#28 refused
-        // it in `producers`) and stays open. Mirrors `Graph.reachable_form` in python.
-        for (int variant : g.variantsOf(keyId)) {
-            if (hasRealProducers(variant)) {
-                // First produced variant, which is the one the dump saw first: `variantsOf`
-                // is insertion-ordered, and this reaches a plan tree the fixtures freeze.
-                return variant;
-            }
-        }
-        return obtainableSibling(keyId);
-    }
-
     /**
-     * Another form of this key's material that the graph CAN make, or -1.
+     * The other form of this key the graph CAN make, or -1. See {@link Unsourced}.
      *
-     * THE #136 HALF. `nuggetSednanite` and `ingotSednanite` are one material by Forge's own
-     * oredict convention, so a nugget nothing makes has a specific other form to point a
-     * reader at -- which is the second clause {@link #reachableForm} refuses to badge
-     * without, and the thing that was missing when the plain-key case was first declared out
-     * of scope.
-     *
-     * DETERMINISTIC, because this reaches a plan tree and `tests/fixtures/plan/*.json`
-     * freezes those: most producers wins, then the key string. That also makes the answer
-     * "the form the pack actually makes" rather than whichever came back first.
-     *
-     * Mirrors `Graph.obtainable_sibling` in python and is held to it by the golden gate.
+     * A DELEGATE, NOT A COPY, and the javadoc for the rule lives there. #176 gave {@link
+     * Cost} a second reason to ask the same question, and python already showed what two
+     * spellings of it cost: `api._reachable_form` and the solver's copy drifted for two
+     * releases, so `/api/sweep` under-reported by 210 keys while the test comparing them
+     * passed. The scratch buffer is this solver's own, so nothing mutable is shared with a
+     * concurrent solve.
      */
-    private int obtainableSibling(int keyId) {
-        String material = null;
-        Csr ores = g.oresOf();
-        for (int p = ores.start(keyId); p < ores.end(keyId) && material == null; p++) {
-            material = Keys.materialOfOreGroup(g.oreGroupName(ores.at(p)));
-        }
-        if (material == null) {
-            return -1;
-        }
-        int best = -1;
-        int bestMade = 0;
-        Csr members = g.oreMembers();
-        for (int group = 0; group < g.oreGroupCount(); group++) {
-            if (!material.equals(Keys.materialOfOreGroup(g.oreGroupName(group)))) {
-                continue;
-            }
-            for (int p = members.start(group); p < members.end(group); p++) {
-                int member = members.at(p);
-                if (member == keyId) {
-                    continue;
-                }
-                int made = realProducerCount(member);
-                if (made <= 0) {
-                    continue;
-                }
-                if (best < 0 || made > bestMade
-                        || (made == bestMade && g.key(member).compareTo(g.key(best)) < 0)) {
-                    best = member;
-                    bestMade = made;
-                }
-            }
-        }
-        return best;
+    int reachableForm(int keyId) {
+        return Unsourced.reachableForm(g, keyId, scratch);
     }
 
     /**

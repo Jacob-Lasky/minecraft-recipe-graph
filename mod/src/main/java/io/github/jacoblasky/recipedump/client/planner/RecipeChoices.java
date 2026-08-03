@@ -15,7 +15,7 @@ import io.github.jacoblasky.recipedump.plan.Pins;
  *
  * WHY THIS IS NOT ON `PlanNode`. The plan shape carries `alternatives` as a COUNT, not a list,
  * and that is the right call -- inlining every candidate would put thousands of recipes into a
- * tree that already reaches 347 nodes. So the count comes with the plan and the list is looked
+ * tree that already reaches 634 nodes. So the count comes with the plan and the list is looked
  * up on demand, once, when someone opens the picker.
  *
  * The lookup needs the graph, which is why it lives here rather than in `PlannerWidgets`: the

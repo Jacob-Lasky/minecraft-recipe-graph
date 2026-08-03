@@ -27,7 +27,7 @@
   "from_sources": [],
   "machines_to_build": [],
   "max_nodes": 4000,
-  "nodes": 13,
+  "nodes": 21,
   "pins_overruled": {},
   "qty": 1,
   "shopping_list": [
@@ -39,6 +39,13 @@
     "qty": 3
    },
    {
+    "key": "forestry:bee_princess_ge#6f16eda873ae",
+    "kind": "item",
+    "label": "Forest Princess",
+    "name": "Forest Princess",
+    "qty": 2
+   },
+   {
     "key": "natura:sticks:*",
     "kind": "item",
     "label": "Maple Sticks (*)",
@@ -46,20 +53,32 @@
     "qty": 2
    },
    {
-    "key": "chickens:spawn_egg#8007a5b9df3a",
+    "key": "forestry:bee_princess_ge#49265408b3e4",
     "kind": "item",
-    "label": "Ink Black Chicken",
-    "name": "Ink Black Chicken",
-    "qty": 1,
-    "unsourced": true
+    "label": "Tropical Princess",
+    "name": "Tropical Princess",
+    "qty": 1
    },
    {
-    "key": "chickens:spawn_egg#79d20a22828a",
+    "key": "forestry:bee_princess_ge#c3e057183678",
     "kind": "item",
-    "label": "Log Chicken",
-    "name": "Log Chicken",
-    "qty": 1,
-    "unsourced": true
+    "label": "Modest Princess",
+    "name": "Modest Princess",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#fe694d7cc286",
+    "kind": "item",
+    "label": "Mystical Princess",
+    "name": "Mystical Princess",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#00c16aad704a",
+    "kind": "item",
+    "label": "Meadows Princess",
+    "name": "Meadows Princess",
+    "qty": 1
    }
   ],
   "target": "thermalfoundation:material:32",
@@ -113,42 +132,149 @@
       },
       {
        "alternatives": 134,
-       "category": "chickens.Laying",
+       "category": "bdew.jeibees.produce.rootBees",
        "children": [
         {
-         "alternatives": 2,
-         "category": "chickens.Breeding",
+         "alt_count": 4,
+         "alternatives": 3,
+         "category": "bdew.jeibees.mutation.rootBees",
          "children": [
           {
-           "key": "chickens:spawn_egg#8007a5b9df3a",
+           "alt_count": 4,
+           "key": "forestry:bee_princess_ge#49265408b3e4",
            "kind": "item",
-           "label": "Ink Black Chicken",
-           "name": "Ink Black Chicken",
+           "label": "Tropical Princess",
+           "name": "Tropical Princess",
            "need": 1,
-           "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
-           "status": "raw",
-           "unsourced": true
+           "status": "raw"
           },
           {
-           "key": "chickens:spawn_egg#79d20a22828a",
+           "alt_count": 4,
+           "alternatives": 3,
+           "category": "bdew.jeibees.mutation.rootBees",
+           "children": [
+            {
+             "alt_count": 4,
+             "key": "forestry:bee_princess_ge#c3e057183678",
+             "kind": "item",
+             "label": "Modest Princess",
+             "name": "Modest Princess",
+             "need": 1,
+             "status": "raw"
+            },
+            {
+             "alt_count": 4,
+             "alternatives": 12,
+             "category": "bdew.jeibees.mutation.rootBees",
+             "children": [
+              {
+               "alt_count": 4,
+               "key": "forestry:bee_princess_ge#fe694d7cc286",
+               "kind": "item",
+               "label": "Mystical Princess",
+               "name": "Mystical Princess",
+               "need": 1,
+               "status": "raw"
+              },
+              {
+               "alt_count": 4,
+               "alternatives": 42,
+               "category": "bdew.jeibees.mutation.rootBees",
+               "children": [
+                {
+                 "alt_count": 4,
+                 "alternatives": 201,
+                 "category": "bdew.jeibees.mutation.rootBees",
+                 "children": [
+                  {
+                   "alt_count": 4,
+                   "key": "forestry:bee_princess_ge#6f16eda873ae",
+                   "kind": "item",
+                   "label": "Forest Princess",
+                   "name": "Forest Princess",
+                   "need": 1,
+                   "status": "raw"
+                  },
+                  {
+                   "alt_count": 4,
+                   "key": "forestry:bee_princess_ge#00c16aad704a",
+                   "kind": "item",
+                   "label": "Meadows Princess",
+                   "name": "Meadows Princess",
+                   "need": 1,
+                   "status": "raw"
+                  }
+                 ],
+                 "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                 "kind": "item",
+                 "label": "Common Drone",
+                 "machine": "Bee Breeding",
+                 "machine_state": "have",
+                 "name": "Common Drone",
+                 "need": 1,
+                 "per_run": 1,
+                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                 "runs": 1,
+                 "status": "craft"
+                },
+                {
+                 "alt_count": 4,
+                 "key": "forestry:bee_princess_ge#6f16eda873ae",
+                 "kind": "item",
+                 "label": "Forest Princess",
+                 "name": "Forest Princess",
+                 "need": 1,
+                 "status": "raw"
+                }
+               ],
+               "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+               "kind": "item",
+               "label": "Cultivated Drone",
+               "machine": "Bee Breeding",
+               "machine_state": "have",
+               "name": "Cultivated Drone",
+               "need": 1,
+               "per_run": 1,
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+               "runs": 1,
+               "status": "craft"
+              }
+             ],
+             "key": "forestry:bee_drone_ge#e870ae142070",
+             "kind": "item",
+             "label": "Eldritch Drone",
+             "machine": "Bee Breeding",
+             "machine_state": "have",
+             "name": "Eldritch Drone",
+             "need": 1,
+             "per_run": 1,
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
+             "runs": 1,
+             "status": "craft"
+            }
+           ],
+           "key": "forestry:bee_drone_ge#dd8d21c62d2e",
            "kind": "item",
-           "label": "Log Chicken",
-           "name": "Log Chicken",
+           "label": "Skulking Drone",
+           "machine": "Bee Breeding",
+           "machine_state": "have",
+           "name": "Skulking Drone",
            "need": 1,
-           "note": "no recipe reaches this state; the graph can only make Realmite Chicken",
-           "status": "raw",
-           "unsourced": true
+           "per_run": 1,
+           "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
+           "runs": 1,
+           "status": "craft"
           }
          ],
-         "key": "chickens:spawn_egg#c46730e61a53",
+         "key": "forestry:bee_drone_ge#c59795af440a",
          "kind": "item",
-         "label": "String Chicken",
-         "machine": "Chicken Breeding",
+         "label": "Spidery Drone",
+         "machine": "Bee Breeding",
          "machine_state": "have",
-         "name": "String Chicken",
+         "name": "Spidery Drone",
          "need": 1,
          "per_run": 1,
-         "recipe": "hei:chickens.Breeding:117046",
+         "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
          "runs": 1,
          "status": "craft"
         }
@@ -156,12 +282,12 @@
        "key": "minecraft:string",
        "kind": "item",
        "label": "String",
-       "machine": "Laying Egg",
+       "machine": "Bee Produce",
        "machine_state": "have",
        "name": "String",
        "need": 1,
        "per_run": 1,
-       "recipe": "hei:chickens.Laying:117002",
+       "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
        "runs": 1,
        "status": "craft"
       },
@@ -240,7 +366,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 13,
+  "work": 21,
   "work_budget": 80000
  },
  "scenario": {

@@ -50,12 +50,6 @@
     "why": "craftable: nuclearcraft:centrifuge_idle"
    },
    {
-    "category": "nuclearcraft_pressurizer",
-    "machine": "Pressurizer",
-    "state": "buildable",
-    "why": "craftable: nuclearcraft:pressurizer_idle"
-   },
-   {
     "category": "tconstruct.alloy",
     "machine": "Alloying",
     "state": "buildable",
@@ -72,6 +66,12 @@
     "machine": "Smelting",
     "state": "buildable",
     "why": "craftable: tconstruct:smeltery_controller"
+   },
+   {
+    "category": "thermalexpansion.compactor",
+    "machine": "Compactor",
+    "state": "buildable",
+    "why": "craftable: thermalexpansion:machine:5 (as thermalexpansion:machine:5#baa7f6d95be3)"
    },
    {
     "category": "zmaster587.AR.chemicalReactor",
@@ -128,12 +128,11 @@
     "qty": 4
    },
    {
-    "key": "forestry:bee_drone_ge#438f0076b188",
+    "key": "forestry:bee_princess_ge#438f0076b188",
     "kind": "item",
-    "label": "Radiant Drone",
-    "name": "Radiant Drone",
-    "qty": 4,
-    "unsourced": true
+    "label": "Radiant Princess",
+    "name": "Radiant Princess",
+    "qty": 4
    },
    {
     "key": "minecraft:iron_ore",
@@ -529,14 +528,12 @@
                        "children": [
                         {
                          "alt_count": 4,
-                         "key": "forestry:bee_drone_ge#438f0076b188",
+                         "key": "forestry:bee_princess_ge#438f0076b188",
                          "kind": "item",
-                         "label": "Radiant Drone",
-                         "name": "Radiant Drone",
+                         "label": "Radiant Princess",
+                         "name": "Radiant Princess",
                          "need": 4,
-                         "note": "no recipe reaches this state; the graph can only make Forest Drone",
-                         "status": "raw",
-                         "unsourced": true
+                         "status": "raw"
                         }
                        ],
                        "key": "minecraft:clay_ball",
@@ -636,7 +633,7 @@
                      "children": [
                       {
                        "alternatives": 5,
-                       "category": "nuclearcraft_pressurizer",
+                       "category": "thermalexpansion.compactor",
                        "children": [
                         {
                          "alternatives": 15,
@@ -667,13 +664,13 @@
                        "key": "advancedrocketry:productplate",
                        "kind": "item",
                        "label": "Titanium Aluminide Plate",
-                       "machine": "Pressurizer",
+                       "machine": "Compactor",
                        "machine_state": "buildable",
-                       "machine_why": "craftable: nuclearcraft:pressurizer_idle",
+                       "machine_why": "craftable: thermalexpansion:machine:5 (as thermalexpansion:machine:5#baa7f6d95be3)",
                        "name": "Titanium Aluminide Plate",
                        "need": 4,
                        "per_run": 1,
-                       "recipe": "hei:nuclearcraft_pressurizer:333000",
+                       "recipe": "hei:thermalexpansion.compactor:150160",
                        "runs": 4,
                        "status": "craft"
                       }

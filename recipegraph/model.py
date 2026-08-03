@@ -451,6 +451,7 @@ class Graph:
         self._world_ores = None
         self._labels = None
         self._live_keys = None
+        self._unsourced_keys = None
         self._variant_index = None
         self._reshaped_only = None
         self._material_forms = None
@@ -782,6 +783,42 @@ class Graph:
             self._fluid_names = {}
             self._fluid_names = fluidnames.derive(self.recipes, self.bare_name)
         return self._fluid_names
+
+    @property
+    def unsourced_keys(self):
+        """Every live key `reachable_form` names another form for. 47,674 on the reference.
+
+        THE COST MODEL'S HALF OF #139/#136/#170, and the reason it is a set rather than a
+        predicate call inside `cost._seed`: the seed loop would otherwise run the whole
+        enumeration once per key instead of once per table. Cached on the graph the way
+        `reshaped_only` and `variant_index` are, because `estimate` is not the only caller --
+        `/api/sweep` and `/api/cost` ask the same question of the same graph, and a graph
+        outlives any one of them.
+
+        NOT "BECAUSE `estimate` SEEDS TWICE", which an earlier version of this docstring said
+        and `Unsourced.keys` repeated. `estimate` calls `_seed` ONCE and hands `dict(seed)` to
+        each of the two relaxations, so the second pass re-uses the first pass's seed rather
+        than recomputing it. The justification above does not depend on that being wrong or
+        right, which is why it is stated separately.
+
+        WHAT THESE KEYS ARE. `reachable_form` returns non-None only when nothing makes this
+        exact key AND the graph demonstrably makes another form of it -- another NBT state, a
+        processed form of the same material, or the same item under an NBT tag. So the graph
+        has positive evidence it cannot explain this route, which is a stronger and much
+        narrower claim than "no producer". See `reachable_form` for why the second clause is
+        what keeps it worth reading.
+
+        OVER `live_keys`, NOT `by_input`, AND THE DIFFERENCE IS 39 KEYS. Only a consumed key
+        can change a recipe's price, so restricting to `by_input` would price every route
+        identically and cost the same 0.4 seconds. The 39 are keys nothing consumes -- they
+        reach no plan, and they DO reach `/api/sweep` and `/api/cost`. Pricing a key one way
+        in the table and another way in the sweep is the drift #178 spent a PR removing.
+        """
+        if self._unsourced_keys is None:
+            self._unsourced_keys = frozenset(
+                key for key in self.live_keys
+                if not self.by_output.get(key) and self.reachable_form(key))
+        return self._unsourced_keys
 
     @property
     def live_keys(self):

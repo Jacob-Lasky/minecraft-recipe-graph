@@ -89,6 +89,62 @@ class TheOrderingIsTheClaimTest(unittest.TestCase):
         self.assertEqual(sorted(cost_mod.TOKEN_COST), sorted(tokens_mod.KINDS))
 
 
+class WhatTheGraphCannotExplainCostsTest(unittest.TestCase):
+    """`UNSOURCED_COST`, #176. The ordering is the claim; the magnitude is measured inert.
+
+    #139 shipped the "no known source" badge and deliberately did not touch the price, so
+    an item the graph had PROVEN it cannot account for still seeded at `BASE_RAW_COST` --
+    the cheapest value in the model. The solver therefore preferred routes through exactly
+    the items it was warning the reader about.
+    """
+
+    def test_it_outranks_a_locked_chapter(self):
+        # The claims differ in KIND. A gate is a lock with a key somewhere in the story; an
+        # unsourced item is one the tool cannot explain at all, on positive evidence rather
+        # than silence. Below a gate would put a route the graph cannot account for ahead of
+        # one it can, which is the defect.
+        self.assertGreater(cost_mod.UNSOURCED_COST, cost_mod.GATE_COST)
+
+    def test_it_is_not_an_impossibility(self):
+        # Same property 3 as a gate. The item exists in the world -- a Fissile Drone comes
+        # from somewhere -- so the route must stay finite and be chosen when it is the only
+        # one. Measured: infinity strands 2,372 currently-priced keys; every finite
+        # candidate strands zero.
+        self.assertLess(cost_mod.UNSOURCED_COST, cost_mod.MACHINE_COST["unavailable"])
+
+    def test_it_is_its_own_number(self):
+        # #95. Two unrelated statements sharing a figure destroys the ordering among both.
+        for other in (cost_mod.LOOT_COST, cost_mod.GATE_COST, cost_mod.DIMENSION_COST,
+                      cost_mod.MACHINE_COST["unavailable"]):
+            self.assertNotEqual(cost_mod.UNSOURCED_COST, other)
+
+    def test_the_whole_chain_holds_in_one_assertion(self):
+        # The band as `cost.py` states it, so a constant moved past its neighbour fails here
+        # and not somewhere confusing three modules away.
+        chain = [cost_mod.BASE_RAW_COST, cost_mod.LOOT_COST, cost_mod.DIMENSION_COST,
+                 cost_mod.GATE_COST, cost_mod.UNSOURCED_COST,
+                 cost_mod.MACHINE_COST["unavailable"]]
+        self.assertEqual(chain, sorted(chain))
+        self.assertEqual(len(chain), len(set(chain)))
+
+    def test_the_cache_notices_the_constant_moving(self):
+        # The failure `fingerprint` exists to prevent, applied to the constant this class is
+        # about: a warm `.cost-cache.json` serving pre-change prices reads as "the tuning
+        # change did not work" rather than as a stale cache. THE SEED CONSTANTS WERE NOT
+        # HASHED AT ALL before #176 -- GATE_COST is checked here too because that gap was
+        # real and this is where it would come back.
+        args = ("graph.json", {}, {}, ())
+        before = cost_mod.fingerprint(*args)
+        for name in ("UNSOURCED_COST", "GATE_COST", "LOOT_COST", "DIMENSION_COST"):
+            original = getattr(cost_mod, name)
+            try:
+                setattr(cost_mod, name, original + 7.0)
+                self.assertNotEqual(cost_mod.fingerprint(*args), before,
+                                    "moving %s must invalidate the cost cache" % name)
+            finally:
+                setattr(cost_mod, name, original)
+
+
 class WhatAPlaceholderCostsTest(unittest.TestCase):
     def test_a_locked_chapter_no_longer_prices_like_a_cobblestone(self):
         table = costs_for(two_routes())
