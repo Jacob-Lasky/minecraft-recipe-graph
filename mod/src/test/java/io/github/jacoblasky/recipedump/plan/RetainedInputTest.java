@@ -175,28 +175,49 @@ public class RetainedInputTest {
         // dividing a permanent requirement by it says a big enough output makes it free, which
         // is the error the amortisation comment in `Cost` was written about for machines. The
         // pack has a recipe yielding 60,466,176 fruit.
-        double small = priceOfOut(0.0f, 1);
-        double large = priceOfOut(0.0f, 4096);
-        assertTrue("a retained input must not get cheaper with the batch: " + small + " -> "
-                + large, large >= small - 1e-9);
+        double one = contribution(0.0f, 1);
+        double many = contribution(0.0f, 4096);
+        assertTrue("the shard has to cost something to begin with: " + one, one > 0.0);
+        assertEquals("a retained input's contribution must not shrink with the batch",
+                one, many, 1e-9);
     }
 
     @Test
-    public void aConsumedInputStillAmortises() {
-        // The other half, so the test above cannot pass by pricing everything into `base`.
-        assertTrue(priceOfOut(1.0f, 4096) < priceOfOut(1.0f, 1));
+    public void aConsumedInputDoesAmortise() {
+        // The mirror image, and it is what proves the test above measures anything: the same
+        // slot at the default chance must have its contribution collapse over 4096.
+        double one = contribution(1.0f, 1);
+        double many = contribution(1.0f, 4096);
+        assertTrue(one > 0.0);
+        assertTrue("a consumed input must amortise: " + one + " at 1, " + many + " at 4096",
+                many < one / 100.0);
     }
 
-    /** The price of `mod:out` from a one-retained-one-spent recipe yielding `batch`. */
-    private static double priceOfOut(float chance, int batch) {
+    /**
+     * What the shard slot alone adds to the price of `mod:out`, isolated by removing it.
+     *
+     * MEASURED AS A DIFFERENCE AND NOT AS A TOTAL, because the total is the wrong instrument
+     * and the first version of this test used it. The recipe also holds a CONSUMED input which
+     * genuinely amortises, so the total legitimately falls as the batch grows: this test failed
+     * with "22.0 -> 21.000244140625" and the code was right. Any tolerance wide enough to
+     * accept that drop is wide enough to accept the retained term vanishing as well.
+     */
+    private static double contribution(float chance, int batch) {
+        return priceOfOut(chance, batch, true) - priceOfOut(chance, batch, false);
+    }
+
+    /** The price of `mod:out`, with or without the shard slot in front of the material. */
+    private static double priceOfOut(float chance, int batch, boolean withShard) {
         GraphBuilder b = new GraphBuilder();
         b.name(b.key("mod:out"), "Out");
         b.name(b.key("mod:shard"), "Shard");
         b.name(b.key("mod:material"), "Material");
         b.beginRecipe();
-        b.beginSlot(1, "item", chance);
-        b.alternative(b.key("mod:shard"));
-        b.endSlot();
+        if (withShard) {
+            b.beginSlot(1, "item", chance);
+            b.alternative(b.key("mod:shard"));
+            b.endSlot();
+        }
         b.beginSlot(1, "item");
         b.alternative(b.key("mod:material"));
         b.endSlot();

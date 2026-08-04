@@ -164,30 +164,51 @@ class RetainedInputsDoNotAmortiseTest(unittest.TestCase):
     """A retained input is priced like a machine: once, and not divided by the batch."""
 
     @staticmethod
-    def _price(chance, batch):
+    def _price(chance, batch, with_shard=True):
         g = Graph()
         g.names = {"mod:out": "Out", "mod:shard": "Shard", "mod:material": "Material"}
-        g.add(Recipe("forge", "t", [("mod:out", batch)],
-                     [Ingredient(["mod:shard"], 1, "item", chance),
-                      Ingredient(["mod:material"], 1)],
+        slots = [Ingredient(["mod:material"], 1)]
+        if with_shard:
+            slots.insert(0, Ingredient(["mod:shard"], 1, "item", chance))
+        g.add(Recipe("forge", "t", [("mod:out", batch)], slots,
                      category="minecraft.crafting"))
         return cost_mod.estimate(g, have={}, machine_states={},
                                  free_sources=set()).get("mod:out")
+
+    def _contribution(self, chance, batch):
+        """What the shard slot alone adds to the price, isolated by removing it.
+
+        MEASURED AS A DIFFERENCE AND NOT AS A TOTAL, because the total is the wrong instrument
+        and the first version of this test used it. The recipe also holds a CONSUMED input,
+        which genuinely does amortise, so the total legitimately falls as the batch grows: at
+        batch 1 it was 22.0 and at 4096 it was 21.000244. A tolerance wide enough to accept
+        that drop is wide enough to accept the retained term vanishing too, which is exactly
+        the shape of test this repository keeps having to fix. The Java mirror of this caught
+        it; the Python one had been written to pass.
+        """
+        return self._price(chance, batch) - self._price(chance, batch, with_shard=False)
 
     def test_a_bigger_batch_does_not_make_a_retained_input_cheaper(self):
         # THE WHOLE POINT. `base` is what running the recipe costs at all and does not divide;
         # dividing a permanent requirement by the batch says a big enough output makes it free,
         # which is the identical error the amortisation comment in `_relax` was written about
         # for machines. The reference pack has a recipe yielding 60,466,176 fruit.
-        small = self._price(0.0, 1)
-        large = self._price(0.0, 4096)
-        self.assertGreater(large, 0.0)
-        self.assertAlmostEqual(large - small, 0.0, delta=abs(small) * 0.5 + 1.0,
-                               msg="the retained term must not shrink with the batch")
+        one = self._contribution(0.0, 1)
+        many = self._contribution(0.0, 4096)
+        self.assertGreater(one, 0.0, "the shard has to cost something to begin with")
+        self.assertAlmostEqual(many, one, places=9,
+                               msg="a retained input's contribution must not shrink with the "
+                                   "batch: %r at 1, %r at 4096" % (one, many))
 
-    def test_a_consumed_input_still_amortises(self):
-        # The other half, so the test above cannot pass by pricing everything into `base`.
-        self.assertLess(self._price(1.0, 4096), self._price(1.0, 1))
+    def test_a_consumed_input_does_amortise(self):
+        # The mirror image, and it is what proves the test above is measuring something. The
+        # same slot at the default chance must have its contribution collapse over a batch of
+        # 4096, or "does not shrink" would be true of everything and assert nothing.
+        one = self._contribution(1.0, 1)
+        many = self._contribution(1.0, 4096)
+        self.assertGreater(one, 0.0)
+        self.assertLess(many, one / 100.0,
+                        "a consumed input must amortise: %r at 1, %r at 4096" % (one, many))
 
     def test_a_retained_input_is_not_free(self):
         # Free would make every route through it the cheapest in the model, so the solver would
