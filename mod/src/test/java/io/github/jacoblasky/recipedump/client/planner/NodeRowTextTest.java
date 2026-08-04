@@ -386,27 +386,37 @@ public class NodeRowTextTest {
      * "3 machine(s) to build" was the whole of what the panel said, and every `MachineRow`
      * accessor except `size()` was called only from `PlanJsonTest`. The values are
      * `plan-in-stock`'s, asserted there too.
+     *
+     * NAMED CHISELING UNTIL #211/#169. That row was never real: it was on the list only because
+     * a DISCARDED attempt entered the category, and nothing in this plan's tree is chiselled.
+     * See `Solver.snapshot`. Casting is a machine the plan actually routes through.
      */
     @Test
     public void theMachinesToBuildAreNameableWithTheirReasons() {
         PlanView plan = PlanFixtures.load("plan-in-stock");
         List<String> lines = NodeRowText.machineLines(plan.machinesToBuild(), TODO_INNER);
-        assertTrue("three machines, at least one line each: " + lines, lines.size() >= 3);
+        assertTrue("two machines, at least one line each: " + lines, lines.size() >= 2);
         String all = join(lines);
-        assertTrue(all, all.contains("Chiseling"));
+        assertTrue(all, all.contains("Casting"));
         assertTrue(all, all.contains("buildable"));
         assertTrue("the reason a machine is a roadblock is the actionable half: " + all,
-                   all.contains("craftable: chisel:chisel_iron"));
+                   all.contains("craftable: tconstruct:casting"));
     }
 
     /**
      * The longest machine row in the fixture set survives whole, over as many lines as it takes.
      *
-     * 124 CHARACTERS, WHICH IS 744 PIXELS AND FITS NO SCREEN MINECRAFT RUNS ON. `fit` would cut
+     * 109 CHARACTERS, WHICH IS 654 PIXELS AND FITS NO SCREEN MINECRAFT RUNS ON. `fit` would cut
      * it, and what it would cut is the registry name of the thing the player has to go and
-     * craft: `craftable: modularmachinery:mythic_processor_chemical_reactor_controller`. So
-     * these wrap, and this asserts both halves of that -- nothing lost, and nothing left over
-     * the panel's width for the caller's `fit` to cut after all.
+     * craft: `craftable: modularmachinery:mythical_resource_miner_tier5_controller`. So these
+     * wrap, and this asserts both halves of that -- nothing lost, and nothing left over the
+     * panel's width for the caller's `fit` to cut after all.
+     *
+     * THE ROW IT NAMES CHANGED WITH #211/#169 AND THE CLAIM DID NOT. It was the 124-character
+     * Mythic Processor Chemical Reactor; that machine left this fixture's list entirely when
+     * the loot tables and automation cards stopped being routes and the list went 81 rows to
+     * 36. The new longest is still far past the panel, which is all this test needs -- it is
+     * about wrapping, not about which machine happens to be worst.
      */
     @Test
     public void theLongestMachineRowSurvivesWholeAcrossLines() {
@@ -415,7 +425,7 @@ public class NodeRowTextTest {
         String rejoined = join(lines).replace(NodeRowText.CONTINUATION, " ");
         assertTrue("the machine's own registry name was cut: " + lines,
                    rejoined.contains(
-                           "modularmachinery:mythic_processor_chemical_reactor_controller"));
+                           "modularmachinery:mythical_resource_miner_tier5_controller"));
         assertFalse("a wrapped row must not also be cut", rejoined.contains(NodeRowText.ELLIPSIS));
         for (String line : lines) {
             assertTrue("this line still overflows the panel and `fit` will cut it: " + line,

@@ -349,9 +349,15 @@ public class PlanJsonTest {
         // quantity with no generator named is a row a player cannot act on.
         assertEquals("placed: nuclearcraft:cobblestone_generator", free.fromSources().get(0).why());
 
+        // FOUR ROWS, AND THE FIRST WAS `method`, UNTIL #211/#169. The one that left was the
+        // METHOD marker: a documentation card is no longer a route, so the plan stopped listing
+        // the marker item as something the player has to go and obtain. The three that remain
+        // are all `loot` -- a dungeon drop, a boss drop, an overworld find -- which are real
+        // instructions and are exactly what this list is for. The kind assertion is kept rather
+        // than dropped, because "which kind leads this list" is the thing that moved.
         PlanView tokens = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(4, tokens.tokensNeeded().size());
-        assertEquals("method", tokens.tokensNeeded().get(0).tokenKind());
+        assertEquals(3, tokens.tokensNeeded().size());
+        assertEquals("loot", tokens.tokensNeeded().get(0).tokenKind());
 
         PlanView emc = PlanFixtures.load("plan-emc-terminator");
         assertEquals(1, emc.fromEmc().size());
@@ -392,11 +398,18 @@ public class PlanJsonTest {
      * nothing presses moved one Dreadite branch off a Block of Dreadite and onto an alloy
      * furnace, for 12 more units of work. The BUDGET is unchanged, which is the claim this test
      * exists to keep checkable -- 35% of it spent, and the headroom #176 thinned did not move.
+     *
+     * 28,024 -> 28,196 FOR #211/#169, AND WORK ROSE WHILE THE TREE SHRANK, which looks backwards
+     * and is the expected shape. `work` counts every {@code expand}, INCLUDING the ones
+     * backtracking discards; the tree counts only what survived. Demoting the loot tables makes
+     * the solver reject more attempts before it settles, so it does more searching and keeps
+     * less of it: 641 nodes to 519 for 172 more units of work. Still 35% of an unchanged budget,
+     * and {@code exhausted} is false, so the headroom warning above is unaffected.
      */
     @Test
     public void theWorkCounterAndItsBudgetBothArrive() {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(28024, plan.work());
+        assertEquals(28196, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
