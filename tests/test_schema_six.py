@@ -29,6 +29,15 @@ from recipegraph.model import Graph  # noqa: E402
 from recipegraph.sources import dump_meta, dump_names  # noqa: E402
 
 
+#: Stands in for "the whole pack" wherever a test needs a jar set that is not the six-mod dev
+#: one. 367 is the MEASURED count of top-level jars in the pack's `mods/` (#119, #208); the
+#: loaded-mod count `mod_count` actually holds has never been read off an FML log, so no test
+#: here writes one down as though it had. Nothing asserts on the value, only that it differs
+#: from the small set -- the older "410" this file used to carry was a figure that matched
+#: nothing, which is the whole reason #208 pinned a denominator.
+FULL_PACK = 367
+
+
 def _dump(root, summary, names=None):
     """A dump directory holding a summary.json and, optionally, a names.json."""
     os.makedirs(root, exist_ok=True)
@@ -107,8 +116,10 @@ class LostNamesRideInTheProvenanceLineTest(unittest.TestCase):
 
     def test_a_clean_dump_says_nothing_about_lost_names(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.9.11",
-                                   "schema": 6, "names_failed": 0, "mod_count": 410})
-        self.assertEqual(said, "dump: written by mod 0.9.11, schema 6, from 410 mods")
+                                   "schema": 6, "names_failed": 0,
+                                   "mod_count": FULL_PACK})
+        self.assertEqual(said, "dump: written by mod 0.9.11, schema 6, from %d mods"
+                         % FULL_PACK)
 
     def test_one_lost_name_is_not_pluralised(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.9.11",
@@ -276,9 +287,9 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
 
     def test_the_counts_are_read(self):
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "mod_count": 410,
+            meta = dump_meta.read(_dump(root, {"schema": 6, "mod_count": FULL_PACK,
                                                "mod_digest": "a1b2c3d4e5f6"}))
-        self.assertEqual(meta["mod_count"], 410)
+        self.assertEqual(meta["mod_count"], FULL_PACK)
         self.assertEqual(meta["mod_digest"], "a1b2c3d4e5f6")
 
     def test_a_schema_five_dump_declares_no_jar_set(self):
@@ -297,35 +308,36 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
         """The sentence #194 exists to change.
 
         `dump: written by mod 0.9.11, schema 6` was IDENTICAL IN FORM whether five jars or
-        410 produced the dump, and the contents could not settle it either. This is the
-        word that separates them, and it is in the line every surface already prints.
+        the whole pack produced the dump, and the contents could not settle it either. This
+        is the word that separates them, and it is in the line every surface already prints.
         """
         small = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": 6,
                                     "mod_count": 6, "names_failed": 0})
         big = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": 6,
-                                  "mod_count": 410, "names_failed": 0})
+                                  "mod_count": FULL_PACK, "names_failed": 0})
         self.assertIn("from 6 mods", small)
-        self.assertIn("from 410 mods", big)
+        self.assertIn("from %d mods" % FULL_PACK, big)
         self.assertNotEqual(small, big)
 
     def test_a_graph_still_names_its_pack_after_the_dump_is_gone(self):
         g = Graph()
         g.dump_schema = 6
         g.dump_version = "0.9.11"
-        g.dump_mod_count = 410
+        g.dump_mod_count = FULL_PACK
         g.dump_mod_digest = "a1b2c3d4e5f6"
-        self.assertIn("from 410 mods", dump_meta.describe(dump_meta.of_graph(g)))
+        self.assertIn("from %d mods" % FULL_PACK,
+                      dump_meta.describe(dump_meta.of_graph(g)))
 
     def test_the_jar_set_survives_a_graph_round_trip(self):
         g = Graph()
-        g.dump_mod_count = 410
+        g.dump_mod_count = FULL_PACK
         g.dump_mod_digest = "a1b2c3d4e5f6"
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "graph.json")
             g.save(path)
             back = Graph.load(path)
-            self.assertEqual(Graph.recorded_mod_set(path), (410, "a1b2c3d4e5f6"))
-        self.assertEqual(back.dump_mod_count, 410)
+            self.assertEqual(Graph.recorded_mod_set(path), (FULL_PACK, "a1b2c3d4e5f6"))
+        self.assertEqual(back.dump_mod_count, FULL_PACK)
         self.assertEqual(back.dump_mod_digest, "a1b2c3d4e5f6")
 
     def test_a_pre_194_graph_records_no_jar_set(self):
@@ -344,7 +356,7 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
         which is the failure mode this project keeps finding, one level up.
         """
         g = Graph()
-        g.dump_mod_count = 410
+        g.dump_mod_count = FULL_PACK
         g.dump_mod_digest = "a1b2c3d4e5f6"
         # `catalysts` sorts before `dump_mod_*`, so padding it pushes them past the window.
         g.catalysts = {"pad%06d" % i: ["x" * 40] for i in range(24000)}
@@ -352,13 +364,14 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
             path = os.path.join(root, "graph.json")
             g.save(path)
             self.assertGreater(os.path.getsize(path), Graph.HEADER_BYTES)
-            self.assertEqual(Graph.recorded_mod_set(path), (410, "a1b2c3d4e5f6"))
+            self.assertEqual(Graph.recorded_mod_set(path), (FULL_PACK, "a1b2c3d4e5f6"))
 
 
 class AWrongPackIsRefusedTest(unittest.TestCase):
 
     SMALL = {"schema": 6, "mod_version": "0.9.11", "mod_count": 6, "mod_digest": "aaaa"}
-    BIG = {"schema": 6, "mod_version": "0.9.11", "mod_count": 410, "mod_digest": "bbbb"}
+    BIG = {"schema": 6, "mod_version": "0.9.11", "mod_count": FULL_PACK,
+           "mod_digest": "bbbb"}
 
     def _graph(self, root, summary):
         path = os.path.join(root, "graph.json")
@@ -368,19 +381,19 @@ class AWrongPackIsRefusedTest(unittest.TestCase):
         g.save(path)
         return path
 
-    def test_a_six_jar_dump_may_not_replace_a_410_jar_graph(self):
+    def test_a_six_jar_dump_may_not_replace_a_full_pack_graph(self):
         with self.assertRaises(dump_meta.WrongPack) as caught:
-            dump_meta.check_mod_set(self.SMALL, 410, "bbbb")
+            dump_meta.check_mod_set(self.SMALL, FULL_PACK, "bbbb")
         said = str(caught.exception)
-        self.assertIn("410 mods", said)
+        self.assertIn("%d mods" % FULL_PACK, said)
         self.assertIn("6 mods", said)
         self.assertIn("--allow-mod-set-change", said)
 
     def test_the_same_jar_set_passes(self):
-        self.assertIsNone(dump_meta.check_mod_set(self.BIG, 410, "bbbb"))
+        self.assertIsNone(dump_meta.check_mod_set(self.BIG, FULL_PACK, "bbbb"))
 
     def test_a_dump_that_cannot_say_is_not_accused(self):
-        self.assertIsNone(dump_meta.check_mod_set({"mod_digest": None}, 410, "bbbb"))
+        self.assertIsNone(dump_meta.check_mod_set({"mod_digest": None}, FULL_PACK, "bbbb"))
 
     def test_a_graph_that_cannot_say_is_not_accused(self):
         """Every graph on disk today, so refusing here would refuse the first build."""
@@ -429,7 +442,7 @@ class AWrongPackIsRefusedTest(unittest.TestCase):
                 code = cli.main(["build", "--instance", inst, "--out", out])
             self.assertEqual(code, 2)
             self.assertIn("refusing to build", said.getvalue())
-            self.assertEqual(Graph.recorded_mod_set(out), (410, "bbbb"))
+            self.assertEqual(Graph.recorded_mod_set(out), (FULL_PACK, "bbbb"))
 
 
 class OneNameForSummaryJsonTest(unittest.TestCase):
@@ -479,7 +492,7 @@ class TheUnrecordedCasesStillReadTest(unittest.TestCase):
 
     def test_a_dump_with_a_digest_but_no_count_is_described_honestly(self):
         with self.assertRaises(dump_meta.WrongPack) as caught:
-            dump_meta.check_mod_set({"mod_digest": "aaaa"}, 410, "bbbb")
+            dump_meta.check_mod_set({"mod_digest": "aaaa"}, FULL_PACK, "bbbb")
         self.assertIn("an unrecorded number of mods in this dump",
                       str(caught.exception))
 
@@ -510,7 +523,7 @@ class TheUnrecordedCasesStillReadTest(unittest.TestCase):
         switched itself off. This fails the moment that ordering stops holding.
         """
         g = Graph()
-        g.dump_mod_count, g.dump_mod_digest = 410, "a1b2c3d4e5f6"
+        g.dump_mod_count, g.dump_mod_digest = FULL_PACK, "a1b2c3d4e5f6"
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "graph.json")
             g.save(path)
@@ -539,18 +552,32 @@ class ASkippedCheckDoesNotLookLikeAPassedOneTest(unittest.TestCase):
     exactly the shape #194 is about. Each of these asserts the line, not just the outcome.
     """
 
-    def _build(self, summary, graph=None, out_name="graph.json"):
+    def _build(self, summary, graph=None, truncated=False):
+        """`build`'s stderr, with the temp path replaced by a fixed token.
+
+        THE PATH IS SUBSTITUTED OUT ON THE WAY BACK, and without that the
+        distinguishability assertion below cannot fail: three of these lines name `out_path`,
+        every case gets a fresh `TemporaryDirectory`, so comparing the raw strings would find
+        five different lines even if all five carried identical wording. Normalising the one
+        part that varies for reasons other than wording is what leaves the assertion able to
+        catch what it is for.
+        """
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"), summary)
-            out = os.path.join(inst, out_name)
-            if graph is not None:
+            out = os.path.join(inst, "graph.json")
+            if truncated:
+                with open(out, "w") as fh:
+                    fh.write('{"catalysts":{},"dump_mod_c')
+            elif graph is not None:
                 g = Graph()
                 g.dump_mod_count, g.dump_mod_digest = graph
                 g.save(out)
             said = io.StringIO()
             with contextlib.redirect_stderr(said):
-                index.build(inst, out_path=out)
-            return said.getvalue()
+                # Kept so a caller can assert the build actually produced a graph rather
+                # than only that it printed the right line.
+                self.built = index.build(inst, out_path=out)
+            return said.getvalue().replace(out, "<out>")
 
     SIX = {"schema": 6, "mod_version": "0.10.0", "mod_count": 6, "mod_digest": "aaaa"}
     FIVE = {"schema": 5, "mod_version": "0.9.11"}
@@ -561,7 +588,7 @@ class ASkippedCheckDoesNotLookLikeAPassedOneTest(unittest.TestCase):
         self.assertNotIn("NOT CHECKED", said)
 
     def test_a_dump_too_old_to_compare_says_it_was_not_checked(self):
-        said = self._build(self.FIVE, graph=(410, "bbbb"))
+        said = self._build(self.FIVE, graph=(FULL_PACK, "bbbb"))
         self.assertIn("NOT CHECKED", said)
         self.assertIn("predates schema 6", said)
 
@@ -575,33 +602,60 @@ class ASkippedCheckDoesNotLookLikeAPassedOneTest(unittest.TestCase):
         self.assertIn("no graph to disagree with", said)
         self.assertNotIn("NOT CHECKED", said)
 
+    def test_a_graph_too_damaged_to_read_does_not_take_the_build_down_with_it(self):
+        """An interrupted save must not lock someone out of the command that repairs it.
+
+        `recorded_mod_set` falls through to a full `json.load` when its prefix scan finds
+        neither the pair nor the sentinel, so a truncated graph.json arrives as a ValueError.
+        Letting it out would replace a working build with a traceback, and the file it names
+        is the one this build was about to rewrite anyway. `DumpCommand.readModSet` makes the
+        same call about an unreadable summary.json.
+        """
+        said = self._build(self.SIX, truncated=True)
+        self.assertIn("NOT CHECKED", said)
+        self.assertIn("could not be read", said)
+        # And it BUILT. Asserting only the line would pass if the guard reported and then let
+        # the ValueError out of the next frame.
+        self.assertEqual(self.built.dump_mod_digest, "aaaa")
+
     def test_the_override_says_what_it_let_through(self):
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"), self.SIX)
             out = os.path.join(inst, "graph.json")
             g = Graph()
-            g.dump_mod_count, g.dump_mod_digest = 410, "bbbb"
+            g.dump_mod_count, g.dump_mod_digest = FULL_PACK, "bbbb"
             g.save(out)
             said = io.StringIO()
             with contextlib.redirect_stderr(said):
                 index.build(inst, out_path=out, allow_mod_set_change=True)
         self.assertIn("--allow-mod-set-change", said.getvalue())
-        self.assertIn("410 mods there, 6 mods in this dump", said.getvalue())
+        self.assertIn("%d mods there, 6 mods in this dump" % FULL_PACK, said.getvalue())
 
-    def test_the_four_outcomes_are_all_distinguishable(self):
-        """Whatever the wording, no two of them may read the same."""
+    def test_every_outcome_is_distinguishable_from_every_other(self):
+        """Whatever the wording, no two of them may read the same.
+
+        The count is not written down: the assertion is that the rendered lines are as many
+        as the cases, so an outcome added later that borrows a neighbour's wording fails here
+        rather than passing quietly.
+        """
         lines = {
             "matched": self._build(self.SIX, graph=(6, "aaaa")),
-            "dump too old": self._build(self.FIVE, graph=(410, "bbbb")),
+            "dump too old": self._build(self.FIVE, graph=(FULL_PACK, "bbbb")),
             "graph too old": self._build(self.SIX, graph=(None, None)),
             "nothing there": self._build(self.SIX),
+            "graph damaged": self._build(self.SIX, truncated=True),
         }
         said = {k: [ln for ln in v.splitlines() if ln.startswith("mod set:")]
                 for k, v in lines.items()}
         for name, got in said.items():
             self.assertEqual(len(got), 1, "%s produced %r" % (name, got))
         rendered = [v[0] for v in said.values()]
-        self.assertEqual(len(set(rendered)), 4, rendered)
+        self.assertEqual(len(set(rendered)), len(lines), rendered)
+        # And the token really was substituted, so the assertion above compared WORDING and
+        # not five different temp paths. Without this the normalisation could silently stop
+        # matching and the test would go back to being one that cannot fail.
+        for name, got in said.items():
+            self.assertNotIn(tempfile.gettempdir(), got[0], name)
 
 
 class TheOverrideFlagIsSpelledOnceTest(unittest.TestCase):
@@ -620,7 +674,7 @@ class TheOverrideFlagIsSpelledOnceTest(unittest.TestCase):
                    "mod_digest": "aaaa"})
             out = os.path.join(inst, "graph.json")
             g = Graph()
-            g.dump_mod_count, g.dump_mod_digest = 410, "bbbb"
+            g.dump_mod_count, g.dump_mod_digest = FULL_PACK, "bbbb"
             g.save(out)
             said = io.StringIO()
             with contextlib.redirect_stderr(said):
@@ -656,7 +710,9 @@ class BothRefusalsReachTheExitCodeTest(unittest.TestCase):
             with contextlib.redirect_stderr(said):
                 code = cli.main(["build", "--instance", inst, "--out", out])
         self.assertEqual(code, 2)
-        self.assertIn("names.json holds 1 entries", said.getvalue())
+        # "1 entry", not "1 entries": the refusal is read by someone who has just been
+        # stopped, and a message that cannot count is a message they trust less.
+        self.assertIn("names.json holds 1 entry but", said.getvalue())
         self.assertFalse(os.path.exists(out))
 
 

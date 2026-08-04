@@ -191,7 +191,9 @@ class WrongPack(RefusedBuild):
 
     NOT a damaged dump: both artifacts may be perfectly good, and the wrong one is about to
     overwrite the other. The five-jar case is the one #194 was filed about, and it is not
-    hypothetical -- the headless harness now produces valid dumps from a six-mod dev client.
+    hypothetical: `DumpCommand` has been driven against a five-jar dev set with a null server,
+    so a small-jar-set dump is a thing that can be produced today. A harness that does it as a
+    matter of course is #146, still open, which is why this guard does not wait for it.
     """
 
 
@@ -218,11 +220,11 @@ def check_names(meta, on_disk):
     if declared is None or on_disk is None or declared == on_disk:
         return
     raise DamagedDump(
-        "names.json holds %d entries but summary.json says the dump wrote %d. That is a "
+        "names.json holds %d %s but summary.json says the dump wrote %d. That is a "
         "damaged dump directory, not an old one -- an interrupted write, a partial copy or "
         "a hand edit. Re-run /recipedump, re-copy the dump, or delete names.json to build "
         "without it (items.csv still covers the undiscriminated keys)."
-        % (on_disk, declared))
+        % (on_disk, "entry" if on_disk == 1 else "entries", declared))
 
 
 #: The `build` flag that gets past `check_mod_set`. Spelled here as well as in `cli` so the
@@ -240,16 +242,17 @@ def check_mod_set(meta, graph_count, graph_digest):
     """Raise `WrongPack` when this dump did not come from the pack the graph on disk did.
 
     THE FAILURE THIS EXISTS FOR, stated concretely. A dump from five jars produces a graph,
-    and prints `dump: written by mod 0.9.11, schema 6` -- a line identical IN FORM to the one
-    a 410-jar dump prints. The contents cannot settle it either: a client-only mod that
-    registers no JEI category is invisible in the output. So the small graph silently
+    and at schema 5 printed `dump: written by mod 0.9.11, schema 5` -- a line identical IN FORM
+    to the one a full-pack dump printed. The contents cannot settle it either: a client-only
+    mod that registers no JEI category is invisible in the output. So the small graph silently
     replaces the large one at the same path, and every downstream consumer trusts it.
 
-    IT REFUSES RATHER THAN WARNING, on the team's explicit instruction and for the reason
-    `RefusedBuild` records. The graph is the cheap artifact here, but it is the only thing
-    standing between a wrong dump and every plan priced from it.
+    IT REFUSES RATHER THAN WARNING, which is #194's own conclusion and the reason
+    `RefusedBuild` records: change the artifact rather than ask the reader to be careful. The
+    graph is the cheap artifact here, but it is the only thing standing between a wrong dump
+    and every plan priced from it.
 
-    THE OVERRIDE IS A FLAG AND NOT AN ENVIRONMENT VARIABLE, so that replacing a 410-jar graph
+    THE OVERRIDE IS A FLAG AND NOT AN ENVIRONMENT VARIABLE, so that replacing a full-pack graph
     with a six-jar one is a thing someone typed on the line that did it, findable in a shell
     history when the plans come out wrong.
 
@@ -271,7 +274,13 @@ def check_mod_set(meta, graph_count, graph_digest):
 
 
 def mods_phrase(count):
-    """`410 mods`, or an honest non-answer for a graph or dump that did not record one."""
+    """`<n> mods`, or an honest non-answer for a graph or dump that did not record one.
+
+    NO EXAMPLE NUMBER IN THIS DOCSTRING ON PURPOSE. `mod_count` is Forge's LOADED-mod count,
+    which nobody has read off an FML log; the pack's measured figures are 367 jars in `mods/`
+    and 370 modids in `mcmod.info` (#119, #208), and quoting either here would put a made-up
+    loaded-mod count in the one place a reader would take as authoritative.
+    """
     return "an unrecorded number of mods" if count is None else "%d mods" % count
 
 
@@ -301,7 +310,8 @@ def describe(meta):
         # THE JAR COUNT IS IN THE CURRENT-SCHEMA SENTENCE AND NOWHERE ELSE, because it is
         # the one branch that can print a number it actually has. It is also the branch that
         # used to be the problem: "written by mod 0.9.11, schema 6" was identical whether
-        # five jars or 410 produced it, and this is the word that separates them. #194
+        # five jars or the whole pack produced it, and this is the word that separates
+        # them. #194
         return "dump: written by mod %s, schema %d, from %s%s" % (
             version, SCHEMA, mods_phrase(meta.get("mod_count")), _lost_names(meta))
     if meta["schema"] is not None and meta["schema"] < SCHEMA:

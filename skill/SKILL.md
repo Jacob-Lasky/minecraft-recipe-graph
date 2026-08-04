@@ -454,11 +454,11 @@ one: the output path is hardcoded to `<gamedir>/mc-recipe-dump`, so a dev-client
 dump run in a pack directory would otherwise destroy the pack's real dump in place.
 
 **Schema 5 and 6 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the
-keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then `build`,
-with **no re-run of `have`** -- the opposite of 3 -> 4, and why `nbt_digest.DIGEST_FORMAT_SCHEMA`
-deliberately stayed at 4. Moving it for a bump that did not touch the digest would make the
-loud "your stock reads as zero" warning fire on a graph that is fine, and a warning that cries
-wolf gets trained away before the one time it matters.
+keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then
+`build`, with **no re-run of `have`** -- the opposite of 3 -> 4, and why
+`nbt_digest.DIGEST_FORMAT_SCHEMA` deliberately stayed at 4. Moving it for a bump that did not
+touch the digest would make the loud "your stock reads as zero" warning fire on a graph that
+is fine, and a warning that cries wolf gets trained away before the one time it matters.
 
 Two things about the new files that are easy to get wrong:
 

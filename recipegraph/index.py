@@ -204,7 +204,6 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
 
     _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say)
 
-
     say("graph: %d recipes, %d produced item keys, %d/%d oredict resolved"
         % (len(g.recipes), len(g.by_output),
            len(referenced & set(g.ore_members)), len(referenced)))
@@ -220,16 +219,22 @@ def _refuse_the_wrong_pack(meta, out_path, allow_mod_set_change, say):
     one of the two artifacts is not the pack the operator has in mind, and the build is
     about to decide which by destroying the other.
 
-    FOUR OUTCOMES, AND THREE OF THEM SAY SO. Returning silently for both "the jar sets
-    match" and "I could not compare them" would make a check that ran and a check that was
-    skipped look identical from the outside -- which is the #194 defect itself, one level up,
-    committed by the guard written to fix it. So an unchecked build says it was unchecked and
-    why, and a checked one says it checked.
+    EVERY OUTCOME BUT ONE SAYS SO. Returning silently for both "the jar sets match" and "I
+    could not compare them" would make a check that ran and a check that was skipped look
+    identical from the outside -- which is the #194 defect itself, one level up, committed by
+    the guard written to fix it. So an unchecked build says it was unchecked and why, and a
+    checked one says it checked. `tests/test_schema_six.py` asserts that no two of the lines
+    read the same, so adding an outcome means adding a line that is distinguishable from the
+    others rather than reusing a neighbour's wording.
 
-    NOTHING TO COMPARE AGAINST IS STILL NOT A FAILURE. A dump from before schema 6, or a
-    graph from before #194, cannot be compared and must not block: refusing on either would
-    refuse the first build after this lands, which is every build. They are reported, not
-    raised, and the same build records the digest that makes the NEXT one checkable.
+    NOTHING TO COMPARE AGAINST IS STILL NOT A FAILURE. A dump from before schema 6, a graph
+    from before #194, or a graph too damaged to read cannot be compared and must not block:
+    refusing on the first two would refuse the first build after this lands, which is every
+    build, and refusing on the third would strand anyone whose last build was interrupted
+    behind the very command that would replace the broken file. They are reported, not
+    raised, and the same build records the digest that makes the NEXT one checkable. This is
+    the same call `DumpCommand.readModSet` makes about an unreadable summary.json, for the
+    same reason, and the two must not drift apart.
     """
     if not out_path:
         # No graph is being replaced, so there is no comparison to skip. The only outcome
@@ -243,7 +248,16 @@ def _refuse_the_wrong_pack(meta, out_path, allow_mod_set_change, say):
             "jars produced it, so it cannot be compared against the graph it is replacing; "
             "re-run /recipedump to make the next build checkable")
         return
-    count, digest = Graph.recorded_mod_set(out_path)
+    try:
+        count, digest = Graph.recorded_mod_set(out_path)
+    except (OSError, ValueError) as e:
+        # A HALF-WRITTEN GRAPH IS NOT A WRONG PACK. `recorded_mod_set` falls back to a full
+        # `json.load` when its prefix scan finds neither the pair nor the sentinel, so a
+        # truncated graph.json reaches here as a ValueError -- and letting it out would turn
+        # an interrupted save into a traceback from the one command that fixes it.
+        say("mod set: NOT CHECKED -- the graph at %s could not be read (%s), so there is "
+            "nothing to compare against; this build replaces it" % (out_path, e))
+        return
     if digest is None:
         say("mod set: NOT CHECKED -- the graph at %s predates #194 and records no jar set; "
             "this build records one, so the next build is checkable" % out_path)

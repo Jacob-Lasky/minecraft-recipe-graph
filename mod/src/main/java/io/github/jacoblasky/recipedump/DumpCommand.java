@@ -145,20 +145,27 @@ public class DumpCommand extends CommandBase {
 
     /** True unless `args` asks to suppress the trace. Unknown args are ignored, as before. */
     static boolean wantsTrace(String[] args) {
-        return !suppressed(args, NO_TRACE_ARG);
+        return !carries(args, NO_TRACE_ARG);
     }
 
     /** True unless `args` asks to suppress the icon atlas. */
     static boolean wantsIcons(String[] args) {
-        return !suppressed(args, NO_ICONS_ARG);
+        return !carries(args, NO_ICONS_ARG);
     }
 
     /** True when `args` carries `force`, allowing an overwrite across mod sets. */
     static boolean forced(String[] args) {
-        return suppressed(args, FORCE_ARG);
+        return carries(args, FORCE_ARG);
     }
 
-    private static boolean suppressed(String[] args, String flag) {
+    /**
+     * Whether `args` names `flag`. NAMED FOR PRESENCE, NOT FOR SUPPRESSION: it was `suppressed`
+     * while every flag reading it turned something off, and #194 added `force`, which turns
+     * something ON. `return suppressed(args, FORCE_ARG)` reads as the opposite of what it does,
+     * and a predicate whose name inverts at one of three call sites is a bug waiting for a
+     * reader in a hurry.
+     */
+    private static boolean carries(String[] args, String flag) {
         if (args == null) {
             return false;
         }
@@ -614,6 +621,12 @@ public class DumpCommand extends CommandBase {
 
             writeLines(new File(dir, "skipped.ndjson"), skips);
             int namesFailed = sink.namesFailed();
+            // ASKED A SECOND TIME rather than carried from `execute`'s clobber check, and
+            // that is safe because Forge's active mod list is fixed once the load phase is
+            // over: no mod arrives or leaves while a world is running. If that ever stopped
+            // being true the two answers could differ, and the digest this dump RECORDS would
+            // not be the digest the guard COMPARED -- so thread the list through Runner
+            // rather than adding a third call site.
             List<String> modIds = activeModIds();
             writeSummary(new File(dir, SUMMARY_FILE), perCategory, categoryMod,
                          recipes, failed, skips.size(), sink.names().size(), namesFailed,
@@ -1456,10 +1469,12 @@ public class DumpCommand extends CommandBase {
     /**
      * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194
      *
-     * The question a dump could not answer about itself, and the reason #119's parity gap
-     * was argued about rather than measured: five jars and 410 jars produce provenance lines
+     * The question a dump could not answer about itself, and the reason #119's parity gap ran
+     * for months on quoted numbers: five jars and the pack's 367 produce provenance lines
      * identical in form, and the CONTENTS cannot settle it either -- a client-only mod that
-     * registers no JEI category leaves no trace in the output at all.
+     * registers no JEI category leaves no trace in the output at all. #208 settled that one at
+     * 0 keys by walking both jar sets on the desktop, because no artifact could be asked; this
+     * is what makes the next such question answerable from the artifact instead.
      *
      * NULL, NOT AN EMPTY LIST, when `Loader` throws. "Could not ask" and "asked and found
      * nothing" are different facts and the reader distinguishes them; an empty list would
@@ -1494,7 +1509,7 @@ public class DumpCommand extends CommandBase {
      *
      * MODIDS ONLY, DELIBERATELY NOT VERSIONS. The hazard this exists to catch is a dump
      * taken against a DIFFERENT SET of jars -- the server pack's 364 rather than the
-     * client's 410, or the harness's six -- and versions do not speak to that. What they do
+     * client's 367, or the harness's six -- and versions do not speak to that. What they do
      * is churn the digest on every routine pack update, which would fire the mismatch
      * refusal on a legitimate redump and get it forced past out of habit. This project has
      * already written down what that costs: "a warning that cries wolf gets trained away
@@ -1508,12 +1523,12 @@ public class DumpCommand extends CommandBase {
         if (modIds == null) {
             return null;
         }
-        // SORTED HERE AND NOWHERE ELSE, because this is the function whose name promises a
-        // SET. It used to be sorted one level up in `activeModIds`, which held the invariant
-        // only for the one caller that happened to do it -- so the same pack enumerated in
-        // a different order digested differently, and the assertion that says otherwise was
-        // red. A COPY, because `Collections.sort` on an `Arrays.asList` view writes through
-        // to the caller's array.
+        // SORTED HERE AND NOWHERE ELSE. DO NOT move this up into `activeModIds`: that holds
+        // the invariant only for the one caller that happens to sort, and the digest's whole
+        // promise is that it is of a SET -- the same pack enumerated in a different order must
+        // digest the same, or the clobber refusal fires on a redump of the pack it just read.
+        // A COPY, because `Collections.sort` on an `Arrays.asList` view writes through to the
+        // caller's array.
         List<String> sorted = new ArrayList<String>(modIds);
         Collections.sort(sorted);
         return fnv(String.join("\n", sorted));
@@ -1579,8 +1594,8 @@ public class DumpCommand extends CommandBase {
      * wrong is fixed by dumping again; this one destroys the input to that fix. The output
      * directory is `<gamedir>/mc-recipe-dump` with no way to redirect it, so a run against a
      * SMALLER jar set -- a dev client, a server-side instance, the headless harness -- lands
-     * on top of the pack's real dump and replaces it. That artifact costs a launch of a
-     * 410-mod pack to reproduce, which is the whole reason #123, #87 and #90 spent months
+     * on top of the pack's real dump and replaces it. That artifact costs a launch of the full
+     * 367-jar pack to reproduce, which is the whole reason #123, #87 and #90 spent months
      * queued behind one.
      *
      * A DISTINCT PATH FOR NON-PLAYER DUMPS WAS THE OTHER CANDIDATE AND IS WEAKER. It only
@@ -1653,7 +1668,7 @@ public class DumpCommand extends CommandBase {
             // against the file's actual length and refuse a truncated one. #194
             w.write(",\n \"names\": " + names + ",\n \"names_failed\": " + namesFailed);
             // OMITTED ENTIRELY when Forge would not answer, rather than written as 0 or
-            // null. The fields exist to let a reader tell a five-jar dump from a 410-jar
+            // null. The fields exist to let a reader tell a five-jar dump from a full-pack
             // one, and a recorded zero is a claim about the jar set; absence is the honest
             // shape for "not measured", and it is the shape every schema-5 dump already
             // has, so the reader needs no second spelling of the same absence. #194

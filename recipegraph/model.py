@@ -464,11 +464,13 @@ class Graph:
         # WHICH JARS THE DUMP SAW, as a count and as a digest of the sorted modid set. #194
         #
         # The one thing a dump could not previously say about itself, and the reason #119's
-        # parity gap was argued about rather than measured: a graph built from five jars
-        # printed a provenance line identical IN FORM to one built from 410, and the
-        # contents could not settle it either -- a client-only mod registering no JEI
-        # category is invisible in the output. Both None for a graph built from a dump older
-        # than schema 6, which is every graph on disk today.
+        # parity gap ran for months on quoted numbers: a graph built from five jars printed a
+        # provenance line identical IN FORM to one built from all 367, and the contents could
+        # not settle it either -- a client-only mod registering no JEI category is invisible
+        # in the output. #208 settled that argument at 0 keys, and it had to do it by walking
+        # the two jar sets on the desktop, because no artifact in the pipeline could be asked.
+        # This is what makes the next such question answerable from the artifact. Both None
+        # for a graph built from a dump older than schema 6, which is every graph on disk.
         self.dump_mod_count = None
         self.dump_mod_digest = None
         # The instance this graph was built from. Persisted so `serve` can find the dump

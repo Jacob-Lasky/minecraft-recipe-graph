@@ -913,7 +913,7 @@ def main(argv=None):
     # #194: `build` refuses when the dump names a different jar set than the graph it is
     # about to replace. This is the way past it, and it is a flag rather than a prompt
     # because the graph outlives the terminal -- a shell history can answer "who replaced
-    # the 410-mod graph with a six-mod one" months later, and a y/n cannot.
+    # the full-pack graph with a six-mod one" months later, and a y/n cannot.
     p.add_argument(dump_meta.OVERRIDE_FLAG, action="store_true",
                    help="overwrite a graph that was built from a different set of mods")
     p.set_defaults(fn=cmd_build)

@@ -331,7 +331,7 @@ reported on the page footer and by `have`; the current upgrade order is in
 [the dump mod](#the-dump-mod).
 
 **Only the machine that plays can produce the data.** A server has no game to run
-`/recipedump` in and no reason to hold 410 mod jars, which is what
+`/recipedump` in and no reason to hold the pack's 367 mod jars, which is what
 [Feeding it from the machine that plays](#feeding-it-from-the-machine-that-plays) is about.
 A jar built here is therefore *available*, not *installed* — building it does nothing until
 someone copies it into a client.
@@ -384,7 +384,7 @@ rsync -avz --partial data/graph.json data/ae2_have.json \
       server:/srv/minecraft-recipe-graph/data/
 ```
 
-`build` reads the ~410 mod jars and a ~165 MB `recipes.ndjson`, so it belongs where those
+`build` reads the 367 mod jars and a ~165 MB `recipes.ndjson`, so it belongs where those
 already are. Shipping the built graph moves ~115 MB instead of several gigabytes of jars,
 and the server needs no copy of the pack.
 
@@ -462,7 +462,7 @@ says whether it worked.
 modded items throw on `getDisplayName()` outside a render pass, and before schema 6 that was
 caught and forgotten, so a dump that lost 40,000 names wrote a shorter `names.json` and said
 nothing. `mod_count` and `mod_digest` say which jars were loaded, because nothing else can:
-a five-jar dump and a 410-jar one produce provenance lines identical in form, and the
+a five-jar dump and a full-pack one produce provenance lines identical in form, and the
 contents cannot settle it either since a client-only mod registering no JEI category leaves
 no trace in the output. `recipegraph build` refuses a `names.json` whose length disagrees
 with `names`, and refuses to replace a graph whose `mod_digest` differs from the dump's
@@ -471,9 +471,9 @@ unless `--allow-mod-set-change` says so.
 **`/recipedump` refuses to overwrite a dump written by a different set of mods.** The output
 directory is `<gamedir>/mc-recipe-dump` and cannot be redirected, so a run from a dev client
 or a server-side instance would land on top of the pack's real dump — the one artifact here
-that costs a launch of a 410-mod pack to reproduce. `/recipedump force` overwrites anyway.
-A dump directory that predates schema 6 records no digest and is overwritten without a
-fight, which is what makes the first dump after upgrading work.
+that costs a launch of the full 367-jar pack to reproduce. `/recipedump force` overwrites it
+anyway. A dump directory that predates schema 6 records no digest and is overwritten without
+a fight, which is what makes the first dump after upgrading work.
 
 It also writes `nbt_trace.json` by default: a per-top-level-tag digest of every key that
 carries identifying NBT, in two flavours per tag — lists in order, and lists sorted.
@@ -583,7 +583,7 @@ harness/shot.sh <screen> [name] # any screen registered in ShotScreens
 
 About a minute and a half per screenshot on a warm cache, against a manual pack launch.
 Adding a screen to it is one line. It renders GUIs and not the world, and seven mods is not
-410, so it replaces the launch-per-iteration loop rather than the live acceptance run.
+367, so it replaces the launch-per-iteration loop rather than the live acceptance run.
 [harness/README.md](harness/README.md) has the knobs, the costs and the limits.
 
 ### Machines — route through what you actually have

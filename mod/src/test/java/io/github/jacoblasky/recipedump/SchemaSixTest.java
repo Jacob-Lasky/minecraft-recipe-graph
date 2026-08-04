@@ -32,7 +32,7 @@ import org.junit.Test;
  * asserted here: the counting, and that the count reaches summary.json.
  *
  * THE SECOND HALF OF #194 IS THE JAR SET, and it is guarded lower down. A dump could not say
- * which mods were loaded when it ran, so a five-jar dump and a 410-jar one produced
+ * which mods were loaded when it ran, so a five-jar dump and a full-pack one produced
  * provenance lines identical in form -- and `execute` writes to a hardcoded
  * `<gamedir>/mc-recipe-dump`, so the small one lands on top of the large one. `refuseToClobber`
  * is the guard, and the cases below are mostly about when it must NOT fire.
@@ -247,7 +247,7 @@ public class SchemaSixTest {
                             name + "-" + System.nanoTime());
         assertTrue(dir.mkdirs());
         dir.deleteOnExit();
-        File summary = new File(dir, "summary.json");
+        File summary = new File(dir, DumpCommand.SUMMARY_FILE);
         summary.deleteOnExit();
         DumpCommand.writeSummary(summary, new LinkedHashMap<String, int[]>(),
                                  new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, ids);
@@ -258,7 +258,7 @@ public class SchemaSixTest {
     public void aSmallerJarSetMayNotOverwriteTheRealDump() throws Exception {
         // The failure the whole guard exists for: a six-mod dev client, or the headless
         // harness, landing on <gamedir>/mc-recipe-dump in a pack directory. The artifact it
-        // would replace costs a launch of a 410-mod pack to make again.
+        // would replace costs a launch of the full 367-jar pack to make again.
         List<String> pack = mods("a", "b", "c", "d", "e", "f", "g");
         File dir = dumpDir("realdump", pack);
 
@@ -309,7 +309,7 @@ public class SchemaSixTest {
         File dir = new File(System.getProperty("java.io.tmpdir"), "old-" + System.nanoTime());
         assertTrue(dir.mkdirs());
         dir.deleteOnExit();
-        File summary = new File(dir, "summary.json");
+        File summary = new File(dir, DumpCommand.SUMMARY_FILE);
         summary.deleteOnExit();
         Files.write(summary.toPath(),
                     "{\"mod_version\":\"0.9.11\",\"schema\":5}"
