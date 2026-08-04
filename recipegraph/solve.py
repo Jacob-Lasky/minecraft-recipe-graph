@@ -714,8 +714,10 @@ class Solver:
         # THE SCORES ARE KEPT, NOT DISCARDED, AND THAT IS #181's WHOLE COST. `sorted(key=...)`
         # calls `score_recipe` exactly once per candidate and then throws the values away, so
         # materialising them here is the SAME number of scoring calls -- measured, not
-        # assumed: `plan-fluid-chain`'s `work` is unchanged at 28,012, and `work` counts every
-        # `expand` including the ones backtracking discards.
+        # assumed: #181 left `plan-fluid-chain`'s `work` unchanged at 28,012, and `work` counts
+        # every `expand` including the ones backtracking discards. That fixture reads 28,024
+        # since #136 priced the storage blocks, which is a different branch being walked
+        # rather than this loop scoring more often; #181's measured property is untouched.
         #
         # DO NOT RE-SCORE FROM A REPORTING PATH. A second `score_recipe` pass would be
         # correct, would produce identical output, and would be invisible in every test,

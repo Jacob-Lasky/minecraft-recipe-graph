@@ -378,11 +378,17 @@ public class PlanJsonTest {
      * TERMINAL-ONLY UNTIL #190. `cli.cmd_plan` prints both and the panel said "search gave up
      * early" with no numbers, which asks the player to trust a rule instead of reading one.
      * The values are `plan-fluid-chain`'s, the fixture that spends 35% of its budget.
+     *
+     * 28,012 UNTIL #136, WHICH IS THE SAME SEVEN NODES {@code
+     * theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive} records: pricing the storage blocks
+     * nothing presses moved one Dreadite branch off a Block of Dreadite and onto an alloy
+     * furnace, for 12 more units of work. The BUDGET is unchanged, which is the claim this test
+     * exists to keep checkable -- 35% of it spent, and the headroom #176 thinned did not move.
      */
     @Test
     public void theWorkCounterAndItsBudgetBothArrive() {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(28012, plan.work());
+        assertEquals(28024, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
