@@ -89,6 +89,17 @@ public final class PlanNode {
     String resolvedTo;
     /** How many alternatives this input slot offered. Set by the PARENT, not by the node. */
     Integer altCount;
+    /**
+     * A run of the parent recipe never SPENDS this input, so owning one is the requirement.
+     *
+     * Set by the PARENT, like `altCount`, because consumption is a property of the SLOT rather
+     * than of the item: the same item can be retained by one recipe and spent by another. #175.
+     *
+     * NOT CALLED `catalyst`, deliberately. This port already means the JEI machine BLOCK by
+     * that word, in `RecipeGraph.catalysts`, `Machines`, `Evidence` and six other files, and one
+     * word for two concepts would have a reader of a plan row conclude it names a machine.
+     */
+    Boolean notConsumed;
     /** A world ore whose dimension the player has never visited. */
     String dimension;
     /** A pack placeholder standing in for an instruction rather than an item. */
@@ -203,6 +214,11 @@ public final class PlanNode {
         return unsourced != null && unsourced.booleanValue();
     }
 
+    /** True when a run of the parent recipe does not spend this input (#175). */
+    public boolean notConsumed() {
+        return notConsumed != null && notConsumed.booleanValue();
+    }
+
     /**
      * The children, EMPTY rather than null on a leaf.
      *
@@ -264,6 +280,7 @@ public final class PlanNode {
         other.machineWhy = machineWhy;
         other.resolvedTo = resolvedTo;
         other.altCount = altCount;
+        other.notConsumed = notConsumed;
         other.dimension = dimension;
         other.tokenKind = tokenKind;
         other.unsourced = unsourced;
@@ -392,6 +409,11 @@ public final class PlanNode {
 
         public Builder pinned(Boolean value) {
             node.pinned = value;
+            return this;
+        }
+
+        public Builder notConsumed(Boolean value) {
+            node.notConsumed = value;
             return this;
         }
 

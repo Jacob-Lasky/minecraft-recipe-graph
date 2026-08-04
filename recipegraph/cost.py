@@ -357,6 +357,28 @@ EMC_COST = 0.5
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
+#
+# #175 ADDED THE CATALYST TERM TO `_relax` AND DELIBERATELY DID NOT BUMP THIS. That looks like
+# an omission, so here is the argument, and it rests on a measurement rather than on taste.
+#
+# The bump exists to stop a warm `.cost-cache.json` serving prices computed by different
+# arithmetic. The retained-input term cannot produce a different price on any graph predating the
+# `p` field: with every slot at the default chance, `retained` is 0.0 and the ingredient term
+# is `c * 1.0`, and `x + 0.0 == x` and `x * 1.0 == x` are exact in IEEE 754 rather than
+# approximately true. Measured, not asserted: `estimate` over a 40-recipe graph exercising
+# batch outputs, fluids, an oredict slot, a transfer and three machine bands produces the
+# byte-identical price digest d89f2eb4 before and after the change.
+#
+# And a graph that DOES carry `p` arrives as a new `graph.json`, whose size and mtime are
+# already hashed below, so that cache is invalidated by the file rather than by this number.
+# There is no input for which a stale cache could serve a wrong price, which is the only thing
+# this counter is for.
+#
+# SO THE RULE IS NOT WEAKENED, IT IS MET: bump this the moment the RETENTION ARITHMETIC changes
+# (a different amortisation, a threshold, a non-linear scaling of a fractional chance), because
+# then two graphs with identical files really would price differently. Adding a field that is
+# absent everywhere is not that. `tests/test_plan_fixtures.py` pins this number against the
+# fixtures, so a bump costs an oracle regeneration and must ride with one.
 FORMULA_VERSION = 10
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
@@ -820,13 +842,34 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
             if r.transfer:
                 base += TRANSFER_PENALTY
             ingredients = 0.0
+            # A RETAINED INPUT IS ECONOMICALLY A MACHINE, so its cost joins `base` and NOT the
+            # amortising term below. #175: an input with `consume_chance == 0.0` survives the
+            # run, so you buy one and run the recipe forever. Dividing it by the batch would
+            # say a big enough output makes the retained input free, the identical error
+            # the amortisation comment further down was written about for machines.
+            #
+            # IT IS NOT PRICED AT ZERO, AND THAT IS THE POINT. Free would make every such
+            # route the cheapest one in the model, so the solver would prefer machines whose
+            # retained input the player cannot obtain -- the defect #176 fixed for
+            # unsourced keys, reintroduced through a different door. `min` still applies
+            # afterwards, so a genuinely cheaper uncatalysed route still wins.
+            retained = 0.0
             for ing in r.inputs:
                 c = input_cost(cost, _cheapest_alternative(cost, ing, ore_members),
                                 ing.qty, ore_members)
                 if math.isinf(c):
                     ingredients = math.inf
                     break
-                ingredients += c
+                if ing.survives_run:
+                    retained += c
+                else:
+                    # A FRACTIONAL CHANCE GENUINELY AMORTISES, unlike a permanent one: an
+                    # input consumed 30% of the time costs 0.3 of itself per run, and over a
+                    # batch that is exactly what you spend. Only 24 input slots in the
+                    # reference pack are fractional (one deliberate 8-tier ladder in
+                    # `Trinitas.zs`), but they span 0.95 down to 0.001, so rounding them to a
+                    # boolean would be wrong by three orders of magnitude at one end.
+                    ingredients += c * ing.consume_chance
             if math.isinf(ingredients):
                 continue
             for key, qty in r.outputs:
@@ -845,7 +888,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                 # to 8e-5 and 126 items (diamond, coal, string, redstone) priced under 0.1.
                 # That is how "one iron ingot" came out as "smelt a Spawner Shard", which
                 # needs a Pristine Matter run, which needs bee drones. See issue #29.
-                per_unit = base + ingredients / _scaled_qty(key, qty)
+                per_unit = base + retained + ingredients / _scaled_qty(key, qty)
                 if per_unit < cost.get(key, math.inf) - 1e-9:
                     cost[key] = per_unit
                     changed += 1
@@ -1065,5 +1108,23 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
         best = input_cost(cost, alt, ing.qty, ore_members)
         if math.isinf(best):
             return math.inf
+        # A FRACTIONAL CHANCE SCALES HERE, AND A RETAINED INPUT DOES NOT (#175). This function
+        # prices ONE RUN, so there is no batch to amortise over and the two cases separate
+        # differently from `_relax`:
+        #
+        #   p == 0.0   charged in FULL, once. You must own the shard before the forge runs, so
+        #              a recipe demanding an expensive permanent input has to rank worse for it.
+        #              Scaling by 0.0 here would price that recipe as though the shard were
+        #              free and hand the ranker the #176 defect: the cheapest route in the
+        #              model being the one whose input you cannot get.
+        #   0 < p < 1  scaled, because one run spends `p` of it in expectation.
+        #
+        # AND THIS HAS TO AGREE WITH `_relax`, which is the reason it is here at all. That
+        # charges a retained input at full cost and a fractional one at `p` of itself; a ranker
+        # that charged a 30%-consumed input in full would price a route the relaxation prices
+        # differently, and the divergence between "what the ranker charged" and "what the
+        # solver expands" is exactly the class of bug #29 is about.
+        if not ing.survives_run:
+            best *= ing.consume_chance
         total += best
     return total

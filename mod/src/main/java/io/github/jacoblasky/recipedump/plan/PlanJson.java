@@ -160,6 +160,9 @@ public final class PlanJson {
         if (node.altCount != null) {
             w.name("alt_count").value(node.altCount);
         }
+        if (node.notConsumed != null) {
+            w.name("not_consumed").value(node.notConsumed.booleanValue());
+        }
         if (node.dimension != null) {
             w.name("dimension").value(node.dimension);
         }

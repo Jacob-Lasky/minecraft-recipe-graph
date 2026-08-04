@@ -279,11 +279,24 @@ def mod_of(key):
 
 
 class Ingredient:
-    """One input slot: any of `alternatives` satisfies it, `qty` of them."""
+    """One input slot: any of `alternatives` satisfies it, `qty` of them.
 
-    __slots__ = ("alternatives", "qty", "role")
+    `consume_chance` is the probability the slot is SPENT by a run, 0.0 to 1.0, and it
+    defaults to 1.0 because that is what every dump before schema 6 means. See #175: the
+    dump had no field for this at all, so a Deep Mob Learning data model that sits in the
+    machine forever was bought once per run and a Spinel Ring plan asked for 64 of them.
 
-    def __init__(self, alternatives, qty=1, role="item"):
+    0.0 IS NOT "FREE", IT IS "OWN ONE". An input the run never spends is economically a
+    machine: you must have it before the recipe runs at all, and it survives. `cost._relax` puts
+    it beside `category_entry_cost` rather than in the amortising ingredient term, and
+    `Solver._build` expands it once per plan rather than once per run. Pricing it at zero
+    instead would repeat the defect #176 fixed, where the cheapest thing in the model was
+    the thing the solver could not actually obtain.
+    """
+
+    __slots__ = ("alternatives", "qty", "role", "consume_chance")
+
+    def __init__(self, alternatives, qty=1, role="item", consume_chance=1.0):
         # dedupe but keep order so the first alternative stays the "canonical" one
         seen = set()
         alts = []
@@ -294,16 +307,37 @@ class Ingredient:
         self.alternatives = alts
         self.qty = qty
         self.role = role
+        self.consume_chance = consume_chance
+
+    @property
+    def survives_run(self):
+        """True when a run never spends this slot, so owning one is the whole requirement.
+
+        DO NOT RENAME THIS TO `is_catalyst`, AND DO NOT CALL THIS CONCEPT A CATALYST IN CODE.
+        This repository already owns that word for a different thing: a JEI recipe catalyst is
+        the machine BLOCK a recipe is displayed against, which is what `catalysts.json`,
+        `sources/catalysts.py`, `multiblocks.py` and ten files in the Java port mean by it. A
+        non-consumed INPUT is unrelated to that, and one word for two concepts in one codebase
+        is how a reader of a plan node concludes the row is naming a machine. #175 uses the
+        word in its prose because that is the mod-community term; the code says what happens.
+        """
+        return self.consume_chance == 0.0
 
     def to_json(self):
         d = {"alt": self.alternatives, "qty": self.qty}
         if self.role != "item":
             d["role"] = self.role
+        # OMITTED WHEN 1.0, so a graph built from a pre-#175 dump serialises byte for byte as
+        # it did before and the Java reader's default is exercised by the common case rather
+        # than by a rarity. `graph.json` is 121 MB; a field on all 335k slots is not free.
+        if self.consume_chance != 1.0:
+            d["p"] = self.consume_chance
         return d
 
     @staticmethod
     def from_json(d):
-        return Ingredient(d["alt"], d.get("qty", 1), d.get("role", "item"))
+        return Ingredient(d["alt"], d.get("qty", 1), d.get("role", "item"),
+                          d.get("p", 1.0))
 
 
 def merge_slots(inputs, key_of):
@@ -322,13 +356,24 @@ def merge_slots(inputs, key_of):
     `options` is the WIDEST slot's alternative count, not the first's: a merged row that
     reported 1 option while standing in for a slot that accepted 3 would misstate the
     choice that was made.
+
+    SLOTS ARE BUCKETED BY KEY *AND* `consume_chance`, SO THE SAME ITEM CAN YIELD TWO ROWS,
+    and callers must not assume the returned keys are distinct. #175: a recipe may hold one
+    item as a RETAINED input and the same item as a consumed ingredient, and those are
+    two different requirements -- own one, and spend N per run. Bucketing on the key alone
+    fused them and SUMMED their quantities, so the retained one became stock you spend.
+    Merging
+    still collapses the 3x3-of-one-ingredient case this function exists for, because those
+    nine slots share a chance. Inert on every dump written before `p` existed, where every
+    slot is 1.0 and this bucket is exactly the old one.
     """
     merged = {}
     for ing in inputs:
         key = key_of(ing)
-        row = merged.get(key)
+        bucket = (key, ing.consume_chance)
+        row = merged.get(bucket)
         if row is None:
-            merged[key] = [key, ing, ing.qty, len(ing.alternatives)]
+            merged[bucket] = [key, ing, ing.qty, len(ing.alternatives)]
         else:
             row[2] += ing.qty
             row[3] = max(row[3], len(ing.alternatives))

@@ -1190,9 +1190,18 @@ public final class Solver {
 
         List<PlanNode> children = new ArrayList<PlanNode>();
         for (MergedSlot slot : mergeSlots(recipeId)) {
-            PlanNode child = expand(slot.keyId, slot.qty * runs, ancestors, depth + 1);
+            // `slot.qty` AND NOT `slot.qty * runs` FOR A RETAINED SLOT, mirroring
+            // `solve.py:_build`. #175: a run that never spends the slot needs the same one
+            // however many times you run it, and multiplying by `runs` is what asked for 64
+            // Blaze Data Models when the answer is one. Still expanded, because you genuinely
+            // cannot run the recipe without it; the quantity was the defect, not the row.
+            PlanNode child = expand(slot.keyId,
+                    slot.survivesRun() ? slot.qty : slot.qty * runs, ancestors, depth + 1);
             if (slot.options > 1) {
                 child.altCount = slot.options;
+            }
+            if (slot.survivesRun()) {
+                child.notConsumed = Boolean.TRUE;
             }
             children.add(child);
         }
@@ -1205,11 +1214,18 @@ public final class Solver {
         final int keyId;
         long qty;
         int options;
+        /** Probability a run consumes this slot. 1.0 on every graph predating #175. */
+        final float consumeChance;
 
-        MergedSlot(int keyId, long qty, int options) {
+        MergedSlot(int keyId, long qty, int options, float consumeChance) {
             this.keyId = keyId;
             this.qty = qty;
             this.options = options;
+            this.consumeChance = consumeChance;
+        }
+
+        boolean survivesRun() {
+            return consumeChance == 0.0f;
         }
     }
 
@@ -1235,22 +1251,46 @@ public final class Solver {
      */
     List<MergedSlot> mergeSlots(int recipeId) {
         RecipeStore store = g.recipes();
-        Map<Integer, MergedSlot> merged = new LinkedHashMap<Integer, MergedSlot>();
+        Map<Long, MergedSlot> merged = new LinkedHashMap<Long, MergedSlot>();
         for (int slot = store.slotStart(recipeId); slot < store.slotEnd(recipeId); slot++) {
             int chosen = pickAlternative(slot);
             if (chosen < 0) {
                 continue;   // an empty slot: a spacer in the recipe grid
             }
             int options = store.altEnd(slot) - store.altStart(slot);
-            MergedSlot row = merged.get(chosen);
+            float chance = store.slotConsumeChance(slot);
+            Long bucket = Long.valueOf(mergeBucket(chosen, chance));
+            MergedSlot row = merged.get(bucket);
             if (row == null) {
-                merged.put(chosen, new MergedSlot(chosen, store.slotQty(slot), options));
+                merged.put(bucket,
+                        new MergedSlot(chosen, store.slotQty(slot), options, chance));
             } else {
                 row.qty += store.slotQty(slot);
                 row.options = Math.max(row.options, options);
             }
         }
         return new ArrayList<MergedSlot>(merged.values());
+    }
+
+    /**
+     * The key two slots must share to merge: the resolved item AND its consume chance (#175).
+     *
+     * SO THE SAME ITEM CAN PRODUCE TWO ROWS, and that is the point. A recipe may hold one item
+     * permanently and spend the same item as an ingredient, which are two different
+     * requirements: own one, and spend N per run. Bucketing on the item alone fused them and
+     * SUMMED their quantities, turning the retained one into stock you spend. `model.merge_slots`
+     * buckets identically, and the two must agree or the golden fixtures diverge.
+     *
+     * The 3x3-of-one-ingredient collapse this method exists for is unaffected, because those
+     * nine slots share a chance.
+     *
+     * PACKED INTO A `long` RATHER THAN A STRING KEY: this runs once per slot of every candidate
+     * recipe, and a `String.format` there would allocate on the hot path. `+ 0.0f` normalises
+     * `-0.0f` to `0.0f` before taking the bits, because the two compare equal and would
+     * otherwise land in different buckets, splitting a row on a distinction nothing else makes.
+     */
+    private static long mergeBucket(int keyId, float chance) {
+        return ((long) keyId << 32) | (Float.floatToIntBits(chance + 0.0f) & 0xffffffffL);
     }
 
     // -- the wire format ----------------------------------------------------------------

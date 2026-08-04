@@ -21,6 +21,14 @@ An item stack may carry `"n"`, a digest of the NBT that decides what it IS (sche
 and up). It becomes a `#suffix` on the key, so a Forest drone and a Meadows drone are
 different ingredients -- see DumpCommand.discriminator. Absent on older dumps, which
 then behave exactly as before.
+
+An INPUT stack may carry `"p"`, the probability a run CONSUMES it, 0.0 to 1.0 (#175).
+**Absent means 1.0**, so every dump written before that field existed reads exactly as it
+did before, which is the property that let the reader land ahead of the mod change. 0.0 is
+an input the run never spends: the pack declares 1,078 with `setChance(0.0)` and another 502
+with CraftTweaker's `.reuse()`. It sits on the STACK and not on the slot because `in` is a
+list of arrays with no slot object to hang a field on, and changing that shape would break
+every reader.
 """
 
 import json
@@ -42,19 +50,64 @@ def _stack_key(entry):
     return "%s#%s" % (key, nbt) if nbt else key
 
 
+def _consume_chance(entry):
+    """The stack's `p`, or 1.0 when it is absent OR unusable. Never raises. See #175.
+
+    MALFORMED AND "FULLY CONSUMED" ARE DIFFERENT FACTS, AND THIS DELIBERATELY MAPS THE FIRST
+    ONTO THE SECOND. 1.0 is the value that cannot invent work out of nothing: it says "assume a
+    run spends this", which is the pre-#175 behaviour and the conservative direction. Every other
+    landing spot is worse, and three of them were reachable before this function existed:
+
+      `"p": false`   `float(False)` is 0.0, so a malformed boolean declared the slot a PERMANENT
+                     catalyst. Charged once instead of once per run, on a stack nobody marked.
+                     `isinstance(True, int)` is True in Python, so a plain `(int, float)` check
+                     does NOT exclude it; `dump_meta._count` excludes `bool` explicitly for the
+                     same reason.
+      `"p": "0.0"`   a quoted number did the same thing, because `float` accepts strings.
+      `"p": null`    `float(None)` RAISES, so one malformed line aborted a 335,000-recipe build
+                     with a TypeError naming neither the line nor the field.
+
+    OUT OF RANGE IS ALSO REFUSED, not clamped. A negative `p` would scale an ingredient's cost
+    NEGATIVE in `cost._relax`, which is not a mispriced route but an arbitrage: the more of it a
+    recipe demands the cheaper the recipe gets. Clamping to 0.0 would instead make it permanent.
+    Neither is a reading of the data, so the field is treated as unusable and the default stands.
+    """
+    if "p" not in entry:
+        return 1.0
+    raw = entry["p"]
+    # `bool` first: it is a subclass of `int`, so the isinstance check below would accept it.
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 1.0
+    value = float(raw)
+    # `value != value` is the NaN test that needs no import, and NaN fails every comparison
+    # below, so it would otherwise slip through as "in range".
+    if value != value or value < 0.0 or value > 1.0:
+        return 1.0
+    return value
+
+
 def _slot_to_ingredient(slot, role="item"):
     if isinstance(slot, dict):
         slot = [slot]
-    alts, qty = [], 1
+    alts, qty, chance = [], 1, 0.0
     for entry in slot or []:
         key = _stack_key(entry)
         if not key:
             continue
         alts.append(key)
         qty = max(qty, int(entry.get("c", entry.get("a", 1)) or 1))
+        # `max`, THE SAME WAY AND FOR A STRONGER REASON THAN `qty` ABOVE. `p` lives on the
+        # STACK because `in` is a list of arrays with no slot object to hang it on, so a slot
+        # of interchangeable stacks carries one `p` per alternative. In practice they agree:
+        # Modular Machinery's chance is a property of the REQUIREMENT, not of the item that
+        # satisfies it. Should they ever disagree, taking the highest is the arm that cannot
+        # invent a free route -- `min` would let one reusable alternative in a slot make the
+        # whole slot retained, which is exactly the "cheapest thing is the thing you cannot
+        # obtain" defect #176 fixed. Overstating consumption only ever overstates a price.
+        chance = max(chance, _consume_chance(entry))
     if not alts:
         return None
-    return Ingredient(alts, qty, role)
+    return Ingredient(alts, qty, role, chance)
 
 
 def extract(path, on_progress=None):

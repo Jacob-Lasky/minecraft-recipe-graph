@@ -801,7 +801,10 @@ class WorldOreTiebreakTest(unittest.TestCase):
         _g, solver = self._solver(graph=g)
         by_id = {r.rid: r for r in g.recipes}
         slots = solver._merge_slots(by_id["compress"])
-        self.assertEqual([(k, q) for k, q, _o in slots], [("mod:panel", 9)])
+        # The fourth member is the slot's `consume_chance` (#175). Asserted rather than
+        # discarded: these nine slots MUST still collapse to one row, because they share a
+        # chance, and `merge_slots` now buckets on the chance as well as the key.
+        self.assertEqual([(k, q, c) for k, q, _o, c in slots], [("mod:panel", 9, 1.0)])
         self.assertEqual(solver.ore_backed(by_id["compress"], slots),
                          solver.ore_backed(by_id["compress"]))
 
