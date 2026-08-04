@@ -383,6 +383,57 @@ public class PlanFixtureTest {
      * a single "expected ... but was ..." would mean sixteen runs to learn the shape of the
      * problem.
      */
+    @Test
+    public void renamedToSimulateSomeoneDeletingTheGoldenGate() throws IOException {
+        String oracle = System.getenv("RECIPEGRAPH_ORACLE");
+        Assume.assumeTrue("set RECIPEGRAPH_ORACLE to the oracle graph to run the golden gate",
+                oracle != null && new File(oracle).isFile());
+        List<File> fixtures = planFixtures();
+        Assume.assumeFalse("no plan fixtures", fixtures.isEmpty());
+
+        File oracleFile = new File(oracle);
+        JsonObject identity = theOneOracleTheFixturesName(fixtures);
+        RecipeGraph graph = GraphJsonReader.read(oracleFile);
+        // BEFORE A SINGLE PLAN IS SOLVED, so a wrong oracle says "wrong oracle" rather than
+        // producing twenty structural diffs that read as a broken port.
+        String rebuilt = refuseAnOracleTheFixturesDoNotName(identity, graph, oracleFile);
+        Map<String, CostTable> priced = new LinkedHashMap<String, CostTable>();
+        List<String> failures = new ArrayList<String>();
+
+        for (File fixture : fixtures) {
+            JsonObject doc = read(fixture);
+            JsonObject request = doc.getAsJsonObject("request");
+
+            ScenarioInputs.Resolved resolved =
+                    ScenarioInputs.resolve(graph, doc.getAsJsonObject("scenario"));
+            String signature = resolved.costSignature();
+            CostTable costs = priced.get(signature);
+            if (costs == null) {
+                costs = ScenarioInputs.price(graph, resolved);
+                priced.put(signature, costs);
+            }
+            int maxNodes = request.has("max_nodes")
+                    ? request.get("max_nodes").getAsInt() : Solver.DEFAULT_MAX_NODES;
+            int target = graph.keyId(request.get("item").getAsString());
+            if (target < 0) {
+                failures.add(fixture.getName() + ": the oracle graph has no key "
+                        + request.get("item").getAsString());
+                continue;
+            }
+            PlanResult plan = ScenarioInputs.solverFor(graph, resolved, costs, maxNodes)
+                    .solve(target, request.get("qty").getAsLong());
+
+            String why = JsonCompare.describe(doc.get("result"),
+                    new JsonParser().parse(PlanJson.toJson(plan)));
+            if (why != null) {
+                failures.add(fixture.getName() + ": " + why);
+            }
+        }
+        assertTrue(failures.size() + " of " + fixtures.size()
+                + " fixtures disagree with the oracle:" + rebuilt + "\n  "
+                + join(failures, "\n  "), failures.isEmpty());
+    }
+
     /**
      * The one `graph` identity block every fixture records, which they must agree on.
      *
