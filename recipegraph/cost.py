@@ -206,17 +206,31 @@ FLUID_SCALE = 1.0 / 1000.0
 #  * FLOOR IT AT THE MATERIAL'S CHEAPEST OBTAINABLE MEMBER. Circular. The floor picks the
 #    INGOT, whose price was itself earned through the nugget, so the nugget rises to exactly
 #    the number the bug produced and nothing moves.
-#  * INHERIT A BARE KEY'S PRICE FROM A PRODUCED VARIANT OF IT, which is the shape #170 reaches
-#    for and a different rule from the one above: it keys on the NBT axis rather than on the
-#    material family. `extratrees:drink` is why not. Nothing makes the bare Beer Mug, and all
-#    30 produced variants are FILLED mugs a Fluid Transposer makes from an EMPTY mug variant,
-#    so the rule prices "Beer Mug" at what a Mug of Apple Juice costs. A one-hop cycle check
-#    does not save it, because the empty mug is another VARIANT and not the bare key. Measured
-#    on the reference graph by the agent on #170; recorded here rather than on that branch
-#    because the branch is a draft that is not landing and this list is what stops the rule
-#    being re-proposed. NOTE WHAT IT DOES NOT ARGUE AGAINST: #176 assigns the flat
-#    `UNSOURCED_COST` to this set and inherits nothing, so the Beer Mug costs 2,000 today and
-#    not the price of a filled one. The hazard is specific to inheritance.
+#  * INHERIT IT FROM A PRODUCED NBT VARIANT OF THE SAME KEY. A DIFFERENT RULE FROM THE ONE
+#    ABOVE, not a second reason for it: that one keys on the oredict material family, this one
+#    on the NBT axis. Not circular the way the member floor is, and wrong for a different
+#    reason: a container's produced variants are the FILLED forms of it.
+#    `thermalexpansion:reservoir:32000` is the harm. One recipe demands the bare key, both of
+#    its variants are Fluid Transposer output, and the rule prices a Creative Reservoir at
+#    521.0 against a 2,000 floor -- 4x understated, into a slot that really does ask for one.
+#    `extratrees:drink` is the same shape at its clearest and its weakest: a Beer Mug whose 30
+#    variants are all filled glasses made from an EMPTY glass variant, so the rule would price
+#    "Beer Mug" at what a Mug of Apple Juice costs, and nothing demands that key directly so no
+#    plan moves for it. A one-hop cycle check saves neither, because the empty container is
+#    another VARIANT and not the bare key.
+#
+#    WHAT MAKES IT POSSIBLE IS `real_producers`, one module over: it drops container transfers
+#    only for a FLUID key, so for an ITEM key a Transposer fill or empty counts as production
+#    and a filled glass reads as a made thing. Restricting the rule to variants the key's own
+#    family does not make is what #170 proposes; the unrestricted rule is what this entry
+#    refuses.
+#
+#    Measured on graph-oracle.json by the agent on #170, and recorded here rather than on that
+#    branch because the branch is a draft and this list only works if it outlives the attempts.
+#    The 521.0 is their number under their rule; the producer and demand counts above were
+#    re-checked here. NOTE WHAT IT DOES NOT ARGUE AGAINST: #176 assigns the flat
+#    `UNSOURCED_COST` and inherits nothing, so both keys sit at 2,000 today rather than at a
+#    filled container's price. The hazard is specific to inheritance.
 #  * FLOOR IT AT THE MATERIAL'S WORLD ORE, re-seeded into a clean relaxation. Structurally
 #    sound and measured clean -- 6 keys floored, 0 lost, 0 cheaper, every control unchanged
 #    -- and it still produced a WORSE plan than the bug at the time: with the nugget gone the
