@@ -97,6 +97,32 @@ public final class PlannerWidgets {
      * {@link #PADDING} is what keeps those off the window frame.
      */
     public static final int NODE_PAD = 3;
+    /**
+     * What a TOKEN node draws in the icon column instead of a sprite.
+     *
+     * A TOKEN IS AN INSTRUCTION AND NOT AN ITEM, and the trap is that it is a REGISTERED item, so
+     * `iconFor` succeeds and returns a perfectly good picture of a thing that does not exist.
+     * `contenttweaker:dungeon_drop` is the case #174 was reported on: "the osiris spinel shows it
+     * requires a Dungeon Drop which implies it is an item". A sprite plus a red quantity plus a
+     * count is three signals all saying "item", so the sprite is the one to drop.
+     *
+     * A GLYPH RATHER THAN A BLANK, and that is the half worth arguing. Suppressing the sprite
+     * alone leaves the token distinguishable from a genuine RAW row only by the absence of an
+     * icon -- which is also true of every fluid and every oredict group, so it separates nothing.
+     * A mark is a POSITIVE carrier.
+     *
+     * IN THE ICON COLUMN BECAUSE THE ICON COLUMN SURVIVES THE ZOOM. `NodeContent.showDetail`
+     * drops the label and the badge word below `FlowZoom.LABEL_LEGIBLE`, and without this the
+     * zoomed-out diagram would separate a token from a NEED by hue alone -- which is what
+     * `NodeStatus`'s inks and `present.STATUS_STYLE` both deliberately refuse to do, and what a
+     * colour-blind player cannot read. The mark is not `detail`, so it stays at every zoom, and
+     * it survives greyscale.
+     *
+     * `!` AND NOT AN INVENTED GLYPH: it matches the web renderer's `graphview.TOKEN_MARK` on
+     * #174, agreed with that agent directly. A rule taught in the browser and broken in game is
+     * worse than neither, which is the whole reason that conversation happened.
+     */
+    public static final String TOKEN_MARK = "!";
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
     public static final int QTY = 52;
     /**
@@ -715,16 +741,20 @@ public final class PlannerWidgets {
      */
     private static void twoLineNode(NodeContent box, PlanNode node, int width, int height,
                                     int colour) {
-        iconIfAny(box, NodeActionsHolder.actions().iconFor(node), NODE_ICON, NODE_PAD,
-                  (height - NODE_ICON) / 2);
-        // The width is charged whether or not that drew anything; see ICON.
         int x = NODE_PAD + NODE_ICON + GAP;
         int right = width - NODE_PAD;
-        // CENTRED VERTICALLY rather than pinned to the top, so a caller that hands over a
-        // taller box than two lines need gets a node that looks deliberate instead of one
-        // whose text has slid to the ceiling. At `FlowLayout.NODE_HEIGHT` this comes out at
-        // exactly NODE_PAD, which is the inset the sides get.
+        // A TOKEN GETS THE MARK AND NOT ITS SPRITE; see TOKEN_MARK. On the mark's line rather
+        // than the icon's, so it sits beside the quantity and reads as part of the row.
         int top = (height - LINE * 2) / 2;
+        if (!tokenMark(box, node, NODE_ICON, NODE_PAD, top)) {
+            iconIfAny(box, NodeActionsHolder.actions().iconFor(node), NODE_ICON, NODE_PAD,
+                      (height - NODE_ICON) / 2);
+        }
+        // The width is charged whether or not that drew anything; see ICON.
+        // `top` is CENTRED VERTICALLY rather than pinned to the top, so a caller that hands
+        // over a taller box than two lines need gets a node that looks deliberate instead of one
+        // whose text has slid to the ceiling. At `FlowLayout.NODE_HEIGHT` it comes out at exactly
+        // NODE_PAD, which is the inset the sides get.
         box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, top));
         int badgeWidth = badgeWidthBeside(right - x - QTY - GAP);
         if (badgeWidth > 0) {
@@ -746,7 +776,9 @@ public final class PlannerWidgets {
      */
     private static void oneLineNode(NodeContent box, PlanNode node, int width, int colour) {
         int x = 0;
-        iconIfAny(box, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
+        if (!tokenMark(box, node, ICON, x, 0)) {
+            iconIfAny(box, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
+        }
         // The width is charged whether or not that drew anything; see ICON.
         x += ICON + GAP;
         box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
@@ -793,7 +825,9 @@ public final class PlannerWidgets {
         int indent = Math.min(depth, MAX_INDENT_DEPTH) * INDENT;
         int x = indent;
 
-        iconIfAny(row, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
+        if (!tokenMark(row, node, ICON, x, 0)) {
+            iconIfAny(row, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
+        }
         // The width is charged whether or not that drew anything; see ICON.
         x += ICON + GAP;
 
@@ -1397,6 +1431,24 @@ public final class PlannerWidgets {
      * loading mid-session and `iconFor` began answering. A helper that also advanced the cursor
      * would make that conditional again.
      */
+    /**
+     * Draw {@link #TOKEN_MARK} in the icon column when `node` is a token, and say whether it did.
+     *
+     * A BOOLEAN SO THE CALLER SKIPS THE SPRITE, rather than this suppressing it: the three call
+     * sites already own the geometry of their own icon column, and a method that drew a mark AND
+     * silently swallowed the sprite lookup would hide which of the two happened.
+     *
+     * IT MUST BE ASKED BEFORE `iconIfAny` AND NOT AFTER. A token's key resolves -- that is the
+     * whole trap -- so an icon drawn first is a sprite the mark would then be painted on top of.
+     */
+    private static boolean tokenMark(ParentWidget<?> box, PlanNode node, int width, int x, int y) {
+        if (!NodeStatus.isToken(node)) {
+            return false;
+        }
+        box.child(line(TOKEN_MARK, width, NodeStatus.colour(node)).pos(x, y));
+        return true;
+    }
+
     private static void iconIfAny(ParentWidget<?> box, net.minecraft.item.ItemStack stack,
                                   int size, int x, int y) {
         if (stack == null || stack.isEmpty()) {
