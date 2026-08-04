@@ -137,6 +137,34 @@ class ProdClientHarnessTest(unittest.TestCase):
         self.assertTrue(found,
                         "prodshot.sh must build its image before running, as shot.sh does")
 
+    def test_it_reinstalls_the_mod_jar_rather_than_trusting_a_staged_one(self):
+        """The same trap as the image, one layer in, and worse.
+
+        `prodshot.sh` rebuilt its image every run and left the JAR UNDER TEST alone, so a shot
+        measured whatever `stage-instance.sh` last happened to install. On a branch that changes
+        Java that is a 22-minute run photographing the OLD behaviour, with nothing in the log to
+        say which jar it was. It has to be `--mod-only`: re-staging the whole instance copies 377
+        jars out of the AMP server and takes the container gate, and a gated script calling
+        another one is the deadlock `tools/gate.sh` warns about in its header."""
+        prodshot = strip_comments(read("prodshot.sh"))
+        # Loose about what sits between, because the path is `$(dirname "$0")/...` and the
+        # nested quotes inside it defeat any character class written to exclude them.
+        found = re.search(r"gated .*stage-instance\.sh.* --mod-only", prodshot)
+        self.assertTrue(found,
+                        "prodshot.sh must reinstall the mod jar before running, and take the"
+                        " gate to do it: build-jar.sh holds the gate while gradle rewrites the"
+                        " jar being copied")
+        self.assertLess(prodshot.index("--mod-only"), prodshot.index("gated docker run"),
+                        "the reinstall must finish before the run's own gate is taken;"
+                        " nesting flock deadlocks")
+        staging = strip_comments(read("stage-instance.sh"))
+        self.assertIn("--mod-only", staging,
+                      "stage-instance.sh must accept the flag prodshot.sh passes it")
+        body = re.search(r"install_mod\(\) \{(.*?)\n\}", staging, re.S)
+        self.assertTrue(body, "stage-instance.sh must define install_mod")
+        self.assertNotIn("gated", body.group(1),
+                         "install_mod must take no container, or prodshot.sh deadlocks on it")
+
     def test_the_watchdog_waits_for_the_container_before_watching_it(self):
         """The watchdog is started before `docker run`, and `docker run` blocks on the container
         gate. Without a wait-to-appear loop the first poll finds nothing and the watchdog exits,

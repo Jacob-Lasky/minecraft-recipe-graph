@@ -32,6 +32,12 @@ set -e
 HEADLESS_ONLY=0
 [ "${1:-}" = "--headless-only" ] && HEADLESS_ONLY=1
 
+# Reinstall the mod jar and nothing else. What `prodshot.sh` runs before every shot, so a run
+# cannot measure a jar older than the source tree beside it. Takes no container and no gate,
+# which is why it is safe to call from inside a script that is about to take both.
+MOD_ONLY=0
+[ "${1:-}" = "--mod-only" ] && MOD_ONLY=1
+
 LOCAL_BUILD="${LOCAL_BUILD:-/coding/.recipegraph-build}"
 INSTANCE="${INSTANCE:-$LOCAL_BUILD/prodinstance}"
 PACK_JARS="${PACK_JARS:-$LOCAL_BUILD/packserver377}"
@@ -147,6 +153,11 @@ else:
     print("stage-instance: disabled the launch RAM dialog in concheckrmd.cfg")
 PY
 }
+
+if [ "$MOD_ONLY" -eq 1 ]; then
+    install_mod
+    exit 0
+fi
 
 if [ "$HEADLESS_ONLY" -eq 0 ]; then
     stage_from_amp
