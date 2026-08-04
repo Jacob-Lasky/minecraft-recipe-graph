@@ -330,6 +330,14 @@ public final class ShotScreens {
                 JeiRecipeShot.open(arg);
             }
         });
+        // The only screen that drives an INPUT GESTURE end to end. See JeiKeybindShot for the
+        // two defects it exists to have caught.
+        register("jei-keybind", new Opener() {
+            @Override
+            public void open(String arg) {
+                JeiKeybindShot.open(arg);
+            }
+        });
     }
 
     private ShotScreens() {

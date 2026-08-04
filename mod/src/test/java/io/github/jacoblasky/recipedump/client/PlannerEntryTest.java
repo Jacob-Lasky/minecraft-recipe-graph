@@ -5,10 +5,6 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -63,22 +59,7 @@ public class PlannerEntryTest {
     }
 
     private void loadGraph() throws Exception {
-        File file = new File(folder.getRoot(), "graph.json");
-        FileOutputStream out = new FileOutputStream(file);
-        try {
-            out.write(GraphDocuments.TINY.getBytes("UTF-8"));
-        } finally {
-            out.close();
-        }
-        System.setProperty(GraphSource.PROPERTY, file.getPath());
-        GraphService.get().startLoad(null);
-        long deadline = System.currentTimeMillis() + 30_000L;
-        while (GraphService.get().state() != GraphService.State.READY) {
-            if (System.currentTimeMillis() > deadline) {
-                throw new AssertionError("graph never loaded: " + GraphService.get().describe());
-            }
-            Thread.sleep(5L);
-        }
+        TestGraphs.load(folder.getRoot(), GraphDocuments.TINY);
     }
 
     private static PlannerState state() {
@@ -98,14 +79,46 @@ public class PlannerEntryTest {
         loadGraph();
         PlanBook book = new PlanBook();
         book.setTodo("mod:plate", 1L);
-        PlannerEntry.startPlan(book);
+        PlannerEntry.startPlan(book, null);
         awaitPlan();
 
         long generation = PlannerService.get().generation();
-        PlannerEntry.startPlan(book);
+        PlannerEntry.startPlan(book, null);
         assertEquals("the same question must not be asked again",
                      generation, PlannerService.get().generation());
         assertEquals(PlannerService.State.DONE, PlannerService.get().state());
+    }
+
+    /**
+     * A NAMED target beats the book's first entry, which is what the JEI key needs.
+     *
+     * `firstTarget` is the guess `open` has to make when nobody said which item; a player who
+     * points at something and presses the key HAS said. Before `openFor` existed the keybind
+     * could only open the planner and let it guess, which produces a completely convincing
+     * screenshot of a plan for the wrong item -- so the assertion is on the target actually
+     * solved, not on a plan existing.
+     */
+    @Test
+    public void aNamedTargetIsPlannedInsteadOfTheBooksFirst() throws Exception {
+        loadGraph();
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:ingot", 1L);
+        book.setTodo("mod:plate", 1L);
+        assertEquals("mod:ingot", PlannerEntry.firstTarget(book));
+
+        PlannerEntry.startPlan(book, "mod:plate");
+        awaitPlan();
+        assertEquals("mod:plate", PlannerService.get().targetKey());
+    }
+
+    @Test
+    public void namingNothingFallsBackToTheBooksFirst() throws Exception {
+        loadGraph();
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        PlannerEntry.startPlan(book, null);
+        awaitPlan();
+        assertEquals("mod:plate", PlannerService.get().targetKey());
     }
 
     @Test
@@ -115,13 +128,13 @@ public class PlannerEntryTest {
         loadGraph();
         PlanBook book = new PlanBook();
         book.setTodo("mod:plate", 1L);
-        PlannerEntry.startPlan(book);
+        PlannerEntry.startPlan(book, null);
         awaitPlan();
 
         long generation = PlannerService.get().generation();
         PlanBook more = new PlanBook();
         more.setTodo("mod:plate", 64L);
-        PlannerEntry.startPlan(more);
+        PlannerEntry.startPlan(more, null);
         awaitPlan();
         assertTrue("a new quantity must produce a new answer",
                    PlannerService.get().generation() > generation);
@@ -225,7 +238,7 @@ public class PlannerEntryTest {
         // over a graph that is merely still loading -- a wait reported as an error.
         PlanBook book = new PlanBook();
         book.setTodo("mod:plate", 1L);
-        PlannerEntry.startPlan(book);
+        PlannerEntry.startPlan(book, null);
         assertEquals(PlannerService.State.IDLE, PlannerService.get().state());
     }
 }

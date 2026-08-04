@@ -5,6 +5,7 @@ import io.github.jacoblasky.recipedump.common.CommonProxy;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.PlanTargetKeybind;
+import io.github.jacoblasky.recipedump.client.jei.PlannerHooks;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.common.PlanBookCapability;
@@ -43,6 +44,22 @@ public class ClientProxy extends CommonProxy {
         // binding ends up registered twice. Safe without JEI -- the key resolves nothing and
         // says nothing, which is what an unbound feature should do.
         PlanTargetKeybind.register();
+        // AND THE THING THAT LISTENS FOR IT. Registering the key without this is what the mod
+        // shipped for two releases: the press resolved an item and handed it to a default
+        // listener that does nothing, so the gesture the whole of #19 exists for was a no-op
+        // on every real client while staying green in every test, because each test installed
+        // a listener of its own. See PlanTargetRouter.
+        PlannerHooks.setTargetListener(new PlanTargetRouter(new PlanTargetRouter.BookSource() {
+            @Override
+            public PlanBook book() {
+                return PlanBookCapability.of(Minecraft.getMinecraft().player);
+            }
+        }, new PlanTargetRouter.Opener() {
+            @Override
+            public void open(PlanBook book, String target) {
+                openGuarded(Minecraft.getMinecraft().player, book, target);
+            }
+        }));
         // BUILD JEI'S STACK INDEX WHEN THE GRAPH LANDS, on the loader thread, so the first
         // context menu does not pay for a walk of ~35,000 item stacks. `indexFor` is
         // null-safe and does nothing useful without JEI, so this is unconditional; the
@@ -104,8 +121,24 @@ public class ClientProxy extends CommonProxy {
             tell(player, "plan book unavailable: the capability is not registered");
             return;
         }
+        openGuarded(player, book, null);
+    }
+
+    /**
+     * Open the planner without letting a missing ModularUI escape as a crash.
+     *
+     * ONE COPY, BECAUSE THE SECOND CALLER IS A KEYBIND. The item's path can afford to throw
+     * into Forge's item-use dispatch and produce a crash report naming the mod; the JEI key
+     * runs inside keyboard dispatch, where `PlanTargetKeybind`'s header requires that nothing
+     * throws, since an exception there takes the frame rather than the feature. Having the
+     * guard on one path and not the other is how the item stays polite on a client with no
+     * ModularUI while the key hard-crashes it.
+     *
+     * @param target the key the player named, or null to plan the book's first entry
+     */
+    private void openGuarded(EntityPlayer player, PlanBook book, String target) {
         try {
-            PlannerEntry.open(book);
+            PlannerEntry.openFor(book, target);
         } catch (Throwable missing) {
             tell(player, "the planner needs ModularUI 3.1.5, which is not installed");
         }

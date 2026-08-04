@@ -54,10 +54,16 @@ public final class LivePlannerActions implements PlannerActions {
 
     @Override
     public void openNodeMenu(PlanNode node) {
-        // SELECTED FIRST, so opening a menu and highlighting the item are one click rather
-        // than two. Nothing here reads the selection, but `client.flow` draws from it and a
-        // diagram that stayed unhighlighted while its menu was open would read as a diagram
-        // that had not registered the click.
+        // SELECTED FIRST, so opening a menu and highlighting the item would be one click
+        // rather than two.
+        //
+        // THIS COMMENT USED TO SAY "`client.flow` draws from it" AND THAT IS NOT TRUE. Checked
+        // 2026-08-04: nothing under `client/flow/` -- or anywhere else in `mod/src/main` --
+        // calls `PlanSelection.isSelected`, `selectedKey` or `selectedNode`. The selection is
+        // WRITTEN on every node-menu open and READ by nobody, so no diagram highlights and no
+        // menu acts on it. The write is kept because it is correct and cheap and the consumer
+        // is the missing half; the comment is corrected because a justification naming a
+        // caller that does not exist is what stops the next reader from noticing.
         selectNode(node);
         current = node;
         open(menu());

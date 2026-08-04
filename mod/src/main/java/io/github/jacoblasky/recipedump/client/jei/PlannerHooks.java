@@ -69,7 +69,20 @@ public final class PlannerHooks {
         listener = target == null ? NOBODY_LISTENING : target;
     }
 
-    /** True when something is listening, so a menu can grey the entry rather than lie. */
+    /**
+     * True when something is listening.
+     *
+     * THIS SAID "so a menu can grey the entry rather than lie" AND NO MENU ASKS IT. The entry
+     * it described was never built, and a comment promising a caller that does not exist is
+     * how a reader concludes the seam is wired when it is not -- which is exactly the mistake
+     * this class was at the centre of, since nothing installed a listener at all until
+     * 2026-08-04.
+     *
+     * It stays because it is the only way to OBSERVE a static setter, and
+     * `JeiBridgeTest.settingASeamToNullRestoresTheDefaultRatherThanInstallingNull` is a real
+     * test of {@link #setTargetListener} that has nothing else to assert against. That is a
+     * genuine use, unlike the one it used to claim.
+     */
     public static boolean hasTargetListener() {
         return listener != NOBODY_LISTENING;
     }

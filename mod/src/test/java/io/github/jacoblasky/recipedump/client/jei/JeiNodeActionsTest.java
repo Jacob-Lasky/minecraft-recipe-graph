@@ -312,7 +312,7 @@ public class JeiNodeActionsTest {
 
     @Test
     public void aKeyThisGraphNeverSawAnswersFalseRatherThanGuessing() {
-        // No weakening of the KEY in this direction, unlike `JeiBridge.keyIdFor`. A plan node's
+        // No weakening of the KEY in this direction, unlike `JeiBridge.keyFor`. A plan node's
         // key came out of the graph, so a miss means the graph was swapped under the plan --
         // and answering with a neighbouring item's stack would be a wrong answer dressed as a
         // right one.

@@ -192,8 +192,23 @@ public final class JeiBridge {
         }
     }
 
+    /** An ingredient and WHICH of JEI's surfaces it came from. See {@link #hovered}. */
+    public static final class Hovered {
+
+        /** `recipes`, `list` or `bookmarks`. Never null. */
+        public final String surface;
+
+        /** JEI's raw ingredient. Never null. */
+        public final Object ingredient;
+
+        Hovered(String surface, Object ingredient) {
+            this.surface = surface;
+            this.ingredient = ingredient;
+        }
+    }
+
     /**
-     * Whatever ingredient the mouse is over, from any of JEI's three surfaces, or null.
+     * Whatever ingredient the mouse is over, and where it came from, or null.
      *
      * THE ORDER IS DELIBERATE and it is "most specific context first". The recipes GUI is
      * checked before the item list because when a recipe screen is open it is drawn OVER the
@@ -201,64 +216,99 @@ public final class JeiBridge {
      * the bookmark overlay only holds what the player put there and is the least likely of
      * the three to be what they meant.
      *
-     * Returns JEI's raw ingredient rather than an `ItemStack`: it may be a fluid or another
-     * mod's ingredient type, and the caller decides whether it can plan one.
+     * WHICH SURFACE ANSWERED IS PART OF THE RESULT RATHER THAN A SECOND CALL, because the
+     * mouse moves between calls and a caller that asked twice could be told the ingredient
+     * came from a surface that is no longer the one under the cursor. It matters to the
+     * screenshot harness, which has to say what it proved: "the item list answered" and "a
+     * recipe slot answered" are different claims about the gesture, and a log that says only
+     * "found an ingredient" cannot distinguish the one a player makes from the one that
+     * happened to be reachable.
      */
-    public static Object ingredientUnderMouse() {
+    public static Hovered hovered() {
         IJeiRuntime runtime = DumpPlugin.runtime;
         if (runtime == null) {
             return null;
         }
         try {
             Object found = runtime.getRecipesGui().getIngredientUnderMouse();
-            if (found == null) {
-                found = runtime.getIngredientListOverlay().getIngredientUnderMouse();
+            if (found != null) {
+                return new Hovered("recipes", found);
             }
-            if (found == null) {
-                found = runtime.getBookmarkOverlay().getIngredientUnderMouse();
+            found = runtime.getIngredientListOverlay().getIngredientUnderMouse();
+            if (found != null) {
+                return new Hovered("list", found);
             }
-            return found;
+            found = runtime.getBookmarkOverlay().getIngredientUnderMouse();
+            return found == null ? null : new Hovered("bookmarks", found);
         } catch (Throwable failed) {
             return null;
         }
     }
 
     /**
-     * The graph key for whatever the mouse is over, or -1.
+     * Type into JEI's search box. False when there is no JEI to type into.
      *
-     * Keys the stack the same way the dump did, so an ingredient the player is looking at
-     * lands on the same key the graph holds. A non-item ingredient -- a fluid, another mod's
-     * type -- answers -1, because the planner's targets are keys and only items have one
-     * here.
+     * FOR THE SCREENSHOT HARNESS AND NOTHING ELSE SO FAR. A probe that hovers "whatever slot
+     * is first" is not reproducible across mod sets, and narrowing the list first is how JEI
+     * itself expects to be pointed at an item. It is a real user-visible action -- the search
+     * box keeps the text -- so it belongs behind the same null-safe surface as the rest and
+     * not in a probe reaching for `DumpPlugin.runtime` directly.
      */
-    public static int keyUnderMouse(RecipeGraph graph) {
-        Object ingredient = ingredientUnderMouse();
-        return ingredient instanceof ItemStack ? keyIdFor((ItemStack) ingredient, graph) : -1;
+    public static boolean filterTo(String text) {
+        IJeiRuntime runtime = DumpPlugin.runtime;
+        if (runtime == null || text == null) {
+            return false;
+        }
+        try {
+            runtime.getIngredientFilter().setFilterText(text);
+            return true;
+        } catch (Throwable failed) {
+            return false;
+        }
     }
 
     /**
-     * The graph key id for a stack, or -1. The inverse direction of {@link StackIndex}.
+     * Whatever ingredient the mouse is over, or null. See {@link #hovered} for the order.
      *
-     * SEPARATE FROM {@link #keyUnderMouse} SO IT CAN BE TESTED. Reading the mouse needs a
-     * live JEI runtime and this does not, and this is where the behaviour worth asserting
-     * lives -- everything above it is one instanceof.
-     *
-     * Falls back to the undiscriminated key when the exact one is unknown, which is the same
-     * single weakening `StackIndex` makes in the other direction. It is what stops "plan
-     * this" doing nothing on a stack whose enchantment list happens to differ from the one
-     * the dump recorded. ONE STEP ONLY: it does not go on to collapse durability, because a
-     * pristine tool and a worn one are the same PLAN target while a differently-worn one is
-     * not necessarily the same thing the player pointed at.
+     * Returns JEI's raw ingredient rather than an `ItemStack`: it may be a fluid or another
+     * mod's ingredient type, and the caller decides whether it can plan one.
      */
-    public static int keyIdFor(ItemStack stack, RecipeGraph graph) {
+    public static Object ingredientUnderMouse() {
+        Hovered found = hovered();
+        return found == null ? null : found.ingredient;
+    }
+
+    // THERE WAS A `keyUnderMouse(RecipeGraph)` HERE AND IT HAD NO PRODUCTION CALLER. Removed
+    // 2026-08-04 with the rest of this class's Phase 4 work, because it is the same shape as the
+    // `setTargetListener` defect one file over: a public method whose only exercise was a test
+    // asserting it answers -1 with no runtime, sitting beside the path that really is used.
+    // The live path is `hovered()` -> `ItemStack` -> `PlannerHooks.deliver`, and the router
+    // resolves the key with `keyFor` on the other side of that handover, so nothing wants a
+    // combined read-and-resolve. Bring it back only with a caller.
+
+
+    /**
+     * The graph KEY for a stack, or null. The inverse direction of {@link StackIndex}.
+     *
+     * BOTH FORMS BECAUSE THE TWO CONSUMERS GENUINELY DIFFER, and the id is not convertible
+     * back. A node menu works in ids -- it is asking the graph questions about something the
+     * graph already holds -- while a plan target is a `PlanBook` entry and a `Solver`
+     * argument, both of which are keyed by string and both of which outlive the graph object
+     * that resolved them. Deriving one from the other at each call site is where the
+     * exact-then-base fallback below would get dropped from one of them.
+     */
+    public static String keyFor(ItemStack stack, RecipeGraph graph) {
         if (graph == null) {
-            return -1;
+            return null;
         }
         String key = DumpCommand.stackKey(stack);
         if (key == null) {
-            return -1;
+            return null;
         }
-        int keyId = graph.keyId(key);
-        return keyId >= 0 ? keyId : graph.keyId(Keys.baseKey(key));
+        if (graph.keyId(key) >= 0) {
+            return key;
+        }
+        String base = Keys.baseKey(key);
+        return graph.keyId(base) >= 0 ? base : null;
     }
 }

@@ -104,6 +104,24 @@ so the picture is evidence that the runtime was captured, a focus was created an
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
 names another item.
 
+`jei-keybind` is the other half of that, and it drives an INPUT GESTURE end to end rather than
+opening a screen: it filters JEI's item list, walks the real cursor over the overlay until JEI
+reports an item under it, presses the plan key through `PlanTargetKeybind.onPressed`, and then
+fails the run unless the planner solves the key of the item that was under the cursor. It needs
+a world, because the plan book is a capability on the player:
+`harness/shot.sh jei-keybind jeikey -Dmcrecipedump.shotWorld=jeikey`. `jei-keybind:<filter>`
+types something else into JEI's search box; the default is `@minecraft hopper`, chosen so the
+same probe means the same thing on the dev set and on the whole pack.
+
+It exists because this is the one path where both halves of a seam can be green and the
+feature still dead, and that happened twice at once. `PlannerHooks.setTargetListener` was never
+called by the shipped mod, so every press was handed to a listener that does nothing; and the
+keybind subscribed only to `InputEvent.KeyInputEvent`, which does not fire while a `GuiScreen`
+is open, which is every frame on which JEI has an overlay to point at. Neither is visible to a
+unit test, because every unit test installs a listener of its own and calls the handler
+directly. The verdict compares keys rather than photographing a tree deliberately: a planner
+opened on the wrong item produces a completely convincing screenshot.
+
 `ae2-probe` needs a world: `harness/shot.sh ae2-probe ae2probe
 -Dmcrecipedump.shotWorld=ae2`. Measured at 177 s and 189 s on a warm cache with one Java file
 changed -- above the table below because of the world load, and because both runs shared Tower

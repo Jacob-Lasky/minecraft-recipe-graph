@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client.jei;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -61,7 +62,6 @@ public class JeiBridgeTest {
         RecipeGraph graph = new GraphBuilder().build();
         assertFalse(JeiBridge.isAvailable());
         assertNull(JeiBridge.ingredientUnderMouse());
-        assertEquals(-1, JeiBridge.keyUnderMouse(graph));
         assertFalse(JeiBridge.showRecipesFor(new ItemStack(Items.STICK)));
         assertFalse(JeiBridge.showRecipesFor(0, graph));
     }
@@ -182,31 +182,47 @@ public class JeiBridgeTest {
         GraphBuilder b = new GraphBuilder();
         int stickKey = b.key(DumpCommand.stackKey(stick));
         RecipeGraph graph = b.build();
-        assertEquals(stickKey, JeiBridge.keyIdFor(stick, graph));
+        assertEquals("minecraft:stick", JeiBridge.keyFor(stick, graph));
         assertEquals("minecraft:stick", graph.key(stickKey));
     }
 
+
+
+
     @Test
-    public void anNbtVariantTheGraphNeverSawStillResolvesToItsBaseItem() {
-        // The single weakening in the pointing direction. Without it, "plan this" does
-        // nothing on a stack whose enchantment list happens to differ from the one the dump
-        // recorded -- and doing nothing is indistinguishable from a broken keybind.
+    public void theKeyFallsBackToTheBaseItemForAnNbtVariantTheGraphNeverSaw() {
         ItemStack named = new ItemStack(Items.STICK);
         named.setTagCompound(new net.minecraft.nbt.NBTTagCompound());
         named.getTagCompound().setString("Species", "NeverDumped");
 
         GraphBuilder b = new GraphBuilder();
-        int base = b.key("minecraft:stick");
+        b.key("minecraft:stick");
         RecipeGraph graph = b.build();
-        assertTrue(graph.keyId(DumpCommand.stackKey(named)) < 0);
-        assertEquals(base, JeiBridge.keyIdFor(named, graph));
+        assertNotEquals("minecraft:stick", DumpCommand.stackKey(named));
+        assertEquals("minecraft:stick", JeiBridge.keyFor(named, graph));
     }
 
     @Test
-    public void aStackTheGraphHasNoKeyForAtAllAnswersMinusOne() {
-        RecipeGraph graph = new GraphBuilder().build();
-        assertEquals(-1, JeiBridge.keyIdFor(new ItemStack(Items.STICK), graph));
-        assertEquals(-1, JeiBridge.keyIdFor(ItemStack.EMPTY, graph));
-        assertEquals(-1, JeiBridge.keyIdFor(new ItemStack(Items.STICK), null));
+    public void theKeyIsNullWhenNothingResolvesRatherThanAGuess() {
+        RecipeGraph empty = new GraphBuilder().build();
+        assertNull(JeiBridge.keyFor(new ItemStack(Items.STICK), empty));
+        assertNull(JeiBridge.keyFor(ItemStack.EMPTY, empty));
+        assertNull(JeiBridge.keyFor(new ItemStack(Items.STICK), null));
+    }
+
+    // -- the surfaces, without a runtime to read them -------------------------------------
+
+    @Test
+    public void withNoRuntimeThereIsNoHoveredIngredientAndNoSurfaceToName() {
+        assertNull(JeiBridge.hovered());
+        assertNull(JeiBridge.ingredientUnderMouse());
+    }
+
+    @Test
+    public void filteringWithoutJeiAnswersFalseRatherThanThrowing() {
+        // The harness types into JEI's search box to make a probe reproducible. On a client
+        // with no JEI there is no box, and saying so is the contract every method here keeps.
+        assertFalse(JeiBridge.filterTo("@minecraft hopper"));
+        assertFalse(JeiBridge.filterTo(null));
     }
 }

@@ -183,7 +183,7 @@ public final class JeiNodeActions implements NodeActions {
     /**
      * The stack a plan node names, or null.
      *
-     * NO `baseKey` FALLBACK HERE, and that is the difference from {@link JeiBridge#keyIdFor}.
+     * NO `baseKey` FALLBACK HERE, and that is the difference from {@link JeiBridge#keyFor}.
      * That method keys something the player pointed AT, which may be an NBT variant the dump
      * never recorded, so weakening the key is what stops the keybind doing nothing. A plan node
      * came out of this graph, so its key is either in the table or the graph has been swapped

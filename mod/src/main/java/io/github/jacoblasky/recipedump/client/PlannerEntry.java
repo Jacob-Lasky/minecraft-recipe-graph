@@ -96,30 +96,48 @@ public final class PlannerEntry {
      * once at open time is what made a plan arriving a second later invisible.
      */
     public static void open(PlanBook book) {
-        PlannerScreen.openPlanner(book);
-        startPlan(book);
+        openFor(book, firstTarget(book));
     }
 
     /**
-     * Start planning the book's first entry, if there is one and nothing is already running.
+     * Open the planner on a target the player just NAMED, rather than on the book's first.
+     *
+     * THIS IS WHAT THE JEI KEYBIND NEEDS AND {@link #open} CANNOT GIVE IT. `open` plans
+     * `firstTarget`, which its own note calls "a placeholder rule rather than a design"; a
+     * player who points at an item and presses the key has said which item, and planning a
+     * different one because it happens to sit earlier in their TODO list is not a defensible
+     * reading of that gesture. `null` falls back to the book's first, so `open` is this with
+     * nothing named.
+     */
+    public static void openFor(PlanBook book, String target) {
+        PlannerScreen.openPlanner(book);
+        startPlan(book, target);
+    }
+
+    /**
+     * Start planning `named`, or the book's first entry, if nothing is already running.
+     *
+     * ONE METHOD, NOT TWO. There was a no-target overload for a while and its only callers
+     * were tests -- the exact shape this codebase keeps paying for, a seam whose halves are
+     * both exercised and which production reaches by a different route. `null` means "nobody
+     * named one", which is what `open` passes.
      *
      * AFTER the window opens, never before: opening is instant and planning is not, so the
      * first frame shows the state and a later use of the item shows the tree. A player who
      * right-clicks and waits several seconds for a window has been given a slow tool, which
      * is the same argument that put the graph read on its own thread.
      *
-     * THE FIRST TODO IS THE TARGET, which is a placeholder rule rather than a design. #148's
-     * panel and #145's JEI keybind both have a better answer and wiring those together is the
-     * next piece. What this buys today is that the whole path -- graph, scenario, cost table,
-     * solver, JSON, panel -- runs against real pack data on a real client rather than only in
-     * a JUnit gate.
+     * THE FIRST TODO IS THE TARGET WHEN NOBODY NAMED ONE, and that remains a placeholder
+     * rather than a design -- it is what opening the planner cold has to guess. A caller who
+     * knows better says so through {@link #openFor}, which is how the JEI keybind plans the
+     * item the player was pointing at.
      */
-    static void startPlan(PlanBook book) {
+    static void startPlan(PlanBook book, String named) {
         GraphService graphs = GraphService.get();
         if (graphs.state() != GraphService.State.READY) {
             return;
         }
-        String target = firstTarget(book);
+        String target = named != null ? named : firstTarget(book);
         if (target == null) {
             return;
         }
