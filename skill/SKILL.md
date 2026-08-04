@@ -480,12 +480,22 @@ same reason at a larger scale.** Five mod-side issues in one jar, against one sc
 the expensive step is a launch of a 367-jar pack, not the code, and five increments would only
 buy a partial revert nobody can exercise, since reverting half a jar still costs the launch.
 
-**Schema 5 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the keys the
-reader computes and AE2 stock still matches. Upgrading 4 -> 5 is `/recipedump` then `build`,
-with **no re-run of `have`** -- the opposite of 3 -> 4, and why `nbt_digest.DIGEST_FORMAT_SCHEMA`
-deliberately stayed at 4. Moving it for a bump that did not touch the digest would make the
-loud "your stock reads as zero" warning fire on a graph that is fine, and a warning that cries
-wolf gets trained away before the one time it matters.
+**#194 is v0.10.0 (dump schema 6), and it is additive.** `summary.json` gains `names` and
+`names_failed` -- the display names the dump wrote, and the ones `getDisplayName()` threw on,
+which used to be caught and forgotten -- plus `mod_count` and `mod_digest`, so a dump can say
+which jars produced it. Three refusals hang off it: `build` will not read a `names.json`
+whose length disagrees with `names`, will not replace a graph built from a different
+`mod_digest` without `--allow-mod-set-change`, and `/recipedump` will not overwrite a dump
+directory written by a different jar set without `force`. That last one is the important
+one: the output path is hardcoded to `<gamedir>/mc-recipe-dump`, so a dev-client or harness
+dump run in a pack directory would otherwise destroy the pack's real dump in place.
+
+**Schema 5 and 6 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the
+keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then
+`build`, with **no re-run of `have`** -- the opposite of 3 -> 4, and why
+`nbt_digest.DIGEST_FORMAT_SCHEMA` deliberately stayed at 4. Moving it for a bump that did not
+touch the digest would make the loud "your stock reads as zero" warning fire on a graph that
+is fine, and a warning that cries wolf gets trained away before the one time it matters.
 
 Two things about the new files that are easy to get wrong:
 
@@ -651,7 +661,7 @@ tooling only: recipegraph itself is Python 3 stdlib, the image copies `recipegra
 nothing else, and CI stays stdlib-only.
 
 **`getDisplayName()` returns format codes.** 14,425 of 340,324 names arrived as
-`§3Abyssalnite Axe`. `dump_names.load` cleans them now, the same way `load_items_csv`
+`§3Abyssalnite Axe`. `dump_names.load_with_count` cleans them now, the same way `load_items_csv`
 always did; if a new name source appears it needs `clean_label` too.
 
 **`getDisplayName()` also returns unlocalized lang keys.** 1,429 names arrived as

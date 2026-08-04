@@ -1,8 +1,11 @@
 package io.github.jacoblasky.recipedump;
 
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -12,8 +15,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import mezz.jei.api.IRecipeRegistry;
 import mezz.jei.api.ingredients.VanillaTypes;
@@ -111,9 +116,11 @@ public class DumpCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/recipedump [" + NO_TRACE_ARG + "] [" + NO_ICONS_ARG + "] -- dump all JEI "
-                + "recipes for offline crafting-tree tools; " + NO_TRACE_ARG + " skips "
-                + "nbt_trace.json (#80), " + NO_ICONS_ARG + " skips the icon atlas (#36)";
+        return "/recipedump [" + NO_TRACE_ARG + "] [" + NO_ICONS_ARG + "] [" + FORCE_ARG
+                + "] -- dump all JEI recipes for offline crafting-tree tools; "
+                + NO_TRACE_ARG + " skips nbt_trace.json (#80), " + NO_ICONS_ARG + " skips "
+                + "the icon atlas (#36), " + FORCE_ARG + " overwrites a dump written by a "
+                + "different set of mods (#194)";
     }
 
     /**
@@ -150,17 +157,39 @@ public class DumpCommand extends CommandBase {
      */
     static final String NO_ICONS_ARG = "noicons";
 
+    /**
+     * Argument that lets a dump OVERWRITE a dump directory written by a different jar set.
+     *
+     * OPT-IN, UNLIKE THE OTHER TWO, and the asymmetry is the point. `notrace` and `noicons`
+     * fail safe when mistyped because they suppress; this one enables, so a mistyped `force`
+     * refuses -- and refusing is the outcome that costs a retyped command rather than an
+     * artifact that took a game launch to make. See {@link #refuseToClobber}.
+     */
+    static final String FORCE_ARG = "force";
+
     /** True unless `args` asks to suppress the trace. Unknown args are ignored, as before. */
     static boolean wantsTrace(String[] args) {
-        return !suppressed(args, NO_TRACE_ARG);
+        return !carries(args, NO_TRACE_ARG);
     }
 
     /** True unless `args` asks to suppress the icon atlas. */
     static boolean wantsIcons(String[] args) {
-        return !suppressed(args, NO_ICONS_ARG);
+        return !carries(args, NO_ICONS_ARG);
     }
 
-    private static boolean suppressed(String[] args, String flag) {
+    /** True when `args` carries `force`, allowing an overwrite across mod sets. */
+    static boolean forced(String[] args) {
+        return carries(args, FORCE_ARG);
+    }
+
+    /**
+     * Whether `args` names `flag`. NAMED FOR PRESENCE, NOT FOR SUPPRESSION: it was `suppressed`
+     * while every flag reading it turned something off, and #194 added `force`, which turns
+     * something ON. `return suppressed(args, FORCE_ARG)` reads as the opposite of what it does,
+     * and a predicate whose name inverts at one of three call sites is a bug waiting for a
+     * reader in a hurry.
+     */
+    private static boolean carries(String[] args, String flag) {
         if (args == null) {
             return false;
         }
@@ -189,6 +218,12 @@ public class DumpCommand extends CommandBase {
             return;
         }
         File dir = new File(Minecraft.getMinecraft().gameDir, "mc-recipe-dump");
+        // BEFORE `createDirectories`, and long before a byte is written. See the method.
+        String refusal = refuseToClobber(dir, activeModIds(), forced(args));
+        if (refusal != null) {
+            reply(sender, refusal);
+            return;
+        }
         try {
             Files.createDirectories(dir.toPath());
         } catch (IOException e) {
@@ -609,10 +644,19 @@ public class DumpCommand extends CommandBase {
             }
 
             writeLines(new File(dir, "skipped.ndjson"), skips);
-            writeSummary(new File(dir, "summary.json"), perCategory, categoryMod,
-                         recipes, failed, skips.size());
+            int namesFailed = sink.namesFailed();
+            // ASKED A SECOND TIME rather than carried from `execute`'s clobber check, and
+            // that is safe because Forge's active mod list is fixed once the load phase is
+            // over: no mod arrives or leaves while a world is running. If that ever stopped
+            // being true the two answers could differ, and the digest this dump RECORDS would
+            // not be the digest the guard COMPARED -- so thread the list through Runner
+            // rather than adding a third call site.
+            List<String> modIds = activeModIds();
+            writeSummary(new File(dir, SUMMARY_FILE), perCategory, categoryMod,
+                         recipes, failed, skips.size(), sink.names().size(), namesFailed,
+                         modIds);
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
-            int ores = writeOreDict(new File(dir, "oredict.json"), sink.names());
+            int ores = writeOreDict(new File(dir, "oredict.json"));
             writeNames(new File(dir, "names.json"), sink.names());
             int damageables = writeDamageable(new File(dir, "damageable.json"));
             Map<String, String> machines = ModularMachineryBridge.machines();
@@ -645,16 +689,30 @@ public class DumpCommand extends CommandBase {
             // that does not hold, and a player who opened the file after being told 0 found
             // 22,188. "Did anything break" and "how much did JEI decline to give us" are
             // different questions; see #90.
+            // THE THIRD NUMBER IS ALWAYS PRINTED, INCLUDING WHEN IT IS ZERO, for the same
+            // reason the other two are: a line that only appears on failure makes a healthy
+            // dump and an unreported one look identical, which is the #194 defect itself.
             reply(sender, String.format(
-                    "%s wrappers threw; %s entries recorded in skipped.ndjson "
-                            + "(per-category counts in summary.json)",
-                    formatCount(failed), formatCount(skips.size())));
+                    "%s wrappers threw; %s display names could not be read; %s entries "
+                            + "recorded in skipped.ndjson (per-category counts in summary.json)",
+                    formatCount(failed), formatCount(namesFailed),
+                    formatCount(skips.size())));
             reply(sender, String.format(
                     "%s items scanned: %s with EMC, %s blueprints across %s machines, "
                             + "%s damageable item types",
                     formatCount(itemsSeen), formatCount(emc.size()),
                     formatCount(blueprints.size()), formatCount(machines.size()),
                     formatCount(damageables)));
+            // WHICH JARS THIS DUMP SAW, said out loud at the moment it can still be acted
+            // on. A player who meant to dump the full pack and finds "7 mods" here has lost
+            // a minute; the same person finding out three days later, from a graph that
+            // looked normal, has lost the three days. #194
+            reply(sender, modIds == null
+                    ? "mod set: Forge would not list it, so this dump does not record which "
+                            + "jars produced it"
+                    : String.format("mod set: %d mods, digest %s (recorded in summary.json, "
+                            + "so a graph built from this dump can name its pack)",
+                            modIds.size(), modDigest(modIds)));
             if (sink.tracing()) {
                 reply(sender, String.format(
                         "nbt_trace.json: %s keys with identifying NBT", formatCount(traced)));
@@ -873,6 +931,11 @@ public class DumpCommand extends CommandBase {
     static final class KeySink {
 
         private final Map<String, String> names = new LinkedHashMap<String, String>();
+        /**
+         * Keys whose `getDisplayName()` threw at least once. NOT the reported count -- see
+         * {@link #namesFailed()}, which subtracts the ones a later occurrence got.
+         */
+        private final Set<String> nameThrew = new LinkedHashSet<String>();
         /** null when not tracing, which is how every normal dump runs. */
         private final Map<String, String> trace;
 
@@ -882,6 +945,26 @@ public class DumpCommand extends CommandBase {
 
         Map<String, String> names() {
             return names;
+        }
+
+        /**
+         * How many discriminated keys this dump has NO display name for. #194
+         *
+         * SUBTRACTED AT THE END RATHER THAN COUNTED AS IT GOES, because a key can throw and
+         * then succeed. `record` re-enters the try on every occurrence of a key it has no
+         * name for, and the documented cause of the throw -- being outside a render pass --
+         * is a property of WHEN it is called, not of the item. Counting throws would report
+         * a loss for an item whose name the dump went on to write, and the number's whole
+         * job is to be comparable against `names.json`'s length.
+         */
+        int namesFailed() {
+            int lost = 0;
+            for (String key : nameThrew) {
+                if (!names.containsKey(key)) {
+                    lost++;
+                }
+            }
+            return lost;
         }
 
         Map<String, String> trace() {
@@ -901,7 +984,12 @@ public class DumpCommand extends CommandBase {
                     // written from the same place.
                     names.put(key, stack.getDisplayName());
                 } catch (Throwable ignored) {
-                    // a few modded items throw on getDisplayName outside a render pass
+                    // A few modded items throw on getDisplayName outside a render pass.
+                    // STILL SWALLOWED -- one unnameable item must not end a dump -- but no
+                    // longer SILENT: before #194 this catch discarded the fact as well as
+                    // the exception, so a dump that lost 40,000 names wrote a shorter
+                    // names.json and said nothing, and nothing downstream could tell.
+                    nameThrew.add(key);
                 }
             }
             // GATED ON THE '#', not on tagDigests returning null, and the difference is
@@ -1364,6 +1452,9 @@ public class DumpCommand extends CommandBase {
      *   5  summary.json's `skipped` becomes `threw` and gains `skip_lines`; adds
      *      damageable.json, emc.json, machine_names.json and the icons-N.png atlas with
      *      icons.json. See #90, #118, #50, #55, #36.
+     *   6  summary.json gains `names` and `names_failed`, so a short names.json stops being
+     *      undetectable in principle, and `mod_count` / `mod_digest`, so a dump can say
+     *      which jars it saw. See #194.
      *
      * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
      * expensive step is a launch of the game, not the code, and five increments on one
@@ -1397,16 +1488,190 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 5;
+    static final int SCHEMA = 6;
 
     /**
-     * @param threw      wrapper failures -- things that went wrong
-     * @param skipLines  lines in skipped.ndjson -- everything JEI declined to give us,
-     *                   failures included
+     * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194
+     *
+     * The question a dump could not answer about itself, and the reason #119's parity gap ran
+     * for months on quoted numbers: five jars and the pack's 367 produce provenance lines
+     * identical in form, and the CONTENTS cannot settle it either -- a client-only mod that
+     * registers no JEI category leaves no trace in the output at all. #208 settled that one at
+     * 0 keys by walking both jar sets on the desktop, because no artifact could be asked; this
+     * is what makes the next such question answerable from the artifact instead.
+     *
+     * NULL, NOT AN EMPTY LIST, when `Loader` throws. "Could not ask" and "asked and found
+     * nothing" are different facts and the reader distinguishes them; an empty list would
+     * write `mod_count: 0`, which is a measurement nobody took.
      */
-    private static void writeSummary(File file, Map<String, int[]> perCategory,
-                                     Map<String, String> categoryMod,
-                                     int recipes, int threw, int skipLines) {
+    static List<String> activeModIds() {
+        try {
+            List<String> ids = new ArrayList<String>();
+            for (net.minecraftforge.fml.common.ModContainer mod
+                    : net.minecraftforge.fml.common.Loader.instance().getActiveModList()) {
+                if (mod != null && mod.getModId() != null) {
+                    ids.add(mod.getModId());
+                }
+            }
+            // AN EMPTY LIST IS ALSO "COULD NOT ASK". A live Forge always lists at least
+            // `minecraft`, `mcp` and `FML`, so an empty result does not mean a pack with no
+            // mods -- it means this JVM is not inside a running Forge, which is where the
+            // unit tests are. Returning it as a measurement would let a dump claim a jar set
+            // of zero and make every later comparison against it a false mismatch.
+            //
+            // NOT SORTED HERE. Order matters to exactly one thing, `modDigest`, and it sorts
+            // its own input -- see there for why the invariant cannot live at this level.
+            return ids.isEmpty() ? null : ids;
+        } catch (Throwable ignored) {
+            // A dump is worth more than its provenance stamp; see writeSummary's null case.
+            return null;
+        }
+    }
+
+    /**
+     * A digest of the modid SET. Null for a null list, so "could not ask" survives the hop.
+     *
+     * MODIDS ONLY, DELIBERATELY NOT VERSIONS. The hazard this exists to catch is a dump
+     * taken against a DIFFERENT SET of jars -- the server pack's 364 rather than the
+     * client's 367, or the harness's six -- and versions do not speak to that. What they do
+     * is churn the digest on every routine pack update, which would fire the mismatch
+     * refusal on a legitimate redump and get it forced past out of habit. This project has
+     * already written down what that costs: "a warning that cries wolf gets trained away
+     * before the one time it matters." Which BUILD wrote the dump is `mod_version`'s job.
+     *
+     * `fnv` and not a fresh hash, so this file holds one hashing loop rather than two. It is
+     * a different input domain from the NBT discriminator and reusing the function does not
+     * touch schema 4's frozen key format -- `canonical` is what that format is, not `fnv`.
+     */
+    static String modDigest(List<String> modIds) {
+        if (modIds == null) {
+            return null;
+        }
+        // SORTED HERE AND NOWHERE ELSE. DO NOT move this up into `activeModIds`: that holds
+        // the invariant only for the one caller that happens to sort, and the digest's whole
+        // promise is that it is of a SET -- the same pack enumerated in a different order must
+        // digest the same, or the clobber refusal fires on a redump of the pack it just read.
+        // A COPY, because `Collections.sort` on an `Arrays.asList` view writes through to the
+        // caller's array.
+        List<String> sorted = new ArrayList<String>(modIds);
+        Collections.sort(sorted);
+        return fnv(String.join("\n", sorted));
+    }
+
+    /**
+     * The provenance file, named ONCE because #194 gave it a second speller.
+     *
+     * `writeSummary` has always written it; `readModSet` now reads it back to decide whether
+     * a dump may overwrite another. A writer and a reader of the same file that each spell
+     * its name are two places to change and one to forget, and forgetting here does not
+     * throw -- `readModSet` would simply find no file, report "cannot say", and the
+     * clobber guard would wave every dump through while looking exactly as green.
+     */
+    static final String SUMMARY_FILE = "summary.json";
+
+    /** What a dump directory already on disk says about the jars that wrote it. */
+    static final class ModSet {
+        /** -1 when unrecorded, which is every dump written before schema 6. */
+        final int count;
+        /** null when unrecorded. */
+        final String digest;
+
+        ModSet(int count, String digest) {
+            this.count = count;
+            this.digest = digest;
+        }
+    }
+
+    /** `mod_count` and `mod_digest` out of a summary.json, unrecorded reading as absent. */
+    static ModSet readModSet(File summary) {
+        int count = -1;
+        String digest = null;
+        if (summary.isFile()) {
+            try (JsonReader r = new JsonReader(new InputStreamReader(
+                    Files.newInputStream(summary.toPath()), StandardCharsets.UTF_8))) {
+                r.beginObject();
+                while (r.hasNext()) {
+                    String field = r.nextName();
+                    if (r.peek() == JsonToken.NULL) {
+                        r.nextNull();
+                    } else if (field.equals("mod_count")) {
+                        count = r.nextInt();
+                    } else if (field.equals("mod_digest")) {
+                        digest = r.nextString();
+                    } else {
+                        r.skipValue();
+                    }
+                }
+            } catch (Throwable ignored) {
+                // An unreadable summary is a dump we cannot vouch for either way, and
+                // `refuseToClobber` treats "cannot say" as permission to proceed. Refusing
+                // on a corrupt summary would strand anyone whose last dump was interrupted.
+            }
+        }
+        return new ModSet(count, digest);
+    }
+
+    /**
+     * Why a dump must not be written here, or null to go ahead. #194
+     *
+     * THE ONE IRREVERSIBLE MISTAKE AVAILABLE IN THIS COMMAND. Everything else a dump gets
+     * wrong is fixed by dumping again; this one destroys the input to that fix. The output
+     * directory is `<gamedir>/mc-recipe-dump` with no way to redirect it, so a run against a
+     * SMALLER jar set -- a dev client, a server-side instance, the headless harness -- lands
+     * on top of the pack's real dump and replaces it. That artifact costs a launch of the full
+     * 367-jar pack to reproduce, which is the whole reason #123, #87 and #90 spent months
+     * queued behind one.
+     *
+     * A DISTINCT PATH FOR NON-PLAYER DUMPS WAS THE OTHER CANDIDATE AND IS WEAKER. It only
+     * protects the artifact when the caller correctly declares itself the odd one out, so it
+     * covers the harness and misses the dev client someone runs by hand -- and the caller
+     * that most needs protecting is the one that did not realise which pack it was in. This
+     * compares what is actually on disk against what is actually loaded, so it does not care
+     * who is asking.
+     *
+     * SILENT WHENEVER IT CANNOT COMPARE: no directory, no summary, a summary from before
+     * schema 6, or a `Loader` that would not answer. Every one of those is an absence of
+     * evidence, and refusing on one would block the first dump after any mod upgrade -- a
+     * guard that fires on the normal path is a guard that gets forced past without reading.
+     */
+    static String refuseToClobber(File dir, List<String> modIds, boolean force) {
+        String digest = modDigest(modIds);
+        if (force || digest == null || !dir.isDirectory()) {
+            return null;
+        }
+        ModSet existing = readModSet(new File(dir, SUMMARY_FILE));
+        if (existing.digest == null || existing.digest.equals(digest)) {
+            return null;
+        }
+        return "REFUSING to dump: " + dir.getName() + " already holds a dump written by a "
+                + "DIFFERENT set of mods ("
+                + (existing.count >= 0 ? String.valueOf(existing.count) : "an unrecorded"
+                        + " number of") + " mods there, " + modIds.size() + " loaded here)."
+                + " Overwriting it would destroy an artifact that costs a game launch to"
+                + " reproduce. Move or delete it, or re-run `/recipedump " + FORCE_ARG
+                + "` if replacing it is what you meant.";
+    }
+
+    /**
+     * @param threw       wrapper failures -- things that went wrong
+     * @param skipLines   lines in skipped.ndjson -- everything JEI declined to give us,
+     *                    failures included
+     * @param names       entries names.json is about to receive, so a reader can tell a
+     *                    truncated names.json from a short one
+     * @param namesFailed keys this dump has no display name for at all. #194
+     * @param modIds      the modids of every loaded mod, or null when Forge would not
+     *                    say -- in which case NEITHER field is written, because a reader
+     *                    must be able to tell "not recorded" from a recorded number. #194
+     */
+    // Package-visible, not private, for the same reason `writeNbtTrace` is: `SchemaSixTest`
+    // writes a real summary.json with it and asserts the fields #194 added are in the
+    // output, so the python reader is held to bytes this writer actually produced rather
+    // than to a hand-typed guess at its shape. Two mocks agreeing with each other is the
+    // failure mode.
+    static void writeSummary(File file, Map<String, int[]> perCategory,
+                             Map<String, String> categoryMod,
+                             int recipes, int threw, int skipLines,
+                             int names, int namesFailed, List<String> modIds) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             // Stamp what produced this. Without it a dump is undatable: the only signal
@@ -1419,8 +1684,23 @@ public class DumpCommand extends CommandBase {
             // per-category tally beside it, and matches what gaps.py has always called it.
             // The line count it was mistaken for is its own field. #90
             w.write(",\n \"recipes\": " + recipes + ",\n \"threw\": " + threw
-                    + ",\n \"skip_lines\": " + skipLines
-                    + ",\n \"categories\": {");
+                    + ",\n \"skip_lines\": " + skipLines);
+            // TWO NUMBERS BECAUSE ONE CANNOT BE CHECKED. `names_failed` alone says a dump
+            // lost some display names; it cannot say whether names.json then arrived
+            // intact, because the total it should hold is not knowable from anything else
+            // the dump records. `names` is that total, so the python reader can compare it
+            // against the file's actual length and refuse a truncated one. #194
+            w.write(",\n \"names\": " + names + ",\n \"names_failed\": " + namesFailed);
+            // OMITTED ENTIRELY when Forge would not answer, rather than written as 0 or
+            // null. The fields exist to let a reader tell a five-jar dump from a full-pack
+            // one, and a recorded zero is a claim about the jar set; absence is the honest
+            // shape for "not measured", and it is the shape every schema-5 dump already
+            // has, so the reader needs no second spelling of the same absence. #194
+            if (modIds != null) {
+                w.write(",\n \"mod_count\": " + modIds.size()
+                        + ",\n \"mod_digest\": \"" + safe(modDigest(modIds)) + "\"");
+            }
+            w.write(",\n \"categories\": {");
             boolean first = true;
             for (Map.Entry<String, int[]> e : perCategory.entrySet()) {
                 if (!first) {
@@ -1463,7 +1743,7 @@ public class DumpCommand extends CommandBase {
         }
     }
 
-    private static int writeOreDict(File file, Map<String, String> names) {
+    private static int writeOreDict(File file) {
         int count = 0;
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {

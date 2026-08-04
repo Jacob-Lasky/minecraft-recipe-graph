@@ -288,7 +288,7 @@ class DiscriminatedStackTest(unittest.TestCase):
         os.makedirs(dump)
         with open(os.path.join(dump, "names.json"), "w") as fh:
             json.dump({"mod:x": "X"}, fh)
-        self.assertEqual(dump_names.load(dump_names.find(inst)), {"mod:x": "X"})
+        self.assertEqual(dump_names.load_with_count(dump_names.find(inst))[0], {"mod:x": "X"})
 
     def test_dumped_names_reach_the_graph_without_overwriting_items_csv(self):
         inst = tempfile.mkdtemp()
@@ -327,7 +327,7 @@ class DiscriminatedStackTest(unittest.TestCase):
                        "c:d": "Borax Solution Cell\u00a7r",
                        "e:f": "\u00a7r",
                        "g:h": "Plain"}, fh)
-        got = dump_names.load(path)
+        got = dump_names.load_with_count(path)[0]
         self.assertEqual(got["a:b#1"], "Abyssalnite Axe")
         self.assertEqual(got["c:d"], "Borax Solution Cell")
         self.assertEqual(got["g:h"], "Plain")
@@ -341,12 +341,12 @@ class DiscriminatedStackTest(unittest.TestCase):
         with open(path, "w") as fh:
             json.dump({"forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone",
                        "mod:blank": "  ", "mod:notastring": 7}, fh)
-        self.assertEqual(dump_names.load(path),
+        self.assertEqual(dump_names.load_with_count(path)[0],
                          {"forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone"})
-        self.assertEqual(dump_names.load(os.path.join(d, "nope.json")), {})
+        self.assertEqual(dump_names.load_with_count(os.path.join(d, "nope.json"))[0], {})
         with open(path, "w") as fh:
             fh.write("{oh no")
-        self.assertEqual(dump_names.load(path), {})
+        self.assertEqual(dump_names.load_with_count(path)[0], {})
 
 
 class DumpProvenanceTest(unittest.TestCase):

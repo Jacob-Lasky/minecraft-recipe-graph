@@ -27,8 +27,26 @@ def find(instance_dir, dump_dir=None):
     return path if os.path.exists(path) else None
 
 
-def load(path):
-    """{key: display name}. Missing or malformed reads as empty rather than raising.
+def load_with_count(path):
+    """{key: display name}, plus how many entries the FILE held before any were dropped.
+
+    THERE IS NO `load(path)` WRAPPER RETURNING ONLY THE MAP. There was, it became the map's
+    sole remaining spelling once #194 moved `index.build` here, and a function whose only
+    callers are its own tests is a function nobody can tell is dead. Callers that want just
+    the map write `load_with_count(path)[0]`, which says at the call site that a count was
+    available and declined.
+
+    TWO NUMBERS BECAUSE THE MAP'S LENGTH IS NOT THE FILE'S LENGTH, and the difference is
+    exactly what would make #194's completeness check lie. `clean_label` returns None for a
+    name that was only formatting codes, so the MAP legitimately holds fewer entries than the
+    mod wrote -- 14,425 of the reference pack's names arrive with section signs and some
+    are nothing else. Comparing summary.json's declared count against the cleaned map would
+    then report a truncated file on every healthy dump, which is a check that gets switched
+    off in a week. The RAW count is the one summary.json's `names` is comparable with.
+
+    Returned together, from ONE parse, rather than offered as a second `count(path)`
+    helper: names.json is ~30 MB on the reference pack, and a caller that wants both would
+    otherwise read and parse it twice.
 
     FORMAT CODES ARE STRIPPED, exactly as `load_items_csv` does for the pack's own
     export. `getDisplayName()` returns what the game DRAWS, section signs and all, so
@@ -36,16 +54,19 @@ def load(path):
     or `Borax Solution Cell§r`. Rendered outside Minecraft those are literal
     characters: they show in search results, they sort ahead of every letter, and a
     leading code hides the first word of the name behind punctuation.
+
+    @return (names, raw entry count) -- the count is None when there was no file to count,
+            which is not the same as a file holding zero entries.
     """
     if not path or not os.path.exists(path):
-        return {}
+        return {}, None
     with open(path, encoding="utf-8", errors="replace") as fh:
         try:
             doc = json.load(fh)
         except ValueError:
-            return {}
+            return {}, None
     if not isinstance(doc, dict):
-        return {}
+        return {}, None
     out = {}
     for key, value in doc.items():
         if not isinstance(value, str):
@@ -63,4 +84,4 @@ def load(path):
         label = clean_label(value)
         if label:
             out[str(key)] = label
-    return out
+    return out, len(doc)
