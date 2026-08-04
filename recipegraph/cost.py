@@ -1108,5 +1108,23 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
         best = input_cost(cost, alt, ing.qty, ore_members)
         if math.isinf(best):
             return math.inf
+        # A FRACTIONAL CHANCE SCALES HERE, AND A RETAINED INPUT DOES NOT (#175). This function
+        # prices ONE RUN, so there is no batch to amortise over and the two cases separate
+        # differently from `_relax`:
+        #
+        #   p == 0.0   charged in FULL, once. You must own the shard before the forge runs, so
+        #              a recipe demanding an expensive permanent input has to rank worse for it.
+        #              Scaling by 0.0 here would price that recipe as though the shard were
+        #              free and hand the ranker the #176 defect: the cheapest route in the
+        #              model being the one whose input you cannot get.
+        #   0 < p < 1  scaled, because one run spends `p` of it in expectation.
+        #
+        # AND THIS HAS TO AGREE WITH `_relax`, which is the reason it is here at all. That
+        # charges a retained input at full cost and a fractional one at `p` of itself; a ranker
+        # that charged a 30%-consumed input in full would price a route the relaxation prices
+        # differently, and the divergence between "what the ranker charged" and "what the
+        # solver expands" is exactly the class of bug #29 is about.
+        if not ing.survives_run:
+            best *= ing.consume_chance
         total += best
     return total

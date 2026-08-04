@@ -231,6 +231,60 @@ class RetainedInputsDoNotAmortiseTest(unittest.TestCase):
         self.assertGreater(self._price(0.25, 1), self._price(0.0625, 1))
 
 
+class TheRankerAgreesWithTheRelaxationTest(unittest.TestCase):
+    """`recipe_cost` is a SECOND pricing path and it has to charge what `_relax` charges.
+
+    Found by the review pass, not by the change: `_relax` was taught about the consume chance
+    and `recipe_cost` was not, so the solver's own ranking still charged a 30%-consumed input
+    in full. A ranker that prices a route differently from the relaxation is the divergence
+    #29 is about, where nothing is mispriced and the price is simply for a route nobody takes.
+
+    One run, so there is no batch: a retained input is charged in FULL exactly once, and a
+    fractional one at `p` of itself.
+    """
+
+    @staticmethod
+    def _graph(chance):
+        g = Graph()
+        g.names = {"mod:out": "Out", "mod:shard": "Shard"}
+        g.add(Recipe("forge", "t", [("mod:out", 1)],
+                     [Ingredient(["mod:shard"], 1, "item", chance)],
+                     category="minecraft.crafting"))
+        return g
+
+    def _run_cost(self, chance):
+        g = self._graph(chance)
+        prices = {"mod:shard": 100.0}
+        return cost_mod.recipe_cost(prices, g.recipes[0], g.ore_members)
+
+    def test_a_fractional_input_is_charged_at_its_fraction(self):
+        full = self._run_cost(1.0)
+        quarter = self._run_cost(0.25)
+        self.assertAlmostEqual(full - quarter, 75.0, places=6,
+                               msg="a quarter-consumed input must cost a quarter per run")
+
+    def test_a_retained_input_is_charged_IN_FULL_and_not_scaled_to_zero(self):
+        # The one place scaling by `p` would be wrong. You must own the shard before the forge
+        # runs, so a recipe demanding an expensive permanent input has to rank worse for it.
+        # Scaling to zero would tell the ranker this recipe is free and reintroduce #176's
+        # defect: the cheapest route in the model being the one you cannot take.
+        self.assertAlmostEqual(self._run_cost(0.0), self._run_cost(1.0), places=6)
+        self.assertGreater(self._run_cost(0.0), 100.0 - 1e-6)
+
+    def test_the_ranker_and_the_relaxation_agree_on_a_fractional_input(self):
+        # The property that matters, rather than either number on its own. With one output and
+        # one input the relaxation's per-unit price is `base + ingredients`, which is exactly
+        # what `recipe_cost` computes for one run, so the two must come out equal.
+        g = self._graph(0.25)
+        relaxed = cost_mod.estimate(g, have={"mod:shard": 0}, machine_states={},
+                                    free_sources=set())
+        ranked = cost_mod.recipe_cost(
+            {"mod:shard": relaxed["mod:shard"]}, g.recipes[0], g.ore_members)
+        self.assertAlmostEqual(relaxed["mod:out"], ranked, places=6,
+                               msg="the ranker and the relaxation priced the same recipe "
+                                   "differently: %r vs %r" % (relaxed["mod:out"], ranked))
+
+
 class TheChangeMovesNoPriceOnAGraphWithoutPTest(unittest.TestCase):
     """The control run that justifies not bumping `FORMULA_VERSION`, promoted into the suite.
 

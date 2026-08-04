@@ -193,6 +193,51 @@ public class RetainedInputTest {
                 many < one / 100.0);
     }
 
+    @Test
+    public void theRankerChargesAFractionalInputAtItsFraction() {
+        // `Cost.recipeCost` is a SECOND pricing path, used by the solver's own ranking, and the
+        // review pass found it had not been taught the chance at all. A ranker that prices a
+        // route differently from the relaxation is the divergence #29 is about.
+        double full = runCost(1.0f);
+        double quarter = runCost(0.25f);
+        assertEquals("a quarter-consumed input must cost a quarter per run",
+                Cost.BASE_RAW_COST * 0.75, full - quarter, 1e-6);
+    }
+
+    @Test
+    public void theRankerChargesARetainedInputInFullRatherThanScalingItToZero() {
+        // The one place scaling by `p` would be wrong: this prices ONE RUN, and you must own
+        // the shard before the forge runs. Scaling to zero would tell the ranker a recipe
+        // needing an unobtainable permanent input is the cheapest available, which is #176's
+        // defect through the ranking door.
+        assertEquals(runCost(1.0f), runCost(0.0f), 1e-6);
+        assertTrue("a retained input must still cost what it costs",
+                runCost(0.0f) >= Cost.BASE_RAW_COST - 1e-9);
+    }
+
+    /**
+     * `Cost.recipeCost` for a one-slot recipe, in the idiom `CostTest` already uses: estimate a
+     * real table first, then rank against it, so the price charged is the one the relaxation
+     * produced rather than a number invented here.
+     *
+     * The shard is a leaf with no producer, so it is seeded at `BASE_RAW_COST` whatever the
+     * chance is, which is what makes the two calls comparable.
+     */
+    private static double runCost(float chance) {
+        GraphBuilder b = new GraphBuilder();
+        b.name(b.key("mod:out"), "Out");
+        b.name(b.key("mod:shard"), "Shard");
+        b.beginRecipe();
+        b.beginSlot(1, "item", chance);
+        b.alternative(b.key("mod:shard"));
+        b.endSlot();
+        b.output(b.key("mod:out"), 1);
+        b.endRecipe("forge", "minecraft.crafting", null, "hei_dump", false, false);
+        RecipeGraph g = b.build();
+        CostTable table = Cost.estimate(g, new CostInputs());
+        return Cost.recipeCost(table, g, 0, null, null);
+    }
+
     /**
      * What the shard slot alone adds to the price of `mod:out`, isolated by removing it.
      *

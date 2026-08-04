@@ -901,6 +901,15 @@ public strictfp final class Cost {
             if (Double.isInfinite(best)) {
                 return Double.POSITIVE_INFINITY;
             }
+            // A FRACTIONAL CHANCE SCALES HERE, A RETAINED INPUT DOES NOT (#175), mirroring
+            // `cost.py:recipe_cost`. This prices ONE RUN, so there is no batch to amortise
+            // over and the cases separate differently from the relaxation above: a retained
+            // input is charged in FULL because you must own it before the recipe runs at all,
+            // and scaling it by 0.0 would tell the ranker that a recipe needing an
+            // unobtainable permanent input is the cheapest one available.
+            if (!recipes.slotSurvivesRun(slot)) {
+                best *= recipes.slotConsumeChance(slot);
+            }
             total += best;
         }
         return total;
