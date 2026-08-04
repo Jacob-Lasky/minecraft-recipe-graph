@@ -300,6 +300,51 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
                           "mod:d:*", "mod:d:*", "mod:q", "mod:p:3",
                           "nuclearcraft:compound:7", "minecraft:stone", None, None, "mod:e"])
 
+    def test_the_crafttweaker_log_reader_keeps_the_line_order_and_dedupes(self):
+        # THE OTHER `_norm_entry` CALLER, AND IT HAD NO TEST AT ALL. `index.py:43` uses it as
+        # the second accepted oredict source, so it decides `ore_members` for anyone who ran
+        # `/ct oredict` instead of the dump mod, and every ordering claim this class makes
+        # about `from_json` applies to it identically.
+        #
+        # It is also where the two spellings #192 fixed actually arrive. `ENTRY` hands over
+        # the INSIDE of each `<...>`, so a `* 16` written OUTSIDE the brackets never reaches
+        # `_norm_entry` from here, which is the only reason the bracket defect did not bite on
+        # this path. A `<mod:d:*>` wildcard does reach it, and was silently mangled to
+        # `mod:d:` until the fix, so the third group below is a regression test and not a
+        # curiosity.
+        lines = [
+            "Ore entries for <ore:plateStuff>: <mod:z> * 16, <mod:a>\n",
+            # No brackets, so the comma fallback runs instead of `ENTRY`, and the stack size
+            # DOES reach `_norm_entry` on that branch.
+            "Ore entries for oreDict:ingotStuff = mod:m, mod:z * 4, mod:a\n",
+            # The wildcard, and a repeat of it, so the dedupe this reader does is observed
+            # rather than assumed. `from_json` deliberately does NOT dedupe; see that
+            # function's docstring for why the two differ.
+            "Ore entries for <ore:dustStuff>: <mod:d:*>, <mod:c>, <mod:d:*>\n",
+            "a line that is not an ore entry at all\n",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "crafttweaker.log")
+            with open(path, "w") as fh:
+                fh.writelines(lines)
+            got = oredict.from_crafttweaker_log(path)
+
+        self.assertEqual(got, {
+            "plateStuff": ["mod:z", "mod:a"],
+            "ingotStuff": ["mod:m", "mod:z", "mod:a"],
+            "dustStuff": ["mod:d:*", "mod:c"],
+        })
+        # The guard on the guard, for the same reason as the document above: two of these three
+        # groups would pass under a `sorted()` reader if the members happened to be in
+        # alphabetical order, and one of them is only two members long.
+        for group, members in got.items():
+            self.assertNotEqual(members, sorted(members),
+                                "%s must not be in alphabetical order, or a `sorted()` "
+                                "reader passes" % group)
+        self.assertEqual(["mod:d:*", "mod:c"], got["dustStuff"],
+                         "the repeated wildcard must collapse to ONE member, in the position "
+                         "it was first seen, and must not be mangled to `mod:d:`")
+
     def test_the_graph_reads_the_dumps_oredict_in_that_order_too(self):
         # And the whole way up: `index.build` is what puts `from_json`'s answer on the graph,
         # so an order preserved by the reader and lost by the loader is the same wrong plan.
