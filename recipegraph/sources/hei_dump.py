@@ -50,6 +50,42 @@ def _stack_key(entry):
     return "%s#%s" % (key, nbt) if nbt else key
 
 
+def _consume_chance(entry):
+    """The stack's `p`, or 1.0 when it is absent OR unusable. Never raises. See #175.
+
+    MALFORMED AND "FULLY CONSUMED" ARE DIFFERENT FACTS, AND THIS DELIBERATELY MAPS THE FIRST
+    ONTO THE SECOND. 1.0 is the value that cannot invent work out of nothing: it says "assume a
+    run spends this", which is the pre-#175 behaviour and the conservative direction. Every other
+    landing spot is worse, and three of them were reachable before this function existed:
+
+      `"p": false`   `float(False)` is 0.0, so a malformed boolean declared the slot a PERMANENT
+                     catalyst. Charged once instead of once per run, on a stack nobody marked.
+                     `isinstance(True, int)` is True in Python, so a plain `(int, float)` check
+                     does NOT exclude it; `dump_meta._count` excludes `bool` explicitly for the
+                     same reason.
+      `"p": "0.0"`   a quoted number did the same thing, because `float` accepts strings.
+      `"p": null`    `float(None)` RAISES, so one malformed line aborted a 335,000-recipe build
+                     with a TypeError naming neither the line nor the field.
+
+    OUT OF RANGE IS ALSO REFUSED, not clamped. A negative `p` would scale an ingredient's cost
+    NEGATIVE in `cost._relax`, which is not a mispriced route but an arbitrage: the more of it a
+    recipe demands the cheaper the recipe gets. Clamping to 0.0 would instead make it permanent.
+    Neither is a reading of the data, so the field is treated as unusable and the default stands.
+    """
+    if "p" not in entry:
+        return 1.0
+    raw = entry["p"]
+    # `bool` first: it is a subclass of `int`, so the isinstance check below would accept it.
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 1.0
+    value = float(raw)
+    # `value != value` is the NaN test that needs no import, and NaN fails every comparison
+    # below, so it would otherwise slip through as "in range".
+    if value != value or value < 0.0 or value > 1.0:
+        return 1.0
+    return value
+
+
 def _slot_to_ingredient(slot, role="item"):
     if isinstance(slot, dict):
         slot = [slot]
@@ -68,7 +104,7 @@ def _slot_to_ingredient(slot, role="item"):
         # invent a free route -- `min` would let one reusable alternative in a slot make the
         # whole slot retained, which is exactly the "cheapest thing is the thing you cannot
         # obtain" defect #176 fixed. Overstating consumption only ever overstates a price.
-        chance = max(chance, float(entry.get("p", 1.0)))
+        chance = max(chance, _consume_chance(entry))
     if not alts:
         return None
     return Ingredient(alts, qty, role, chance)

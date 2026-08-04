@@ -87,6 +87,45 @@ class TheDumpReaderTest(unittest.TestCase):
         self.assertEqual(ing.consume_chance, 1.0)
         self.assertFalse(ing.survives_run)
 
+    def test_a_malformed_p_reads_as_ABSENT_and_never_as_a_probability(self):
+        # "Malformed" and "fully consumed" are different facts, and this maps the first onto the
+        # second because 1.0 is the only landing spot that cannot invent work out of nothing.
+        # Three of these were reachable before `_consume_chance` existed, and the first two are
+        # the dangerous direction: they declared the slot a PERMANENT catalyst, charged once
+        # instead of once per run, on a stack nobody marked.
+        #
+        #   p: false     `float(False)` is 0.0. `isinstance(True, int)` is True in Python, so a
+        #                plain `(int, float)` check does not exclude a bool.
+        #   p: "0.0"     `float` accepts strings.
+        #   p: null      `float(None)` RAISED, aborting a 335,000-recipe build with a TypeError
+        #                naming neither the line nor the field.
+        for bad in (False, True, "0.0", "nonsense", None, [], {}):
+            ing = hei_dump._slot_to_ingredient([{"i": "mod:a", "c": 1, "p": bad}])
+            self.assertEqual(ing.consume_chance, 1.0, "p=%r must read as absent" % (bad,))
+            self.assertFalse(ing.survives_run, "p=%r must not make the slot permanent" % (bad,))
+
+    def test_an_out_of_range_p_is_refused_rather_than_clamped(self):
+        # A negative `p` would scale an ingredient's cost NEGATIVE in `cost._relax`, which is not
+        # a mispriced route but an arbitrage: the more of it a recipe demands, the cheaper the
+        # recipe gets. Clamping to 0.0 would instead make it permanent. Neither is a reading of
+        # the data, so the field is unusable and the default stands.
+        for bad in (-1.0, -0.001, 1.5, 2, float("inf"), float("nan")):
+            ing = hei_dump._slot_to_ingredient([{"i": "mod:a", "c": 1, "p": bad}])
+            self.assertEqual(ing.consume_chance, 1.0, "p=%r must read as absent" % (bad,))
+
+    def test_zero_survives_as_zero_and_is_distinct_from_missing(self):
+        # The other half, and the reason the guard above cannot simply reject everything: 0.0 is
+        # a REAL value at the opposite end of the range from the default. `if not p:` or
+        # `p or 1.0` would map it onto 1.0 and silently price the one stack a mod declared
+        # never-consumed as fully consumed.
+        present = hei_dump._slot_to_ingredient([{"i": "mod:a", "c": 1, "p": 0.0}])
+        missing = hei_dump._slot_to_ingredient([{"i": "mod:a", "c": 1}])
+        self.assertEqual(present.consume_chance, 0.0)
+        self.assertEqual(missing.consume_chance, 1.0)
+        self.assertTrue(present.survives_run)
+        self.assertFalse(missing.survives_run)
+        self.assertNotEqual(present.consume_chance, missing.consume_chance)
+
     def test_a_stack_with_no_key_does_not_contribute_its_chance(self):
         # A stack that yields no key is not part of the slot, so its `p` must not vote.
         ing = hei_dump._slot_to_ingredient([{"c": 1, "p": 0.0}, {"i": "mod:b", "c": 1}])
