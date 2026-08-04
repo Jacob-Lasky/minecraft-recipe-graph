@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 import java.util.ArrayList;
@@ -233,7 +234,9 @@ public final class NodeRowText {
      * rounding a partial-bucket step would misreport it.
      */
     static String amount(long need, String kind) {
-        if ("fluid".equals(kind)) {
+        // `Keys` AND NOT THE LITERAL: see `Keys.NON_ITEM_KINDS`, which exists so a fourth
+        // kind is one line there. The wire `kind` field carries exactly that vocabulary.
+        if (Keys.kindName(Keys.KIND_FLUID).equals(kind)) {
             return quantityPlain(need) + " mB";
         }
         return quantity(need);
@@ -434,8 +437,21 @@ public final class NodeRowText {
         // than out of nodes -- the tree is short for a different reason, and looks just as
         // complete. `Solver` needs a work counter at all because backtracking rewinds `nodes`,
         // so discarded work never counts against the node cap.
+        //
+        // IT QUOTES THE WORK BUDGET AND NOT THE NODE CAP, which is `PlanResult.exhausted`'s own
+        // instruction: the node count is far below its cap in this case, so quoting the cap at
+        // this reader is simply wrong. And it says raising the NODE budget is the lever, because
+        // that is the only control there is and the work budget derives from it -- a sentence
+        // that named a budget the player cannot set would be worse than no sentence.
+        //
+        // THE NUMBERS ARE WHY `work` AND `work_budget` ARE READ AT ALL (#190). `cli.cmd_plan`
+        // prints both and this said "search gave up early" with none, which asks the player to
+        // trust the rule instead of checking it. Both fields were parsed and had no reader for
+        // the length of this review; do not let that happen again by dropping them from here.
         if (plan.exhausted()) {
-            return "search gave up early -- the plan below may be missing branches";
+            return "search gave up after " + quantityPlain(plan.work()) + " of "
+                   + quantityPlain(plan.workBudget())
+                   + " steps -- raise the node budget to raise this";
         }
         return "";
     }

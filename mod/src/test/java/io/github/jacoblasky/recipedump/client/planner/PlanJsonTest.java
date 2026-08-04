@@ -274,9 +274,46 @@ public class PlanJsonTest {
         PlanView.MachineRow first = plan.machinesToBuild().get(0);
         assertEquals("chisel.chiseling", first.category());
         assertEquals("Chiseling", first.machine());
-        assertEquals("buildable", first.state());
         assertEquals("craftable: chisel:chisel_iron", first.why());
         assertEquals("buildable", first.stateLabel());
+    }
+
+    /**
+     * The raw machine state lands in the right slot, proved through the word a player reads.
+     *
+     * WHY NOT `assertEquals("buildable", row.state())`, WHICH IS WHAT THIS USED TO BE. All 125
+     * committed machine rows are `buildable`, and `NodeStatus.machineStateLabel("buildable")`
+     * returns "buildable" -- so that assertion and the `stateLabel()` one beside it could not
+     * fail independently, and a reader that put `why` into the state slot would have passed
+     * both. `unavailable` is the state whose label DIFFERS, "no route", so asserting the label
+     * on a hand-built row proves the raw value arrived AND that it went through the mapping.
+     * No fixture can do this, which is why it is built here rather than loaded.
+     *
+     * #190 deleted `MachineRow.state()` on the strength of this: it had no caller but the test,
+     * and the test it had was weaker than the one that replaces it.
+     */
+    @Test
+    public void aMachineStateOtherThanBuildableArrivesAndIsWordedForAPlayer() {
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "mod:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.CRAFT);
+        result.add("tree", tree);
+        com.google.gson.JsonArray machines = new com.google.gson.JsonArray();
+        com.google.gson.JsonObject machine = new com.google.gson.JsonObject();
+        machine.addProperty("category", "mod.press");
+        machine.addProperty("machine", "Mythic Press");
+        machine.addProperty("state", "unavailable");
+        machine.addProperty("why", "no recipe makes mod:press_controller");
+        machines.add(machine);
+        result.add("machines_to_build", machines);
+
+        PlanView.MachineRow row = PlanJson.readResult(result).machinesToBuild().get(0);
+        assertEquals("no route", row.stateLabel());
+        assertEquals("no recipe makes mod:press_controller", row.why());
+        assertEquals("Mythic Press", row.machine());
     }
 
     /**

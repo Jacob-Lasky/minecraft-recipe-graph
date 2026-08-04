@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 import java.io.InputStream;
@@ -50,6 +51,17 @@ import com.google.gson.JsonParser;
  * a GUI. What it will NOT do is invent a key or a label: those are the identity of the row.
  */
 public final class PlanJson {
+
+    /**
+     * The default `kind`, from the one place the kind vocabulary is defined.
+     *
+     * NOT THE LITERAL `"item"`, twice over. `Keys.NON_ITEM_KINDS`'s javadoc says everything is
+     * derived from that array "so a fourth kind is one line here and nothing else", and three
+     * Python routines each keeping a private copy is the defect it records. A reader spelling
+     * the word again is a fourth copy, in the one place that decides what an absent `kind`
+     * means for every node and every summary row.
+     */
+    private static final String ITEM = Keys.kindName(Keys.KIND_ITEM);
 
     private PlanJson() {
     }
@@ -152,7 +164,7 @@ public final class PlanJson {
             // the player is meant to gather from.
             String label = has(o, "label") ? string(o, "label") : string(o, "name");
             out.add(new PlanView.EntryRow(string(o, "key"), label, number(o, "qty", 0L),
-                                          has(o, "kind") ? string(o, "kind") : "item",
+                                          has(o, "kind") ? string(o, "kind") : ITEM,
                                           optional(o, "why"), optional(o, "token_kind"),
                                           longOrNull(o, "emc"), bool(o, "unsourced")));
         }
@@ -176,7 +188,7 @@ public final class PlanJson {
         // would disagree. `longOrNull` and friends exist for that and for nothing else.
         PlanNode.Builder builder = new PlanNode.Builder()
                 .key(string(json, "key"))
-                .kind(has(json, "kind") ? string(json, "kind") : "item")
+                .kind(has(json, "kind") ? string(json, "kind") : ITEM)
                 .label(string(json, "label"))
                 .need(number(json, "need", 1L))
                 .status(has(json, "status") ? string(json, "status") : NodeStatus.CRAFT)

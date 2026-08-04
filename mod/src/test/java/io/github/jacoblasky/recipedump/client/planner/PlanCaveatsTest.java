@@ -136,7 +136,6 @@ public class PlanCaveatsTest {
                    ScenarioSource.summary().isEmpty());
         assertTrue("the plan panel must reserve no caveat lines",
                    PlanCaveats.summaryLine().isEmpty());
-        assertFalse("there is nothing left to disclose", PlanCaveats.any());
         List<String> lines = PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH);
         assertEquals("one line, saying every input was read", 1, lines.size());
         assertFalse(lines.get(0).isEmpty());

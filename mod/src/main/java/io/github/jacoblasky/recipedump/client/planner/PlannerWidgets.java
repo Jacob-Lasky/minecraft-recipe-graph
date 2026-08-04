@@ -907,8 +907,8 @@ public final class PlannerWidgets {
      *               the shopping list: it has an explicit "nothing outstanding" row because it
      *               is the one section whose emptiness is worth stating.
      */
-    private static void addSection(List<String> lines, List<Integer> colours, String header,
-                                   List<String> rows, int colour) {
+    static void addSection(List<String> lines, List<Integer> colours, String header,
+                           List<String> rows, int colour) {
         if (rows.isEmpty()) {
             return;
         }
@@ -937,25 +937,36 @@ public final class PlannerWidgets {
      * Five notes wrap to about eleven lines, which is 110 pixels of a 240-pixel screen.
      */
     public static ModularPanel caveatsPanel() {
-        int width = PANEL_WIDTH;
-        int inner = width - PADDING * 2;
+        // `CONTENT_WIDTH` IS ALREADY `PANEL_WIDTH - PADDING * 2`; do not recompute it here.
+        int inner = CONTENT_WIDTH;
         List<String> lines = PlanCaveats.detailLines(inner);
 
         int height = PADDING * 2 + LINE + 1 + lines.size() * LINE;
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
-        body.child(line(PlanCaveats.TITLE, inner, NodeStatus.INK_MUTED).pos(0, 0));
+        // THE TITLE CARRIES THE ALARM AND THE NOTES DO NOT, which the first screenshot of this
+        // panel is what settled. Every note was drawn in `INK_NEED` and eleven lines of red on
+        // grey read as five errors rather than as five explanations -- and red is used nowhere
+        // else in this class for prose, only for the one-to-three line warnings above the tree
+        // and the caveat line under it. One alarm and five readable paragraphs is the same
+        // hierarchy `badgeWidthFor` argues for between a badge and a label.
+        //
+        // THIS IS NOT THE "TIDY FILLER" `ScenarioSource.Status.unavailable` WARNS ABOUT. That
+        // warning is about WORDING -- a reason phrased so blandly nobody reports it -- and the
+        // wording here is the hand-written sentence itself. The player also arrived by clicking
+        // a red line, so the panel does not have to shout to be understood as a caveat.
+        body.child(line(PlanCaveats.TITLE, inner, NodeStatus.INK_NEED).pos(0, 0));
         int y = LINE + 1;
         for (String text : lines) {
             // ALREADY WRAPPED, so `line` has nothing left to cut. Passing the full width is
             // what keeps that true: a narrower box here would truncate text that was measured
             // against `inner`, and the ellipsis would land mid-sentence in the one place in
             // this class where a sentence has to arrive whole.
-            body.child(line(text, inner, NodeStatus.INK_NEED).pos(0, y));
+            body.child(line(text, inner, NodeStatus.INK_MUTED).pos(0, y));
             y += LINE;
         }
-        return ModularPanel.defaultPanel("mcrecipedump_plan_caveats", width, height)
+        return ModularPanel.defaultPanel("mcrecipedump_plan_caveats", PANEL_WIDTH, height)
                 .child(body);
     }
 

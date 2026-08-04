@@ -384,6 +384,79 @@ public class PlannerLayoutTest {
                    area.x() >= 0 && area.y() >= 0);
     }
 
+    /**
+     * An empty summary list contributes no header, and a non-empty one contributes both. #190.
+     *
+     * THE BRANCH THAT RUNS ON EVERY REAL PANEL. `tokens_needed` and `from_emc` are empty in game
+     * until #112 and #50, so the suppression path is the one a player hits today and the
+     * non-empty path is the one they hit after those land. A header standing over blank space
+     * reads as a list that failed to load, which is the opposite of what four labelled sections
+     * are for.
+     *
+     * ASSERTED ON THE LINE BUILDER RATHER THAN THE PANEL, because a `TextWidget`'s string cannot
+     * be read back out of a laid-out tree -- which is the same reason `NodeRowText` exists as a
+     * separate class. `theTodoPanelDrawsOneRowPerLine` below is what ties these lines to widgets.
+     */
+    @Test
+    public void anEmptySummaryListContributesNeitherRowsNorAHeader() {
+        List<String> lines = new java.util.ArrayList<String>();
+        List<Integer> colours = new java.util.ArrayList<Integer>();
+
+        PlannerWidgets.addSection(lines, colours, "transmuted from EMC:",
+                                  java.util.Collections.<String>emptyList(),
+                                  NodeStatus.INK_OK);
+        assertTrue("an empty list must not leave its header behind: " + lines, lines.isEmpty());
+        assertTrue(colours.isEmpty());
+
+        PlannerWidgets.addSection(lines, colours, "used from your stock:",
+                                  java.util.Arrays.asList("5x Iron Ingot", "2x Chest"),
+                                  NodeStatus.INK_OK);
+        assertEquals(java.util.Arrays.asList("used from your stock:", "5x Iron Ingot",
+                                             "2x Chest"), lines);
+        assertEquals("one colour per line", lines.size(), colours.size());
+        assertEquals("the header is muted, not the section's colour",
+                     Integer.valueOf(NodeStatus.INK_MUTED), colours.get(0));
+        assertEquals(Integer.valueOf(NodeStatus.INK_OK), colours.get(1));
+
+        // A null header is the shopping list, which writes its own heading and its own
+        // "nothing outstanding" row because it is the one section whose emptiness is worth
+        // stating. It must not gain a second heading from here.
+        int before = lines.size();
+        PlannerWidgets.addSection(lines, colours, null,
+                                  java.util.Arrays.asList("3x Iron Ore"), NodeStatus.INK_NEED);
+        assertEquals(before + 1, lines.size());
+        assertEquals("3x Iron Ore", lines.get(lines.size() - 1));
+    }
+
+    /**
+     * Every line the TODO panel composes becomes exactly one row, up to the scroll cap.
+     *
+     * WHAT THIS CATCHES that the string test above cannot: a section whose rows are composed and
+     * then dropped by the widget layer, which is how a header could still end up over blank
+     * space. `plan-in-stock` is the fixture that exercises it -- two `used_from_stock` rows and
+     * three machines, with `tokens_needed` and `from_emc` both empty -- so the panel has both a
+     * suppressed section and two populated ones.
+     */
+    @Test
+    public void theTodoPanelDrawsOneRowPerLine() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        assertFalse("the fixture must have stock rows to draw", plan.usedFromStock().isEmpty());
+        assertTrue("and no EMC rows, so a section is suppressed", plan.fromEmc().isEmpty());
+
+        ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook());
+        HeadlessLayout.layOut(panel);
+        ListWidget<?, ?> list = findList(panel);
+        int rows = list.getChildren().size();
+        int inner = PlannerWidgets.TODO_WIDTH - PlannerWidgets.PADDING * 2;
+        // Recomposed rather than hardcoded, so this stays an identity between the two layers
+        // instead of a number that has to be edited whenever a section's wording changes.
+        int expected = 1 + 1 // "nothing on the list", "still needed for this plan:"
+                + 1          // "nothing outstanding": plan-in-stock has an empty shopping list
+                + 1 + NodeRowText.machineLines(plan.machinesToBuild(), inner).size()
+                + 1 + NodeRowText.entryLines(plan.usedFromStock(), inner).size();
+        assertEquals("every composed line must become a row", expected, rows);
+    }
+
     @Test
     public void aTodoListLongerThanTheScreenScrollsRatherThanGrowing() {
         // `plan-truncated` is the fixture with the long shopping list -- 19 rows, 20 before

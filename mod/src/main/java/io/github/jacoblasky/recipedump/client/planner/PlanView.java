@@ -470,9 +470,13 @@ public final class PlanView {
             return machine;
         }
 
-        public String state() {
-            return state;
-        }
+        // NO RAW `state()` ACCESSOR, AND THAT IS #190's OWN LESSON APPLIED TO ITSELF. One was
+        // here and its only caller was `PlanJsonTest`, which is what the issue says about all
+        // four of these. Three of them got readers; this one could not honestly get one, because
+        // `stateLabel()` is the only form anything draws and no fixture can tell them apart --
+        // all 125 committed machine rows are `buildable`, whose label happens to be the same
+        // word. So the round-trip is asserted THROUGH the label instead, on a hand-built
+        // `unavailable` row where the two differ. DO NOT add a raw accessor back for a test.
 
         /**
          * What stands between the player and this machine, in words they can act on.

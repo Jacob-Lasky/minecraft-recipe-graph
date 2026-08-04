@@ -266,6 +266,48 @@ public class NodeRowTextTest {
     }
 
     /**
+     * The exhausted warning quotes the WORK budget, which is why `work` is read at all. #190.
+     *
+     * IT SAID "search gave up early" WITH NO NUMBERS, and `PlanResult.exhausted`'s javadoc is
+     * emphatic about why the numbers matter here: the node count is far below its cap in this
+     * case, so quoting the cap is wrong, and the reader is being asked to accept "raise the node
+     * budget" on trust. `work` and `work_budget` were parsed into `PlanView` and drawn nowhere,
+     * which is the same write-only shape this issue is about, so this test is what stops them
+     * going back to having no reader.
+     *
+     * HAND-BUILT, because no committed fixture is exhausted: `plan-truncated` hits the NODE cap
+     * and `plan-fluid-chain` spends 35% of its work budget without exhausting it. A fixture that
+     * exhausted would have to be generated, and this asserts wording rather than solver output.
+     */
+    @Test
+    public void theExhaustedWarningQuotesTheWorkBudgetRatherThanTheNodeCap() {
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "mod:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.CRAFT);
+        result.add("tree", tree);
+        result.addProperty("exhausted", true);
+        result.addProperty("nodes", 118);
+        result.addProperty("max_nodes", 4000);
+        result.addProperty("work", 80001);
+        result.addProperty("work_budget", 80000);
+
+        String warning = NodeRowText.truncationWarning(PlanJson.readResult(result));
+        assertTrue(warning, warning.contains("80,001"));
+        assertTrue(warning, warning.contains("80,000"));
+        // AND NOT THE NODE CAP, which is the specific mistake `PlanResult.exhausted` warns
+        // against: 118 of 4,000 nodes were emitted, so "cut off at the 4,000 node budget" would
+        // be a false explanation of a real problem.
+        assertFalse("the node cap is the wrong number to quote here: " + warning,
+                    warning.contains("4,000"));
+        // The lever the player actually has. `workBudget` derives from `maxNodes`, and naming a
+        // budget they cannot set would be worse than naming none.
+        assertTrue(warning, warning.contains("node budget"));
+    }
+
+    /**
      * Two shopping rows with the same name are told apart. #190.
      *
      * `plan-fluid-chain` holds two distinct keys both labelled "Soul Vial", which is the

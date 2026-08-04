@@ -45,9 +45,9 @@ public final class PlanCaveats {
      * What the summary line adds to say the explanation exists.
      *
      * PARENTHESISED RATHER THAN SET OFF WITH A DASH, because the line it joins is already a
-     * `key: value, value` list and a dash after that reads as another list item. It is also
-     * four characters shorter, which the three-line cap does not need today and will if a
-     * sixth input is declared.
+     * `key: value, value` list and a dash after that reads as another item in the list. The two
+     * forms are the same length to within a character, so this is a reading argument and not a
+     * budget one.
      */
     static final String POINTER = "(click for what each costs you)";
 
@@ -71,10 +71,11 @@ public final class PlanCaveats {
         return summary + " " + POINTER;
     }
 
-    /** True when there is anything to disclose, so the caveat line is worth a click. */
-    public static boolean any() {
-        return !ScenarioSource.missingNotes().isEmpty();
-    }
+    // THERE IS DELIBERATELY NO `any()` HERE. One was written and had no caller outside a test,
+    // which in this class of all places is the defect rather than a convenience: `plannerPanel`
+    // already decides whether to reserve caveat lines from `summaryLine().isEmpty()`, and
+    // `detailLines` handles the nothing-missing case itself. A third way to ask the same
+    // question is a third thing to keep in step. DO NOT add one back without a caller.
 
     /**
      * The full disclosure, wrapped to `widthPx`, one numbered entry per missing source.
@@ -98,15 +99,23 @@ public final class PlanCaveats {
             // NOT AN EMPTY PANEL. Every input live is a real and reachable state -- it is what
             // `ScenarioSourceTest` asserts with every reader installed -- and a blank window
             // reads as a rendering fault rather than as good news.
-            out.add("every input was read; this plan assumes nothing");
+            //
+            // Wrapped like every other line here even though it fits today, because the
+            // asymmetry is the hazard: a line added straight to the list is one `line()` would
+            // cut with an ellipsis if anyone lengthened it, in the one panel where nothing may
+            // be cut.
+            out.addAll(NodeRowText.wrapRow("every input was read; this plan assumes nothing",
+                                           widthPx));
             return out;
         }
         for (int i = 0; i < notes.size(); i++) {
-            String numbered = (i + 1) + ". " + notes.get(i);
-            // WRAPPED WITH NO LINE LIMIT, hence `Integer.MAX_VALUE` rather than a number: the
-            // limit argument is what `fit` would cut on, and there is nothing here worth
-            // cutting. The longest note is 135 characters and wraps to three lines.
-            out.addAll(NodeRowText.wrap(numbered, widthPx, Integer.MAX_VALUE));
+            // THROUGH `wrapRow`, SO THE CONTINUATIONS ARE INDENTED AND THE NUMBERS FORM A
+            // COLUMN. Found by looking at the screenshot: with every line flush left, the
+            // second line of note 1 sat directly under "1." and the eye had to read the text
+            // to find where note 2 began. `wrapRow` also caps nothing, which is what this
+            // panel needs -- see the paragraph above. The notes run to 135 characters as
+            // declared constants and around 105 once a reader answers, so most take two lines.
+            out.addAll(NodeRowText.wrapRow((i + 1) + ". " + notes.get(i), widthPx));
         }
         return out;
     }
