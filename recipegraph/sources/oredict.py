@@ -30,24 +30,95 @@ ENTRY = re.compile(r"<([^>]+)>")
 # cannot be asked.
 REMOVAL_LINE = re.compile(r"Removing (.+?) from ore dictionary entry (\S+)\s*$")
 
+# A TRAILING `* 4` STACK SIZE, ANCHORED AND REQUIRING DIGITS, which is what keeps it from
+# eating a `:*` wildcard meta. See `_norm_entry`.
+STACK_SIZE = re.compile(r"\s*\*\s*\d+\s*$")
+
 
 def _norm_entry(raw):
-    """`<nuclearcraft:compound:7>` / `nuclearcraft:compound:7` -> canonical key."""
-    from ..model import norm_key
+    """`<nuclearcraft:compound:7>` / `nuclearcraft:compound:7` -> canonical key.
 
-    raw = raw.strip().strip("<>")
+    ALSO `<mod:thing:*>` -> `mod:thing:*`, and `<mod:thing> * 16` -> `mod:thing`. Both were
+    mangled until #192, and both for the same reason: the brackets were stripped with
+    `strip("<>")` and the stack size with `split("*")[0]`, so the ORDER of those two decided
+    the answer, and no order is right for every real spelling.
+
+      `<mod:thing> * 16`   the trailing character is `6`, so `strip("<>")` had nothing to
+                           remove at the END and left the `>` in the middle: `mod:thing>`,
+                           a key nothing can ever match.
+      `<mod:thing:*>`      `split("*")[0]` ate the wildcard before the meta parser could see
+                           it, yielding the malformed `mod:thing:`. It also made the
+                           `parts[-1] == "*"` branch below unreachable FROM HERE, because
+                           nothing that has been split on `*` can still contain one.
+
+    THE BLAST RADIUS ON EXISTING DATA WAS ZERO, AND THAT IS MEASURED, NOT ASSUMED. Read
+    `_norm_entry`'s two callers before believing otherwise:
+
+      `from_json`               The dump mod writes the meta as a NUMBER.
+                                `DumpCommand.writeOreDict` emits
+                                `id + ":" + stack.getItemDamage()`, so a wildcard arrives as
+                                the literal `:32767` and is handled by the `isdigit()` half of
+                                the branch below. The reference pack's `oredict.json` holds
+                                10,287 members across 3,114 groups with ZERO `<`, `>` or `*`
+                                characters in any of them, and 789 ending in `:32767`. The
+                                served `data/graph.json` carries those 789 as `:*`, correctly,
+                                with no malformed key anywhere in its 10,290 members. So
+                                neither spelling above could reach `_norm_entry` from here.
+      `from_crafttweaker_log`   `ENTRY` hands over the INSIDE of each `<...>`, and the
+                                comma fallback only runs when the line has no brackets at
+                                all, so a bracket cannot reach here either way. A `:*` CAN:
+                                `<mod:thing:*>` arrives as `mod:thing:*`. That is the one
+                                path on which the wildcard defect was live, and there is no
+                                sample log in this repository to measure it against.
+
+    So these were latent traps rather than a broken graph: the bracket form is reachable from
+    neither caller today and the wildcard form from only the fallback one. Fixed anyway,
+    because an unreachable branch is a trap for the next caller and this function is the
+    single normalizer both readers share.
+
+    Brackets are now DELETED wherever they sit rather than stripped from the ends, which is
+    safe because no legal item key contains one, and the stack size is matched as an anchored
+    suffix that requires digits rather than by splitting on every `*`. DO NOT reduce either of
+    these back to a `strip` or a `split`.
+    """
+    from ..model import WILDCARD_META, norm_key
+
+    raw = raw.replace("<", "").replace(">", "")
+    raw = STACK_SIZE.sub("", raw).strip()
     if not raw:
         return None
-    raw = raw.split("*")[0].strip()  # drop `* 4` stack sizes
     parts = raw.split(":")
     meta = 0
     if len(parts) >= 3 and (parts[-1].isdigit() or parts[-1] == "*"):
-        meta = 32767 if parts[-1] == "*" else int(parts[-1])
+        meta = WILDCARD_META if parts[-1] == "*" else int(parts[-1])
         raw = ":".join(parts[:-1])
     return norm_key(raw, meta)
 
 
 def from_json(path):
+    """`{ore group: [member key, ...]}` from the dump mod's `oredict.json`.
+
+    MEMBER ORDER IS THE DOCUMENT'S ORDER AND THAT IS A CONTRACT, not an implementation
+    detail. With nothing in stock, which is the state the interesting plans are computed in,
+    `Solver.resolve_ore` and `cost.input_cost` separate two equally priced members by nothing
+    else, and the Java port never runs this function: `GraphJsonReader` reads the graph this
+    already built. So a `set` or a `sorted()` here would be inherited IDENTICALLY by both
+    languages, every golden fixture would be regenerated against it, and the cross-language
+    gate would agree perfectly with both sides wrong. See
+    `tests/test_result_order.py:OredictMemberOrderIsStableForTheSameReason`, which is the only
+    assertion on that link, and which fails under a `sorted()`, under a sort-then-reverse and
+    under a `set`. It does NOT fail under `dict.fromkeys`, measured, because that preserves
+    insertion order on every Python this runs on; a dict dedupe is a member-count change here
+    and not an order change.
+
+    IT DOES NOT DEDUPE, WHERE `from_crafttweaker_log` BELOW DOES, and the asymmetry is
+    deliberate rather than an oversight: this reads a registry dump whose groups are already
+    distinct, so a dedupe could only ever fire on two spellings that `_norm_entry` collapses
+    to one key, and it would fire by REMOVING a member. No caller cares about the duplicate
+    (`resolve_ore` takes a `max` and `input_cost` keeps the first strictly cheaper member, so
+    a repeat is a no-op in both), and the log reader dedupes only because a log genuinely
+    repeats lines. Do not "unify" the two.
+    """
     with open(path) as fh:
         doc = json.load(fh)
     out = {}

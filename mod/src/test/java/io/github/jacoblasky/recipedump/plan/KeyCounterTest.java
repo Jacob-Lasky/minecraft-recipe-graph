@@ -2,10 +2,12 @@ package io.github.jacoblasky.recipedump.plan;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
@@ -85,6 +87,51 @@ public class KeyCounterTest {
         List<Integer> expected = Arrays.asList(9, 3, 7);
         assertFalse("the tied ids must not be ascending", isOrdered(expected, 1));
         assertFalse("the tied ids must not be descending", isOrdered(expected, -1));
+    }
+
+    @Test
+    public void aTiedRunIsNotOrderedByTheKeyIdsRenderedAsText() {
+        // WHY A SECOND ORDERING CASE WHEN THE ONE ABOVE ALREADY FAILS UNDER BOTH WRONG MAPS.
+        // 9, 3, 7 comes back as 3, 7, 9, and those ids are single digits, so that one result
+        // is simultaneously ascending BY ID and alphabetical by the id RENDERED AS TEXT. The
+        // case cannot say which of the two a TreeMap did, and which of the two it is is
+        // exactly the distinction the class javadoc got wrong until #192: it warned about
+        // "alphabetical", which is a String-keyed port's failure and not this one's.
+        //
+        // 2, 10, 1 separates all three orders, so this case is what keeps that javadoc true:
+        //
+        //   insertion              2, 10, 1     correct
+        //   ascending by id        1, 2, 10     HashMap and TreeMap<Integer>, measured
+        //   alphabetical as text   1, 10, 2     what the javadoc used to claim
+        KeyCounter counter = new KeyCounter();
+        counter.add(2, 1);
+        counter.add(10, 1);
+        counter.add(1, 1);
+        assertEquals("[2=1, 10=1, 1=1]", render(counter.mostCommon()));
+    }
+
+    @Test
+    public void theTextAndIdOrderingsOfTheTiedFixtureDisagree() {
+        // The guard on the guard for the case above, in this file's idiom: the literals are
+        // restated rather than shared, so tidying the ids has to argue with a test instead of
+        // silently following. Single-digit ids would collapse the last assertion here.
+        List<Integer> ids = Arrays.asList(2, 10, 1);
+        assertFalse("the tied ids must not be ascending", isOrdered(ids, 1));
+        assertFalse("the tied ids must not be descending", isOrdered(ids, -1));
+
+        List<Integer> ascendingIds = new ArrayList<Integer>(ids);
+        Collections.sort(ascendingIds);
+        List<String> ascendingAsText = new ArrayList<String>();
+        List<String> alphabetical = new ArrayList<String>();
+        for (Integer id : ascendingIds) {
+            ascendingAsText.add(String.valueOf(id));
+            alphabetical.add(String.valueOf(id));
+        }
+        Collections.sort(alphabetical);
+        assertNotEquals("ascending by id and alphabetical as text must disagree on these ids, "
+                        + "or the case above cannot tell the two apart and the javadoc's "
+                        + "correction rests on nothing",
+                ascendingAsText, alphabetical);
     }
 
     @Test

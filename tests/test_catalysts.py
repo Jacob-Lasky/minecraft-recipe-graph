@@ -29,12 +29,18 @@ class LoadTest(unittest.TestCase):
             "tconstruct.casting_table": ["tconstruct:casting_table"],
             "te.pulverizer": ["thermalexpansion:machine:2"],
             "wild": ["mod:thing:32767"],
+            "wild_star": ["mod:thing:*"],
         }))
         self.assertEqual(got["tconstruct.casting_table"], ["tconstruct:casting_table"])
         # A trailing meta must be split off before norm_key, or `machine:2` is treated as
         # an id with no meta and never matches the rest of the graph.
         self.assertEqual(got["te.pulverizer"], ["thermalexpansion:machine:2"])
         self.assertEqual(got["wild"], ["mod:thing:*"])
+        # BOTH SPELLINGS OF THE WILDCARD, because `_to_key` has a separate branch for the
+        # literal `*` and only the numeric one was covered. That branch is what #192 changed
+        # here, from a hardcoded 32767 to `model.WILDCARD_META`, and an untested branch is
+        # where a constant swap goes wrong silently.
+        self.assertEqual(got["wild_star"], ["mod:thing:*"])
 
     def test_order_is_preserved(self):
         # JEI lists the primary machine first; that decides which name a plan shows.

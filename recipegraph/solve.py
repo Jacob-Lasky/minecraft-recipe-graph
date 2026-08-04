@@ -953,8 +953,13 @@ class Solver:
             (#19) can be asserted against it. A reordered list is a failing fixture with no
             behavioural change to point at.
           - Reproducing it in Java needs a STABLE sort by count descending over an
-            insertion-ordered map. `HashMap` plus `sort` gives the right multiset and the
-            wrong order; `TreeMap` gives alphabetical, which is wrong in a different way.
+            insertion-ordered map, which is what `plan/KeyCounter.java` is for. Both wrong
+            maps give the SAME wrong order there, and it is not alphabetical: the port's
+            counter is keyed by the int key id rather than by the string key, so `TreeMap`
+            sorts by id, and `HashMap` iterates the port's small non-negative ids ascending
+            too. Ids are issued in intern order, so ascending-by-id is often close enough to
+            first-reached order to look right. See that file's javadoc; this docstring said
+            "alphabetical" until #192 and was describing a port that does not exist.
 
         `machines_to_build` is the odd one out and is `sorted()` by category on purpose: it is
         a checklist rather than a worklist, so a stable alphabetical order is easier to scan

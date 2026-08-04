@@ -9,8 +9,11 @@ load-bearing anyway, and about to become much more so:
     in a different order is a failing fixture with no behavioural change to point at, and the
     obvious reading of that failure ("the fixture is stale, regenerate it") is the wrong one.
   - Reproducing the order in Java needs a STABLE sort by count descending over an
-    insertion-ordered map. `HashMap` plus `sort` gives the right multiset and the wrong order.
-    `TreeMap` gives alphabetical, which is wrong differently. Neither fails loudly.
+    insertion-ordered map. Both wrong maps there give the SAME wrong order and it is NOT
+    alphabetical: `plan/KeyCounter.java` is keyed by the int key id, so `TreeMap` sorts by id
+    and `HashMap` iterates the port's small non-negative ids ascending too. Ids are issued in
+    intern order, which makes ascending-by-id look close enough to first-reached order to pass
+    a review. This docstring said "alphabetical" until #192; see that file's javadoc.
 
 So these tests exist to make an implicit property explicit, and to fail on the DAY someone
 swaps a Counter for a dict-plus-`sorted` rather than months later inside a port.
@@ -145,6 +148,41 @@ class ProducerOrderIsStableBecauseTieBreakingRidesOnIt(unittest.TestCase):
                          "filtering a container transfer must not reorder the survivors")
 
 
+# THE DOCUMENT THE `from_json` ORDER GUARD RUNS OVER. Every group in it is a different way to
+# get the order wrong, and `test_the_order_document_discriminates` ASSERTS each property below
+# rather than leaving this comment to be taken on trust:
+#
+#   plateStuff   two members in descending alphabetical order, so a `sorted()` reader fails
+#   ingotStuff   three members in neither alphabetical order nor its reverse, so a reader that
+#                REVERSES, or that sorts and then reverses, fails too. A two-member group
+#                cannot tell either of those from a correct reader, which is why the group
+#                above does not carry this on its own
+#   dustStuff    the spellings the dump and `crafttweaker.log` really emit, so `_norm_entry`
+#                runs on the path that has no other test caller: brackets, a `* n` stack size
+#                both outside and inside them, an explicit `:0` meta and a `:*` wildcard
+_OREDICT_DOC = {
+    "plateStuff": ["<mod:z>", "mod:a * 4"],
+    "ingotStuff": ["mod:m", "mod:z", "mod:a"],
+    "dustStuff": ["<mod:q:0>", "mod:p:3", "<mod:c> * 16", "<mod:b * 2>", "<mod:d:*>"],
+}
+
+
+def _expected_members(group):
+    """What `from_json` must return for `group`: the document's own order, normalized.
+
+    DERIVED FROM THE DOCUMENT AND NOT TYPED OUT BESIDE IT, which is the whole point of the
+    guard. A hand-typed expectation can only discriminate against the one wrong order whoever
+    typed it had in mind, and a case chosen for convenience is immune to the defect: that is
+    how this repository has certified a shared blind spot before, and it is why #192 asked for
+    this one to come from the data.
+
+    The keys come from `_norm_entry` deliberately, so the claim under test stays ORDER alone
+    with the normalization held constant. The normalization itself is pinned with literals, in
+    `test_norm_entry_handles_every_spelling_the_logs_carry`.
+    """
+    return [k for k in (oredict._norm_entry(m) for m in _OREDICT_DOC[group]) if k]
+
+
 class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
     """`ore_members` values decide oredict ties, and the same first-wins rule applies.
 
@@ -197,18 +235,125 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
         # gate proves the two implementations AGREE; it can prove neither of them right about
         # anything they share an upstream for. This is the only test on that link.
         #
-        # The spellings are the dump's real ones, so `_norm_entry` is exercised too -- it is
-        # reachable only from here and from `from_crafttweaker_log`, which has no test caller
-        # at all, so its bracket-stripping and `* 4` stack-size handling were uncovered.
-        expected = ["mod:z", "mod:a"]
-        self.assertNotEqual(expected, sorted(expected),
-                            "the fixture must not be in alphabetical order, or a sorting "
-                            "reader passes this test")
+        # The spellings are the dump's and the log's real ones, so `_norm_entry` is exercised
+        # too. It is reachable only from `from_json` and from `from_crafttweaker_log`, which
+        # has no test caller at all, and covering it here found two live defects in it: see
+        # `test_norm_entry_handles_every_spelling_the_logs_carry`.
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "oredict.json")
             with open(path, "w") as fh:
-                json.dump({"plateStuff": ["<mod:z>", "mod:a * 4"]}, fh)
-            self.assertEqual(oredict.from_json(path)["plateStuff"], expected)
+                json.dump(_OREDICT_DOC, fh)
+            got = oredict.from_json(path)
+        for group in _OREDICT_DOC:
+            self.assertEqual(got[group], _expected_members(group),
+                             "%s came back in an order the document did not list it in"
+                             % group)
+
+    def test_the_order_document_discriminates(self):
+        # THE GUARD ON THE GUARD, and the reason it is a loop over the document rather than a
+        # sentence in the comment above it: every property the document is built to have is
+        # asserted here, so alphabetising a group later fails HERE instead of quietly retiring
+        # the assertion above while it carries on passing green.
+        for group in _OREDICT_DOC:
+            members = _expected_members(group)
+            self.assertGreater(len(members), 1,
+                              "%s has too few members to show an order at all" % group)
+            self.assertNotEqual(members, sorted(members),
+                                "%s must not be in alphabetical order, or a `sorted()` "
+                                "reader passes" % group)
+
+        # AND AT LEAST ONE GROUP NEEDS THREE OR MORE MEMBERS IN NEITHER ORDER. With two
+        # members, "the order the document listed" and "reverse-alphabetical" are the SAME
+        # LIST, so a reader that sorted and then reversed would satisfy every two-member group
+        # in here. That is the shape #192 was opened about: cases each blind to the defect.
+        discriminating = []
+        for group in _OREDICT_DOC:
+            members = _expected_members(group)
+            if len(members) > 2 and members != sorted(members, reverse=True):
+                discriminating.append(group)
+        self.assertTrue(discriminating,
+                        "no group can tell the document's order from reverse-alphabetical, so "
+                        "a reader that sorts and reverses passes the whole class")
+
+    def test_norm_entry_handles_every_spelling_the_logs_carry(self):
+        # The VALUES behind the order assertion, pinned with literals because this is where
+        # literals belong. Two of these were wrong until #192, both because the brackets and
+        # the `* n` stack size were removed in a fixed order and no order is right for every
+        # real spelling:
+        #
+        #   `<mod:c> * 16`  came back as `mod:c>`, a key nothing can ever match, because the
+        #                   trailing character is `6` and so `strip("<>")` had nothing to
+        #                   remove at the END and left the `>` sitting in the middle.
+        #   `<mod:d:*>`     came back as the malformed `mod:d:`, because `split("*")[0]` ate
+        #                   the wildcard before the meta parser could see it, which also made
+        #                   `_norm_entry`'s `parts[-1] == "*"` branch unreachable from
+        #                   `from_json`.
+        #
+        # NEITHER MANGLED ANY EXISTING DATA, measured rather than hoped: the dump mod writes
+        # the meta as a NUMBER, so the reference pack's 789 wildcard members arrive as
+        # `:32767` and the served graph carries all 789 correctly with no malformed key in
+        # its 10,290. `_norm_entry`'s docstring has the full accounting of which spelling can
+        # reach which caller. These cases are here because an unreachable branch is a trap for
+        # the next caller, not because a plan was ever wrong.
+        #
+        # Both forms are held here rather than only in the document above, because the
+        # document's assertion is about order and would still pass with every key mangled the
+        # same way.
+        spellings = ("<mod:z>", "mod:a * 4", "<mod:c> * 16", "<mod:b * 2>",
+                     "<mod:d:*>", "mod:d:*", "<mod:q:0>", "mod:p:3",
+                     "nuclearcraft:compound:7", "stone", "", "<>", "  <mod:e>  ")
+        self.assertEqual([oredict._norm_entry(raw) for raw in spellings],
+                         ["mod:z", "mod:a", "mod:c", "mod:b",
+                          "mod:d:*", "mod:d:*", "mod:q", "mod:p:3",
+                          "nuclearcraft:compound:7", "minecraft:stone", None, None, "mod:e"])
+
+    def test_the_crafttweaker_log_reader_keeps_the_line_order_and_dedupes(self):
+        # THE OTHER `_norm_entry` CALLER, AND IT HAD NO TEST AT ALL. `index.py:43` uses it as
+        # the second accepted oredict source, so it decides `ore_members` for anyone who ran
+        # `/ct oredict` instead of the dump mod, and every ordering claim this class makes
+        # about `from_json` applies to it identically.
+        #
+        # It is also the ONLY caller a `:*` wildcard can reach `_norm_entry` through. The dump
+        # mod writes the meta as a number, so `from_json` never sees one; here `ENTRY` hands
+        # over the INSIDE of each `<...>` and `<mod:d:*>` arrives intact, and was mangled to
+        # `mod:d:` until #192. So the third group below is the regression test for that fix,
+        # and this reader is the reason the fix was worth making rather than merely tidy.
+        #
+        # The same `ENTRY` behaviour is why the BRACKET half of #192's fix cannot bite here:
+        # a `* 16` written outside the brackets is dropped by the regex before `_norm_entry`
+        # runs, and the comma fallback only fires on a line with no brackets at all.
+        lines = [
+            "Ore entries for <ore:plateStuff>: <mod:z> * 16, <mod:a>\n",
+            # No brackets, so the comma fallback runs instead of `ENTRY`, and the stack size
+            # DOES reach `_norm_entry` on that branch.
+            "Ore entries for oreDict:ingotStuff = mod:m, mod:z * 4, mod:a\n",
+            # The wildcard, and a repeat of it, so the dedupe this reader does is observed
+            # rather than assumed. `from_json` deliberately does NOT dedupe; see that
+            # function's docstring for why the two differ.
+            "Ore entries for <ore:dustStuff>: <mod:d:*>, <mod:c>, <mod:d:*>\n",
+            "a line that is not an ore entry at all\n",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "crafttweaker.log")
+            with open(path, "w") as fh:
+                fh.writelines(lines)
+            got = oredict.from_crafttweaker_log(path)
+
+        self.assertEqual(got, {
+            "plateStuff": ["mod:z", "mod:a"],
+            "ingotStuff": ["mod:m", "mod:z", "mod:a"],
+            "dustStuff": ["mod:d:*", "mod:c"],
+        })
+        # The guard on the guard, for the same reason as the document above: two of these three
+        # groups would pass under a `sorted()` reader if the members happened to be in
+        # alphabetical order, and one of them is only two members long.
+        for group, members in got.items():
+            self.assertNotEqual(members, sorted(members),
+                                "%s must not be in alphabetical order, or a `sorted()` "
+                                "reader passes" % group)
+        self.assertEqual(["mod:d:*", "mod:c"], got["dustStuff"],
+                         "the repeated wildcard must collapse to ONE member, in the position "
+                         "it was first seen, and must not be mangled to `mod:d:`")
 
     def test_the_graph_reads_the_dumps_oredict_in_that_order_too(self):
         # And the whole way up: `index.build` is what puts `from_json`'s answer on the graph,

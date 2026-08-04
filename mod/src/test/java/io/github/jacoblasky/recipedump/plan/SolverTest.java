@@ -433,9 +433,10 @@ public class SolverTest {
         // `tests/test_result_order.py:TheShoppingListKeepsDiscoveryOrderNotAlphabeticalOrder`,
         // ported. THIS AND `theUsedFromStockTieFollowsTheSameRule` ARE THE ONLY TWO ASSERTIONS
         // IN THIS FILE THAT DISCRIMINATE AGAINST ALL THREE WRONG MAPS AT ONCE: apple holds the
-        // lower key id and sorts first alphabetically, and the plan reaches zebra first. `HashMap` and `TreeMap<Integer>` both order small
-        // non-negative int keys ascending and put apple first; `TreeMap<String>` and a bare
-        // `sorted()` put apple first for the other reason. Only insertion order gives zebra.
+        // lower key id and sorts first alphabetically, and the plan reaches zebra first.
+        // `HashMap` and `TreeMap<Integer>` both order small non-negative int keys ascending
+        // and put apple first; `TreeMap<String>` and a bare `sorted()` put apple first for the
+        // other reason. Only insertion order gives zebra.
         //
         // The case above cannot see any of that: its tie is zzz before aaa, which is not
         // alphabetical but IS ascending by key id, so it passes under a HashMap. Measured, not

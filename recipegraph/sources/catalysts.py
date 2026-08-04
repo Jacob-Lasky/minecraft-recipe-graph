@@ -18,7 +18,7 @@ which name a "machines to build" list shows.
 import json
 import os
 
-from ..model import norm_key
+from ..model import WILDCARD_META, norm_key
 from . import dump_meta
 
 
@@ -62,7 +62,7 @@ def _to_key(raw):
     if len(parts) >= 3 and (parts[-1].isdigit() or parts[-1] == "*"):
         tail = parts[-1]
         base = ":".join(parts[:-1])
-        return norm_key(base, 32767 if tail == "*" else int(tail))
+        return norm_key(base, WILDCARD_META if tail == "*" else int(tail))
     return norm_key(raw)
 
 

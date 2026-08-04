@@ -18,8 +18,25 @@ import java.util.Map;
  * which fails loudly:
  *
  *   LinkedHashMap + a stable sort by count descending   correct
- *   HashMap + sort                                      right multiset, wrong order
- *   TreeMap                                             alphabetical, wrong differently
+ *   HashMap + sort                                      ascending key id, not insertion order
+ *   TreeMap<Integer>                                    ascending key id, for another reason
+ *   any map + "sort ascending, then reverse"            every tied run backwards
+ *
+ * The third one is a sort mistake rather than a map mistake and is argued out on
+ * {@link #mostCommon}. The other two are the map, and:
+ *
+ * THE TWO WRONG MAPS GIVE THE SAME WRONG ANSWER, AND IT IS NOT "ALPHABETICAL". This map is
+ * keyed by `int`, not by String, so `TreeMap` sorts by key id; and for the small non-negative
+ * ids this port issues, `HashMap`'s spread function is the identity and a table that stays at
+ * 16 buckets iterates them ascending as well. Key ids are handed out in intern order, which is
+ * frequently the order the solver reaches things in, so the wrong list is usually a PLAUSIBLE
+ * list. That is what lets it through a review.
+ *
+ * This comment used to say `TreeMap` gives "alphabetical". That is the failure mode of a port
+ * keyed by String and it is not this one's, and a warning naming the wrong failure mode is
+ * what stops a reader noticing the right one. Corrected under #192 with the swap measured
+ * rather than reasoned: replacing this field with either wrong map turns exactly four tests
+ * red, and before those four were written it turned none of the suite red at all.
  *
  * Having exactly one implementation is what stops the fourth call site picking the wrong one.
  *
@@ -28,7 +45,11 @@ import java.util.Map;
  */
 final class KeyCounter {
 
-    /** Insertion-ordered, because that IS the tiebreak. Never swap this for a HashMap. */
+    /**
+     * Insertion-ordered, because that IS the tiebreak. DO NOT swap this for a `HashMap` or a
+     * `TreeMap`: both order these ids ascending, which is a plausible-looking wrong answer, for
+     * the reasons in the class javadoc.
+     */
     private final LinkedHashMap<Integer, long[]> counts;
 
     KeyCounter() {
