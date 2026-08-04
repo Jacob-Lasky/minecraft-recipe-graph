@@ -1483,9 +1483,75 @@ public final class PlannerWidgets {
      * put on the screen was not.
      */
     private static Icon icon(net.minecraft.item.ItemStack stack, int width, int height) {
+        reportIfModelless(stack);
         Icon widget = new Icon(stack);
         widget.size(width, height);
         return widget;
+    }
+
+    /**
+     * Registry names already reported by {@link #reportIfModelless}, so it says each one once.
+     *
+     * STATIC MUTABLE STATE IN THIS PACKAGE, WHICH THE HEADER OTHERWISE ARGUES AGAINST, and it is
+     * here on purpose with a bound: one entry per distinct item whose model is missing, which on
+     * the reference pack is a handful and on a healthy pack is zero. Without it the line would be
+     * printed once per row per panel build.
+     */
+    private static final java.util.Set<String> REPORTED_MISSING_MODELS =
+            new java.util.HashSet<String>();
+
+    /**
+     * Log, once per item, when a resolved stack has no model and will therefore draw the
+     * missing-texture checkerboard.
+     *
+     * WHY LOGGING AND NOT A FALLBACK. `packplanner.png` has the magenta-and-black checkerboard on
+     * its top row, and there are two possible causes that want OPPOSITE fixes: a genuinely
+     * modelless item (a TESR-drawn or runtime-tinted thing, which wants a text fallback) or an
+     * artifact of rendering headlessly with no resource packs bound (which wants nothing at all,
+     * and where a fallback would suppress an icon no player is missing). Guessing means shipping a
+     * guard against a case that may not exist, so this converts the question into something the
+     * next pack run answers for free instead of costing a 22-minute slot of its own.
+     *
+     * IT NAMES THE REGISTRY NAME, because that is the one thing the picture cannot tell you and
+     * the only thing that distinguishes the two causes.
+     *
+     * AT BUILD TIME AND NOT IN `draw`. A model does not change under a running client, so asking
+     * once per widget rather than once per frame costs nothing on the render path -- and the
+     * render path is where this file's other comments are careful about cost.
+     *
+     * IT CANNOT THROW. Every call site is inside a GUI build, and `getItemModelMesher` is client
+     * state that a test JVM does not have, so the whole body is guarded: a diagnostic that takes
+     * the screen down is worse than the checkerboard it is diagnosing.
+     */
+    private static void reportIfModelless(net.minecraft.item.ItemStack stack) {
+        try {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+            if (mc == null || mc.getRenderItem() == null) {
+                return;
+            }
+            net.minecraft.client.renderer.block.model.IBakedModel model =
+                    mc.getRenderItem().getItemModelMesher().getItemModel(stack);
+            if (model == null || model != mc.getRenderItem().getItemModelMesher()
+                    .getModelManager().getMissingModel()) {
+                return;
+            }
+            String name = stack.getItem().getRegistryName() == null
+                    ? stack.toString() : stack.getItem().getRegistryName().toString();
+            String id = name + "#" + stack.getItemDamage();
+            if (REPORTED_MISSING_MODELS.add(id)) {
+                org.apache.logging.log4j.LogManager
+                        .getLogger(io.github.jacoblasky.recipedump.RecipeDumpMod.MODID)
+                        .warn("planner icon for " + id + " has no baked model, so it draws the"
+                              + " missing-texture checkerboard. Either the item is genuinely"
+                              + " modelless (a TESR or runtime-tinted item) or this client bound"
+                              + " no resource pack for it; those want opposite fixes, so the"
+                              + " registry name is the thing to report.");
+            }
+        } catch (Throwable ignored) {
+            // A DIAGNOSTIC MUST NOT BE THE THING THAT BREAKS A GUI BUILD. `Minecraft` is absent in
+            // a test JVM and the mesher is absent before the model system loads, and neither is a
+            // reason for a row not to draw.
+        }
     }
 
     /**
