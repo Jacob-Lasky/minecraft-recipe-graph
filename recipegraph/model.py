@@ -337,7 +337,7 @@ def merge_slots(inputs, key_of):
 
 class Recipe:
     __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine",
-                 "transfer", "variant")
+                 "transfer", "variant", "not_production")
 
     def __init__(self, rid, source, outputs, inputs, category="crafting", machine=None,
                  transfer=False, variant=False):
@@ -357,6 +357,18 @@ class Recipe:
         # is a distinction `cost` needs and nothing else does. Set by
         # index.expand_interconversion, never by an extractor. See #110.
         self.variant = variant
+        # The ground on which this recipe is not a production route, or None: a random loot
+        # table, or a JEI card explaining how to automate something. The graph may WALK it and
+        # the ranker must price it -- the JEI card is real information -- but it is never
+        # evidence that its outputs can be obtained this way.
+        #
+        # DERIVED, NOT PERSISTED, and it is the one flag on this class that is. `to_json`
+        # deliberately omits it: the rule reads the per-world token map, so a value written
+        # into the graph would be a stale answer to a question the reader can settle in under
+        # a second. Set by `notproduction.mark`, never by an extractor and never by a loader.
+        # See that module's header for the three reasons, and DO NOT add it to `to_json`
+        # without answering them.
+        self.not_production = None
 
     def to_json(self):
         return {
@@ -487,6 +499,36 @@ class Graph:
         self._meta_index = None
         self._fluid_names = None
         self._producer_cache = {}
+        # The token map `mark_non_production` last ran against, or None for "never". Cleared
+        # here with the rest because the rule reads `by_output`: a graph whose recipes changed
+        # has to be re-marked, not left holding a verdict about a producer set that is gone.
+        self._non_production_signature = None
+        self._non_production_counts = None
+
+    def mark_non_production(self, token_kinds):
+        """Set `Recipe.not_production` for this token map, once, and report the counts.
+
+        MEMOISED ON THE TOKEN MAP, so the two callers that need it -- the cost relaxation and
+        the solver -- can each ask without either having to know whether the other ran first.
+        A DIFFERENT map re-marks rather than short-circuiting, which is what makes a server
+        that reloads `data/tokens.json` mid-session give the new answer instead of the union
+        of two.
+
+        THE COUNTS ARE MEMOISED WITH THE MARKS, so a caller that only wants the report -- the
+        `stats` command -- gets the same numbers as the plan that ran before it rather than
+        None on the second call.
+
+        `token_kinds` only. A caller overriding the declared loot categories -- which is
+        tests, and nothing else -- calls `notproduction.mark` directly, because memoising on
+        a signature that did not include them would serve one pack's verdict for another's.
+        """
+        from . import notproduction
+
+        signature = tuple(sorted((token_kinds or {}).items()))
+        if self._non_production_signature != signature:
+            self._non_production_counts = notproduction.mark(self, token_kinds)
+            self._non_production_signature = signature
+        return self._non_production_counts
 
     def add(self, recipe):
         self.recipes.append(recipe)
@@ -1089,25 +1131,54 @@ class Graph:
         return meta, max_damage
 
     def real_producers(self, key):
-        """`producers`, minus container transfers asked to CREATE a fluid.
+        """`producers`, minus the entries that are not production of `key`. TWO EXCLUSIONS.
 
-        Emptying a container is not production of its contents: to hold a water-filled can
-        you must already have had the water, so `Water Can -> 1,000 mB water` is circular.
-        Left in, it is worse than circular, because the dump drops the NBT that tells one
-        filled can from another -- every filled Forestry can collapses to `forestry:can:1`,
-        so the graph believes squeezing a can of WATER yields uranium fluoride. That exact
-        edge put a Fluid Transposer and a bogus uranium chain in a Borax plan.
+        A CONTAINER TRANSFER ASKED TO CREATE A FLUID. Emptying a container is not production
+        of its contents: to hold a water-filled can you must already have had the water, so
+        `Water Can -> 1,000 mB water` is circular. Left in, it is worse than circular, because
+        the dump drops the NBT that tells one filled can from another -- every filled Forestry
+        can collapses to `forestry:can:1`, so the graph believes squeezing a can of WATER
+        yields uranium fluoride. That exact edge put a Fluid Transposer and a bogus uranium
+        chain in a Borax plan.
 
         Filling a container IS real work and stays: only the fluid direction is fake, so a
         transfer may still produce an ITEM. A fluid whose only route is a container empty
         correctly comes out as NEED, which is the honest answer.
 
+        AND A RECIPE `notproduction` DEMOTED: a random loot table, or a JEI card explaining
+        how to automate something. #211 and #169. Same predicate as the first exclusion and
+        the same reason -- these entries do not turn their inputs into their outputs -- so
+        this is the one place that answers it rather than a second spelling beside it. #211
+        asked for exactly this: "a recipe KIND that the solver refuses to route through but
+        the UI can still show". Nothing is removed from the graph, `by_output`, `used_in`,
+        `explore`'s `makes` rows or `/api/recipe`, so the JEI card stays readable; it simply
+        stops being an answer to "how do I get this".
+
+        THE ALTERNATIVE-PRODUCER GUARD IS WHAT MAKES THIS SAFE. `notproduction.demoted` never
+        demotes a recipe unless every one of its outputs has another producer that is not
+        itself demoted, so this filter cannot empty the list and cannot move a key into
+        `unsourced_keys` -- which reads this method, and whose price is #176's 2,000.
+
+        `cost._relax` MIRRORS THE FIRST EXCLUSION AND CHARGES FOR THE SECOND, which is a
+        deliberate asymmetry and not drift. Skipping demoted recipes in the relaxation as well
+        was built and measured: it strands 26 keys at infinity, because their only route that
+        is not documentation is itself unreachable. `NON_PRODUCTION_PENALTY` sits above the
+        `unavailable` machine wall, so the ranker still never prefers a route this method
+        withholds. The reason is written out at the call site in `_relax`; read it before
+        making the two identical.
+
         Not memoised on purpose -- it is a cheap filter over an already-memoised list, and
         a second cache keyed the same way is how the two drift apart.
+
+        NO FAST PATH THAT READS ANY FLAG BUT THE RECIPES' OWN. The non-fluid case used to
+        return the memoised list unfiltered, and reinstating that on "has this graph been
+        marked" would be wrong for a caller that marked through `notproduction.mark` directly
+        rather than through `mark_non_production` -- which is what the tests do. The filter is
+        one comprehension over a list that is almost always shorter than five.
         """
-        if not key.startswith(FLUID_PREFIX):
-            return self.producers(key)
-        return [r for r in self.producers(key) if not r.transfer]
+        fluid = key.startswith(FLUID_PREFIX)
+        return [r for r in self.producers(key)
+                if not r.not_production and not (fluid and r.transfer)]
 
     @staticmethod
     def kind(key):
