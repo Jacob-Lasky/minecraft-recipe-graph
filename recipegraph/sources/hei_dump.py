@@ -21,6 +21,14 @@ An item stack may carry `"n"`, a digest of the NBT that decides what it IS (sche
 and up). It becomes a `#suffix` on the key, so a Forest drone and a Meadows drone are
 different ingredients -- see DumpCommand.discriminator. Absent on older dumps, which
 then behave exactly as before.
+
+An INPUT stack may carry `"p"`, the probability a run CONSUMES it, 0.0 to 1.0 (#175).
+**Absent means 1.0**, so every dump written before that field existed reads exactly as it
+did before, which is the property that let the reader land ahead of the mod change. 0.0 is
+an input the run never spends: the pack declares 1,078 with `setChance(0.0)` and another 502
+with CraftTweaker's `.reuse()`. It sits on the STACK and not on the slot because `in` is a
+list of arrays with no slot object to hang a field on, and changing that shape would break
+every reader.
 """
 
 import json
@@ -45,16 +53,25 @@ def _stack_key(entry):
 def _slot_to_ingredient(slot, role="item"):
     if isinstance(slot, dict):
         slot = [slot]
-    alts, qty = [], 1
+    alts, qty, chance = [], 1, 0.0
     for entry in slot or []:
         key = _stack_key(entry)
         if not key:
             continue
         alts.append(key)
         qty = max(qty, int(entry.get("c", entry.get("a", 1)) or 1))
+        # `max`, THE SAME WAY AND FOR A STRONGER REASON THAN `qty` ABOVE. `p` lives on the
+        # STACK because `in` is a list of arrays with no slot object to hang it on, so a slot
+        # of interchangeable stacks carries one `p` per alternative. In practice they agree:
+        # Modular Machinery's chance is a property of the REQUIREMENT, not of the item that
+        # satisfies it. Should they ever disagree, taking the highest is the arm that cannot
+        # invent a free route -- `min` would let one reusable alternative in a slot make the
+        # whole slot retained, which is exactly the "cheapest thing is the thing you cannot
+        # obtain" defect #176 fixed. Overstating consumption only ever overstates a price.
+        chance = max(chance, float(entry.get("p", 1.0)))
     if not alts:
         return None
-    return Ingredient(alts, qty, role)
+    return Ingredient(alts, qty, role, chance)
 
 
 def extract(path, on_progress=None):

@@ -334,7 +334,10 @@ class Solver:
         # onto `Heart Fruit`, and it cuts a Quartz Sliver line in the Aedialite Fragment
         # plan from 815 to 30.
         own = {key for key, _qty in recipe.outputs}
-        for alt, qty, _options in slots:
+        # `_chance` IS CORRECTLY IGNORED HERE. The question is "does what I have cover this
+        # slot", and a retained slot's `qty` is already what you must hold; owning one chaos
+        # shard satisfies the slot whether the run spends it or not.
+        for alt, qty, _options, _chance in slots:
             if (self.available(alt) >= qty or alt in self.craftables
                     or alt in self.free_sources):
                 satisfied += 1
@@ -393,7 +396,14 @@ class Solver:
         """
         slots = self._merge_slots(recipe)
         per_run = sum(qty for out, qty in recipe.outputs if out == key)
-        return (tuple(sorted((options, qty) for _alt, qty, options in slots)),
+        # THE CONSUME CHANCE IS DELIBERATELY NOT PART OF THE SHAPE. A shape is what two
+        # recipes have to share to count as the same OFFER for #181's tie reporting, and
+        # folding `chance` in would split ties that a player would call identical. It is also
+        # the conservative choice while `p` is new: every slot in every existing dump is 1.0,
+        # so adding it would move no shape today and could quietly re-partition ties the day
+        # a dump carries retained inputs. If they should change the offer, that is a ranking
+        # decision with its own fixtures, not a side effect of #175.
+        return (tuple(sorted((options, qty) for _alt, qty, options, _chance in slots)),
                 per_run, recipe.category, bool(recipe.transfer))
 
     def _interchangeable_count(self, scored, chosen, key, cache):
@@ -475,7 +485,9 @@ class Solver:
         if slots is None:
             slots = self._merge_slots(recipe)
         leaves = []
-        for alt, qty, _options in slots:
+        # `_chance` IS CORRECTLY IGNORED HERE TOO: an unobtainable retained input is as
+        # much a dead end as an unobtainable ingredient. You cannot run the recipe without it.
+        for alt, qty, _options, _chance in slots:
             if alt.startswith("ore:"):
                 # An unresolvable oredict slot is itself the dead end; a resolvable one
                 # was already reduced to a concrete member by `pick_alternative`.
@@ -849,10 +861,30 @@ class Solver:
                     recipe.machine or recipe.category, state[0], state[1])
 
         children = []
-        for alt, qty, alts in self._merge_slots(recipe):
-            child = self.expand(alt, qty * runs, ancestors, depth + 1)
+        for alt, qty, alts, chance in self._merge_slots(recipe):
+            # `qty` AND NOT `qty * runs` FOR A CATALYST. #175: a slot the run never spends is
+            # a thing you OWN, so a hundred runs need the same one. Multiplying it by `runs`
+            # is what asked for 64 Blaze Data Models when the answer is one, and it is worse
+            # than a mispriced leaf because the multiplier is unbounded and scales with the
+            # quantity requested -- doubling the fluid doubled the shards, and under
+            # `fluid:fractallite_taint` it built roughly 40 levels of phantom chaos-shard
+            # subtree beneath a shard that is needed once, permanently.
+            #
+            # STILL EXPANDED, NOT DROPPED. You genuinely cannot run the forge without a chaos
+            # shard, so the requirement is real and its subtree is how you get the one. It is
+            # the QUANTITY that was wrong, not the presence of the row.
+            child = self.expand(alt, qty if chance == 0.0 else qty * runs,
+                                ancestors, depth + 1)
             if alts > 1:
                 child["alt_count"] = alts
+            if chance == 0.0:
+                # Marked so the renderers and the shopping list can shelve it as "own one"
+                # rather than "go and get this many". `not_consumed` and NOT `catalyst`: this
+                # repository already means the JEI machine BLOCK by that word, in
+                # `catalysts.json` and ten Java files, and it is not `reuse` either because the
+                # pack expresses the same idea through two mod mechanisms (Modular Machinery's
+                # `setChance(0.0)` and CraftTweaker's `.reuse()`). Name the consequence.
+                child["not_consumed"] = True
             children.append(child)
         node["children"] = children
         return node
@@ -874,9 +906,9 @@ class Solver:
         than worse -- one `take` of 9 replaces nine takes of 1, and no slot can now pick a
         different route because an earlier COPY OF ITSELF emptied the shelf.
         """
-        return [(key, qty, options)
-                for key, _ing, qty, options in merge_slots(recipe.inputs,
-                                                           self.pick_alternative)]
+        return [(key, qty, options, ing.consume_chance)
+                for key, ing, qty, options in merge_slots(recipe.inputs,
+                                                          self.pick_alternative)]
 
     def _entry(self, key, qty):
         return {"key": key, "name": self.g.display(key), "kind": self.g.kind(key),
