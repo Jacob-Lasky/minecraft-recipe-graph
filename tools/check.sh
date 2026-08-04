@@ -315,11 +315,30 @@ if [ "$want_java" -eq 1 ]; then
         ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods=/deps \
             cleanTest test > "$log" 2>&1 || fail=1
 
-    passed=$(grep -c ' PASSED$' "$log" || true)
-    failed=$(grep -c ' FAILED$' "$log" || true)
-    skipped=$(grep -cE '^[A-Za-z].* > .* SKIPPED$' "$log" || true)
+    # ALL THREE COUNT WITH THE SAME ANCHORED PATTERN THE DISPLAY BELOW USES, and `failed` did
+    # not until #234. `grep -c ' FAILED$'` also matches the two lines gradle prints that are
+    # not tests:
+    #
+    #   PlannerLayoutTest > aTokenNodeMarksTheIconColumn FAILED   a test, count it
+    #   PlannerLayoutTest FAILED                                  the class roll-up
+    #   > Task :test FAILED                                       the gradle task
+    #
+    # so two real failures were reported as four, and the inflation grows with the number of
+    # failing CLASSES rather than staying a fixed offset. `skipped` was already anchored and
+    # `passed` is safe by accident, because gradle prints no class-level PASSED line -- which is
+    # why the arithmetic looked right on a green run and only broke when something failed.
+    #
+    # THE COMPILE CASE IS THE ONE WORTH FIXING FOR. A run that never builds prints
+    # `> Task :compileJava FAILED` and nothing else, so the old count said "1 failed" while the
+    # display named no test at all: a build that never ran, reported as one flaky test. Anchoring
+    # makes it "0 failed" with `fail=1` still set from gradle's exit status, so the run fails on
+    # the exit code and the summary stops inventing a test.
+    tests_re='^[A-Za-z].* > .* '
+    passed=$(grep -cE "${tests_re}PASSED$" "$log" || true)
+    failed=$(grep -cE "${tests_re}FAILED$" "$log" || true)
+    skipped=$(grep -cE "${tests_re}SKIPPED$" "$log" || true)
     echo "java: $passed passed, $failed failed, $skipped skipped"
-    grep -E '^[A-Za-z].* > .* (FAILED|SKIPPED)$' "$log" || true
+    grep -E "${tests_re}(FAILED|SKIPPED)$" "$log" || true
 
     # A SKIPPED gate is reported as a problem, not as a detail. This is the whole point.
     if grep -q 'everyFixturePlansExactlyAsThePythonOracleDoes SKIPPED' "$log"; then
