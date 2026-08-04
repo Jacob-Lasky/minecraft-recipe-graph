@@ -1562,6 +1562,73 @@ public class PlannerLayoutTest {
         }
     }
 
+    /**
+     * A TOKEN draws a mark in the icon column, where an item would draw its sprite.
+     *
+     * WHY, AND IT IS NOT A STYLE CHOICE. A pack token is a REGISTERED item -- `plan-token-gate`
+     * is `contenttweaker:dungeon_drop`, `status=token`, `token_kind=loot` -- so `iconFor`
+     * succeeds and hands back a perfectly good picture of a thing that does not exist. #174 was
+     * reported on exactly that read: "the osiris spinel shows it requires a Dungeon Drop which
+     * implies it is an item". Sprite plus red quantity plus a count is three signals all saying
+     * "item".
+     *
+     * ASSERTED AS A CHILD IN THE ICON COLUMN, which is the strongest thing a headless test can
+     * say here: a `TextWidget`'s `IKey` cannot be read back without a font renderer, so this
+     * cannot check that the character is `!`. What it can check is that a token node carries a
+     * column an otherwise identical non-token node does not, at the icon's own x and width. Red
+     * on the pre-change tree, where a token drew a sprite and nothing else.
+     *
+     * THE SPRITE BEING SKIPPED IS STRUCTURAL AND NOT ASSERTED HERE: `twoLineNode`, `oneLineNode`
+     * and `row` all read `if (!tokenMark(...)) iconIfAny(...)`, and proving the negative would
+     * need a populated `NodeActions` and therefore a real `ItemStack` and Bootstrap, which would
+     * put global mutable state under every geometry assertion in this class. See
+     * `PlannerActions.NONE` for why that trade is refused.
+     */
+    @Test
+    public void aTokenNodeMarksTheIconColumnInsteadOfDrawingASprite() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        assertTrue("the fixture must actually be a token, or this asserts nothing",
+                   NodeStatus.isToken(token));
+        assertFalse("and the control must not be one", NodeStatus.isToken(item));
+
+        List<IWidget> marked = columnsOf(PlannerWidgets.planNodeContent(token, 209, 26));
+        List<IWidget> plain = columnsOf(PlannerWidgets.planNodeContent(item, 209, 26));
+        assertEquals("a token carries exactly one column a plain item does not",
+                     plain.size() + 1, marked.size());
+
+        // AND IT IS IN THE ICON COLUMN, not appended after the label. The position is the point:
+        // `NodeContent.showDetail` drops the label and the badge word below
+        // `FlowZoom.LABEL_LEGIBLE`, and the icon column is not `detail`, so a mark placed there
+        // is the one carrier that survives a zoomed-out diagram. A mark in the label would be
+        // dropped at exactly the zoom where hue becomes the only difference from a genuine NEED.
+        IWidget mark = marked.get(0);
+        assertEquals("the mark starts where the icon would", PlannerWidgets.NODE_PAD,
+                     mark.getArea().rx);
+        assertEquals("and is the icon column's width", PlannerWidgets.NODE_ICON,
+                     mark.getArea().w());
+    }
+
+    /** A tree row marks a token the same way, so the two surfaces cannot disagree. */
+    @Test
+    public void aTreeRowMarksATokenToo() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        int marked = columnsOf(PlannerWidgets.row(token, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                 PlannerActions.NONE)).size();
+        int plain = columnsOf(PlannerWidgets.row(item, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                PlannerActions.NONE)).size();
+        assertEquals("the tree row marks a token as well as the diagram node",
+                     plain + 1, marked);
+    }
+
+    /** A node's own columns, laid out. Not `flatten`, which would include the node itself. */
+    private static List<IWidget> columnsOf(ParentWidget<?> box) {
+        HeadlessLayout.layOutPanel("columns", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+        return new java.util.ArrayList<IWidget>(box.getChildren());
+    }
+
     private static PlanNode occurrenceOf(PlanView plan, String key) {
         for (PlanNode node : plan.flatten()) {
             if (key.equals(node.key())) {

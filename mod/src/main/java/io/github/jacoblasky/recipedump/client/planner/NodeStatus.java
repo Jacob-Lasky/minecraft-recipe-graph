@@ -117,6 +117,24 @@ public final class NodeStatus {
     }
 
     /**
+     * True when this node is an INSTRUCTION rather than an item you fetch.
+     *
+     * A PREDICATE RATHER THAN `TOKEN.equals(node.status())` AT THE CALL SITE, because this
+     * class's header forbids a widget keeping its own notion of a status and a spelled-out
+     * comparison is the first half of one. `badge` already asks the same question internally.
+     *
+     * WHY A RENDERER NEEDS TO ASK. A token is a pack placeholder -- `contenttweaker:dungeon_drop`
+     * is `LOOT` in `tokens.DEFAULT_TOKENS` -- and it is a REGISTERED ITEM, so an icon lookup for
+     * it succeeds and returns a perfectly good picture of a thing that does not exist. #174 was
+     * reported on exactly that read: "the osiris spinel shows it requires a Dungeon Drop which
+     * implies it is an item". The solver keeps it out of `shopping_list` and reports it in
+     * `tokens_needed` for the same reason. See {@link PlannerWidgets#TOKEN_MARK}.
+     */
+    public static boolean isToken(PlanNode node) {
+        return node != null && TOKEN.equals(node.status());
+    }
+
+    /**
      * The badge word for a node.
      *
      * A TOKEN KIND WINS over `unsourced`, matching `present.status_badge`. The combination
