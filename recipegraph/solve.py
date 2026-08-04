@@ -814,14 +814,23 @@ class Solver:
         __init__. Every OTHER accumulator must be listed, or a rejected attempt's draw is
         counted twice; `from_sources` was added for exactly that reason.
 
+        `machines_needed` WAS THE ONE STILL MISSING, and the rule above is what it broke: it is
+        written in `_build` before the children are expanded, so every attempt the cycle guard
+        discarded left its machine behind. Symptom, from #211's reproduction after the fix: a
+        three-node plan for a Chest -- eight planks and a log -- reported "machines you do not
+        have yet: Chiseling, Alloy Furnace", neither of which appears anywhere in the tree. It
+        reads as the plan asking for two machines it does not need. Found because demoting the
+        loot tables makes backtracking common on exactly this plan; the leak predates that.
         """
         return (self.pool.copy(), self.used_from_stock.copy(),
                 self.leaf_totals.copy(), self.from_sources.copy(),
-                self.tokens_needed.copy(), self.from_emc.copy(), self.nodes)
+                self.tokens_needed.copy(), self.from_emc.copy(),
+                dict(self.machines_needed), self.nodes)
 
     def _restore(self, snap):
         (self.pool, self.used_from_stock, self.leaf_totals,
-         self.from_sources, self.tokens_needed, self.from_emc, self.nodes) = snap
+         self.from_sources, self.tokens_needed, self.from_emc,
+         self.machines_needed, self.nodes) = snap
 
     def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth,
                interchangeable=1):

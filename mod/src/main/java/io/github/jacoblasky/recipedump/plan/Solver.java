@@ -96,7 +96,7 @@ public final class Solver {
     private KeyCounter usedFromStock = new KeyCounter();
 
     /** `{category name: [machine, state, why]}`, sorted only when it is emitted. */
-    private final Map<String, String[]> machinesNeeded = new LinkedHashMap<String, String[]>();
+    private Map<String, String[]> machinesNeeded = new LinkedHashMap<String, String[]>();
     /** `{key id: why the pin was not used}`. */
     private final Map<Integer, String> pinsOverruled = new LinkedHashMap<Integer, String>();
 
@@ -1113,17 +1113,19 @@ public final class Solver {
         final KeyCounter fromSources;
         final KeyCounter tokensNeeded;
         final KeyCounter fromEmc;
+        final Map<String, String[]> machinesNeeded;
         final int nodes;
 
         Snapshot(KeyCounter pool, KeyCounter usedFromStock, KeyCounter leafTotals,
                  KeyCounter fromSources, KeyCounter tokensNeeded, KeyCounter fromEmc,
-                 int nodes) {
+                 Map<String, String[]> machinesNeeded, int nodes) {
             this.pool = pool;
             this.usedFromStock = usedFromStock;
             this.leafTotals = leafTotals;
             this.fromSources = fromSources;
             this.tokensNeeded = tokensNeeded;
             this.fromEmc = fromEmc;
+            this.machinesNeeded = machinesNeeded;
             this.nodes = nodes;
         }
     }
@@ -1133,10 +1135,18 @@ public final class Solver {
      * the only guarantee the search terminates. Every OTHER accumulator must be listed, or a
      * rejected attempt's draw is counted twice; `fromSources` was added for exactly that
      * reason.
+     *
+     * `machinesNeeded` WAS THE ONE STILL MISSING, on both sides. It is written in {@link #build}
+     * before the children are expanded, so every attempt the cycle guard discarded left its
+     * machine behind, and a three-node plan for a Chest reported two machines that appear
+     * nowhere in its tree. See `solve.Solver._snapshot` in python, which carries the measured
+     * case, and keep the two lists identical -- the golden plan fixtures compare
+     * `machines_to_build` field for field.
      */
     private Snapshot snapshot() {
         return new Snapshot(pool.copy(), usedFromStock.copy(), leafTotals.copy(),
-                fromSources.copy(), tokensNeeded.copy(), fromEmc.copy(), nodes);
+                fromSources.copy(), tokensNeeded.copy(), fromEmc.copy(),
+                new LinkedHashMap<String, String[]>(machinesNeeded), nodes);
     }
 
     private void restore(Snapshot snap) {
@@ -1146,6 +1156,7 @@ public final class Solver {
         fromSources = snap.fromSources;
         tokensNeeded = snap.tokensNeeded;
         fromEmc = snap.fromEmc;
+        machinesNeeded = snap.machinesNeeded;
         nodes = snap.nodes;
     }
 
