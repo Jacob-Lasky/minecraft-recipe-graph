@@ -75,10 +75,9 @@ public class PlanNamesTest {
         // against at the call site.
         assertEquals("minecraft:iron_ingot",
                      PlanNames.of(PlanView.empty()).labelFor("minecraft:iron_ingot"));
-        assertEquals("minecraft:iron_ingot", PlanNames.none().labelFor("minecraft:iron_ingot"));
         assertEquals("minecraft:iron_ingot", PlanNames.of(null).labelFor("minecraft:iron_ingot"));
-        assertEquals("", PlanNames.none().labelFor(null));
-        assertFalse(PlanNames.none().knows(null));
+        assertEquals("", PlanNames.of(null).labelFor(null));
+        assertFalse(PlanNames.of(null).knows(null));
     }
 
     /** The first fixture with something outstanding, so the test names one rather than two. */

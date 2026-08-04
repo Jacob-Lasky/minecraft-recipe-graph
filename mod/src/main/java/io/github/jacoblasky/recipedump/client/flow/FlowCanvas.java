@@ -45,19 +45,29 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      *
      * THE WIDER OF THE TWO LINES, WHICH IS LINE ONE. Since #213's companion work put the label
      * on its own line, the two are measured separately: line one is the quantity and the badge
-     * beside the icon, line two is the label beside the icon. It used to be a single sum
-     * because everything shared one line, and the label was what lost -- eight characters of
-     * item name against a 90px badge.
+     * beside the icon, line two is the label beside the icon, and both sit inside
+     * `NODE_PAD` of the box's border. It used to be a single sum because everything shared one
+     * line, and the label was what lost -- eight characters of item name against a 90px badge.
      *
      * AT LEAST, NOT EQUAL, and the change of relation is deliberate. What the pin protects is
      * the direction that goes wrong silently: `BADGE` grows, a node left at the old width
      * starts DROPPING the badge instead of following, and nothing says so. A node wider than
      * the minimum spends the surplus on the label, which is the thing there is never enough of.
      */
-    public static final int NARROWEST_NODE = Math.max(
+    public static final int NARROWEST_NODE = PlannerWidgets.NODE_PAD * 2 + Math.max(
             PlannerWidgets.NODE_ICON + PlannerWidgets.GAP + PlannerWidgets.QTY
                     + PlannerWidgets.GAP + PlannerWidgets.BADGE,
             PlannerWidgets.NODE_ICON + PlannerWidgets.GAP + PlannerWidgets.MIN_LABEL);
+
+    /**
+     * The shortest node that holds two text lines clear of its own frame.
+     *
+     * `FlowLayout.NODE_HEIGHT` must be at least this. It was 20 -- exactly two lines and no
+     * slack -- while the node drew ONE of them, so the shortfall could not show; the moment the
+     * label moved to a second line the top one was drawn on the nine-slice's bevel.
+     */
+    public static final int SHORTEST_NODE =
+            PlannerWidgets.LINE * 2 + PlannerWidgets.NODE_PAD * 2;
 
     /** Edge colour, muted so the nodes stay the thing you read. */
     private static final int EDGE = 0x66FFFFFF;

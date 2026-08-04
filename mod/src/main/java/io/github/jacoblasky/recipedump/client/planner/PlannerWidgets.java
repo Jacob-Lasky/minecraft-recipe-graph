@@ -11,7 +11,6 @@ import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.utils.Alignment;
 import com.cleanroommc.modularui.widget.ParentWidget;
-import com.cleanroommc.modularui.widgets.ItemDisplayWidget;
 import com.cleanroommc.modularui.widgets.ListWidget;
 import com.cleanroommc.modularui.widgets.TextWidget;
 
@@ -65,26 +64,39 @@ public final class PlannerWidgets {
      * whether a stack came back would re-flow every row the moment a `NodeActions` was
      * installed, or a graph finished loading mid-session and `iconFor` began answering.
      *
-     * THE WIDGET, unlike the width, is added only when there is a stack -- an
-     * `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which is the
-     * sort of claim that reads identically either way in review and is only true one way
-     * round. Measured: 49 empty boxes down the left edge of the first screenshot. That half now
-     * lives in exactly one place, {@link #iconIfAny}, so the four surfaces that draw an icon
-     * cannot disagree about it.
+     * THE WIDGET, unlike the width, is added only when there is a stack, and that half lives in
+     * exactly one place -- {@link #iconIfAny} -- so the four surfaces that draw an icon cannot
+     * disagree about it. See that method for what the guard is worth now that {@link Icon}
+     * replaced `ItemDisplayWidget`; the "49 empty boxes down the left edge" it was written for
+     * was that widget painting its slot frame for an EMPTY stack.
      */
     public static final int ICON = 10;
     /**
      * The icon on a node that got a SECOND LINE for its label; see {@link #planNodeContent}.
      *
      * 16 IS THE NATIVE SIZE OF A 1.12.2 ITEM TEXTURE, so this is the one place in the planner
-     * that draws a stack at 1:1 rather than scaled down. `ItemDisplayWidget` scales the stack
-     * to its own area, so the tree's 10px column is a downscale and this is not, which is
-     * worth having on the surface where a node is the only thing identifying itself.
+     * that draws a stack at 1:1 rather than scaled down. {@link Icon} scales the stack to the
+     * box it is given, so the tree's 10px column is a downscale and this is not, which is worth
+     * having on the surface where a node is the only thing identifying itself.
      *
      * THE COLUMN RULE IS {@link #ICON}'S AND IS NOT RESTATED HERE: the width is charged
      * whether or not a stack comes back, and the widget is added only when one does.
      */
     public static final int NODE_ICON = 16;
+    /**
+     * The inset between a diagram node's box and its contents, on all four sides.
+     *
+     * THE BOX HAS A BORDER AND THE CONTENT WAS DRAWN ON IT. `FlowCanvas` gives every node
+     * `GuiTextures.MC_BACKGROUND`, a nine-slice whose frame occupies the outer two or three
+     * pixels, and content positioned from 0 lands underneath it: `icons-flow.png` at 11:06 has
+     * the hopper's icon sliced down its left edge by the bevel and every item name resting on
+     * the bottom one. Nothing failed, and nothing could -- the widgets were exactly where the
+     * sizer put them.
+     *
+     * ONLY THE DIAGRAM NEEDS IT. A tree row has no border of its own; the panel's own
+     * {@link #PADDING} is what keeps those off the window frame.
+     */
+    public static final int NODE_PAD = 3;
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
     public static final int QTY = 52;
     /**
@@ -271,7 +283,7 @@ public final class PlannerWidgets {
      * invented: selection is not a status, and a hue the palette does not already contain
      * would read as one more thing the row is telling you about the item.
      */
-    public static final int SELECTION_FILL = 0x402F5F96;
+    private static final int SELECTION_FILL = 0x402F5F96;
 
     /**
      * The frame around a selected row. Opaque, one pixel.
@@ -282,7 +294,7 @@ public final class PlannerWidgets {
      * price of one implementation serving both surfaces and is the cheaper half of the trade:
      * a doubled edge on a busy canvas is legible, a missing one in the tree is not.
      */
-    public static final int SELECTION_EDGE = 0xCC2F5F96;
+    private static final int SELECTION_EDGE = 0xCC2F5F96;
 
     /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
     private static int widestBadge() {
@@ -433,9 +445,12 @@ public final class PlannerWidgets {
      * 0.5 Minecraft's bitmap font is drawn at half scale and is unreadable rather than merely
      * small -- `FlowZoom.MIN`'s own comment says so, and says what a reader zoomed out is
      * actually reading: the badge colour and the quantity. So the diagram drops the label and
-     * the badge WORD below {@link io.github.jacoblasky.recipedump.client.flow.FlowZoom#LABEL_LEGIBLE}
-     * and keeps the icon and the coloured quantity. See `FlowCanvas.preDraw` for the two
-     * alternatives and why they lose.
+     * the badge WORD below `FlowZoom.LABEL_LEGIBLE` and keeps the icon and the coloured
+     * quantity. See `FlowCanvas.preDraw` for the two alternatives and why they lose.
+     *
+     * NAMED IN BACKTICKS AND NOT IN A `{@link}`, because `flow` calls `planner` and never the
+     * reverse. A javadoc reference does not compile to a dependency, which is exactly why it is
+     * the one that gets written without anybody noticing the direction.
      *
      * {@link ClickableGroup} IS THE BASE AND IS THEREFORE NOT FINAL, which is worth saying out
      * loud: the click target has to stay one widget per node, because
@@ -449,8 +464,7 @@ public final class PlannerWidgets {
          *
          * Collected as they are built rather than found afterwards by type, because "every
          * `TextWidget` in here" would also catch the quantity -- and the quantity is half of
-         * what {@link io.github.jacoblasky.recipedump.client.flow.FlowZoom#MIN} says a reader
-         * zoomed out is reading.
+         * what `FlowZoom.MIN` says a reader zoomed out is reading.
          */
         private final List<IWidget> detail = new java.util.ArrayList<IWidget>();
 
@@ -458,11 +472,15 @@ public final class PlannerWidgets {
             super(onClick, selectionKey);
         }
 
-        /** Add a child that only appears when the node is drawn large enough to read. */
-        NodeContent detail(IWidget widget) {
+        /**
+         * Add a child that only appears when the node is drawn large enough to read.
+         *
+         * VOID RATHER THAN FLUENT. Both callers use it as a statement, and a returned `this`
+         * nobody reads is an invitation to chain onto a builder that has no other steps.
+         */
+        void detail(IWidget widget) {
             detail.add(widget);
             child(widget);
-            return this;
         }
 
         /**
@@ -697,21 +715,23 @@ public final class PlannerWidgets {
      */
     private static void twoLineNode(NodeContent box, PlanNode node, int width, int height,
                                     int colour) {
-        iconIfAny(box, NodeActionsHolder.actions().iconFor(node), NODE_ICON, 0,
+        iconIfAny(box, NodeActionsHolder.actions().iconFor(node), NODE_ICON, NODE_PAD,
                   (height - NODE_ICON) / 2);
         // The width is charged whether or not that drew anything; see ICON.
-        int x = NODE_ICON + GAP;
+        int x = NODE_PAD + NODE_ICON + GAP;
+        int right = width - NODE_PAD;
         // CENTRED VERTICALLY rather than pinned to the top, so a caller that hands over a
         // taller box than two lines need gets a node that looks deliberate instead of one
-        // whose text has slid to the ceiling.
+        // whose text has slid to the ceiling. At `FlowLayout.NODE_HEIGHT` this comes out at
+        // exactly NODE_PAD, which is the inset the sides get.
         int top = (height - LINE * 2) / 2;
         box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, top));
-        int badgeWidth = badgeWidthBeside(width - x - QTY - GAP);
+        int badgeWidth = badgeWidthBeside(right - x - QTY - GAP);
         if (badgeWidth > 0) {
             box.detail(line(NodeStatus.badge(node), badgeWidth, colour)
-                               .pos(width - badgeWidth, top));
+                               .pos(right - badgeWidth, top));
         }
-        box.detail(line(NodeRowText.label(node), width - x, NodeStatus.INK_MUTED)
+        box.detail(line(NodeRowText.label(node), right - x, NodeStatus.INK_MUTED)
                            .pos(x, top + LINE));
     }
 
@@ -1364,10 +1384,12 @@ public final class PlannerWidgets {
      *
      * THE ONE GUARD, so the four surfaces that draw an icon cannot each get it right and a
      * fifth get it wrong. It used to be four copies of `if (!stack.isEmpty())` with three
-     * copies of the comment explaining why, which is three chances for the next one to be
-     * written without it -- and the failure is not a crash: `ItemDisplayWidget` holding EMPTY
-     * paints its SLOT FRAME rather than nothing, so a missing guard is 49 empty boxes down the
-     * left edge of a screenshot and no error anywhere.
+     * copies of the comment explaining why. The reason has CHANGED with {@link Icon} and the
+     * old one is no longer true of this code: `ItemDisplayWidget` holding EMPTY painted its
+     * SLOT FRAME rather than nothing, which is what put 49 empty boxes down the left edge of
+     * the first screenshot. `GuiDraw.drawItem` returns on an empty stack, so an unguarded
+     * `Icon` would draw nothing -- the guard now buys not building 634 widgets that do nothing,
+     * which is a smaller reason and is the honest one.
      *
      * THE WIDTH IS STILL THE CALLER'S, and deliberately so. {@link #ICON} states why the column
      * is charged whether or not this draws: a width that depended on whether a stack came back
@@ -1395,16 +1417,58 @@ public final class PlannerWidgets {
      * here because the model system is loaded and this is asking it the same question the
      * player's inventory asks.
      *
-     * SQUARE, AND SIZED BY THE CALLER. `ItemDisplayWidget` scales the stack to its own area, so
-     * a 10x11 box drew every item stretched a tenth taller than wide -- invisible on a
-     * cobblestone and obvious on anything with a straight edge.
+     * NOT `ItemDisplayWidget`, WHICH WAS THE FIRST CHOICE AND CANNOT DO THIS. Its `draw` is
+     * `GuiDraw.drawItem(stack, 1, 1, 16f, 16f, z)` -- the offset and BOTH dimensions are
+     * constants in the bytecode, and its own area is read only for the stack-size text. So it
+     * draws a 16x16 item one pixel inside whatever box it is given and a `size(10, 11)` on it
+     * does nothing.
+     *
+     * FOUND BY THE SCREENSHOT, and it is the reason that instruction exists. The first
+     * `icons-planner` shot had the hopper, the ingot and the iron block spilling out of their
+     * 10px column across the quantity beside them and into the rows above and below -- five
+     * overlapping sprites down the left edge. Every layout assertion in `PlannerLayoutTest` was
+     * green through it, and correctly so: the WIDGET was 10x11 and in the right place. What it
+     * put on the screen was not.
      */
-    private static ItemDisplayWidget icon(net.minecraft.item.ItemStack stack, int width,
-                                          int height) {
-        ItemDisplayWidget widget = new ItemDisplayWidget();
+    private static Icon icon(net.minecraft.item.ItemStack stack, int width, int height) {
+        Icon widget = new Icon(stack);
         widget.size(width, height);
-        widget.item(stack);
         return widget;
+    }
+
+    /**
+     * One item, drawn at exactly the size its column reserves.
+     *
+     * THE SCALE IS THE BOX. `GuiDraw.drawItem`'s two float arguments are a WIDTH and a HEIGHT
+     * in GUI pixels, not a scale factor: it translates by (x, y), scales by `width / 16` and
+     * `height / 16`, and hands the stack to `RenderItem.renderItemAndEffectIntoGUI`. Reading
+     * them off `getArea()` is the whole of this class, and it is what `ItemDisplayWidget` does
+     * not do.
+     *
+     * SIZED BY THE CALLER AND SQUARE BY CONVENTION, not by construction: a 1.12.2 item texture
+     * is 16x16, so a box that is not square draws the item stretched. Both callers pass a
+     * square, {@link #ICON} in a tree or TODO row and {@link #NODE_ICON} on a diagram node.
+     *
+     * NO GL STATE HANDLING HERE. `drawItem` is already wrapped in `Platform.setupDrawItem` /
+     * `endDrawItem` and a push/pop of the matrix, so an item drawn from a widget leaves the
+     * lighting and the depth range as it found them. Doing it again outside would be a second
+     * owner of state that has exactly one.
+     */
+    private static final class Icon extends com.cleanroommc.modularui.widget.Widget<Icon> {
+
+        private final net.minecraft.item.ItemStack stack;
+
+        Icon(net.minecraft.item.ItemStack stack) {
+            this.stack = stack;
+        }
+
+        @Override
+        public void draw(com.cleanroommc.modularui.screen.viewport.ModularGuiContext context,
+                         com.cleanroommc.modularui.theme.WidgetThemeEntry<?> widgetTheme) {
+            com.cleanroommc.modularui.drawable.GuiDraw.drawItem(
+                    stack, 0, 0, getArea().width, getArea().height,
+                    context.getCurrentDrawingZ());
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
