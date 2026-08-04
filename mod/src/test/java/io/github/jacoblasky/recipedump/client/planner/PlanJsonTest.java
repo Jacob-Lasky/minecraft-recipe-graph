@@ -267,14 +267,22 @@ public class PlanJsonTest {
     @Test
     public void theMachinesToBuildListReadsBackWithItsReasons() {
         PlanView plan = PlanFixtures.load("plan-in-stock");
-        // 4 before #172. The Packager dropped out: it was only on the list because the plan
-        // routed through a cyclic recipe that needed it, and the ranking no longer picks
-        // that route. A machine leaving this list is the plan getting SHORTER, not a loss.
-        assertEquals(3, plan.machinesToBuild().size());
+        // 4 before #172, 3 before #211/#169. Each drop is the plan getting SHORTER rather than
+        // losing information, and each has its own cause:
+        //
+        //   #172        the Packager was only on the list because the plan routed through a
+        //               cyclic recipe that needed it, and the ranking stopped picking that.
+        //   #211/#169   Chiseling was only on it because a DISCARDED attempt entered it.
+        //               `Solver.snapshot` did not carry `machinesNeeded`, which its own
+        //               javadoc forbids, so every attempt the cycle guard threw away left its
+        //               machine behind. Nothing in this plan's tree is chiselled -- that is
+        //               what made the leak visible, and it is why a machine list is a weak
+        //               place to notice one.
+        assertEquals(2, plan.machinesToBuild().size());
         PlanView.MachineRow first = plan.machinesToBuild().get(0);
-        assertEquals("chisel.chiseling", first.category());
-        assertEquals("Chiseling", first.machine());
-        assertEquals("craftable: chisel:chisel_iron", first.why());
+        assertEquals("tconstruct.casting_table", first.category());
+        assertEquals("Casting", first.machine());
+        assertEquals("craftable: tconstruct:casting", first.why());
         assertEquals("buildable", first.stateLabel());
     }
 
@@ -396,10 +404,11 @@ public class PlanJsonTest {
 
     @Test
     public void theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive() {
-        // 641 nodes in one viewport. 347 before #172, 388 before #176, 634 before #136. Named
-        // here so a future change that makes the tree panel O(n^2) has something to fail
-        // against rather than just feeling slow in game -- so when this number MOVES UP it is
-        // the test getting harder, and the only wrong response is to stop asserting it.
+        // 519 nodes in one viewport. 347 before #172, 388 before #176, 634 before #136, 641
+        // before #211/#169. Named here so a future change that makes the tree panel O(n^2) has
+        // something to fail against rather than just feeling slow in game -- so when this
+        // number MOVES UP it is the test getting harder, and the only wrong response is to
+        // stop asserting it. When it moves DOWN, see the last paragraph below.
         //
         // WHY IT GREW, MEASURED RATHER THAN REASONED. All 42 of this plan's `unsourced` nodes
         // were LEAVES before #176 -- dead ends resting on items the graph cannot explain.
@@ -425,8 +434,18 @@ public class PlanJsonTest {
         // and one more shopping row. `work` moved 28,012 -> 28,024, so the headroom the
         // paragraph above warns about is unchanged, and `truncated` and `exhausted` are both
         // still false.
+        //
+        // 641 -> 519 FOR #211/#169, AND THIS IS THE FIRST TIME THE NUMBER HAS COME DOWN.
+        // A drop is the direction that needs justifying, because the easy way to make this
+        // assertion pass is to plan less. 122 nodes of FABRICATED route left the tree when the
+        // JEI loot tables and automation cards this plan was routing through stopped being
+        // routes. Corroborated on the same fixture rather than argued: shopping rows 64 -> 59
+        // and token rows 4 -> 3, both smaller, and `truncated` and `exhausted` are false on
+        // both sides so nothing was cut for want of budget. Measured against master twice, once
+        // before this branch was rebased onto #136/#175/#194 and once after, and the delta was
+        // -122 nodes and -5 shopping rows both times.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(641, plan.flatten().size());
+        assertEquals(519, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

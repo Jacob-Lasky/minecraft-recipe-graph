@@ -960,6 +960,14 @@ public final class Solver {
                 perRun += store.outputQtyAt(p);
             }
         }
+        // A BOOLEAN HERE WHERE PYTHON WRITES THE GROUND, and the two partition identically.
+        // Python appends `recipe.not_production or ""`, so it separates a `loot_table` entry
+        // from an `annotation` one; this writes true for both. They cannot disagree, and the
+        // reason is structural rather than lucky: a recipe is `loot_table` only when its
+        // CATEGORY is declared and `annotation` only when it is not, so two recipes carrying
+        // different grounds necessarily have different categories -- and the category is
+        // already a component above, so their shapes differ either way. If a third ground is
+        // ever added that does not imply a category, this has to carry the ground instead.
         return parts + "|" + perRun + "|" + store.categoryId(recipeId) + "|"
                 + store.isTransfer(recipeId) + "|" + Bits.get(notProduction, recipeId);
     }
