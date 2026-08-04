@@ -30,24 +30,72 @@ ENTRY = re.compile(r"<([^>]+)>")
 # cannot be asked.
 REMOVAL_LINE = re.compile(r"Removing (.+?) from ore dictionary entry (\S+)\s*$")
 
+# A TRAILING `* 4` STACK SIZE, ANCHORED AND REQUIRING DIGITS, which is what keeps it from
+# eating a `:*` wildcard meta. See `_norm_entry`.
+STACK_SIZE = re.compile(r"\s*\*\s*\d+\s*$")
+
 
 def _norm_entry(raw):
-    """`<nuclearcraft:compound:7>` / `nuclearcraft:compound:7` -> canonical key."""
-    from ..model import norm_key
+    """`<nuclearcraft:compound:7>` / `nuclearcraft:compound:7` -> canonical key.
 
-    raw = raw.strip().strip("<>")
+    ALSO `<mod:thing:*>` -> `mod:thing:*`, and `<mod:thing> * 16` -> `mod:thing`. Both of
+    those were broken until #192, and both for the same reason: the brackets were stripped
+    with `strip("<>")` and the stack size with `split("*")[0]`, so the ORDER of the two
+    decided the answer and there is no order that is right for every real spelling.
+
+      `<mod:thing> * 16`   the trailing character is `6`, so `strip("<>")` left the `>` in the
+                           middle and `mod:thing>` came out as the key. CraftTweaker writes
+                           this form, and `from_crafttweaker_log` only escaped it because
+                           `ENTRY` hands over the INSIDE of the brackets.
+      `<mod:thing:*>`      `split("*")[0]` ate the wildcard before the meta parser could see
+                           it, yielding the malformed `mod:thing:`. That made the
+                           `parts[-1] == "*"` branch below UNREACHABLE: nothing that has been
+                           split on `*` can still contain one. A wildcard membership was
+                           therefore never resolvable, silently.
+
+    So brackets are DELETED wherever they sit rather than stripped from the ends, which is
+    safe because no legal item key contains one, and the stack size is matched as an anchored
+    suffix that requires digits rather than by splitting on every `*`. DO NOT reduce either of
+    these back to a `strip` or a `split`; both spellings above come from real logs.
+    """
+    from ..model import WILDCARD_META, norm_key
+
+    raw = raw.replace("<", "").replace(">", "")
+    raw = STACK_SIZE.sub("", raw).strip()
     if not raw:
         return None
-    raw = raw.split("*")[0].strip()  # drop `* 4` stack sizes
     parts = raw.split(":")
     meta = 0
     if len(parts) >= 3 and (parts[-1].isdigit() or parts[-1] == "*"):
-        meta = 32767 if parts[-1] == "*" else int(parts[-1])
+        meta = WILDCARD_META if parts[-1] == "*" else int(parts[-1])
         raw = ":".join(parts[:-1])
     return norm_key(raw, meta)
 
 
 def from_json(path):
+    """`{ore group: [member key, ...]}` from the dump mod's `oredict.json`.
+
+    MEMBER ORDER IS THE DOCUMENT'S ORDER AND THAT IS A CONTRACT, not an implementation
+    detail. With nothing in stock, which is the state the interesting plans are computed in,
+    `Solver.resolve_ore` and `cost.input_cost` separate two equally priced members by nothing
+    else, and the Java port never runs this function: `GraphJsonReader` reads the graph this
+    already built. So a `set` or a `sorted()` here would be inherited IDENTICALLY by both
+    languages, every golden fixture would be regenerated against it, and the cross-language
+    gate would agree perfectly with both sides wrong. See
+    `tests/test_result_order.py:OredictMemberOrderIsStableForTheSameReason`, which is the only
+    assertion on that link, and which fails under a `sorted()`, under a sort-then-reverse and
+    under a `set`. It does NOT fail under `dict.fromkeys`, measured, because that preserves
+    insertion order on every Python this runs on; a dict dedupe is a member-count change here
+    and not an order change.
+
+    IT DOES NOT DEDUPE, WHERE `from_crafttweaker_log` BELOW DOES, and the asymmetry is
+    deliberate rather than an oversight: this reads a registry dump whose groups are already
+    distinct, so a dedupe could only ever fire on two spellings that `_norm_entry` collapses
+    to one key, and it would fire by REMOVING a member. No caller cares about the duplicate
+    (`resolve_ore` takes a `max` and `input_cost` keeps the first strictly cheaper member, so
+    a repeat is a no-op in both), and the log reader dedupes only because a log genuinely
+    repeats lines. Do not "unify" the two.
+    """
     with open(path) as fh:
         doc = json.load(fh)
     out = {}
