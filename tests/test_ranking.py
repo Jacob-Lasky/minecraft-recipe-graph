@@ -26,7 +26,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import cost, present, render, solve  # noqa: E402
+from recipegraph import cost, graphview, present, render, solve  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
@@ -1413,6 +1413,38 @@ class CrossLanguageWordingTest(unittest.TestCase):
     JAVA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "mod", "src", "main", "java", "io", "github", "jacoblasky",
                         "recipedump", "client", "planner", "NodeRowText.java")
+
+    PLANNER_WIDGETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "mod", "src", "main", "java", "io", "github", "jacoblasky",
+                                   "recipedump", "client", "planner", "PlannerWidgets.java")
+
+    def test_a_token_is_marked_with_the_same_glyph_in_both_renderers(self):
+        """`graphview.TOKEN_MARK` and `PlannerWidgets.TOKEN_MARK` have to be one character.
+
+        #174 was reported on a reader concluding a pack placeholder was an item, and both
+        renderers now answer it by marking the box rather than by a colour. A glyph taught in
+        the browser and a different one in game is worse than neither: it teaches a visual rule
+        and then breaks it. The two constants are in two languages and nothing but this joins
+        them.
+
+        THE MARK LIVES IN THE ICON COLUMN IN GAME, which is what makes it survive
+        `FlowZoom.LABEL_LEGIBLE` dropping the label and the badge word. That is why it is a
+        glyph at all rather than a word.
+        """
+        for path in (self.PLANNER_WIDGETS,):
+            if not os.path.exists(path):
+                self.fail("the Java copy of this glyph lives here: %s" % path)
+        with open(self.PLANNER_WIDGETS, encoding="utf-8") as fh:
+            source = fh.read()
+        # FAIL RATHER THAN SKIP when the constant is absent, which is the half that matters: a
+        # skip in a parity test reads exactly like a pass, and this file's own docstring is
+        # about a rule with nothing enforcing it.
+        found = re.search(r'TOKEN_MARK\s*=\s*"((?:[^"\\]|\\.)*)"', source)
+        self.assertTrue(found, "PlannerWidgets.java declares no TOKEN_MARK; python says %r"
+                        % (graphview.TOKEN_MARK,))
+        self.assertEqual(graphview.TOKEN_MARK, found.group(1),
+                         "the browser marks a token %r and the client marks it %r"
+                         % (graphview.TOKEN_MARK, found.group(1)))
 
     def test_the_java_row_builds_the_same_sentence(self):
         if not os.path.exists(self.JAVA):
