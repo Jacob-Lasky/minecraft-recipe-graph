@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.plan;
 
+import io.github.jacoblasky.recipedump.graph.Bits;
+
 /**
  * Item costs, plus the per-category machine entry costs they were computed with.
  *
@@ -28,10 +30,33 @@ public final class CostTable {
     private final double[] cost;
     /** Per category: the entry cost, or NaN when this table carries none for it. */
     private final double[] machineEntry;
+    /**
+     * The recipes {@link NonProduction} demoted, or null when nothing computed them.
+     *
+     * RIDES ALONGSIDE FOR THE SAME REASON THE ENTRY COSTS DO: the relaxation and the ranking
+     * deriving this separately is how they would come to disagree about whether a route
+     * exists. `Cost.recipeCost` charges `NON_PRODUCTION_PENALTY` off this, and it charges the
+     * table's answer rather than recomputing one.
+     *
+     * Null means "no caller decided", which is the right reading for a hand-built table in a
+     * test: every recipe is a route, exactly as before #211.
+     */
+    private final long[] nonProduction;
 
     CostTable(double[] cost, double[] machineEntry) {
+        this(cost, machineEntry, null);
+    }
+
+    CostTable(double[] cost, double[] machineEntry, long[] nonProduction) {
         this.cost = cost;
         this.machineEntry = machineEntry;
+        this.nonProduction = nonProduction;
+    }
+
+    /** True when this recipe is documentation rather than a route. See {@link NonProduction}. */
+    public boolean isNotProduction(int recipeId) {
+        return nonProduction != null && recipeId >= 0
+                && Bits.get(nonProduction, recipeId);
     }
 
     /** What this key costs to obtain. +Infinity when nothing priced it. Never null. */

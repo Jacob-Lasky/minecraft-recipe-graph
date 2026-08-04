@@ -185,6 +185,35 @@ public strictfp final class Cost {
     public static final double TRANSFER_PENALTY = 500.0;
 
     /**
+     * What a route through JEI PROSE costs: a random loot table, or a card explaining how to
+     * automate something. #211 and #169. {@link NonProduction} decides which recipes these are.
+     *
+     * A PENALTY RATHER THAN A DROP OR AN INFINITY, and all three were built and measured in
+     * python. Dropping the recipe collapses `contenttweaker:imp_skin` to {@code BASE_RAW_COST},
+     * because the annotation is its only producer and the seed then treats it as a leaf -- the
+     * plan stops lying about HOW and starts lying about HOW MUCH, which is worse because the
+     * first is visible in the tree and the second is not. Declining to relax through it strands
+     * 26 keys at infinity, five of #169's seven infusion catalysts among them. The penalty
+     * strands 0 and keeps every output priced.
+     *
+     * THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, and there is one bound to state:
+     *
+     * <pre>
+     *   MACHINE_COST[UNAVAILABLE] &lt; NON_PRODUCTION_PENALTY
+     * </pre>
+     *
+     * ABOVE the 5,000 wall, which is the highest price anything else here can reach. "You
+     * cannot have this machine" is a true statement about the world and a route through it is a
+     * real route with a real obstacle; a loot table is not a route at all, so it has to lose to
+     * every claim the graph can account for, including the worst of them.
+     *
+     * NOT AMORTISED, because it is added to `base`. Load-bearing rather than merely consistent
+     * with #29: a scrapbox entry yielding a stack would otherwise divide this by 64 and come
+     * out under a raw leaf.
+     */
+    public static final double NON_PRODUCTION_PENALTY = 50000.0;
+
+    /**
      * What a PLACEHOLDER costs, by what it asks of the player, indexed by {@link Tokens}.
      *
      * Until #105 the cost model never mentioned tokens, so every one fell through the generic
@@ -567,23 +596,26 @@ public strictfp final class Cost {
      */
     public static CostTable estimate(RecipeGraph graph, CostInputs inputs) {
         CostInputs in = inputs == null ? new CostInputs() : inputs;
+        // BEFORE THE SEED, because every relaxation pass below reads it. Computed here rather
+        // than stored on the graph: see NonProduction's header for why it is per solve.
+        long[] demoted = NonProduction.recipes(graph, in.tokens(), null);
         double[] seed = seed(graph, in);
         double[] firstPass = settleReshaped(graph,
-                relax(graph, seed.clone(), in.passes(), in.states(), null),
-                in.passes(), in.states(), null);
+                relax(graph, seed.clone(), in.passes(), in.states(), null, demoted),
+                in.passes(), in.states(), null, demoted);
         Map<Integer, int[]> machineItems = in.machineItems();
         if (machineItems == null || machineItems.isEmpty()) {
-            return new CostTable(firstPass, null);
+            return new CostTable(firstPass, null, demoted);
         }
         double[] entry = machineEntryCosts(graph, machineItems,
-                new CostTable(firstPass, null));
+                new CostTable(firstPass, null, demoted));
         // A SECOND CLEAN RELAXATION FROM THE SAME SEED, not a continuation of the first.
         // Relaxation only ever lowers a cost, so the cheap prices pass one computed under the
         // optimistic flat entry would stick and the real entry costs would never propagate.
         double[] second = settleReshaped(graph,
-                relax(graph, seed.clone(), in.passes(), in.states(), entry),
-                in.passes(), in.states(), entry);
-        return new CostTable(second, entry);
+                relax(graph, seed.clone(), in.passes(), in.states(), entry, demoted),
+                in.passes(), in.states(), entry, demoted);
+        return new CostTable(second, entry, demoted);
     }
 
     /**
@@ -612,7 +644,7 @@ public strictfp final class Cost {
      * makes it safe to iterate a bitset here while python iterates an unordered set.
      */
     static double[] settleReshaped(RecipeGraph graph, double[] cost, int passes,
-                                   MachineStates states, double[] entry) {
+                                   MachineStates states, double[] entry, long[] demoted) {
         boolean stranded = false;
         for (int key = 0; key < cost.length; key++) {
             if (graph.isReshapedOnly(key) && Double.isInfinite(cost[key])) {
@@ -628,7 +660,7 @@ public strictfp final class Cost {
                 cost[key] = BASE_RAW_COST;
             }
         }
-        return relax(graph, cost, passes, states, entry);
+        return relax(graph, cost, passes, states, entry, demoted);
     }
 
     /** Starting costs, before any recipe is considered. Shared by both relaxation passes. */
@@ -781,7 +813,7 @@ public strictfp final class Cost {
 
     /** One Bellman-Ford style relaxation over every recipe, mutating and returning `cost`. */
     static double[] relax(RecipeGraph graph, double[] cost, int passes, MachineStates states,
-                          double[] entry) {
+                          double[] entry, long[] demoted) {
         RecipeStore recipes = graph.recipes();
         double[] machineCost = new double[graph.categoryCount()];
         boolean[] computed = new boolean[graph.categoryCount()];
@@ -802,9 +834,13 @@ public strictfp final class Cost {
             int changed = 0;
             for (int recipe = 0; recipe < recipes.count(); recipe++) {
                 boolean transfer = recipes.isTransfer(recipe);
+                boolean notProduction = demoted != null && Bits.get(demoted, recipe);
                 double base = machineCost[recipes.categoryId(recipe)];
                 if (transfer) {
                     base += TRANSFER_PENALTY;
+                }
+                if (notProduction) {
+                    base += NON_PRODUCTION_PENALTY;
                 }
                 double ingredients = 0.0;
                 boolean unreachable = false;
@@ -880,6 +916,13 @@ public strictfp final class Cost {
         double total = categoryEntryCost(recipes.categoryId(recipeId), states, cost);
         if (recipes.isTransfer(recipeId)) {
             total += TRANSFER_PENALTY;
+        }
+        // OFF THE TABLE, like the machine entry above and for the same reason: the ranker must
+        // charge the same verdict the relaxation used, and recomputing it here is how the two
+        // would drift. A table carrying none -- a hand-built one in a test -- charges nothing,
+        // which is the pre-#211 behaviour.
+        if (cost != null && cost.isNotProduction(recipeId)) {
+            total += NON_PRODUCTION_PENALTY;
         }
         for (int slot = recipes.slotStart(recipeId); slot < recipes.slotEnd(recipeId); slot++) {
             int alt = pick != null ? pick.pick(slot) : cheapestAlternative(cost, graph, slot);
