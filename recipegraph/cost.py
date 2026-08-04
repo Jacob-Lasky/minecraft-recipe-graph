@@ -355,35 +355,53 @@ TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
 # open question 1 in that issue and is unanswered.
 EMC_COST = 0.5
 
-# Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
-# The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
-# formula change moves none of them, so without this a machine holding `.cost-cache.json`
-# would keep serving prices computed by the old arithmetic forever -- the one failure this
-# cache must never have, and one that looks like "the fix did not work" rather than like a
-# stale cache.
+# Bumped whenever THE CODE WOULD PRICE THE SAME INPUTS DIFFERENTLY, and folded into
+# `fingerprint`. The cache is keyed on the inputs (graph, stock, machine states, tuning
+# constants), so any such change moves none of them, and without this a machine holding
+# `.cost-cache.json` would keep serving the old prices forever -- the one failure this cache
+# must never have, and one that looks like "the fix did not work" rather than like a stale
+# cache.
 #
-# #175 ADDED THE CATALYST TERM TO `_relax` AND DELIBERATELY DID NOT BUMP THIS. That looks like
-# an omission, so here is the argument, and it rests on a measurement rather than on taste.
+# "THE PER-UNIT FORMULA IN `estimate`" IS WHAT THIS SAID, AND IT IS TOO NARROW. That wording
+# names one way to earn a bump and reads as the only one, so a change that moves prices without
+# touching any arithmetic looks exempt. #136 is the case: it added 14 keys to the MEMBERSHIP of
+# `Graph.unsourced_keys`, which `_seed` prices at `UNSOURCED_COST`. No formula, no constant, and
+# 10,810 of 161,531 prices moved. Measured before the bump, on one graph and one scenario: the
+# two trees produced the SAME fingerprint, and a cache written by the earlier one was served to
+# the later one in 0.1s with the fixed keys back at `BASE_RAW_COST`. The fix came back silently.
 #
-# The bump exists to stop a warm `.cost-cache.json` serving prices computed by different
-# arithmetic. The retained-input term cannot produce a different price on any graph predating the
-# `p` field: with every slot at the default chance, `retained` is 0.0 and the ingredient term
-# is `c * 1.0`, and `x + 0.0 == x` and `x * 1.0 == x` are exact in IEEE 754 rather than
-# approximately true. Measured, not asserted: `estimate` over a 40-recipe graph exercising
-# batch outputs, fluids, an oredict slot, a transfer and three machine bands produces the
-# byte-identical price digest d89f2eb4 before and after the change.
+# So the test is the OUTPUT, not the mechanism. A different table for the same inputs earns a
+# bump, whether it came from the arithmetic, from a seed rule, from the membership of a set
+# derived off the graph, or from a relaxation ordering.
 #
-# And a graph that DOES carry `p` arrives as a new `graph.json`, whose size and mtime are
-# already hashed below, so that cache is invalidated by the file rather than by this number.
-# There is no input for which a stale cache could serve a wrong price, which is the only thing
-# this counter is for.
+# AND DECLINING IS A POSITIVE CLAIM THAT PRICES ARE BIT-IDENTICAL, which needs a measurement
+# like any other claim in this file. #175 declined, and was right, and its argument is the
+# worked example of doing that properly:
 #
-# SO THE RULE IS NOT WEAKENED, IT IS MET: bump this the moment the RETENTION ARITHMETIC changes
-# (a different amortisation, a threshold, a non-linear scaling of a fractional chance), because
-# then two graphs with identical files really would price differently. Adding a field that is
-# absent everywhere is not that. `tests/test_plan_fixtures.py` pins this number against the
-# fixtures, so a bump costs an oracle regeneration and must ride with one.
-FORMULA_VERSION = 10
+#   #175 ADDED THE CATALYST TERM TO `_relax` AND DELIBERATELY DID NOT BUMP THIS. That looks like
+#   an omission, so here is the argument, and it rests on a measurement rather than on taste.
+#
+#   The bump exists to stop a warm `.cost-cache.json` serving prices computed by different
+#   arithmetic. The retained-input term cannot produce a different price on any graph predating
+#   the `p` field: with every slot at the default chance, `retained` is 0.0 and the ingredient
+#   term is `c * 1.0`, and `x + 0.0 == x` and `x * 1.0 == x` are exact in IEEE 754 rather than
+#   approximately true. Measured, not asserted: `estimate` over a 40-recipe graph exercising
+#   batch outputs, fluids, an oredict slot, a transfer and three machine bands produces the
+#   byte-identical price digest d89f2eb4 before and after the change.
+#
+#   And a graph that DOES carry `p` arrives as a new `graph.json`, whose size and mtime are
+#   already hashed below, so that cache is invalidated by the file rather than by this number.
+#   There is no input for which a stale cache could serve a wrong price, which is the only thing
+#   this counter is for.
+#
+#   SO THE RULE IS NOT WEAKENED, IT IS MET: bump this the moment the RETENTION ARITHMETIC
+#   changes (a different amortisation, a threshold, a non-linear scaling of a fractional
+#   chance), because then two graphs with identical files really would price differently.
+#   Adding a field that is absent everywhere is not that.
+#
+# `tests/test_plan_fixtures.py` pins this number against the fixtures, so a bump costs an oracle
+# regeneration and must ride with one. #136 learned that the hard way: the guard failed first.
+FORMULA_VERSION = 11
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -910,8 +928,10 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     a manual override changes machine state without touching the graph, and mtimes move
     when a file is rewritten with identical contents. Also folds in the tuning constants,
     so editing MACHINE_COST invalidates the cache instead of silently reusing prices
-    computed under the old table. FORMULA_VERSION covers the other half of that: a change
-    to the arithmetic rather than to a constant, which moves no other input at all.
+    computed under the old table. FORMULA_VERSION covers the other half of that: a CHANGE TO
+    THE CODE, which moves no input here at all. This docstring used to say "a change to the
+    arithmetic", and see FORMULA_VERSION for why that is too narrow -- #136 moved 10,810
+    prices with no arithmetic and no constant, and this function could not tell.
     """
     h = hashlib.sha256()
     try:

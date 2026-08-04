@@ -421,6 +421,15 @@ class StorageBlockTest(unittest.TestCase):
         self.assertEqual(cost_mod.UNSOURCED_COST, table["mod:block"])
         self.assertGreater(table["mod:block"], cost_mod.BASE_RAW_COST)
 
+    def test_the_formula_version_moved(self):
+        # A WARM `.cost-cache.json` MUST NOT SURVIVE THIS, and the same assertion guards #61's,
+        # #93's, #112's and #176's price moves for the same reason. Measured before the bump: the
+        # two trees produced an IDENTICAL fingerprint while 10,810 prices differed, and a cache
+        # written by the earlier one was served to the later one in 0.1s with the 14 fixed keys
+        # back at 1.0. `assertGreaterEqual` rather than equality on purpose, so a later bump does
+        # not have to come back and edit this line.
+        self.assertGreaterEqual(cost_mod.FORMULA_VERSION, 11)
+
 
 class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
     """`PROCESSED_FORM_PREFIXES` decides who gets marked, so the two copies must agree.
