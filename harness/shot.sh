@@ -12,10 +12,17 @@
 #   harness/shot.sh fixture fixture -Dmcrecipedump.shotDebugOverlay=true
 #
 # It builds a container image if one is missing, starts Xvfb plus mesa's llvmpipe inside it,
-# runs RetroFuturaGradle's `runClient` against a five-mod dev set (Forge, MixinBooter,
-# ModularUI, HEI, JEC and this mod), and the mod opens the named screen, writes the PNG and
-# exits. Screens are registered one line each in `ShotScreens`; `mod/build.gradle`'s
-# `stageDevMods` decides what is in the dev set.
+# runs RetroFuturaGradle's `runClient` against the dev mod set, and the mod opens the named
+# screen, writes the PNG and exits. Screens are registered one line each in `ShotScreens`;
+# `mod/build.gradle`'s `stageDevMods` decides what is in the dev set.
+#
+# THE DEV SET IS FIVE STAGED JARS AND TEN LOADED MODS, and those two numbers are both right.
+# The jars are MixinBooter, ModularUI, HEI, JEC and AE2-UEL, staged out of the pack into
+# `mod/run/mods`; Forge and this mod are not among them because neither is staged. Ten is what
+# FML reports ("successfully loaded 10 mods") because Forge alone answers to four mod IDs.
+# Quote whichever number the sentence needs and say which it is: this comment previously said
+# "five-mod" while naming six things and omitting AE2, and the README and build.gradle each
+# gave a third and fourth answer.
 #
 # The exit code is the verdict: 0 means the PNG at the reported path is this run's. A PNG on
 # disk on its own proves nothing, because a failed run leaves the previous one there.
@@ -96,8 +103,9 @@ MEMORY="${MEMORY:-4g}"
 SHOT_WIDTH="${SHOT_WIDTH:-1280}"
 SHOT_HEIGHT="${SHOT_HEIGHT:-800}"
 
-if [ ! -d "$LOCAL_BUILD/deps" ]; then
-    echo "shot.sh: no dev mod jars at $LOCAL_BUILD/deps" >&2
+DEPS_NAME="${DEPS_NAME:-deps}"
+if [ ! -d "$LOCAL_BUILD/$DEPS_NAME" ]; then
+    echo "shot.sh: no dev mod jars at $LOCAL_BUILD/$DEPS_NAME" >&2
     echo "  stage them out of the pack first; see the minecraft-recipe-graph skill." >&2
     exit 1
 fi
@@ -131,7 +139,7 @@ gated docker run --rm \
     --user 99:100 \
     --memory="$MEMORY" --memory-swap="$MEMORY" \
     -v "$HOST_REPO:/repo" \
-    -v "$HOST_BUILD/deps:/deps:ro" \
+    -v "$HOST_BUILD/$DEPS_NAME:/deps:ro" \
     -v "$HOST_BUILD/$CACHE_NAME:/gradle" \
     -v "$HOST_BUILD/shots:/shots" \
     $ORACLE_ARGS \
@@ -155,7 +163,18 @@ set -e
 ELAPSED=$(( $(date +%s) - STARTED ))
 
 if [ "$STATUS" -ne 0 ]; then
-    echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); no screenshot" >&2
+    # A FAILED RUN CAN STILL HAVE LEFT A GOOD PNG, and saying "no screenshot" over one is how
+    # the picture that explains the failure gets thrown away unlooked-at. A probe screen that
+    # captures fine and then reports that its own criteria did not hold exits non-zero with a
+    # valid capture on disk -- see `ShotHarness.EXIT_VERDICT_FAILED`. Tested by presence rather
+    # than by exit code because `runClient` is a Gradle task, so every harness code arrives
+    # here as Gradle's own 1; the log says which, and so does the PNG.
+    if [ -s "$OUT_PNG" ]; then
+        echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); the PNG at $OUT_PNG IS this" \
+             "run's -- read the verdict in the log above before believing the picture" >&2
+    else
+        echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); no screenshot" >&2
+    fi
     exit "$STATUS"
 fi
 if [ ! -s "$OUT_PNG" ]; then

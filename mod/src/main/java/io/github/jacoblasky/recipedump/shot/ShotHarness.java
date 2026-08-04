@@ -7,11 +7,13 @@ import java.io.IOException;
 import javax.imageio.ImageIO;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiScreenWorking;
 import net.minecraft.util.ScreenShotHelper;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.FMLCommonHandler;
+import net.minecraftforge.fml.common.Loader;
+import net.minecraftforge.fml.common.LoaderState;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
 
@@ -92,11 +94,47 @@ public final class ShotHarness {
     /** 2 is what a player runs at; Minecraft's auto-scaler picks 4 at the shot resolution. */
     private static final int DEFAULT_GUI_SCALE = 2;
 
-    /** 0 is the PNG; everything else is the harness saying, in the log, why there is not one. */
+    /**
+     * 0 is the PNG; everything else is the harness saying, in the log, what went wrong.
+     *
+     * NOT ALWAYS "there is no PNG" any more. {@link #EXIT_VERDICT_FAILED} is returned by a run
+     * that captured a perfectly good picture and then reported that its own criteria did not
+     * hold, so 0 means BOTH that the PNG at the reported path is this run's AND that the screen
+     * did not fail itself.
+     *
+     * WHETHER THESE NUMBERS REACH `$?` DEPENDS ON WHO LAUNCHED THE CLIENT, and there are now
+     * two answers rather than one.
+     *
+     * Under `harness/shot.sh` they do NOT. That path runs the client as RetroFuturaGradle's
+     * `runClient` task, so a non-zero exit here fails the Gradle build and `gradlew` returns
+     * its own 1: every code below collapses to that before the script sees it. There they
+     * survive only in two places a person reads, Gradle's "finished with non-zero exit value
+     * N" line and the `!!` line this class logs on the way out.
+     *
+     * Under `harness/prodclient/prodshot.sh` they DO. That path launches a production client
+     * directly, with the container's entrypoint exec'ing into `launch.sh` exec'ing into
+     * `java`, so nothing between this call and the caller's `$?` can substitute a code of its
+     * own, and 2 can be told from 3 from 6 without reading the log.
+     *
+     * Which is why the log lines still have to say what happened in WORDS: one of the two
+     * callers cannot see the number, so a number is never the only record.
+     */
     private static final int EXIT_OK = 0;
     private static final int EXIT_NO_SCREEN = 2;
     private static final int EXIT_TIMEOUT = 3;
     private static final int EXIT_WRITE_FAILED = 4;
+    /**
+     * A screen that declared a verdict never gave one. See {@link ShotScreens#expectReport}.
+     *
+     * DISTINCT FROM {@link #EXIT_VERDICT_FAILED} ON PURPOSE, and do not merge the two. "The
+     * probe said nothing" is a fault in the harness or a flake; "the probe said no" is a
+     * finding about the thing under test. Collapsing them puts the reader of a non-zero exit
+     * back to guessing which of those two happened, and that guess is the whole reason this
+     * machinery exists.
+     */
+    private static final int EXIT_NO_VERDICT = 5;
+    /** A screen reported that its own criteria did not hold. See {@link #EXIT_NO_VERDICT}. */
+    private static final int EXIT_VERDICT_FAILED = 6;
 
     private ShotHarness() {
     }
@@ -186,29 +224,52 @@ public final class ShotHarness {
                 if (!worldReady(mc)) {
                     return;
                 }
-            } else if (!(mc.currentScreen instanceof GuiMainMenu)) {
+            } else if (!readyAtMenu(mc)) {
                 waitOrTimeOut(mc.currentScreen);
                 return;
             }
             setGuiScale();
             setModularUiDebugOverlay(Boolean.getBoolean(PROP_DEBUG_OVERLAY));
+            // WHAT WAS ON SCREEN BEFORE, so the check below can compare identity. The old
+            // check was `instanceof GuiMainMenu`, which does not merely fail to fire under a
+            // menu mod -- it fails SILENTLY IN THE OTHER DIRECTION. Under `CustomMainMenu` an
+            // opener that did nothing at all would leave a screen that is not a `GuiMainMenu`,
+            // so the harness would call it opened and photograph the menu. Identity says
+            // "nothing changed" without knowing what the menu is.
+            GuiScreen before = mc.currentScreen;
             String problem = ShotScreens.open(spec);
             if (problem != null) {
                 log("cannot open the requested screen: " + problem);
                 exit(EXIT_NO_SCREEN);
                 return;
             }
-            if (mc.currentScreen == null || mc.currentScreen instanceof GuiMainMenu) {
+            if (!ShotScreens.noScreenExpected()
+                    && (mc.currentScreen == null || mc.currentScreen == before)) {
                 // The opener ran without throwing and the screen did not change. Reported
                 // separately from a throw because the cause is different: the screen decided
-                // not to open, rather than failing to.
-                log("screen '" + spec + "' did not replace the main menu");
+                // not to open, rather than failing to. Skipped only for an entry that SAID it
+                // opens no screen -- see `ShotScreens.expectNoScreen`, which `dump` uses
+                // because a command's output is chat, and chat is the HUD.
+                log("screen '" + spec + "' did not replace "
+                        + (before == null ? "anything" : before.getClass().getName()));
                 exit(EXIT_NO_SCREEN);
                 return;
             }
-            log("opened " + mc.currentScreen.getClass().getName()
-                    + "; settling " + settleFrames + " frames");
-            framesLeft = settleFrames;
+            // THE LARGER OF THE TWO. A screen that needs longer than the default says so
+            // through `requestSettleFrames`, and it says so during `open` -- which is why
+            // this is read here and not in the constructor.
+            int settle = Math.max(settleFrames, ShotScreens.settleRequest());
+            // `currentScreen` is legitimately null for an entry that opens none, so this
+            // cannot dereference it. It was safe before only because the check above
+            // guaranteed non-null on every path that reached here.
+            log("opened " + (mc.currentScreen == null
+                            ? "no screen; capturing the HUD"
+                            : mc.currentScreen.getClass().getName())
+                    + "; settling " + settle + " frames"
+                    + (settle > settleFrames
+                            ? " (the screen asked for " + ShotScreens.settleRequest() + ")"
+                            : ""));
+            framesLeft = settle;
         }
 
         @SubscribeEvent
@@ -227,11 +288,47 @@ public final class ShotHarness {
                 framesLeft = framesLeft - 1;
                 return;
             }
+            if (holding()) {
+                return;
+            }
             if (timedFrames > 0 && timed <= timedFrames) {
                 measure();
                 return;
             }
             capture();
+        }
+
+        /**
+         * Is a screen still working, and may the run keep waiting for it?
+         *
+         * THE DEADLINE IS THE WHOLE REASON THIS IS SAFE TO OFFER. A screen that can postpone
+         * the capture indefinitely is a screen that can hang the container, and a hung
+         * container on Tower holds the gradle lock and fails the NEXT build with a timeout
+         * naming neither -- the exact damage {@link #exit}'s header records. So the run's own
+         * `-Dmcrecipedump.shotTimeoutSeconds` applies here too, and running past it is a
+         * TIMEOUT rather than a capture: whatever is on screen mid-job is not this run's
+         * answer, and photographing it would produce a plausible picture of a partial dump.
+         *
+         * Progress is logged on the same fifteen-second cadence as the pre-menu wait, because
+         * a `/recipedump` takes minutes and a silent container is indistinguishable from a
+         * dead one to whoever is watching it.
+         */
+        private boolean holding() {
+            ShotScreens.Hold screen = ShotScreens.hold();
+            if (screen == null || !screen.busy()) {
+                return false;
+            }
+            long now = System.nanoTime();
+            if (now > deadlineNanos) {
+                log("timed out waiting for the screen to finish its work");
+                exit(EXIT_TIMEOUT);
+                return true;
+            }
+            if (now - lastReportNanos > 15_000_000_000L) {
+                lastReportNanos = now;
+                log("still working; holding the capture");
+            }
+            return true;
         }
 
         /**
@@ -396,7 +493,7 @@ public final class ShotHarness {
          */
         private boolean worldReady(Minecraft mc) {
             if (!worldRequested) {
-                if (mc.currentScreen != null && !(mc.currentScreen instanceof GuiMainMenu)) {
+                if (!readyAtMenu(mc)) {
                     waitOrTimeOut(mc.currentScreen);   // still on the loading screens
                     return false;
                 }
@@ -534,6 +631,41 @@ public final class ShotHarness {
         }
     }
 
+    /**
+     * Has the client finished loading and settled on a menu the harness may replace?
+     *
+     * NOT `instanceof GuiMainMenu`, AND THAT IS A BLOCKER RATHER THAN A TIDY-UP.
+     * `CustomMainMenu-MC1.12.2-2.0.9.1.jar` is in the target pack and replaces the menu with
+     * its own `GuiScreen` subclass, which is not a `GuiMainMenu`. Both of this class's waits
+     * used the class check, so a 410-jar run would have booted every mod correctly, reached a
+     * perfectly good menu, logged "waiting for the main menu" every fifteen seconds and exited
+     * 3 after ten minutes. That failure reads as "the pack cannot boot headlessly", which is
+     * the wrong conclusion, and it would have been drawn from the most expensive run this
+     * project has ever attempted. #146.
+     *
+     * VERIFIED AGAINST DECOMPILED FORGE RATHER THAN ASSUMED, because the whole fix rests on
+     * the comparison being an ordinal one. `LoadController:338` is
+     * `state.ordinal() >= state.ordinal() && state != ERRORED`; AVAILABLE is ordinal 6 and the
+     * SERVER_* states a world load moves through are 7 to 11. So this stays true once mods have
+     * loaded AND through a world load, which is what the world path below needs.
+     *
+     * IT ALSO MAKES THE FORGE ERROR SCREENS NEED NO ENUMERATION. ERRORED is ordinal 12 and
+     * would satisfy a naive `>=`, which is exactly why Forge excludes it explicitly -- so a
+     * client sitting on `GuiModsMissing`, `GuiSortingProblem` or a custom mod-error screen
+     * never reads as ready here, and `waitOrTimeOut` goes on naming it in the log.
+     *
+     * The one screen shown AFTER loading completes and still not ready is vanilla's progress
+     * screen, which is the only class this needs to know by name. It is also the only one our
+     * own runs have ever been observed waiting on.
+     */
+    private static boolean readyAtMenu(Minecraft mc) {
+        if (!Loader.instance().hasReachedState(LoaderState.AVAILABLE)) {
+            return false;
+        }
+        GuiScreen screen = mc.currentScreen;
+        return screen != null && !(screen instanceof GuiScreenWorking);
+    }
+
     /** Package-visible so `ShotHarnessTest` can pin the fallback without a running client. */
     static int intProperty(String name, int fallback) {
         String raw = System.getProperty(name);
@@ -549,16 +681,50 @@ public final class ShotHarness {
     }
 
     /**
-     * Stop the JVM with `code`.
+     * Let a screen's own verdict decide the exit code, in both directions.
+     *
+     * SILENCE IS NOT AN OUTCOME, and neither is a NO nobody reads. A probe screen that logs
+     * nothing produces a log identical to one where the screen was never wired up; a probe
+     * that logs "criterion false" and exits 0 produces a green run over a finding. Both get
+     * read as clean by whoever greps for a failure, so both are non-zero here, and with
+     * DIFFERENT codes -- see {@link #EXIT_NO_VERDICT}.
+     *
+     * ALL THREE OUTCOMES ARE PINNED BY `ShotHarnessTest`. Be precise about what that buys: the
+     * predecessor of this method was correct in isolation and the defect was in its CALLER --
+     * `Ae2ProbeShot` cleared the debt on all five of its failure paths and none of its success
+     * path, which would have inverted both directions at once. No test of this method would
+     * have caught that. What prevents it recurring is the API shape, where there is no call
+     * meaning only "I spoke"; what these tests prevent is the three outcomes being collapsed
+     * back into two by a later simplification.
+     *
+     * PACKAGE-VISIBLE so that mapping is assertable without a running client, since a client
+     * run costs 105 seconds and only ever exercises one of the three branches.
+     */
+    static int withVerdictCheck(int code) {
+        String owed = ShotScreens.pendingReport();
+        if (owed != null) {
+            log("!! the screen never reported '" + owed + "'. The PNG may be fine and the run is "
+                    + "NOT: a probe that says nothing looks exactly like a probe that never ran.");
+            return code == EXIT_OK ? EXIT_NO_VERDICT : code;
+        }
+        String failure = ShotScreens.failedVerdict();
+        if (failure != null) {
+            log("!! the screen's verdict was NO: " + failure + ". The PNG is this run's and the "
+                    + "run still failed, which is the screen reporting a finding rather than "
+                    + "the harness reporting a fault.");
+            return code == EXIT_OK ? EXIT_VERDICT_FAILED : code;
+        }
+        return code;
+    }
+
+    /**
+     * Flush, tear down any world, and quit with `code`.
      *
      * `FMLCommonHandler.exitJava` rather than `Minecraft.shutdown()`, because shutdown()
      * only asks the game loop to stop and then runs the full teardown, which can block on
      * the sound engine -- and a harness that sometimes hangs AFTER writing the PNG is a
      * harness nobody trusts the exit code of. The PNG is already flushed to disk by the time
      * this is called, so there is nothing left to lose by leaving early.
-     */
-    /**
-     * Flush, tear down any world, and quit.
      *
      * THE WORLD MUST GO FIRST OR THE PROCESS HANGS, and it hangs after writing a perfectly
      * good PNG. Measured: the first `-Dmcrecipedump.shotWorld` run captured its screenshot,
@@ -574,6 +740,7 @@ public final class ShotHarness {
      * exit path with an untested branch.
      */
     private static void exit(int code) {
+        code = withVerdictCheck(code);
         System.out.flush();
         try {
             Minecraft mc = Minecraft.getMinecraft();
