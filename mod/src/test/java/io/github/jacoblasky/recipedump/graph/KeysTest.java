@@ -127,6 +127,22 @@ public class KeysTest {
     }
 
     @Test
+    public void theTwoOreGroupSplitsDivideTheFormsBetweenThem() {
+        // The naming set and the question set, and the split between them is #136's second
+        // half: `Unsourced.obtainableSibling` asks `storageMaterialOfOreGroup` whether a key
+        // is a shape of a material, then names a sibling through the processed split only, so
+        // a decorative block can never be the form a reader is pointed at. Mirrors
+        // `model.split_ore_group` and `model.storage_form_material`.
+        assertEquals("Sednanite", Keys.materialOfOreGroup("nuggetSednanite"));
+        assertNull(Keys.materialOfOreGroup("blockMyrmitite"));
+        assertEquals("Myrmitite", Keys.storageMaterialOfOreGroup("blockMyrmitite"));
+        assertNull(Keys.storageMaterialOfOreGroup("nuggetSednanite"));
+        // A bare form name has no material after it, in both splits.
+        assertNull(Keys.materialOfOreGroup("dust"));
+        assertNull(Keys.storageMaterialOfOreGroup("block"));
+    }
+
+    @Test
     public void everyNamespaceReportsItsOwnKind() {
         assertEquals("item", Keys.kind("minecraft:stone"));
         assertEquals("fluid", Keys.kind("fluid:water"));

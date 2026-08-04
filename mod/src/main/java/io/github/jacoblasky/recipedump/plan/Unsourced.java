@@ -44,6 +44,14 @@ final class Unsourced {
         if (realProducerCount(g, keyId, scratch) > 0) {
             return -1;
         }
+        // A KEY THE PACK CALLS AN ORE IS OBTAINABLE, which outranks anything this predicate can
+        // say: {@link Cost#seed} reads the world-ore set as a CEILING on what mining costs, and
+        // the unsourced seed runs later and only raises. {@link Solver} returns "mined, not
+        // crafted" before ever consulting this mark, so a badged world ore would show up only
+        // in a sweep. Mirrors `Graph.reachable_form` in python, which carries the measurement.
+        if (g.isWorldOre(keyId)) {
+            return -1;
+        }
         // A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is evidence of
         // nothing: `producers` widens a concrete meta to `base:*` and never the reverse.
         // Measured on the reference graph -- without this, `natura:sticks:*` is badged
@@ -131,6 +139,12 @@ final class Unsourced {
      * freezes those: most producers wins, then the key string. That also makes the answer
      * "the form the pack actually makes" rather than whichever came back first.
      *
+     * A `block&lt;Material&gt;` KEY ASKS THE SAME QUESTION, which is #136's second half: a
+     * storage block nobody can press is as unobtainable as a nugget nobody can split. Only
+     * the question widens. The search below still matches groups through
+     * {@link Keys#materialOfOreGroup}, which excludes `block`, so the form NAMED is never a
+     * block. A processed group wins over a storage one when a key carries both.
+     *
      * Mirrors `Graph.obtainable_sibling` in python and is held to it by the golden gate.
      */
     private static int obtainableSibling(RecipeGraph g, int keyId, IntArray scratch) {
@@ -138,6 +152,9 @@ final class Unsourced {
         Csr ores = g.oresOf();
         for (int p = ores.start(keyId); p < ores.end(keyId) && material == null; p++) {
             material = Keys.materialOfOreGroup(g.oreGroupName(ores.at(p)));
+        }
+        for (int p = ores.start(keyId); p < ores.end(keyId) && material == null; p++) {
+            material = Keys.storageMaterialOfOreGroup(g.oreGroupName(ores.at(p)));
         }
         if (material == null) {
             return -1;

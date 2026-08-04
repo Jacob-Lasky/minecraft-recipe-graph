@@ -691,17 +691,21 @@ class Solver:
                 # the reference graph, 125 with any producer, and those 125 are exactly two
                 # tiers, the craftable fresh model and Self-Aware.
                 #
-                # THE MARK IS DISPLAY-ONLY AND MUST STAY THAT WAY. The underlying defect is
-                # `cost._seed` giving an unreachable leaf `BASE_RAW_COST`, which is what made
-                # the tier the CHEAPEST thing in the plan and won it the route. Fixing that
-                # is #136 and needs both cost audits; moving a price from here would change
-                # routing with none of that scrutiny, and no test here would notice.
+                # THE MARK IS DISPLAY-ONLY AND MUST STAY THAT WAY, WHICH IS NOT THE SAME AS
+                # THE SET BEING UNPRICED. The underlying defect was `cost._seed` giving an
+                # unreachable leaf `BASE_RAW_COST`, which made the tier the CHEAPEST thing in
+                # the plan and won it the route; #176 fixed that where it belongs, by seeding
+                # `graph.unsourced_keys` at `UNSOURCED_COST`. So the price and the badge read
+                # one predicate and agree by construction. DO NOT move a price from HERE
+                # instead: this branch runs once per plan node, after the routing decision
+                # that a price exists to inform, and no test in this module would notice.
                 node["unsourced"] = True
-                # TWO WORDINGS, because they are two different claims and a reader has to be
-                # able to act on the difference. An NBT STATE means "you have the item, this
-                # tier of it is out of reach"; a processed FORM means "this shape of the
-                # material is not made at all, use the other one". Collapsing them into one
-                # sentence would make the second read as though levelling were involved.
+                # ONE WORDING PER CLAIM, because a reader has to be able to act on the
+                # difference: an NBT STATE means "you have the item, this tier of it is out of
+                # reach", while a processed FORM means "this shape of the material is not made
+                # at all, use the other one". Collapsing them would make the second read as
+                # though levelling were involved. `_unsourced_note` holds the set; this said
+                # TWO before #170 added the produced-variant sentence, and there are three.
                 node["note"] = self._unsourced_note(key, other)
             self.leaf_totals[key] += remainder
             return node
@@ -710,8 +714,10 @@ class Solver:
         # THE SCORES ARE KEPT, NOT DISCARDED, AND THAT IS #181's WHOLE COST. `sorted(key=...)`
         # calls `score_recipe` exactly once per candidate and then throws the values away, so
         # materialising them here is the SAME number of scoring calls -- measured, not
-        # assumed: `plan-fluid-chain`'s `work` is unchanged at 28,012, and `work` counts every
-        # `expand` including the ones backtracking discards.
+        # assumed: #181 left `plan-fluid-chain`'s `work` unchanged at 28,012, and `work` counts
+        # every `expand` including the ones backtracking discards. That fixture reads 28,024
+        # since #136 priced the storage blocks, which is a different branch being walked
+        # rather than this loop scoring more often; #181's measured property is untouched.
         #
         # DO NOT RE-SCORE FROM A REPORTING PATH. A second `score_recipe` pass would be
         # correct, would produce identical output, and would be invisible in every test,

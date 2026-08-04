@@ -191,12 +191,13 @@ FLUID_SCALE = 1.0 / 1000.0
 # THAT ASSUMPTION IS SOMETIMES FALSE AND #136 IS WHERE IT SHOWS. A key nothing makes may be a
 # thing you pick up, or it may be a PROCESSED FORM the pack simply never authored a recipe
 # for -- the Sednanite Nugget has no producer at all, and 9 of them at 1.0 beat mining the
-# ore at 801.0, so the shopping list named a step nobody can perform. Nothing structural
-# separates the two cases; `Graph.reachable_form` reports the ones it CAN identify rather
-# than repricing them, deliberately.
+# ore at 801.0, so the shopping list named a step nobody can perform. This constant is still
+# the right answer for a cobblestone, so the fix is a NARROWER set rather than a different
+# number: `Graph.reachable_form` is the set with positive evidence the graph cannot explain
+# the route, and `_seed` prices exactly that set at `UNSOURCED_COST`.
 #
-# THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED. Do not re-propose one
-# without new evidence, and add to this list rather than rediscovering it:
+# FOUR WAYS OF REPRICING IT HAVE BEEN BUILT OR MEASURED AND REJECTED, none of them that one.
+# Do not re-propose one without new evidence, and add to this list rather than rediscovering it:
 #
 #  * NO SEED AT ALL for an unobtainable processed form ("infinity is the honest reading").
 #    243 keys go finite -> infinity on the reference graph, `abyssalcraft:nitre` and
@@ -205,18 +206,64 @@ FLUID_SCALE = 1.0 / 1000.0
 #  * FLOOR IT AT THE MATERIAL'S CHEAPEST OBTAINABLE MEMBER. Circular. The floor picks the
 #    INGOT, whose price was itself earned through the nugget, so the nugget rises to exactly
 #    the number the bug produced and nothing moves.
+#  * INHERIT IT FROM A PRODUCED NBT VARIANT OF THE SAME KEY. A DIFFERENT RULE FROM THE ONE
+#    ABOVE, not a second reason for it: that one keys on the oredict material family, this one
+#    on the NBT axis. Not circular the way the member floor is, and wrong for a different
+#    reason: a container's produced variants are the FILLED forms of it.
+#    `thermalexpansion:reservoir:32000` is the harm. One recipe demands the bare key, both of
+#    its variants are Fluid Transposer output, and the rule prices a Creative Reservoir at
+#    521.0 against a 2,000 floor -- 4x understated, into a slot that really does ask for one.
+#    `extratrees:drink` is the same shape at its clearest and its weakest: a Beer Mug whose 30
+#    variants are all filled glasses made from an EMPTY glass variant, so the rule would price
+#    "Beer Mug" at what a Mug of Apple Juice costs, and nothing demands that key directly so no
+#    plan moves for it. A one-hop cycle check saves neither, because the empty container is
+#    another VARIANT and not the bare key.
+#
+#    A FILLED CONTAINER READS AS A MADE THING FOR TWO INDEPENDENT REASONS, and it is worth
+#    knowing which one is load-bearing before reaching for `transfer` as the discriminator:
+#
+#      1. THE FILL DIRECTION CAN NEVER BE FLAGGED. Both of `index.mark_container_transfers`'
+#         signals skip any recipe with no FLUID output, and a fill outputs an ITEM -- the
+#         filled container. So no `transposer_fill` recipe is ever a transfer, by construction
+#         rather than by omission, which is what `real_producers` means by "filling a container
+#         IS real work and stays; only the fluid direction is fake".
+#      2. A FLAGGED EMPTY IS NOT FILTERED OUT FOR AN ITEM KEY. `real_producers` drops transfers
+#         only when the key is a fluid, so a marked `transposer_extract` still counts as a
+#         producer of the emptied container.
+#
+#    Reason 1 is the one that decides both cases above: `reachable_form` names the FILL variant
+#    in each, and that variant's producer was never a candidate for flagging. So a rule keying
+#    on `Recipe.transfer` cannot fix this -- measured on `extratrees:drink`, all 30 variants
+#    have a non-transfer producer and such a rule discriminates nothing at all. Restricting the
+#    rule to variants the key's own family does not make is what #170 proposes; the
+#    unrestricted rule is what this entry refuses.
+#
+#    Measured on graph-oracle.json by the agent on #170, and recorded here rather than on that
+#    branch because the branch is a draft and this list only works if it outlives the attempts.
+#    The 521.0 is their number under their rule; the producer and demand counts above were
+#    re-checked here. NOTE WHAT IT DOES NOT ARGUE AGAINST: #176 assigns the flat
+#    `UNSOURCED_COST` and inherits nothing, so both keys sit at 2,000 today rather than at a
+#    filled container's price. The hazard is specific to inheritance.
 #  * FLOOR IT AT THE MATERIAL'S WORLD ORE, re-seeded into a clean relaxation. Structurally
 #    sound and measured clean -- 6 keys floored, 0 lost, 0 cheaper, every control unchanged
-#    -- and it still produces a WORSE plan than the bug: with the nugget gone the solver
-#    falls to a cyclic route whose shopping list contains the item being planned. The root
-#    defect is that `score_recipe` ranks `cheap` above `-cyclic`, so a cheap cycle beats an
-#    expensive real route; fix that first and this may be moot.
+#    -- and it still produced a WORSE plan than the bug at the time: with the nugget gone the
+#    solver fell to a cyclic route whose shopping list contained the item being planned. That
+#    second defect was the deeper one and #172 fixed it in `score_recipe`, which is why the
+#    prediction "fix that first and this may be moot" came true: #176 then repriced the
+#    nuggets with no ore floor at all, and the reported plan routes through the ore. The rule
+#    stays rejected, because it is now redundant AND it keys on the wrong thing -- an ore
+#    tells you nothing about a material that has none.
 #
-# A FOURTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
-# TABLE. `_relax` only ever LOWERS, which `estimate` already states as the reason machine
-# entry costs need a second clean pass -- so raising a price after relaxation leaves every
-# consumer holding the price it banked before the raise. Measured: the nugget went 1.0 to
-# 10.0 and the ingot stayed at 10.0. A raise has to be an INPUT to a relaxation.
+# A FIFTH FINDING, AND IT CONSTRAINS ANY REPLACEMENT RATHER THAN REJECTING ONE CANDIDATE:
+# A FLOOR CANNOT BE PATCHED INTO A SETTLED TABLE. `_relax` only ever LOWERS, which `estimate`
+# already states as the reason machine entry costs need a second clean pass -- so raising a
+# price after relaxation leaves every consumer holding the price it banked before the raise.
+# Measured: the nugget went 1.0 to 10.0 and the ingot stayed at 10.0. A raise has to be an
+# INPUT to a relaxation, which is how #176 seeds `unsourced_keys` and why widening that set
+# propagates for free.
+#
+# (This read "general rather than about ores", which was true when every rule above it was
+# ore-shaped. The fourth is not.)
 BASE_RAW_COST = 1.0
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
@@ -351,35 +398,53 @@ TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
 # open question 1 in that issue and is unanswered.
 EMC_COST = 0.5
 
-# Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
-# The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
-# formula change moves none of them, so without this a machine holding `.cost-cache.json`
-# would keep serving prices computed by the old arithmetic forever -- the one failure this
-# cache must never have, and one that looks like "the fix did not work" rather than like a
-# stale cache.
+# Bumped whenever THE CODE WOULD PRICE THE SAME INPUTS DIFFERENTLY, and folded into
+# `fingerprint`. The cache is keyed on the inputs (graph, stock, machine states, tuning
+# constants), so any such change moves none of them, and without this a machine holding
+# `.cost-cache.json` would keep serving the old prices forever -- the one failure this cache
+# must never have, and one that looks like "the fix did not work" rather than like a stale
+# cache.
 #
-# #175 ADDED THE CATALYST TERM TO `_relax` AND DELIBERATELY DID NOT BUMP THIS. That looks like
-# an omission, so here is the argument, and it rests on a measurement rather than on taste.
+# "THE PER-UNIT FORMULA IN `estimate`" IS WHAT THIS SAID, AND IT IS TOO NARROW. That wording
+# names one way to earn a bump and reads as the only one, so a change that moves prices without
+# touching any arithmetic looks exempt. #136 is the case: it added 14 keys to the MEMBERSHIP of
+# `Graph.unsourced_keys`, which `_seed` prices at `UNSOURCED_COST`. No formula, no constant, and
+# 10,810 of 161,531 prices moved. Measured before the bump, on one graph and one scenario: the
+# two trees produced the SAME fingerprint, and a cache written by the earlier one was served to
+# the later one in 0.1s with the fixed keys back at `BASE_RAW_COST`. The fix came back silently.
 #
-# The bump exists to stop a warm `.cost-cache.json` serving prices computed by different
-# arithmetic. The retained-input term cannot produce a different price on any graph predating the
-# `p` field: with every slot at the default chance, `retained` is 0.0 and the ingredient term
-# is `c * 1.0`, and `x + 0.0 == x` and `x * 1.0 == x` are exact in IEEE 754 rather than
-# approximately true. Measured, not asserted: `estimate` over a 40-recipe graph exercising
-# batch outputs, fluids, an oredict slot, a transfer and three machine bands produces the
-# byte-identical price digest d89f2eb4 before and after the change.
+# So the test is the OUTPUT, not the mechanism. A different table for the same inputs earns a
+# bump, whether it came from the arithmetic, from a seed rule, from the membership of a set
+# derived off the graph, or from a relaxation ordering.
 #
-# And a graph that DOES carry `p` arrives as a new `graph.json`, whose size and mtime are
-# already hashed below, so that cache is invalidated by the file rather than by this number.
-# There is no input for which a stale cache could serve a wrong price, which is the only thing
-# this counter is for.
+# AND DECLINING IS A POSITIVE CLAIM THAT PRICES ARE BIT-IDENTICAL, which needs a measurement
+# like any other claim in this file. #175 declined, and was right, and its argument is the
+# worked example of doing that properly:
 #
-# SO THE RULE IS NOT WEAKENED, IT IS MET: bump this the moment the RETENTION ARITHMETIC changes
-# (a different amortisation, a threshold, a non-linear scaling of a fractional chance), because
-# then two graphs with identical files really would price differently. Adding a field that is
-# absent everywhere is not that. `tests/test_plan_fixtures.py` pins this number against the
-# fixtures, so a bump costs an oracle regeneration and must ride with one.
-FORMULA_VERSION = 10
+#   #175 ADDED THE CATALYST TERM TO `_relax` AND DELIBERATELY DID NOT BUMP THIS. That looks like
+#   an omission, so here is the argument, and it rests on a measurement rather than on taste.
+#
+#   The bump exists to stop a warm `.cost-cache.json` serving prices computed by different
+#   arithmetic. The retained-input term cannot produce a different price on any graph predating
+#   the `p` field: with every slot at the default chance, `retained` is 0.0 and the ingredient
+#   term is `c * 1.0`, and `x + 0.0 == x` and `x * 1.0 == x` are exact in IEEE 754 rather than
+#   approximately true. Measured, not asserted: `estimate` over a 40-recipe graph exercising
+#   batch outputs, fluids, an oredict slot, a transfer and three machine bands produces the
+#   byte-identical price digest d89f2eb4 before and after the change.
+#
+#   And a graph that DOES carry `p` arrives as a new `graph.json`, whose size and mtime are
+#   already hashed below, so that cache is invalidated by the file rather than by this number.
+#   There is no input for which a stale cache could serve a wrong price, which is the only thing
+#   this counter is for.
+#
+#   SO THE RULE IS NOT WEAKENED, IT IS MET: bump this the moment the RETENTION ARITHMETIC
+#   changes (a different amortisation, a threshold, a non-linear scaling of a fractional
+#   chance), because then two graphs with identical files really would price differently.
+#   Adding a field that is absent everywhere is not that.
+#
+# `tests/test_plan_fixtures.py` pins this number against the fixtures, so a bump costs an oracle
+# regeneration and must ride with one. #136 learned that the hard way: the guard failed first.
+FORMULA_VERSION = 11
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -906,8 +971,10 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     a manual override changes machine state without touching the graph, and mtimes move
     when a file is rewritten with identical contents. Also folds in the tuning constants,
     so editing MACHINE_COST invalidates the cache instead of silently reusing prices
-    computed under the old table. FORMULA_VERSION covers the other half of that: a change
-    to the arithmetic rather than to a constant, which moves no other input at all.
+    computed under the old table. FORMULA_VERSION covers the other half of that: a CHANGE TO
+    THE CODE, which moves no input here at all. This docstring used to say "a change to the
+    arithmetic", and see FORMULA_VERSION for why that is too narrow -- #136 moved 10,810
+    prices with no arithmetic and no constant, and this function could not tell.
     """
     h = hashlib.sha256()
     try:

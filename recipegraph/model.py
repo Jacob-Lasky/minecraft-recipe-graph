@@ -184,12 +184,24 @@ def is_world_ore_group(ore):
 #
 # `ore` IS ABSENT ON PURPOSE and its absence is load-bearing: an ore is the obtainable end of
 # a family, so including it here would let a family be "named" by the very thing that is out
-# of reach. `block` is absent for the reason `world_ores` gives -- `chisel:diamond` is in
-# `blockDiamond`, so accepting it readmits the decorative blocks #61 spent its measurement
-# demoting.
+# of reach.
+#
+# `block` IS ABSENT TOO, AND ITS REASON HOLDS IN ONE DIRECTION ONLY. `chisel:diamond` is a
+# member of `blockDiamond`, so a family this list could name a BLOCK for would point a reader
+# at a decorative panel as the shape the pack makes, which is what #61 spent its measurement
+# demoting. That argument is about the ANSWER `obtainable_sibling` returns, and it stands.
+# It says nothing about the QUESTION -- whether a key the pack registered `blockMyrmitite`
+# and nothing makes is a shape of a material rather than a thing in the world -- and there
+# the answer is plainly yes. So `block` stays out of this list, which is the naming set, and
+# `storage_form_material` reads it on the question side. That function carries the census.
 PROCESSED_FORM_PREFIXES = ("nugget", "dust", "plate", "gear", "rod", "stick", "gem",
                            "ingot", "wire", "foil", "casing", "coil", "screw", "bolt",
                            "ring", "chunk", "crushed", "purified", "clump", "shard")
+
+# Forge's `block<Material>`: nine ingots pressed into one block for storage. NOT in the list
+# above and not a second entry in it -- see the `block` paragraph there for why the two uses
+# of that list pull in opposite directions.
+STORAGE_FORM_PREFIX = "block"
 
 
 def split_ore_group(ore):
@@ -206,6 +218,52 @@ def split_ore_group(ore):
             if best is None or len(form) > len(best):
                 best = form
     return (best, ore[len(best):]) if best else None
+
+
+def storage_form_material(ore):
+    """The material of a `block<Material>` group, or None when the name is not that shape.
+
+    THE QUESTION SIDE OF #136, AND ONLY THAT. `Graph.obtainable_sibling` uses it to decide
+    whether a key is a shape of a material at all; the sibling it goes on to NAME still comes
+    from `PROCESSED_FORM_PREFIXES`, so a decorative block can never be the answer.
+
+    WHY A STORAGE BLOCK IS THE SAME DEFECT AS A NUGGET. #176 priced the processed forms
+    nothing makes, which killed the nugget ladder #136 reported, and the planner fell one
+    denomination the other way: measured on the reference graph, a plan for Myrmitite Ingot
+    asked for `1 Block of Myrmitite`, a key with no producer, no stock and no world
+    generation, priced at `BASE_RAW_COST` because nothing makes it. Pressing nine ingots into
+    a block is production, so a block nobody can press is exactly as unobtainable as a nugget
+    nobody can split.
+
+    IT IS SAFE BECAUSE THE SECOND CLAUSE DOES THE WORK, and that is measured rather than
+    argued. On the reference graph 50 producerless keys priced at a raw leaf carry a `block*`
+    group and no processed one. Every one is accounted for:
+
+        19  a material with processed forms but nothing producible among them: Quicksoil
+            Glass and 18 more AoA3 and DivineRPG world glasses, whose `Glass` family has a
+            `shardGlass` group that nothing in the pack makes. Blocks you mine, not badged.
+        15  a wildcard meta, refused earlier by `reachable_form`: `minecraft:clay:*`,
+            `minecraft:slime:*`, `minecraft:cactus:*`, `minecraft:mossy_cobblestone:*`.
+         2  a material registered in no processed shape at all: a railcraft coke block and
+            `tconstruct:slime`.
+        14  BADGED AND REPRICED, which is the whole of what this changes: eleven planet-metal
+            storage blocks behind #112's gates -- Myrmitite, Ogerite, Dreadite, Polonium,
+            Vityte, Vibranium, Chalcedony, Lunastone, Palladium, Brightsteel, Candyte -- plus
+            two duplicate-name Iridium blocks and a railcraft Block of Zinc.
+
+    THE 19 REST ON "NOTHING PRODUCIBLE TO NAME" RATHER THAN ON THE FAMILY BEING ABSENT, so
+    they are the ones to re-measure if a dump ever gives `shardGlass` a producer. That is the
+    honest limit of this rule and `StorageBlockTest` pins the refusal it depends on.
+
+    DO NOT REPLACE THIS WITH A `block` ENTRY IN `PROCESSED_FORM_PREFIXES`. That list is also
+    the naming set, and adding `block` to it would give the Glass family producible members
+    (`erebus:amber_glass`, eight DivineRPG stained glasses) -- so all 19 world glasses above
+    would be badged and repriced, each consumed by ~320 recipes. Measured, and it is the
+    failure this split avoids.
+    """
+    if ore.lower().startswith(STORAGE_FORM_PREFIX) and len(ore) > len(STORAGE_FORM_PREFIX):
+        return ore[len(STORAGE_FORM_PREFIX):]
+    return None
 
 
 def split_discriminator(key):
@@ -678,17 +736,19 @@ class Graph:
     def material_forms(self):
         """`{material: {form: [keys]}}` for every `<form><Material>` oredict group.
 
-        WHAT THIS IS FOR, AND WHY IT IS NOT A PRICING SIGNAL. #136 reported a plan asking
-        for 18 Sednanite Nuggets, a key nothing in the pack makes, because `cost._seed`
-        prices anything with no producer at `BASE_RAW_COST` on the rule "nothing makes it,
-        so assume you can go and get one". That rule is wrong for a PROCESSED form: a nugget
-        is a shape of a material, not a thing in the world.
+        WHAT THIS IS FOR. #136 reported a plan asking for 18 Sednanite Nuggets, a key nothing
+        in the pack makes, because `cost._seed` prices anything with no producer at
+        `BASE_RAW_COST` on the rule "nothing makes it, so assume you can go and get one".
+        That rule is wrong for a PROCESSED form: a nugget is a shape of a material, not a
+        thing in the world.
 
-        The fix for the PRICE is deliberately not here -- measured, it produces a worse plan
-        than the bug (see #136), and it needs both cost audits. What this supports is the
-        REPORTING half: `reachable_form` below uses it to name the form the graph CAN make,
-        so the shopping list says "the graph can only make Sednanite Ingot" instead of
-        listing a nugget beside 128 Granite as though it were an ordinary thing to fetch.
+        BOTH HALVES NOW READ THIS. `reachable_form` below names the form the graph CAN make,
+        so the shopping list says "the graph can only make Sednanite Ingot" instead of listing
+        a nugget beside 128 Granite as though it were an ordinary thing to fetch. #176 then
+        priced that same set at `UNSOURCED_COST`, so it steers routing as well as reporting.
+        The earlier note here saying the price was "deliberately not" this signal described
+        the three repricing rules #136 measured and rejected, all of which keyed on something
+        else -- see the rejection list on `cost.BASE_RAW_COST`.
 
         THE FAMILY LINK IS PACK DATA, the same class of signal as `world_ores`. The pack
         chose to register `nuggetSednanite` and `ingotSednanite`, and Forge's convention is
@@ -716,6 +776,16 @@ class Graph:
         Returns None when the material has no makeable form, which is the honest answer --
         a family where nothing is obtainable gives the reader nothing to be pointed at, and
         that is exactly the case `reachable_form`'s docstring refuses to badge.
+
+        A `block<Material>` KEY ASKS THE SAME QUESTION and gets the same answer, which is the
+        second half of #136: an unpressable storage block is as unobtainable as a nugget that
+        cannot be split. Only the question widens. The material is looked up in
+        `material_forms`, which still excludes `block`, so the form NAMED is never a block and
+        the decorative-block argument on `PROCESSED_FORM_PREFIXES` is untouched. See
+        `storage_form_material`.
+
+        A PROCESSED GROUP WINS OVER A STORAGE ONE when a key carries both, so nothing that
+        resolved before this resolves differently now.
         """
         material = None
         for group in self.ores_of(key):
@@ -723,6 +793,11 @@ class Graph:
             if split:
                 material = split[1]
                 break
+        if material is None:
+            for group in self.ores_of(key):
+                material = storage_form_material(group)
+                if material:
+                    break
         if material is None:
             return None
         best = None
@@ -778,13 +853,38 @@ class Graph:
         unobtainable is not badged, because then there is nothing to name and the mark would
         collapse to "no recipe", which the NEED badge already says.
 
-        STILL DISPLAY-ONLY, and that is the whole bargain -- see the raw-leaf branch of
-        `Solver.expand`, which carries the reasoning. Pricing an unobtainable processed form
-        was measured for #136 and produces a plan whose shopping list contains the item being
-        planned, which is worse than the bug. This says what the tool does not know; it does
-        not pretend to fix the routing. The repricing question is #176.
+        A STORAGE BLOCK IS ONE MORE FACE OF THE SAME RULE, and it is where #136 finished. With
+        the nuggets priced, a plan for Myrmitite Ingot asked for `1 Block of Myrmitite` --
+        producerless, unstocked, generated nowhere in the world, and priced at `BASE_RAW_COST`
+        for the same reason the nugget was. `obtainable_sibling` answers for it through
+        `storage_form_material`; the second clause and the wildcard guard between them keep 36
+        of the 50 candidates out, world glasses included, and that census is on that function.
+
+        NOT DISPLAY-ONLY ANY MORE, AND THAT IS #176. This docstring used to say the mark was
+        display-only "and that is the whole bargain", on the grounds that every repricing rule
+        #136 measured made the plan worse. Those three rules keyed on the material's world ore
+        or on dropping the seed; #176 priced THIS set -- the one with positive evidence the
+        graph cannot explain the route -- at `UNSOURCED_COST`, measured clean, and it is what
+        made the reported plan stop asking for a nugget. So a key arriving here both gets the
+        badge and gets that price. What is still open is `Solver`'s refusal to ROUTE a bare
+        demand through a produced variant; see the #170 branch below.
         """
         if self.real_producers(key):
+            return None
+        # A KEY THE PACK CALLS AN ORE IS OBTAINABLE, WHICH OUTRANKS ANYTHING THIS PREDICATE
+        # CAN SAY. `world_ores` is the pack's own `ore*` registration and `cost._seed` reads
+        # it as a CEILING -- "mining is what this costs at worst". The unsourced seed runs
+        # after that loop and `max`es prices up, so a badged world ore would be priced ABOVE
+        # the ceiling its own rule promises, and `Solver.expand` would never show it: the
+        # world-ore branch there returns "mined, not crafted" before this mark is ever
+        # consulted. So the badge would appear only in `/api/sweep` and `/api/cost`, which is
+        # exactly the surface-to-surface divergence #178 spent a PR removing.
+        #
+        # A GUARD RATHER THAN A FIX TODAY, measured: 0 world ores reach this on the reference
+        # graph, and 0 carry a `block*` group at all. It is here because the storage-form
+        # widening above is what makes co-registration reachable, and because a rule stated
+        # once is cheaper than the same measurement done again.
+        if key in self.world_ores:
             return None
         # A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is not evidence of
         # anything. `Graph.producers` gathers `base:*` for a concrete meta and never the
