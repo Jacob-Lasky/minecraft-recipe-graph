@@ -36,24 +36,6 @@
   ],
   "machines_to_build": [
    {
-    "category": "extendedcrafting:compressor",
-    "machine": "Quantum Compression",
-    "state": "buildable",
-    "why": "craftable: extendedcrafting:compressor"
-   },
-   {
-    "category": "modularmachinery.recipes.mythic_processor_melter",
-    "machine": "Mythic Processor: Melter",
-    "state": "buildable",
-    "why": "craftable: modularmachinery:mythic_processor_melter_controller"
-   },
-   {
-    "category": "modularmachinery.recipes.quantum_condenser",
-    "machine": "Quantum Condenser",
-    "state": "buildable",
-    "why": "craftable: modularmachinery:quantum_condenser_controller"
-   },
-   {
     "category": "nuclearcraft_chemical_reactor",
     "machine": "Chemical Reactor",
     "state": "buildable",
