@@ -1236,17 +1236,27 @@ class Graph:
              number about nothing. Those keys keep `reachable_form`'s report and its
              `UNSOURCED_COST` price, which is the honest answer for them.
 
-        THE FAMILY HALF OF CLAUSE 4 IS THE CONTAINER GATE, and it is not a refinement of the
-        cycle guard so much as the reason the rule is safe to ship at all. `extratrees:drink`
-        is a Beer Mug: nothing makes the bare key, four AoA3 armour infusions consume it, and
-        all 30 produced variants are FILLED mugs and glasses that a Fluid Transposer makes
-        from an EMPTY mug variant. Priced through them, "Beer Mug" costs what a Mug of Apple
-        Juice costs and the plan routes an armour recipe through filling a glass -- which is
-        the failure `real_producers`' docstring records paying for once already, where the
-        dump dropped the NBT telling one filled can from another and the graph believed
-        squeezing a can of water yielded uranium fluoride. Excluding a variant made from its
-        own family costs nothing, because the sibling it was made FROM is either subsumable
-        itself and cheaper, or excluded for the same reason.
+        THE FAMILY HALF OF CLAUSE 4 IS THE CONTAINER GATE. `thermalexpansion:reservoir:32000`
+        is the case that shows the harm: one recipe demands the bare key directly, and both of
+        its produced variants are made by Fluid Transposer recipes that consume the family, so
+        without this half it prices at 521.0 against the 2,000 floor -- a 4x understatement of a
+        Creative Reservoir, delivered to a slot that really does ask for one. That is the shape
+        `real_producers`' docstring records paying for once already, where the dump dropped the
+        NBT telling one filled can from another and the graph believed squeezing a can of water
+        yielded uranium fluoride. Excluding a variant made from its own family costs nothing,
+        because the sibling it was made FROM is either subsumable itself and cheaper, or
+        excluded for the same reason.
+
+        `extratrees:drink` IS THE CLEAREST SHAPE AND THE WEAKEST HARM, and the distinction is
+        worth keeping because an earlier version of this comment got it wrong. A Beer Mug,
+        nothing makes the bare key, and all 30 produced variants are FILLED mugs and glasses a
+        Transposer makes from an EMPTY mug variant -- so it teaches the rule better than the
+        reservoir does. But it has ZERO direct consumers: its 4 are reached only through
+        `ore:listAllFood`, a 564-member group, and even priced through its variants at 27.15 it
+        is the 319th cheapest member, so `resolve_ore` would never pick it and no plan changes.
+        The harm there is a wrong price on a key `/api/sweep` and `/api/cost` report and nothing
+        demands, which is real and is not a routing failure. 10 of the 11 keys clause 4 refuses
+        DO have a direct demand; this is the one that does not.
 
         MEASURED, NOT ASSUMED, on the reference graph: 2,631 bare keys carry the relation,
         514 have no producer, and 99 of those are consumed by some recipe -- the issue's 96.

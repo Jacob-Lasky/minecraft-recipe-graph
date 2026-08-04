@@ -116,11 +116,13 @@ public class VariantSubsumptionTest {
 
     @Test
     public void aVariantMadeFromASiblingVariantIsExcluded() {
-        // CLAUSE 4, one hop longer, and this is the container gate rather than a refinement:
-        // `extratrees:drink` is a Beer Mug whose 30 produced variants are all filled mugs a
-        // Fluid Transposer makes from an EMPTY mug variant. Priced through them, "Beer Mug"
-        // costs what a Mug of Apple Juice costs and the plan routes an armour recipe through
-        // filling a glass -- the failure `realProducers` records paying for once already.
+        // CLAUSE 4, one hop longer: the container gate.
+        // `thermalexpansion:reservoir:32000` is the measured case -- one recipe demands the bare
+        // key directly, both produced variants are Fluid Transposer output made from the family,
+        // and without this half it prices 521.0 against the 2,000 floor. The shape is clearest
+        // on `extratrees:drink`, a Beer Mug whose 30 variants are all filled mugs made from an
+        // EMPTY mug variant, but that key has no direct consumer so no plan moves for it. See
+        // `Graph.variant_subsumption` in python, which keeps the two apart.
         GraphBuilder b = new GraphBuilder();
         recipe(b, "fixture:use", "mod:out", BARE);
         recipe(b, "fixture:fill", MADE, SIBLING);

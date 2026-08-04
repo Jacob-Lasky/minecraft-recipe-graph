@@ -670,10 +670,14 @@ class ProducedOnlyAsAVariantTest(unittest.TestCase):
         self.assertNotIn("this form", leaf["note"])
 
     def test_a_variant_made_from_a_SIBLING_variant_is_refused(self):
-        # The container gate, one hop longer than the clause above and the reason the rule is
-        # safe to ship: `extratrees:drink` is a Beer Mug whose 30 produced variants are all
-        # filled mugs a Fluid Transposer makes from an EMPTY mug variant. Priced through
-        # them, "Beer Mug" costs what a Mug of Apple Juice costs.
+        # The container gate, one hop longer than the clause above.
+        # `thermalexpansion:reservoir:32000` is the measured case: one recipe demands the bare
+        # key directly and both produced variants are Fluid Transposer output made from the
+        # family, so without this half it prices 521.0 against the 2,000 floor. The shape is
+        # clearest on `extratrees:drink`, a Beer Mug whose 30 variants are all filled mugs made
+        # from an EMPTY mug variant, but that key has no direct consumer and no plan moves for
+        # it -- see `Graph.variant_subsumption`, which keeps the two apart because an earlier
+        # version of this comment conflated them.
         empty = "mod:kama_bound#eeeeeeeeeeee"
         g = self._graph(variant_producible=False)
         g.add(Recipe("fill", "mod.transposer", [(self.MADE, 1)],
