@@ -25,7 +25,7 @@
  "digest": "633740e2ce2a361f99b8f62fbfa350074eb49c9a56845e619b47728c54709d7e",
  "digest_format": "sha256 over '<key> <%.17e of the cost>\\n' for every key in sorted order, with a non-finite cost written as the literal 'inf'. NOT repr: 33% of doubles render differently as text in Python and Java while differing in value in 0% of cases. 17 significant digits is injective over binary64, so this detects a one-ULP drift.",
  "entries": 161531,
- "formula_version": 10,
+ "formula_version": 11,
  "graph": {
   "bytes": 121448519,
   "dimension_ores": 11,

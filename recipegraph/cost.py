@@ -388,7 +388,25 @@ EMC_COST = 0.5
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 10
+#
+# AND WHENEVER A RULE THE FINGERPRINT CANNOT SEE CHANGES, which #211 and #169 are the first
+# case of and which the paragraph above does not cover. `notproduction.annotation_markers`
+# decides whether a recipe is a JEI card from THREE CONDITIONS IN CODE. Two of its inputs are
+# hashed -- the resolved token map, and `tokens.LOOT_TABLE_CATEGORIES` -- and the conditions
+# themselves are not hashable at all. Loosen one of them and every price that route touched
+# moves while every hashed input stays put, which is this constant's whole purpose.
+#
+# DO NOT REASON THAT A NEW CONSTANT COVERS IT. It happens to, right now: `NON_PRODUCTION_PENALTY`
+# is newly present in the hashed tuple, so a warm cache written before #211 is invalidated by
+# that alone -- verified, the fingerprint differs. That is "the cache is correct because of how
+# a constant happens to be defined", which `fingerprint` itself names as the reasoning that
+# goes stale. The next change to the rule will add no constant and get no such accident.
+#
+# 11 IS PROVISIONAL. `wt/one-spelling` and `wt/bare-key-digest` have both also claimed 11, and
+# whichever merged second would ship one number describing two different arithmetics. The
+# integrator assigns these in merge order; this value only has to make the branch
+# self-consistent.
+FORMULA_VERSION = 11
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
