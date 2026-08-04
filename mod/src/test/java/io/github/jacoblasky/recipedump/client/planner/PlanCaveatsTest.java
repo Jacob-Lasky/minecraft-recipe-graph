@@ -181,13 +181,23 @@ public class PlanCaveatsTest {
         return false;
     }
 
+    /**
+     * The panel's lines back into one string, with the wrap undone.
+     *
+     * THE CONTINUATION INDENT HAS TO COME OFF, and forgetting it is what made this test fail
+     * the moment `detailLines` started indenting: a note wrapped over two lines rejoined as
+     * `assumes   you own nothing` with three spaces, so `contains(note)` was false about a note
+     * that WAS fully on screen. A false negative there is the benign direction, but the same
+     * blind spot in the other direction would have passed a note that got cut.
+     */
     private static String rejoin(List<String> lines) {
         StringBuilder sb = new StringBuilder();
         for (String line : lines) {
             if (sb.length() > 0) {
                 sb.append(' ');
             }
-            sb.append(line);
+            sb.append(line.startsWith(NodeRowText.CONTINUATION)
+                              ? line.substring(NodeRowText.CONTINUATION.length()) : line);
         }
         return sb.toString();
     }

@@ -169,39 +169,70 @@ public final class NodeRowText {
         if (rows == null) {
             return out;
         }
+        java.util.Set<String> ambiguous = ambiguousLabels(rows);
+        for (PlanView.EntryRow row : rows) {
+            out.addAll(entryLine(row, ambiguous.contains(row.label()), widthPx));
+        }
+        return out;
+    }
+
+    /**
+     * The labels that appear on more than one row, so only those rows pay for their key.
+     *
+     * SPLIT OUT OF {@link #entryLines} SO A CALLER CAN KEEP THE ROW BESIDE ITS TEXT. A flat
+     * `List<String>` throws away which `EntryRow` produced which line, and a row can wrap over
+     * two of them, so a caller that needs the row's KEY -- to draw an item icon in the column
+     * beside it, which `wt/ui-item-icons` is adding -- cannot recover it by index. With this and
+     * {@link #entryLine} it can loop the rows itself and never has to re-derive the ambiguity,
+     * which is the one part that genuinely needs the whole list.
+     */
+    public static java.util.Set<String> ambiguousLabels(List<PlanView.EntryRow> rows) {
         java.util.Set<String> seen = new java.util.HashSet<String>();
         java.util.Set<String> ambiguous = new java.util.HashSet<String>();
+        if (rows == null) {
+            return ambiguous;
+        }
         for (PlanView.EntryRow row : rows) {
             if (!seen.add(row.label())) {
                 ambiguous.add(row.label());
             }
         }
-        for (PlanView.EntryRow row : rows) {
-            List<String> parts = new ArrayList<String>();
-            if (ambiguous.contains(row.label())) {
-                parts.add(row.key());
-            }
-            if (row.why() != null && !row.why().isEmpty()) {
-                parts.add(row.why());
-            } else if (row.unsourced()) {
-                // NEVER BOTH, which `render._rows` states as a rule rather than a coincidence:
-                // `why` is set only on the infinite-sources list, whose rows are by definition
-                // sourced. The `else` keeps that true here rather than restating it.
-                parts.add(NodeStatus.UNSOURCED_BADGE);
-            }
-            if (row.tokenKind() != null && !row.tokenKind().isEmpty()) {
-                parts.add(NodeStatus.tokenBadge(row.tokenKind()));
-            }
-            if (row.emc() != null) {
-                // THE NUMBER AND NOT "from EMC", per `PlanEntry.emc`: a cost a player can look
-                // up is a claim they can check, and a bare "from EMC" is one they must trust.
-                parts.add("EMC " + quantityPlain(row.emc().longValue()));
-            }
-            String head = amount(row.need(), row.kind()) + " " + row.label();
-            out.addAll(wrapRow(parts.isEmpty() ? head : head + SEPARATOR + join(parts),
-                               widthPx));
+        return ambiguous;
+    }
+
+    /**
+     * One row's line or lines. See {@link #entryLines} for every rule this applies.
+     *
+     * @param disambiguate whether this row's label collides with another's, from
+     *                     {@link #ambiguousLabels}. A caller passing `false` for a colliding row
+     *                     draws two rows a player cannot tell apart, which is the defect
+     *                     `entryLines` exists to prevent; prefer that wrapper unless you need
+     *                     the row alongside its text.
+     */
+    public static List<String> entryLine(PlanView.EntryRow row, boolean disambiguate,
+                                         int widthPx) {
+        List<String> parts = new ArrayList<String>();
+        if (disambiguate) {
+            parts.add(row.key());
         }
-        return out;
+        if (row.why() != null && !row.why().isEmpty()) {
+            parts.add(row.why());
+        } else if (row.unsourced()) {
+            // NEVER BOTH, which `render._rows` states as a rule rather than a coincidence:
+            // `why` is set only on the infinite-sources list, whose rows are by definition
+            // sourced. The `else` keeps that true here rather than restating it.
+            parts.add(NodeStatus.UNSOURCED_BADGE);
+        }
+        if (row.tokenKind() != null && !row.tokenKind().isEmpty()) {
+            parts.add(NodeStatus.tokenBadge(row.tokenKind()));
+        }
+        if (row.emc() != null) {
+            // THE NUMBER AND NOT "from EMC", per `PlanEntry.emc`: a cost a player can look
+            // up is a claim they can check, and a bare "from EMC" is one they must trust.
+            parts.add("EMC " + quantityPlain(row.emc().longValue()));
+        }
+        String head = amount(row.need(), row.kind()) + " " + row.label();
+        return wrapRow(parts.isEmpty() ? head : head + SEPARATOR + join(parts), widthPx);
     }
 
     /** What a wrapped row's continuation lines are prefixed with, so one entry reads as one. */
@@ -448,10 +479,21 @@ public final class NodeRowText {
         // prints both and this said "search gave up early" with none, which asks the player to
         // trust the rule instead of checking it. Both fields were parsed and had no reader for
         // the length of this review; do not let that happen again by dropping them from here.
+        //
+        // THE NUMBERS ARE OPTIONAL AND THE SENTENCE IS NOT. `work_budget` absent reads as 0
+        // through this reader, and a first draft of this quoted it unconditionally -- so a
+        // result carrying `exhausted` without the pair rendered "search gave up after 0 of 0
+        // steps", which is arithmetic nonsense and strictly worse than saying nothing precise.
+        // Caught by `aPlanThatGaveUpEarlySaysSoEvenWhenItWasNotTruncated`, which builds exactly
+        // that result. The solver always writes both; hand-written JSON and older fixtures need
+        // not, and this class reads every field defensively for that reason.
         if (plan.exhausted()) {
-            return "search gave up after " + quantityPlain(plan.work()) + " of "
-                   + quantityPlain(plan.workBudget())
-                   + " steps -- raise the node budget to raise this";
+            if (plan.workBudget() > 0) {
+                return "search gave up after " + quantityPlain(plan.work()) + " of "
+                       + quantityPlain(plan.workBudget())
+                       + " steps -- raise the node budget to raise this";
+            }
+            return "search gave up early -- the plan below may be missing branches";
         }
         return "";
     }
