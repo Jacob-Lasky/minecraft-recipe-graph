@@ -99,6 +99,18 @@ public final class ShotScreens {
                 LivePlanShot.open(arg);
             }
         });
+        register("planner-selected", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openSelectedTree(arg);
+            }
+        });
+        register("flow-selected", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openSelectedFlow(arg);
+            }
+        });
         register("planner-menu", new Opener() {
             @Override
             public void open(String arg) {

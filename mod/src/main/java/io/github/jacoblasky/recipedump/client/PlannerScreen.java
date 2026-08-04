@@ -9,6 +9,7 @@ import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
+import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
@@ -56,7 +57,7 @@ public final class PlannerScreen {
         // landing between the two would be drawn AND recorded as already drawn, and the
         // window would sit on it -- a missed update, which is the failure that matters. Read
         // first, the same race costs one redundant rebuild of an identical panel.
-        ClientGUI.open(new PlannerWindow(book, stamp(book)));
+        ClientGUI.open(new PlannerWindow(book, stamp(book), plans()));
     }
 
     /**
@@ -70,6 +71,19 @@ public final class PlannerScreen {
      */
     private static long stamp(PlanBook book) {
         return PlannerService.get().generation() * 31L + book.revision();
+    }
+
+    /**
+     * The plan generation on its own, WITHOUT the book folded in. See {@link #stamp} for the
+     * combined counter and why the window watches both.
+     *
+     * SEPARATE BECAUSE ONE CONSUMER NEEDS TO TELL THE TWO APART. The selection is cleared when
+     * the PLAN changes and must survive a book change: "Favourite" and "Add to TODO" both bump
+     * the revision, and dropping the highlight because the player starred the node they were
+     * looking at would make the star look like it had cancelled the click.
+     */
+    private static long plans() {
+        return PlannerService.get().generation();
     }
 
     /**
@@ -157,21 +171,65 @@ public final class PlannerScreen {
 
         private final PlanBook book;
         private final long drawn;
+        /** The plan generation this window's tree came from. See {@link #onUpdate}. */
+        private final long plans;
 
-        PlannerWindow(PlanBook book, long stamp) {
+        PlannerWindow(PlanBook book, long stamp, long generation) {
             super(RecipeDumpMod.MODID, builderFor(book));
             this.book = book;
             this.drawn = stamp;
+            this.plans = generation;
         }
 
         @Override
         public void onUpdate() {
             super.onUpdate();
+            long generation = plans();
+            clearSelectionIfPlanChanged(plans, generation);
             long now = stamp(book);
             if (now != drawn) {
-                ClientGUI.open(new PlannerWindow(book, now));
+                ClientGUI.open(new PlannerWindow(book, now, generation));
             }
         }
+    }
+
+    /**
+     * A NEW PLAN CLEARS THE SELECTION (#213's second design question).
+     *
+     * The selected node came out of the tree that is being replaced. Its key may not be in the
+     * new plan at all -- pinning a recipe re-plans, and the whole point of the pin is that a
+     * different route is taken -- and a highlight nobody can see is worse than none.
+     *
+     * RE-POINTING AT THE SAME KEY IN THE NEW TREE IS NOT AVAILABLE, and that is the reason this
+     * clears rather than filters. {@link PlanSelection#selectedNode} is what the node menu, "Add
+     * to TODO" and the picker all read `need()` from, and the occurrence the player clicked has
+     * no identity across a re-solve: the same key can appear under six parents at six different
+     * quantities, so keeping the key and re-finding a node would hand back a plausible wrong
+     * number with nothing to say which occurrence answered. That is exactly the failure
+     * `PlanSelection`'s own class note exists to prevent.
+     *
+     * IDENTITY CANNOT STAND IN FOR THE COUNTER EITHER, which was the tidier-looking first
+     * attempt: keep the selection when the selected NODE is still in the plan being drawn.
+     * `PlannerEntry.planFor` runs `PlanJson.readResult` on every panel build, so the nodes are
+     * new objects every rebuild whether or not the plan changed -- and the check would clear on
+     * a book edit as well, which is the case below that must not clear.
+     *
+     * ON THE PLAN GENERATION AND NOT ON {@link #stamp}. A book edit bumps the combined counter
+     * too, and dropping the highlight because the player starred the node they were looking at
+     * would read as the star having cancelled the click.
+     *
+     * A METHOD RATHER THAN TWO LINES INSIDE `onUpdate`, because `onUpdate` needs a constructed
+     * `ModularScreen` and a `ClientGUI`, and the policy is what is worth pinning: see
+     * `PlannerScreenTest`, which is red against a version comparing `stamp`.
+     *
+     * @return whether the selection was dropped
+     */
+    static boolean clearSelectionIfPlanChanged(long drawnGeneration, long currentGeneration) {
+        if (drawnGeneration == currentGeneration) {
+            return false;
+        }
+        PlanSelection.clear();
+        return true;
     }
 
     /**

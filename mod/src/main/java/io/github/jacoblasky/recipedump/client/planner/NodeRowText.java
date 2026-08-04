@@ -32,8 +32,14 @@ public final class NodeRowText {
      * majority of the characters a key or a label contains; the narrow ones (i, l, .) are
      * 2 to 4, so the budget UNDERFILLS a little and never overflows, which is the direction
      * to be wrong in.
+     *
+     * PUBLIC, because a label budget is only meaningful in CHARACTERS and the classes that have
+     * to state one are not all in this package. `FlowLayout`'s node width is chosen for the name
+     * it has to hold and `FlowCanvasTest` asserts that in characters; doing the division against
+     * a hardcoded 6 there would be a second copy of this number, in a file whose whole job is
+     * catching the first copy drifting.
      */
-    static final int CHAR_WIDTH = 6;
+    public static final int CHAR_WIDTH = 6;
 
     /** What a truncated string ends with. Three dots rather than an ellipsis glyph, which
      *  Minecraft's default font does not carry. */

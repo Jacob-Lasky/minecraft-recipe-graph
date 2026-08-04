@@ -57,9 +57,13 @@ public final class LivePlannerActions implements PlannerActions {
     @Override
     public void openNodeMenu(PlanNode node) {
         // SELECTED FIRST, so opening a menu and highlighting the item are one click rather
-        // than two. Nothing here reads the selection, but `client.flow` draws from it and a
-        // diagram that stayed unhighlighted while its menu was open would read as a diagram
-        // that had not registered the click.
+        // than two. A diagram that stayed unhighlighted while its menu was open would read as
+        // a diagram that had not registered the click.
+        //
+        // THE READER IS `PlannerWidgets.ClickableGroup.draw`, on both surfaces, and it did not
+        // exist until #213 -- for six merged PRs this line wrote a selection nothing drew, and
+        // the comment above it named `client.flow` as the reader it did not have. The write was
+        // always correct; the missing half was the read.
         selectNode(node);
         current = node;
         open(menu());
