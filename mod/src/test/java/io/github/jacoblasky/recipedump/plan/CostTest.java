@@ -127,14 +127,16 @@ public class CostTest {
         RecipeGraph graph = b.build();
         CostTable table = Cost.estimate(graph, new CostInputs());
 
-        // INFINITY IS WHAT "THE TRANSFER DID NOT PRICE IT" LOOKS LIKE HERE, and that is all
-        // this asserts. Nothing in this graph CONSUMES the fluid, and the leaf rule walks
-        // recipe INPUTS, so the key is never offered to the seed's predicate at all and the
-        // array keeps the infinity it was filled with. Drop the exclusion and `relax` writes
-        // 521.0 through the squeezer, so the assertion has teeth for the thing it is named
-        // for -- it simply cannot see #193, which is about the SEED. The test below adds a
-        // consumer and is the one that says what the leaf rule does.
-        assertTrue(Double.isInfinite(priceOf(graph, table, "fluid:water")));
+        // UNSOURCED_COST EVEN THOUGH NOTHING CONSUMES THIS FLUID, and the "even though" is the
+        // part worth knowing. The LEAF rule walks recipe INPUTS, so an unconsumed key is never
+        // offered to it -- but the rule that raises `Unsourced.producedInNameOnly` sweeps every
+        // key and reads an infinite slot as BASE_RAW_COST, so it INSERTS rather than only
+        // raising. That is the same second effect `Unsourced.keys` has for 39 keys and is
+        // deliberate in both: these keys reach no plan and they DO reach a cost report.
+        //
+        // WHAT THIS ASSERTS is still the thing the test is named for: the price is not one the
+        // squeezer computed. Drop the exclusion and `relax` writes 521.0 through it.
+        assertEquals(Cost.UNSOURCED_COST, priceOf(graph, table, "fluid:water"), 0.0);
         // The item direction is real work and stays -- with the transfer penalty on top, so
         // it can never be preferred to a genuine route.
         assertEquals(Cost.UNGATED_MACHINE_COST + Cost.TRANSFER_PENALTY + Cost.BASE_RAW_COST,
