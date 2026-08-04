@@ -5,6 +5,24 @@ Emits a fragment (inline <style>, content, inline <script>) with no <html>/<head
 AND it can be published as a Claude Artifact unchanged. DO NOT add a doctype or
 <html> wrapper -- the artifact publisher supplies those and would nest them.
 
+`standalone=True` PREPENDS TWO META TAGS AND NOTHING ELSE, for the reason above: a file
+written by `plan --html` or `explore --html` is read directly by a browser, where a page
+with no `<meta name=viewport>` lays out at the UA default 980px and a phone shows the
+desktop layout zoomed out. Measured with Playwright at a 390px device viewport, before and
+after: 980px of layout viewport, then 390. See #138 and `tools/mobile-audit.js`, whose
+standalone leg is what keeps this measured.
+
+The two metas are legal where they land and a document shell is not. A viewport meta is
+honoured outside `<head>` (measured in chromium, both before and after 2 KB of `<style>`),
+and the encoding declaration is found by the parser's prescan because it is in the first
+1,024 bytes -- which is why it goes FIRST and nothing may be inserted ahead of it. Without
+it a `file://` page is sniffed, and an all-ASCII prefix sniffs as windows-1252, which
+mojibakes the ellipsis `graphview._shorten` writes and any accented item name.
+
+DO NOT "finish the job" by growing this into a full document. The server embeds the same
+fragment through `server._wrap_fragment`, which supplies a real head; a shell here would
+nest inside that one, and a doctype would nest inside the artifact publisher's.
+
 No external assets of any kind (fonts, CDN scripts, images): artifacts run under a
 strict CSP that blocks every off-host request.
 """
@@ -20,8 +38,26 @@ from .htmlutil import machine_href
 from . import tokens as tokens_mod
 from .solve import STATUS_RAW, STATUS_TOKEN
 from .pins import EXACT as PIN_EXACT
-from .present import (KIND_CHIP, STATE_BADGE, STATE_LABEL, STATUS_LABEL, hidden_note,
-                      is_roadblock, pin_badge, status_badge)
+from .present import (INTERCHANGEABLE_NOTE, KIND_CHIP, STATE_BADGE, STATE_LABEL,
+                      STATUS_LABEL, hidden_note, is_roadblock, pin_badge, status_badge)
+
+# The whole document shell a standalone file gets, and the module docstring is the argument
+# for why it is two tags rather than a `<head>`. Charset first: the parser's prescan only
+# looks at the first 1,024 bytes.
+STANDALONE_HEAD = ('<meta charset="utf-8">'
+                   '<meta name="viewport" content="width=device-width,initial-scale=1">\n')
+
+
+def _standalone(page, standalone):
+    """`page`, given the two meta tags a file read straight from disk needs.
+
+    ONE implementation for all THREE writers of the same defect. #138 was reported on
+    `plan --html`; `explore --html` had it, and so did `chart --html`, which is named nowhere
+    in the issue because nothing serves that page and so nothing measured it. A second copy
+    of these tags is how one of the three comes to carry a viewport meta the others do not.
+    """
+    return (STANDALONE_HEAD + page) if standalone else page
+
 
 CSS = """
 /* Palette: warm-paper / slate ground with a certus-quartz teal accent taken from
@@ -408,19 +444,59 @@ def _machine_bit(node, name):
         _esc(STATE_LABEL.get(state, state)))
 
 
-def _recipes_bit(node, back):
-    """`N recipes`, as a link to the chooser when there is a server to click back to."""
-    text = "%d recipes" % node["alternatives"]
+def _is_arbitrary(node):
+    """Whether #181 marked this node's pick as a coin toss.
+
+    ONE predicate, because the tree row and `_arbitrary_keys`' summary panel must not disagree
+    about which nodes carry the finding: the panel is where a suppressed mark stays findable,
+    so a node the panel counts and the tree never marks is a footnote with no anchor, and the
+    reverse is a mark with nowhere to look it up.
+    """
+    return node.get("interchangeable", 0) > 1
+
+
+def _recipes_bit(node, back, arbitrary=False):
+    """`N recipes`, or #181's mark instead when the pick among them was arbitrary.
+
+    A link to the chooser either way, when there is a server to click back to. ONE bit and
+    not two, for the reason `present.INTERCHANGEABLE_NOTE` records: the recipe count is the
+    flattering number and showing both leads with it.
+
+    THE MARK IS THE LINK TEXT rather than a badge beside it, so a row that says the pick was
+    arbitrary is also the row that opens the picker. #181 landed this in Java only, where
+    `NodeRowText.meta` has said it since; the browser had the pre-#181 count.
+
+    `arbitrary` is decided by the CALLER and never re-read from the node here, because the
+    finding belongs to the KEY and is stated once per tree. See `_node_html` and #206.
+    """
+    text = _esc((INTERCHANGEABLE_NOTE % node["interchangeable"]) if arbitrary
+                else "%d recipes" % node["alternatives"])
     if not back:
         return text
     return ('<a class="mlink" href="/recipes?item=%s&amp;back=%s">%s</a>'
             % (urllib.parse.quote(node["key"]), urllib.parse.quote(back), text))
 
 
-def _node_html(node, depth=0, back="", icon=None):
+def _node_html(node, depth=0, back="", icon=None, marked=None):
     """One tree row. `back` is where a pin control should return to, empty for a static
     render: `recipegraph plan --html` produces a file that outlives the server, and a
-    button posting to a server that is not there is worse than no button."""
+    button posting to a server that is not there is worse than no button.
+
+    `marked` is the set of keys whose arbitrary-pick mark has already been stated, and it
+    exists so the mark reads as a footnote: FIRST OCCURRENCE ONLY, within one tree.
+
+    WHY SUPPRESSION AND NOT A HIGHER THRESHOLD, measured in #206 across the 21 plan
+    fixtures: 76 marked nodes carrying 8 distinct keys, five of them bee drones accounting
+    for 73. Every mark is true where it sits. The trigger measures tie SIZE and the density
+    comes from tie RECURRENCE, so raising `solve.TIE_MIN` from 3 to 5 would take 16.5% of
+    craft nodes to 10.2% while deleting four genuinely tied keys, and leave the 67-way drone
+    at every one of its 24 nodes. Different axis. DO NOT reach for the threshold.
+
+    A SUPPRESSED MARK IS NOT A DELETED ONE. `_arbitrary_html` lists every marked key once,
+    with how many steps it applies at, so the reader who meets occurrence seventeen has
+    somewhere to find the finding. Removing that panel would turn this into a deletion.
+    """
+    marked = set() if marked is None else marked
     status = node.get("status", "craft")
     label, cls = status_badge(status, node.get("token_kind"), node.get("unsourced"))
     kids = node.get("children") or []
@@ -438,7 +514,16 @@ def _node_html(node, depth=0, back="", icon=None):
         extra.append(_machine_bit(node, node["machine"]))
     elif node.get("category") and not str(node["category"]).startswith("crafting"):
         extra.append(_machine_bit(node, node["category"]))
-    if node.get("alternatives", 0) > 1:
+    # THE MARK IS NOT NESTED UNDER THE RECIPE COUNT, matching `NodeRowText.meta`'s own
+    # if/else-if in Java. `interchangeable` counts a subset of the same producers
+    # `alternatives` counts, so a marked node always has a count to fall back to and the two
+    # orderings agree on every payload the solver writes -- but a renderer that could only
+    # mark a node it was also willing to count would let one missing field drop the finding
+    # from the tree while `_arbitrary_keys` still listed it in the panel.
+    if _is_arbitrary(node) and node["key"] not in marked:
+        marked.add(node["key"])
+        extra.append(_recipes_bit(node, back, arbitrary=True))
+    elif node.get("alternatives", 0) > 1:
         extra.append(_recipes_bit(node, back))
     # How many things the SLOT would have accepted, as opposed to how many recipes make
     # what is in it. The solver has always written this and nothing rendered it, so a
@@ -473,7 +558,7 @@ def _node_html(node, depth=0, back="", icon=None):
         '<summary><span class="tw">&#9656;</span>%s</summary>'
         '<div class="kids">%s</div></details>'
         % (need_flag, block_flag, open_attr, inner,
-           "".join(_node_html(k, depth + 1, back, icon) for k in kids))
+           "".join(_node_html(k, depth + 1, back, icon, marked) for k in kids))
     )
 
 
@@ -607,6 +692,66 @@ def _tokens_html(entries):
             '</div>' % (len(entries), "".join(blocks)))
 
 
+def _arbitrary_keys(tree):
+    """`[{key, label, kind, interchangeable, steps}]` for every key #181 marked in this tree.
+
+    In the order the tree first reaches them, which is the order the marks appear in it, so
+    this panel and the tree agree about which one a reader met first.
+
+    Counted over NODES, not keys: `steps` is how many places the mark is true at, and it is
+    the number that says why the tree only prints it once. See #206.
+    """
+    found = {}
+    order = []
+
+    def visit(node):
+        if _is_arbitrary(node):
+            key = node["key"]
+            row = found.get(key)
+            if row is None:
+                row = found[key] = {"key": key, "label": node.get("label") or key,
+                                    "kind": node.get("kind", "item"),
+                                    "interchangeable": node["interchangeable"], "steps": 0}
+                order.append(row)
+            row["steps"] += 1
+        for kid in node.get("children") or ():
+            visit(kid)
+
+    visit(tree)
+    return order
+
+
+def _arbitrary_html(rows, icon=None):
+    """The keys whose recipe was picked arbitrarily, one row each. #206
+
+    THE OTHER HALF OF THE FOOTNOTE `_node_html` writes. The tree states the mark where a key
+    first appears and stays quiet at every later occurrence, which is only honest if the
+    reader can still find the finding from anywhere; this is where. It also says the thing
+    the per-node marks could not: that 76 marks on one plan were eight findings.
+
+    Sprites like every other item panel, unlike `_tokens_html` beside it: these rows are real
+    items a player can hold, and a picture is how they are recognised everywhere else on the
+    page.
+    """
+    if not rows:
+        return ""
+    body = "".join(
+        '<tr><td class="tname">%s <span class="meta">%s</span></td>'
+        '<td class="n">%s</td></tr>'
+        % (named(row, icon), _esc(INTERCHANGEABLE_NOTE % row["interchangeable"]),
+           "1 step" if row["steps"] == 1 else "%s steps" % "{:,}".format(row["steps"]))
+        for row in rows)
+    most = max(row["steps"] for row in rows)
+    note = ("The tree says this where each item FIRST appears and not again: the finding is "
+            "the same wherever the key turns up, and one of these keys is reached at %s "
+            "separate steps." % "{:,}".format(most)) if most > 1 else (
+        "The tree says this on the step itself.")
+    return ('<div class="card"><h2><span>Picked from equal recipes</span>'
+            '<span class="c">%d</span></h2><div class="scroll"><table>%s</table></div>'
+            '<div class="meta" style="margin-top:9px">%s</div></div>'
+            % (len(rows), body, note))
+
+
 def _truncation_note(result, deeper):
     """Why the tree stops, and the one thing worth doing about it from where you stand.
 
@@ -657,7 +802,13 @@ def _truncation_note(result, deeper):
 
 
 def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
-                icon=None):
+                icon=None, standalone=False):
+    """The plan page. `standalone=True` for a file a browser opens directly. See #138.
+
+    The flag is EXPLICIT rather than inferred from `back` or from `icon`, both of which
+    happen to differ between the two callers today. A renderer guessing which delivery shape
+    it is in is the failure `iconset.resolver`'s docstring already records one level down.
+    """
     tree = result["tree"]
     # BOTH orientations, shipped together. The alternative is a round trip, and a round
     # trip re-solves: a plan can take two minutes (defaults.MAX_NODES_CEILING), which is an
@@ -691,7 +842,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
     total_need = sum(e["qty"] for e in need)
     total_used = sum(e["qty"] for e in used)
 
-    return """<style>%s%s</style>
+    return _standalone("""<style>%s%s</style>
 <div class="wrap">
   <div class="eyebrow">Crafting plan</div>
   <h1>%s<span class="x">&times;%s</span></h1>
@@ -718,10 +869,12 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
       aria-pressed="false">Turn it %s</button></div>
     <div class="meta" style="margin-top:9px">A box is filled by what the plan does with
       that item, per the key above. The small SWATCH inside each box is a different axis:
-      its colour groups items by mod and the letter is the item's initial. The diagram keeps
-      those rather than the item icons the rows carry, because it is scanned for structure
+      its colour groups items by mod and the letter is the item's initial, or
+      <b>!</b> on a pack placeholder, which is not an item at all. The diagram keeps those
+      rather than the item icons the rows carry, because it is scanned for structure
       and a hue says &ldquo;these six are all one mod&rdquo; at a glance. Click any box to
-      plan that item on its own.</div>
+      plan that item on its own &mdash; except a fully rounded one, which is a placeholder
+      and has no plan to open.</div>
   </div>
   <div class="cols" id="cols">
     <div class="card" id="treebox">
@@ -736,7 +889,7 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
       <div class="card">
         <h2><span>Drawn from AE2 stock</span><span class="c">%d</span></h2>
         <div class="scroll"><table>%s</table></div>
-      </div>%s%s%s%s
+      </div>%s%s%s%s%s
     </div>
   </div>
   <div class="foot">Recipe chain resolved offline from the installed pack; stock read
@@ -775,8 +928,12 @@ def render_html(result, graph=None, coverage_note=None, back="", deeper=None,
         _emc_html(result.get("from_emc"), icon),
         _tokens_html(result.get("tokens_needed")),
         _machines_html(result.get("machines_to_build")),
+        # LAST of the panels. Every one above it is something to do; this one is a caveat
+        # about how the plan above was chosen, which is worth knowing and worth knowing
+        # second.
+        _arbitrary_html(_arbitrary_keys(tree), icon),
         JS.replace("%%DIRS%%", script_json(ORIENTATION_LABEL)),
-    )
+    ), standalone)
 
 
 def render_json(result):
@@ -907,11 +1064,16 @@ def _res_html(item, icon=None):
     )
 
 
-def render_explore_html(payload, coverage_note=None, icon=None):
+def render_explore_html(payload, coverage_note=None, icon=None, standalone=False):
+    """The search page. `standalone=True` for a file a browser opens directly. See #138.
+
+    Same flag as `render_html` and for the same reason: `explore --html` writes this to a
+    file and the server embeds it in a page that already has a head.
+    """
     results = payload["results"]
     warn = ('<div class="warnbar">%s</div>' % _esc(coverage_note)) if coverage_note else ""
     dead = hidden_note(payload.get("hidden", 0), payload.get("collapsed", 0))
-    return """<style>%s%s</style>
+    return _standalone("""<style>%s%s</style>
 <div class="wrap">
   <div class="eyebrow">Item explorer</div>
   <h1>%s<span class="x">%d match%s</span></h1>
@@ -947,4 +1109,4 @@ def render_explore_html(payload, coverage_note=None, icon=None):
         sum(1 for r in results if not r["makes_total"]),
         "".join(_res_html(r, icon) for r in results),
         EXPLORE_JS,
-    )
+    ), standalone)

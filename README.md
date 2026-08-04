@@ -399,11 +399,18 @@ made narrow: sticky `:hover`, `[hidden]` losing to a `display` rule, a flex item
 to shrink below an unbreakable registry id. `tools/mobile-audit.js` drives a real browser
 at 390px against a running server and fails loudly on all three.
 
+It also writes a `plan --html` and an `explore --html` and measures those, because they are
+a delivery path of their own: a saved plan is opened straight from disk and published as a
+Claude Artifact, and it is not the served page. That leg had to be added after #138, where
+a standalone plan laid out at 980px on a phone for as long as the tool has existed while
+every audit passed. It needs a graph, from `RECIPEGRAPH_GRAPH` or `data/graph.json`, and it
+FAILS rather than skipping when there is none.
+
 ```bash
 corepack enable pnpm     # once; Node ships corepack through 24
 pnpm install             # playwright, from the committed lockfile
 pnpm run browsers        # the chromium build that playwright pins
-pnpm run audit:mobile  http://127.0.0.1:8765   # phone layout
+pnpm run audit:mobile  http://127.0.0.1:8765   # phone layout, served and standalone
 pnpm run audit:filters http://127.0.0.1:8765   # the /machines filters, which are JS only
 python3 tools/cost-probe.py                    # what a cost-model constant reroutes
 ```

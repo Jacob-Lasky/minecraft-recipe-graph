@@ -622,9 +622,25 @@ running server:
 
 ```bash
 corepack enable pnpm && pnpm install && pnpm run browsers   # once
-pnpm run audit:mobile  http://host:8765
+RECIPEGRAPH_GRAPH=data/graph.json pnpm run audit:mobile  http://host:8765
 pnpm run audit:filters http://host:8765
 ```
+
+**A PAGE THAT "FITS" AT 980px FITS NOTHING.** With no `<meta name=viewport>` a browser lays
+out at its default 980px, and then every measurement is taken against 980 rather than
+against the phone, so the audit's own output read `plan 980 fits` while a phone showed the
+desktop layout zoomed out. `measure()` checks the layout viewport against the device
+viewport first, before believing anything else it measured. #138.
+
+**THE FILES THE CLI WRITES ARE A SURFACE TOO, and they were unmeasured for the whole life
+of the rule above.** `plan --html` and `explore --html` produce standalone documents that
+people open from disk and publish as Artifacts, and `render.render_html` returns a FRAGMENT:
+the served page gets its head from `server._wrap_fragment`, so the audit driving the server
+could never see the defect. The renderers take `standalone=True` for that (two meta tags,
+never a document shell -- see `render.py`'s docstring for why the shell would break both
+other callers), and the audit writes both files with the real CLI and measures them. This is
+why it now needs a graph, and why it fails rather than skips without one: a skip is what let
+a whole delivery path stay unmeasured behind a rule everyone was following.
 
 **The `/machines` filters interact client-side, but the DATA they filter on is computed in
 Python.** `machines.mod_state_counts` ships the mod x state cross-tab into the page (77 x 4

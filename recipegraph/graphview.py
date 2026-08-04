@@ -29,8 +29,9 @@ meaningful direction, and a force layout would throw both away in exchange for w
 
 from .htmlutil import esc as _esc
 from .htmlutil import item_href
-from .present import STATE_LABEL, STATUS_STYLE, is_roadblock, status_legend
-from .solve import STATUS_CRAFT
+from .present import STATE_LABEL, STATUS_STYLE, is_roadblock, status_badge, status_legend
+from .solve import STATUS_CRAFT, STATUS_TOKEN
+from .tokens import KIND_LABEL
 
 # Geometry. Rows are tight because a real plan is tall and narrow: 100 nodes at 30px is
 # already 3,000px of scroll, and anything looser stops being scannable.
@@ -38,6 +39,10 @@ ROW = 30
 COL = 254
 BOX_H = 24
 BOX_W = 226
+# The corner every box gets. A pack placeholder gets `TOKEN_RX` instead, which is the one
+# thing about a box that is not geometry; see it for why the shape carries that and not a
+# colour.
+BOX_RX = 6
 PAD_X = 18
 PAD_Y = 20
 # A label does not wrap in SVG. It runs straight under the right-aligned quantity, so the
@@ -88,6 +93,33 @@ TD_ROW = 78
 
 KIND_MARK = {"fluid": "F", "essentia": "E", "ore": "*"}
 
+# HOW A PACK PLACEHOLDER IS DRAWN, and the two constants are one decision. #174: a token was
+# indistinguishable from an ingredient you have to go and get, in the same fill, with a
+# quantity, on a page whose key calls that fill "NEED, go get".
+#
+# A THIRD CHANNEL, AND IT HAD TO BE SHAPE. Fill says what the plan does with the item and the
+# dashed outline says whether a machine is in the way, so both existing channels are spoken
+# for.
+#
+# NOT A COLOUR. `present.STATUS_STYLE` argues the shared `--need` fill for token and raw in a
+# comment, `NodeStatus.badge` argues it again in Java, and `status_legend` groups them so the
+# key reads as one red row; a ninth ink would have to defeat all three. NOT A WORD EITHER:
+# the Java side measured a 15-character badge inside a 148px node and got a label of zero
+# characters, and this box is 226px with the same competition. Shape and glyph cost none of
+# the interior, and both survive being read by someone who cannot discriminate the fills --
+# which the fill/outline pair does not, since a dashed red box and a dashed grey box differ
+# only by hue.
+#
+# TWO CARRIERS BECAUSE ONE WAS NOT ENOUGH, measured at 1x on the reported Osiris Spinel plan:
+# a stadium among 107 rounded rectangles is findable once you know to look for it and easy to
+# scan past when you do not. The swatch is the diagram's other text slot.
+#
+# `!` and NOT `?`: `_mark` already returns "?" for a node with no label at all, so a question
+# mark would mean two things in one slot. A placeholder is a note rather than a puzzle, which
+# is the other half of the choice.
+TOKEN_RX = BOX_H / 2.0
+TOKEN_MARK = "!"
+
 
 def _hue(key):
     """A stable hue per mod, so items from one mod read as a family.
@@ -111,7 +143,16 @@ def _hue(key):
 
 
 def _mark(node):
-    """One character for the swatch: the type for non-items, else the name's initial."""
+    """One character for the swatch: a placeholder, then the type, then the name's initial.
+
+    THE PLACEHOLDER WINS OVER THE TYPE, in that order deliberately. "This is not a thing you
+    obtain" is the fact a reader is being misled about, and "it is a fluid" is a detail about
+    a thing that does not exist. Every curated token is a `contenttweaker` item today, so the
+    order costs nothing now and is the right way round the day one stands in for a fluid.
+    See TOKEN_MARK for why the glyph is `!`.
+    """
+    if node.get("status") == STATUS_TOKEN:
+        return TOKEN_MARK
     kind = node.get("kind", "item")
     if kind in KIND_MARK:
         return KIND_MARK[kind]
@@ -155,6 +196,12 @@ def layout(tree, max_nodes=400):
             "full": node.get("label") or node.get("name") or node.get("key"),
             "kind": node.get("kind", "item"),
             "status": node.get("status", STATUS_CRAFT),
+            # The two refinements `present.status_badge` needs to word a status. The record
+            # dropped both, so the diagram was the one surface that could not tell a pack
+            # placeholder from a missing ingredient, or a NEED from a NEED nothing can make.
+            # Same defect as `machine_state` below, one field list later. See #174 and #136.
+            "token_kind": node.get("token_kind") or "",
+            "unsourced": bool(node.get("unsourced")),
             "need": node.get("need", 1),
             "machine": node.get("machine") or node.get("category") or "",
             # Carried so the diagram can SHOW a roadblock rather than only mention it in a
@@ -199,17 +246,31 @@ def _render_legend(nodes):
     Exposing it would invite a caller with a different node set and a key that quietly
     disagrees with the diagram beside it.
 
-    Two encodings, because the diagram carries two independent facts. FILL is what the plan
-    does with the item, from the same `present` tables the boxes use. OUTLINE is whether the
-    step waits on a machine, which is not a colour precisely so it cannot compete with the
-    fill.
+    Three encodings, because the diagram carries three independent facts. FILL is what the
+    plan does with the item, from the same `present` tables the boxes use. SHAPE is whether
+    the box is an item at all. OUTLINE is whether the step waits on a machine. Neither of the
+    last two is a colour, precisely so they cannot compete with the fill.
 
     Fills arrive as `var(--token)`, so they go in a style attribute: the swatch has to be the
     exact colour of the box it explains, and that colour is only knowable from the token.
+
+    EVERY CHANNEL ON THE PAGE IS KEYED HERE, including the two that are not fills. The
+    design note on #174 argued against a fourth legend row on the grounds that the legend
+    keys fills and a token is not a new fill. That argument holds against a new colour and
+    not against this: the dashed-outline row beside it is already a non-fill entry, and a
+    reader who meets a shape they were never told about has to guess. An unexplained
+    encoding is the same defect as no encoding.
     """
     rows = ['<li><span class="sw" style="background:%s;border-color:%s"></span>%s</li>'
             % (fill, ink, _esc(labels))
             for fill, ink, labels in status_legend({n["status"] for n in nodes})]
+    if any(n["status"] == STATUS_TOKEN for n in nodes):
+        # Worded to stand on its own rather than pointing at the plan page's "Not crafted,
+        # obtained" panel: `render_diagram` is public and a caller can draw the diagram
+        # without that panel, and a key naming a card that is not on the page is worse than
+        # a key that explains itself.
+        rows.append('<li><span class="sw tok"></span>not an item: something to do, '
+                    'find or unlock</li>')
     if any(is_roadblock(n["machine_state"]) for n in nodes):
         rows.append('<li><span class="sw dash"></span>needs a machine you do not have</li>')
     if not rows:
@@ -318,8 +379,20 @@ def _render_svg(nodes, links, rows, orientation):
         fill, ink = STATUS_STYLE.get(n["status"], STATUS_STYLE[STATUS_CRAFT])
         nx, ny = x(n), y(n)
         blocked = is_roadblock(n["machine_state"])
-        title = "%s × %s%s" % (n["full"], "{:,}".format(n["need"]),
-                                    ("  · " + n["machine"]) if n["machine"] else "")
+        token = n["status"] == STATUS_TOKEN
+        word, _cls = status_badge(n["status"], n["token_kind"], n["unsourced"])
+        # THE WORD, WHICH EVERY OTHER SURFACE HAS AND THIS ONE DID NOT. The box carries no
+        # text but the label and the quantity, so the fill was the whole of what it said
+        # about a node, and two statuses share a fill by an argued decision in
+        # `present.STATUS_STYLE`. A reader hovering a red box could not find out which red it
+        # was. `status_badge` is the same call the tree row makes, so the two cannot drift.
+        title = "%s × %s  · %s%s" % (n["full"], "{:,}".format(n["need"]), word,
+                                     ("  · " + n["machine"]) if n["machine"] else "")
+        if token and n["token_kind"] in KIND_LABEL:
+            # The kind's whole sentence, not the badge word again: "go get" says what to do
+            # and "found by playing" says what the thing IS, which is the fact a reader who
+            # mistook it for an item needs.
+            title += "  · %s" % KIND_LABEL[n["token_kind"]]
         if blocked:
             # Still in the title, because the outline says THAT a step is blocked and only
             # the words say by what and how badly.
@@ -339,23 +412,27 @@ def _render_svg(nodes, links, rows, orientation):
         # cannot be confused with a fill.
         box_stroke = ' stroke-opacity="1" stroke-width="1.6" stroke-dasharray="4 2.5"' \
             if blocked else ' stroke-opacity=".35"'
-        boxes.append(
-            '<g class="nd"><title>%s</title>'
-            '<a href="%s">'
-            '<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s"'
+        inner = (
+            '<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="%.1f" fill="%s"'
             ' stroke="%s"%s/>'
             '<rect x="%.1f" y="%.1f" width="17" height="17" rx="4"'
             ' fill="hsl(%d 42%% 52%%)"/>'
             '<text x="%.1f" y="%.1f" class="mk">%s</text>'
             '<text x="%.1f" y="%.1f" class="lb" fill="%s">%s</text>'
             '<text x="%.1f" y="%.1f" class="qt" fill="%s">%s</text>'
-            '</a></g>'
-            % (_esc(title), item_href(n["key"]),
-               nx, ny, BOX_W, BOX_H, fill, ink, box_stroke,
+            % (nx, ny, BOX_W, BOX_H, TOKEN_RX if token else BOX_RX, fill, ink, box_stroke,
                nx + 4, ny + 3.5, _hue(n["key"]),
                nx + 12.5, ny + 15.5, _esc(_mark(n)),
                nx + LABEL_X, ny + 16, ink, _esc(shown),
                nx + BOX_W - QTY_RIGHT_PAD, ny + 16, ink, qty))
+        # NO LINK ON A TOKEN, and this is the reported half of #174. `/plan?item=` for a
+        # placeholder answers with a one-node plan whose entire content is the placeholder,
+        # which reads as the planner failing rather than as "this is not an item". The
+        # capability it costs -- seeing what else the token gates -- was never on this link
+        # anyway: a plan shows what is UNDER a node, and the token is a leaf.
+        boxes.append('<g class="nd"><title>%s</title>%s</g>'
+                     % (_esc(title), inner if token
+                        else '<a href="%s">%s</a>' % (item_href(n["key"]), inner)))
         if n["cut"]:
             boxes.append('<text x="%.1f" y="%.1f" class="cut">+ more not drawn</text>'
                          % (nx + BOX_W + 8, ny + 16))
@@ -372,8 +449,10 @@ DIAGRAM_CSS = """
 .diagram .lk path{fill:none;stroke:var(--line);stroke-width:1.4}
 .diagram .nd a{cursor:pointer}
 /* Gated like every other :hover in this project: a touch browser leaves the state
-   applied to the last node tapped, so one box stays highlighted while you read. */
-@media(hover:hover){.diagram .nd:hover rect:first-of-type{stroke-opacity:1}}
+   applied to the last node tapped, so one box stays highlighted while you read.
+   ON THE LINK, NOT ON THE GROUP: a token node has no `<a>` (see `_render_svg`), and
+   highlighting a box that cannot be clicked is the same false promise the link was. */
+@media(hover:hover){.diagram .nd a:hover rect:first-of-type{stroke-opacity:1}}
 .diagram text{font-family:var(--sans);font-size:11.5px;dominant-baseline:auto}
 .diagram .mk{font-family:var(--mono);font-size:10.5px;font-weight:700;fill:#fff;
 text-anchor:middle}
@@ -401,7 +480,12 @@ font-size:11.5px;color:var(--dim)}
 .legend li{display:flex;align-items:center;gap:6px}
 .legend .sw{width:11px;height:11px;border-radius:3px;border:1px solid;flex:0 0 auto}
 /* The outline key. Transparent fill on purpose: this entry is about the BORDER, and giving
-   it a background would read as a fifth fill colour, which is the confusion the two
-   channels exist to avoid. */
+   it a background would read as one more fill colour, which is the confusion the separate
+   channels exist to avoid. (It said "a fifth fill" and there are five already: the four
+   semantic ones plus `--mutedbg`. The count was the wrong part of a right argument.) */
 .legend .sw.dash{background:transparent;border:1.5px dashed var(--dim);border-radius:3px}
+/* The shape key, transparent for the same reason as the outline key above. A token box is
+   drawn as a stadium (`graphview.TOKEN_RX`) and the swatch is square, so at 11px this
+   renders as a circle against the fill swatches' rounded squares. */
+.legend .sw.tok{background:transparent;border:1.5px solid var(--dim);border-radius:99px}
 """

@@ -7,7 +7,7 @@ time so the chart follows the viewer's light/dark theme instead of hardcoding ei
 
 import json
 
-from .render import CSS, _esc
+from .render import CSS, _esc, _standalone
 
 CHART_CSS = """
 .charts{display:grid;gap:20px;grid-template-columns:1fr}
@@ -210,9 +210,18 @@ def _rate_label(per_min):
     return "%s%.2f/min" % (sign, per_min)
 
 
-def render_chart_html(payload):
+def render_chart_html(payload, standalone=False):
     """payload: {since, until, window_label, movers:[...], series:{key:[(ts,qty)]},
-    power:[...], source, storage:{...}}"""
+    power:[...], source, storage:{...}}
+
+    `standalone=True` for a file a browser opens directly, exactly as in `render.py`, whose
+    module docstring carries the argument for why that is two meta tags and not a document.
+    THE ONLY CALLER TODAY IS `cli.cmd_chart`, which writes a file, so this page has never
+    been served -- and it had #138 too, unreported, because nothing measures it. The flag is
+    still explicit rather than always-on: the day a `/chart` route appears it needs the
+    fragment, and a renderer that decides for itself is the failure `iconset.resolver`
+    records.
+    """
     movers = payload["movers"]
     series = []
     for m in movers:
@@ -267,7 +276,7 @@ def render_chart_html(payload):
     <div class="readout" id="powerreadout"></div>
   </div>""" % ("{:,.0f}".format(latest.get("stored") or 0))
 
-    return """<style>%s%s</style>
+    return _standalone("""<style>%s%s</style>
 <div class="wrap">
   <div class="eyebrow">Production monitor</div>
   <h1>AE2 network activity<span class="x">%s</span></h1>
@@ -320,4 +329,4 @@ def render_chart_html(payload):
         "".join(rows) or '<tr><td class="empty">no changes recorded yet</td></tr>',
         json.dumps(data, separators=(",", ":")),
         CHART_JS,
-    )
+    ), standalone)

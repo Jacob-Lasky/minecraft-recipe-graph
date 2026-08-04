@@ -7,18 +7,28 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import graphview  # noqa: E402
+from recipegraph import graphview, present, tokens  # noqa: E402
+from recipegraph.solve import STATUS_RAW, STATUS_TOKEN  # noqa: E402
 
 
 def node(key, status="craft", need=1, kind="item", label=None, children=(),
-         machine=None, machine_state=None):
+         machine=None, machine_state=None, token_kind=None, unsourced=False):
     d = {"key": key, "label": label or key.split(":")[-1], "kind": kind,
          "status": status, "need": need, "children": list(children)}
     if machine:
         d["machine"] = machine
     if machine_state:
         d["machine_state"] = machine_state
+    if token_kind:
+        d["token_kind"] = token_kind
+    if unsourced:
+        d["unsourced"] = True
     return d
+
+
+def token(key="contenttweaker:dungeon_drop", kind=tokens.LOOT, label="Dungeon Drop", **kw):
+    """A pack placeholder as the solver writes one: `status=token` plus its kind."""
+    return node(key, status=STATUS_TOKEN, label=label, token_kind=kind, **kw)
 
 
 def plan():
@@ -211,6 +221,156 @@ class RenderTest(unittest.TestCase):
         self.assertIn("&lt;script&gt;", svg)
 
 
+class TokenNodeTest(unittest.TestCase):
+    """A pack placeholder must not draw as an item you go and get. #174
+
+    REPORTED ON AN OSIRIS SPINEL PLAN: "the osiris spinel shows it requires a Dungeon Drop
+    which implies it is an item". The data was already right -- `status=token`, out of the
+    shopping list, in its own panel -- and this renderer was the surface that disagreed: same
+    fill as a real missing ingredient, a quantity, no word, and a link to a plan for it.
+
+    The plan below is the reported one in miniature: a craft node over a LOOT placeholder and
+    a genuine raw ingredient, which is the pair a reader could not tell apart.
+    """
+
+    def _plan(self):
+        return node("ct:osiris_spinel", label="Osiris Spinel", children=[
+            token(),
+            node("mod:callstone", status=STATUS_RAW, label="Armorer Callstone"),
+        ])
+
+    def _boxes(self, svg):
+        """`{label: box markup}`, one entry per node drawn."""
+        out = {}
+        for group in re.findall(r'<g class="nd">.*?</g>', svg):
+            label = re.search(r'class="lb"[^>]*>([^<]*)<', group).group(1)
+            out[label] = group
+        return out
+
+    def test_a_token_is_not_a_link_to_a_plan_for_itself(self):
+        """The reported half. `/plan?item=contenttweaker:dungeon_drop` answers with a one-node
+        plan whose entire content is the placeholder, which reads as the planner failing."""
+        boxes = self._boxes(graphview.render_diagram(self._plan())[0])
+        self.assertNotIn("<a href", boxes["Dungeon Drop"], boxes["Dungeon Drop"])
+        self.assertIn("<a href", boxes["Armorer Callstone"],
+                      "a real ingredient still links to its own plan")
+
+    def test_the_shape_is_what_tells_them_apart(self):
+        boxes = self._boxes(graphview.render_diagram(self._plan())[0])
+        self.assertIn('rx="%.1f"' % graphview.TOKEN_RX, boxes["Dungeon Drop"])
+        self.assertIn('rx="%.1f"' % graphview.BOX_RX, boxes["Armorer Callstone"])
+        self.assertNotEqual(graphview.TOKEN_RX, graphview.BOX_RX)
+
+    def test_the_swatch_carries_it_too(self):
+        """TWO colour-independent carriers, because one was not enough.
+
+        Measured at 1x on the reported Osiris Spinel plan: a stadium among 107 rounded
+        rectangles is findable once you know to look and easy to scan past when you do not.
+        The swatch is the diagram's other text slot and it costs none of the interior.
+        """
+        boxes = self._boxes(graphview.render_diagram(self._plan())[0])
+        mark = re.compile(r'class="mk">([^<]*)<')
+        self.assertEqual(mark.search(boxes["Dungeon Drop"]).group(1), graphview.TOKEN_MARK)
+        self.assertEqual(mark.search(boxes["Armorer Callstone"]).group(1), "A",
+                         "a real ingredient keeps its initial")
+
+    def test_the_placeholder_mark_outranks_the_type_mark(self):
+        """"It is a fluid" is a detail about a thing that does not exist."""
+        svg = graphview.render_diagram(
+            node("ct:goo", label="Goo", kind="fluid", status=STATUS_TOKEN,
+                 token_kind=tokens.LOOT))[0]
+        self.assertIn('class="mk">%s<' % graphview.TOKEN_MARK, svg)
+        self.assertNotIn('class="mk">F<', svg)
+
+    def test_the_colour_is_NOT_what_tells_them_apart(self):
+        """Deliberate, and the reason the shape exists.
+
+        `present.STATUS_STYLE` argues the shared `--need` fill in a comment, `NodeStatus.badge`
+        argues it again in Java, and `status_legend` groups the two so the key reads as one red
+        row. A ninth ink would have to defeat all three -- and it would leave a reader who
+        cannot discriminate red from red with nothing at all, which is what the shape fixes.
+        """
+        boxes = self._boxes(graphview.render_diagram(self._plan())[0])
+        fill = re.compile(r'fill="(var\(--\w+\))"')
+        self.assertEqual(fill.search(boxes["Dungeon Drop"]).group(1),
+                         fill.search(boxes["Armorer Callstone"]).group(1))
+
+    def test_the_shape_does_not_collide_with_the_machine_outline(self):
+        """The diagram's other non-colour channel. A blocked token has to show both."""
+        svg = graphview.render_diagram(
+            token(machine="Altar", machine_state="buildable"))[0]
+        self.assertIn('rx="%.1f"' % graphview.TOKEN_RX, svg)
+        self.assertIn('stroke-dasharray="4 2.5"', svg)
+
+    def test_the_title_says_what_kind_of_placeholder_it_is(self):
+        """The box carries no text but a label and a quantity, so the word goes in the title.
+
+        Both halves: the badge word the tree row shows, and the kind's whole sentence, which
+        is the fact a reader who mistook it for an item actually needs.
+        """
+        svg = graphview.render_diagram(self._plan())[0]
+        title = [t for t in re.findall(r"<title>([^<]*)</title>", svg)
+                 if "Dungeon Drop" in t]
+        self.assertEqual(len(title), 1, svg)
+        self.assertIn(tokens.KIND_BADGE[tokens.LOOT], title[0])
+        self.assertIn(tokens.KIND_LABEL[tokens.LOOT], title[0])
+
+    def test_the_word_comes_from_present_and_not_from_here(self):
+        """Every kind, and through the same call the tree row makes, so the two cannot drift.
+
+        A GATE badged "go get" would send someone hunting for an item that unlocks by playing
+        the story, which is the whole reason `status_badge` refines the word per kind.
+        """
+        for kind in tokens.KINDS:
+            svg = graphview.render_diagram(token(kind=kind))[0]
+            word, _cls = present.status_badge(STATUS_TOKEN, kind)
+            self.assertIn(word, svg, kind)
+            self.assertIn(tokens.KIND_LABEL[kind], svg, kind)
+
+    def test_the_legend_keys_the_shape(self):
+        """An encoding the reader was never told about is as good as no encoding.
+
+        The design note on #174 argued against a fourth legend row because the legend keys
+        FILLS. That holds against a new colour; the dashed-outline row beside this one is
+        already a non-fill entry.
+        """
+        _svg, legend = graphview.render_diagram(self._plan())
+        self.assertIn("not an item", legend)
+        self.assertIn('class="sw tok"', legend)
+
+    def test_a_plan_with_no_placeholder_has_no_shape_row_in_its_key(self):
+        _svg, legend = graphview.render_diagram(plan())
+        self.assertNotIn("not an item", legend)
+        self.assertNotIn("sw tok", legend)
+
+    def test_the_shape_swatch_has_no_fill_of_its_own(self):
+        # A background there would read as a ninth fill colour, exactly as it would on the
+        # outline swatch beside it.
+        self.assertIn(".legend .sw.tok{background:transparent", graphview.DIAGRAM_CSS)
+
+    def test_hover_no_longer_highlights_a_box_that_cannot_be_clicked(self):
+        self.assertIn(".diagram .nd a:hover", graphview.DIAGRAM_CSS)
+        self.assertNotIn(".diagram .nd:hover", graphview.DIAGRAM_CSS)
+
+    def test_layout_carries_the_two_fields_it_used_to_drop(self):
+        """`layout`'s record is a fixed field list, and it copied neither of the refinements
+        `present.status_badge` needs. Same defect `machine_state` had. #174, #136."""
+        nodes, _l, _r = graphview.layout(self._plan())
+        by_label = {n["full"]: n for n in nodes}
+        self.assertEqual(by_label["Dungeon Drop"]["token_kind"], tokens.LOOT)
+        self.assertFalse(by_label["Dungeon Drop"]["unsourced"])
+        nodes, _l, _r = graphview.layout(node("mod:x", unsourced=True))
+        self.assertTrue(nodes[0]["unsourced"])
+        # Absent rather than missing, as with `machine_state`: every record has both keys.
+        self.assertEqual(nodes[0]["token_kind"], "")
+
+    def test_both_orientations_agree_about_all_of_it(self):
+        svgs, _legend = graphview.render_diagrams(self._plan())
+        for orientation, svg in svgs.items():
+            boxes = self._boxes(svg)
+            self.assertNotIn("<a href", boxes["Dungeon Drop"], orientation)
+            self.assertIn('rx="%.1f"' % graphview.TOKEN_RX, boxes["Dungeon Drop"],
+                          orientation)
 
 
 class OrientationTest(unittest.TestCase):
