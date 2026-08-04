@@ -461,6 +461,11 @@ def _recipe_row(ctx, recipe, alts):
         "category": recipe.category,
         "machine": recipe.machine,
         "transfer": recipe.transfer,
+        # The ground on which this entry is not a route, or null. Reported because #211's
+        # complaint was that a silent exclusion reads as "we considered everything": a reader
+        # looking at a scrapbox card should be able to see that the planner will not use it,
+        # and on WHAT grounds, without reading the source.
+        "not_production": recipe.not_production,
         "inputs": [_slot(ctx, i, alts) for i in recipe.inputs],
         "outputs": explore.output_rows(ctx.graph, recipe.outputs),
     }

@@ -156,6 +156,11 @@ class Solver:
         # as before; the CLI and the server supply it. See tokens.py.
         self.token_kinds = dict(token_kinds or {})
         self.tokens_needed = collections.Counter()
+        # AND WHICH RECIPES THE TOKEN MAP MAKES NON-ROUTES, which has to happen here rather
+        # than only in `cost.estimate`: `--no-cost` builds a Solver with `costs=None` and would
+        # otherwise rank a scrapbox loot table as ordinary production. Memoised on the graph,
+        # so when a cost table was built first this is a dict comparison. See notproduction.
+        graph.mark_non_production(self.token_kinds)
         # Precomputed cost per item, from cost.estimate. Without it recipe choice is greedy
         # and local, which is how a two-step chemical route lost to an enormous chain
         # through machines that happened to be owned. A RANKING, not a lower bound and not
@@ -351,14 +356,23 @@ class Solver:
         simple = 1.0 / (1 + len(slots))
         plain = 0.1 if is_hand_crafting(recipe.category) else 0.0
         avail = self.availability_rank(recipe)
-        # A container fill/empty never counts as production, so it loses to any real
-        # recipe regardless of how well stocked it looks.
-        # Order matters. A container transfer is never production. After that, the
-        # ESTIMATED TOTAL COST dominates: it already accounts for machine availability
-        # (via cost.MACHINE_COST) and for how expensive the whole subtree is, which local
-        # signals cannot see. `satisfied`/`simple` only break ties between comparable
-        # routes. DO NOT promote `avail` above cost -- doing that is what made the solver
-        # prefer a million-bucket chain through an owned machine.
+        # ORDER MATTERS, AND THE FIRST TERM IS "IS THIS PRODUCTION AT ALL". A container
+        # fill/empty is not, and neither is a loot table or a JEI automation card, so all three
+        # lose to any real recipe regardless of how well stocked they look. They share one term
+        # rather than getting one each because the claim is identical -- whatever else is true
+        # of it, this entry is not a way to obtain the thing -- and two terms would be a silent
+        # ordering decision between statements that have no order.
+        #
+        # THE DEMOTION IS RANKED HERE AS WELL AS PRICED, NOT INSTEAD OF IT.
+        # `NON_PRODUCTION_PENALTY` already puts these last on `cheap` in every case measured,
+        # and this term is what makes that hold when the alternatives are themselves priced at
+        # infinity -- where `cheap` ties at negative infinity and cannot decide.
+        #
+        # After that, the ESTIMATED TOTAL COST dominates: it already accounts for machine
+        # availability (via cost.MACHINE_COST) and for how expensive the whole subtree is,
+        # which local signals cannot see. `satisfied`/`simple` only break ties between
+        # comparable routes. DO NOT promote `avail` above cost -- doing that is what made the
+        # solver prefer a million-bucket chain through an owned machine.
         cost = self.estimated_cost(recipe)
         cheap = -cost if cost != float("inf") else float("-inf")
         # `ore_backed` sits BELOW cost and stock and ABOVE `simple + plain`, and both
@@ -367,7 +381,8 @@ class Solver:
         # keys have. Above `simple + plain`, because that is the term it has to beat:
         # `plain` gives hand-crafting +0.1 and so prefers unpacking a decorative block
         # over smelting an ore. Moved below it, this goes inert. See `ore_backed`.
-        return (0 if recipe.transfer else 1, -ancestor_cyclic, cheap, -own_cyclic,
+        return (0 if (recipe.transfer or recipe.not_production) else 1,
+                -ancestor_cyclic, cheap, -own_cyclic,
                 satisfied, self.ore_backed(recipe, slots), simple + plain, avail)
 
     def offer_shape(self, recipe, key):
@@ -376,7 +391,12 @@ class Solver:
         The merged slot view, because that is what `_build` expands and what `score_recipe`
         counts; the per-run output of the key being planned, because two recipes yielding
         1000 and 1 are not the same offer however they score; the category, because a
-        different machine is a different thing to go and build; and the transfer flag.
+        different machine is a different thing to go and build; and both production flags.
+
+        BOTH FLAGS, not just `transfer`. A key with a real route and a loot-table route has two
+        candidates whose merged slots, per-run output and category can all coincide, and
+        calling those the same OFFER would report the pick as an arbitrary coin toss when it
+        was the one decision in the ranking that is not arbitrary at all.
 
         SLOT IDENTITY IS DELIBERATELY EXCLUDED, and it is the crux. The 62 Digital Mob
         Agonizer recipes for `fluid:lifeessence` differ precisely in WHICH four data models
@@ -394,7 +414,8 @@ class Solver:
         slots = self._merge_slots(recipe)
         per_run = sum(qty for out, qty in recipe.outputs if out == key)
         return (tuple(sorted((options, qty) for _alt, qty, options in slots)),
-                per_run, recipe.category, bool(recipe.transfer))
+                per_run, recipe.category, bool(recipe.transfer),
+                recipe.not_production or "")
 
     def _interchangeable_count(self, scored, chosen, key, cache):
         """How many recipes tied with `chosen` are the same offer as it. 1 when none are.
@@ -792,6 +813,7 @@ class Solver:
         it removes the only guarantee the search terminates -- see the comment on it in
         __init__. Every OTHER accumulator must be listed, or a rejected attempt's draw is
         counted twice; `from_sources` was added for exactly that reason.
+
         """
         return (self.pool.copy(), self.used_from_stock.copy(),
                 self.leaf_totals.copy(), self.from_sources.copy(),

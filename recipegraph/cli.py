@@ -884,7 +884,9 @@ def cmd_machines(args):
 
 def cmd_stats(args):
     g = _load_graph(args.graph)
-    print(json.dumps(index.coverage(g), indent=2))
+    # Through `_token_kinds` rather than letting `coverage` default, so the demotion counts it
+    # reports are the ones a plan on this machine would actually use. See notproduction.
+    print(json.dumps(index.coverage(g, _token_kinds(args)), indent=2))
     return 0
 
 
