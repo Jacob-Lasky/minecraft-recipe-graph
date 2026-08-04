@@ -67,10 +67,19 @@ final class Unsourced {
             return stemId >= 0 && realProducerCount(g, stemId, scratch) > 0 ? stemId : -1;
         }
         // A BARE key nothing makes while a VARIANT of it IS made: #170's half, and the third
-        // face of one subsumption rule. REPORTED, NOT REPRICED as far as `producers` goes --
-        // whether the solver should ROUTE a bare demand through a produced variant is
-        // contested (#28 refused it there) and stays open. #176 prices it; it does not route
-        // it. Mirrors `Graph.reachable_form` in python.
+        // face of one subsumption rule.
+        //
+        // IT IS ALSO ROUTED NOW, AND THIS IS STILL WIDER THAN THE ROUTE. #170 shipped
+        // `RecipeGraph.subsumedBareKey`, so `Solver` plans a bare demand through the variant's
+        // recipe and `Cost` prices the bare key at what making the variant costs. What reaches
+        // here is either a key the route could not be taken for -- every variant made FROM the
+        // bare key or from a sibling, or none reachable -- or a caller that is not the planner.
+        // Both still need the answer, and `Graph.unsourced_keys` in python records why the
+        // price FLOOR this set feeds must not be narrowed to match the route: a key dropped
+        // from it falls back to `BASE_RAW_COST`, which is #170's original report. `producers`
+        // itself remains un-widened; the direction #28 refused, a demand for `X#d` satisfied
+        // by bare `X`, is the reverse of the one that shipped.
+        // Mirrors `Graph.reachable_form` in python.
         for (int variant : g.variantsOf(keyId)) {
             if (realProducerCount(g, variant, scratch) > 0) {
                 // First produced variant, which is the one the dump saw first: `variantsOf`

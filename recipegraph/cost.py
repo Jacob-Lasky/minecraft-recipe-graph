@@ -950,6 +950,10 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
 
     ore_members = graph.ore_members
     recipes = graph.recipes
+    # A DICT LOOKUP PER OUTPUT, NOT A PREDICATE CALL: this loop runs over every output of
+    # every one of ~340,000 recipes, `passes` times. See `Graph.variant_subsumption` for the
+    # relation and for why it is not spelled out here.
+    subsumption = graph.variant_subsumption
 
     settled = max(1, int(len(recipes) * SETTLED_FRACTION))
     for _ in range(passes):
@@ -1031,6 +1035,43 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                 per_unit = base + retained + ingredients / _scaled_qty(key, qty)
                 if per_unit < cost.get(key, math.inf) - 1e-9:
                     cost[key] = per_unit
+                    changed += 1
+                # AND THE BARE KEY THIS VARIANT SATISFIES A DEMAND FOR. #170: the Alchemy
+                # Array makes `animus:kama_bound#fd1adc426e12` while four recipes ask for
+                # `animus:kama_bound`, so `_seed` found no producer for the bare key and
+                # #176 priced it UNSOURCED_COST -- a 60.0 route reported as a 2,000 wall.
+                # 88 keys on the reference graph move, and 613 prices in all.
+                #
+                # THE CHEAPEST PRODUCTION, NOT `min` OVER VARIANT COSTS, AND THE DIFFERENCE
+                # IS A MEASURED HAZARD RATHER THAN A STYLE. Stock enters the table through
+                # `_seed` as `cost[key] = 0.0` and never through `per_unit`, which is
+                # `base + ingredients / qty`. Attributing a RECIPE therefore cannot leak
+                # stock, and 18 of the eligible bare keys have a variant the AE2 network
+                # holds: `min` over costs would price those at 0.0 and the plan would say
+                # HAVE for an item nobody owns under that key. Reading the recipe instead
+                # lands `forestry:sapling` on what growing one costs.
+                #
+                # A PURE LOWERING, WHICH IS WHY IT CAN LIVE IN THIS LOOP AT ALL. `_relax`
+                # only ever lowers, so a floor cannot be patched into a settled table (see
+                # BASE_RAW_COST's fourth finding) -- and the floor here is #176's 2,000
+                # seed, which is an INPUT to this relaxation and stays underneath every key
+                # this rule fails to reach. Riding the existing fixpoint also means no extra
+                # pass and no settle step: `changed` counts the move, so the loop keeps
+                # going until the subsumed price has propagated to whatever consumes it.
+                #
+                # AND IT NEEDS NO DEMOTION GUARD OF ITS OWN, which is worth writing down
+                # because `real_producers` sends the next reader here before making its two
+                # exclusions identical. A demoted recipe reaches this line -- the loop charges
+                # `NON_PRODUCTION_PENALTY` rather than skipping it -- but cannot lower a
+                # subsumed key below its floor, because that penalty is 50,000 and the floor
+                # is `UNSOURCED_COST`'s 2,000, so `per_unit` is never the smaller number. The
+                # SOLVER half needs no argument at all: `_variant_candidates` reads
+                # `real_producers`, which drops demoted recipes outright, so a loot table is
+                # never offered as a substitution route. The two rules compose because this
+                # one is built on `real_producers` and not on `producers`. #211, #169.
+                bare = subsumption.get(key)
+                if bare is not None and per_unit < cost.get(bare, math.inf) - 1e-9:
+                    cost[bare] = per_unit
                     changed += 1
         if changed < settled:
             break

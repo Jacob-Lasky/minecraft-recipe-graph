@@ -27,6 +27,20 @@ public final class Bits {
         return (bits[index >>> 6] & (1L << (index & 63))) != 0;
     }
 
+    /**
+     * Drops one member, for a set reused across iterations rather than reallocated.
+     *
+     * `RecipeGraph.subsumption` is the caller and the reason: it needs "the bare key and its
+     * variants" as a set, 2,631 times over, and a fresh 37 KB array per iteration is 97 MB of
+     * garbage to answer a question about a few dozen keys. Clearing exactly what was set keeps
+     * one array. The caller MUST clear every bit it set, and there is no `clearAll` here on
+     * purpose: a caller that has to remember which bits are its own is a caller that will not
+     * accidentally hand a dirty set to the next iteration.
+     */
+    public static void clear(long[] bits, int index) {
+        bits[index >>> 6] &= ~(1L << (index & 63));
+    }
+
     public static int cardinality(long[] bits) {
         int total = 0;
         for (long word : bits) {

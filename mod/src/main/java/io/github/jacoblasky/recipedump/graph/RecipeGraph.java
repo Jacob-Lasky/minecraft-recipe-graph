@@ -162,12 +162,28 @@ public final class RecipeGraph {
     /**
      * base key -&gt; the discriminated keys some recipe produces. Built on first use.
      *
-     * LAZY, unlike every other index here, and the reason is where it is read from. The
-     * solver never touches it: machine IDENTIFICATION does, once, over ~500 categories, and
-     * so does the machines page. Building it eagerly would put its bytes on every graph load
-     * including the ones that only ever plan, and the heap gate is measured on that path.
+     * LAZY, unlike every other index here, and the reason USED to be that planning never
+     * needed it: machine identification did, once over ~500 categories, and so did the
+     * machines page, so building it eagerly put its bytes on every graph load including the
+     * ones that only ever plan, and the heap gate is measured on that path. #170 changed that
+     * -- {@link #subsumedBareKey} is built from this index and both the cost model and the
+     * solver read it on every plan -- so laziness now buys only the first-use deferral and
+     * not the saving it was justified by. Kept lazy anyway: a graph loaded to answer a search
+     * or a stock report still never builds it, and one plan builds it once.
      */
     private Csr variantIndex;
+    /**
+     * variant key -&gt; the bare key a demand for which it may satisfy, or -1. #170.
+     *
+     * ON THE GRAPH AND NOT PASSED IN, unlike {@link io.github.jacoblasky.recipedump.plan
+     * .Unsourced}'s bitset, and the difference is what is being shared. That one refused a
+     * field here because the predicate needs a mutable {@code IntArray} to receive producer
+     * lists and {@code GraphService} hands one graph to concurrent off-thread solves, so the
+     * scratch would be a data race. This is an immutable {@code int[]} written once and only
+     * read afterwards, exactly like {@link #variantIndex} above, so two threads racing to
+     * build it duplicate work and agree on the answer. DO NOT add mutable state to it.
+     */
+    private int[] subsumedBy;
     /** item stem -&gt; produced keys at any meta of it. Built on first use, same reason. */
     private Csr metaIndex;
     private KeyIndex metaStems;
@@ -831,6 +847,116 @@ public final class RecipeGraph {
     }
 
     /**
+     * The bare key a demand for which this produced VARIANT may satisfy, or -1. #170.
+     *
+     * ONE SPELLING OF THE RELATION, mirroring `Graph.variant_subsumption` in python, which
+     * carries the argument for every clause and the measurements behind them. Read that before
+     * changing anything here; the short version is that a recipe slot naming the bare item
+     * carries no NBT to match on, so producing `animus:kama_bound#fd1adc426e12` satisfies a
+     * demand for `animus:kama_bound` -- and the REVERSE is false, which is why
+     * {@link #producers} stays narrow and why the keys of this relation are variants while its
+     * values are bare.
+     *
+     * TWO CALLERS, AND THEY MUST NOT DISAGREE: {@code Cost.relax} lets a variant's production
+     * price the bare key, and {@code Solver.expand} routes a bare demand through the variant's
+     * recipe. Pricing a route the solver cannot take is #176's defect and pricing one it takes
+     * differently is worse, so both read this.
+     */
+    public int subsumedBareKey(int variantKeyId) {
+        int[] index = subsumption();
+        return variantKeyId >= 0 && variantKeyId < index.length ? index[variantKeyId] : -1;
+    }
+
+    /**
+     * Appends the produced variants a demand for bare `keyId` may be satisfied by.
+     *
+     * Appends rather than replaces, and returns the count, matching {@link #producers} and
+     * every other list accessor here. Empty for almost every key.
+     *
+     * A VIEW OF {@link #subsumedBareKey} rather than a second spelling of its clauses, exactly
+     * as `Graph.satisfying_variants` is in python. Ordered as {@link #variantsOf} is, which is
+     * recipe-output order and therefore the order the dump saw, because plan fixtures freeze
+     * whole solver results and a variant chosen by index order must not move between runs.
+     *
+     * @return how many were appended
+     */
+    public int satisfyingVariants(int keyId, IntArray out) {
+        int appended = 0;
+        for (int variant : variantsOf(keyId)) {
+            if (subsumedBareKey(variant) == keyId) {
+                out.add(variant);
+                appended++;
+            }
+        }
+        return appended;
+    }
+
+    private int[] subsumption() {
+        if (subsumedBy == null) {
+            int[] out = new int[keys.size()];
+            java.util.Arrays.fill(out, -1);
+            IntArray scratch = new IntArray();
+            long[] family = Bits.ofSize(keys.size());
+            Csr index = variantIndex();
+            for (int bare = 0; bare < index.rows(); bare++) {
+                // `count` before `row`, because `row` allocates and there is one row per
+                // interned key: 2,631 of the reference graph's ~300,000 rows are non-empty,
+                // so materialising them all would be 300,000 throwaway arrays to look at
+                // 2,631 of them.
+                if (index.count(bare) == 0) {
+                    continue;
+                }
+                int[] variants = index.row(bare);
+                scratch.clear();
+                // CLAUSE 2: the bare key has no route of its own. This is what excludes the
+                // control class, which is twenty times the size of the defect.
+                if (realProducers(bare, scratch) > 0) {
+                    continue;
+                }
+                // CLAUSES 3 AND 4, the second of which spans the whole family: a variant made
+                // from the bare key or from a sibling variant is a container fill or an
+                // upgrade, and pricing the bare key through it prices "get one" at what "get
+                // one and change it" costs.
+                Bits.set(family, bare);
+                for (int variant : variants) {
+                    Bits.set(family, variant);
+                }
+                for (int variant : variants) {
+                    scratch.clear();
+                    if (realProducers(variant, scratch) == 0) {
+                        continue;
+                    }
+                    if (!consumesAnyOf(scratch, family)) {
+                        out[variant] = bare;
+                    }
+                }
+                // Cleared rather than reallocated per bare key: 2,631 of these on the
+                // reference graph and the bitset is one bit per key in the whole graph.
+                Bits.clear(family, bare);
+                for (int variant : variants) {
+                    Bits.clear(family, variant);
+                }
+            }
+            subsumedBy = out;
+        }
+        return subsumedBy;
+    }
+
+    private boolean consumesAnyOf(IntArray recipeIds, long[] family) {
+        for (int i = 0; i < recipeIds.size(); i++) {
+            int recipe = recipeIds.get(i);
+            for (int slot = recipes.slotStart(recipe); slot < recipes.slotEnd(recipe); slot++) {
+                for (int p = recipes.altStart(slot); p < recipes.altEnd(slot); p++) {
+                    if (Bits.get(family, recipes.altKeyAt(p))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * A produced key that is the same registered item at another meta, or -1.
      *
      * One step wider than {@link #producersAnyVariant} and the last one there is: NBT, then
@@ -1113,10 +1239,13 @@ public final class RecipeGraph {
                 // away, because a running GUI derives it on the first fluid it renders and a
                 // heap figure taken before that would understate the steady state.
                 + (fluidNames == null ? 0L : fluidNames.retainedBytes())
-                // Same rule for the two lazy sibling indexes: zero until machine
-                // identification asks, counted honestly once it has. A report that showed
-                // them as free would understate any process that resolves machines.
+                // Same rule for the three lazy sibling indexes: zero until something asks,
+                // counted honestly once it has. A report that showed them as free would
+                // understate any process that resolves machines -- and since #170, any
+                // process that PLANS, because `subsumedBy` is built on the first plan and
+                // pulls `variantIndex` up with it.
                 + (variantIndex == null ? 0L : variantIndex.retainedBytes())
+                + Sizes.bytes(subsumedBy)
                 + (metaIndex == null ? 0L
                         : metaIndex.retainedBytes() + metaStems.retainedBytes());
         return new GraphSizes(keyTable, recipeBytes, names, adjacency, itemFacts, other,

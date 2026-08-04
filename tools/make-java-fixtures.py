@@ -338,6 +338,14 @@ CHECKS = {
     # can drop it and still produce a structurally valid tree -- which is exactly why it
     # needs a claim of its own.
     "unsourced": lambda r: sum(1 for n in _walk(r["tree"]) if n.get("unsourced")),
+    # #170's route: a bare demand nothing makes, satisfied by a recipe for an NBT VARIANT of
+    # it. `resolved_to` AND the note, because `resolve_ore` writes `resolved_to` too and an
+    # oredict node is a different claim -- the note is what says a substitution happened, and
+    # it is the only thing the browser shows.
+    "substituted": lambda r: sum(1 for n in _walk(r["tree"])
+                                 if n.get("resolved_to")
+                                 and str(n.get("note") or "").startswith(
+                                     "nothing makes this exact item")),
     "emc": lambda r: _statuses(r).get("emc"),
     "from_emc": lambda r: len(r["from_emc"]),
 }
@@ -456,7 +464,7 @@ TARGETS = [
     Target(
         "fluid-chain", "fluid:nethengeic_fluid",
         expect=("fluid", "craft", "raw", "oredict", "alternatives", "token",
-                "tokens_needed", "machine", "source", "not_truncated"),
+                "tokens_needed", "machine", "source", "unsourced", "not_truncated"),
         why="Strong Mythic Essence, and this is BOTH the fluid fixture and the deep one. A "
             "fluid is not a small variation on an item: `cost.FLUID_SCALE` divides both "
             "sides of every recipe it touches, and scaling one side alone makes every "
@@ -478,7 +486,13 @@ TARGETS = [
             "explores the routes behind them. `truncated` and `exhausted` are both still "
             "false, so the claims above still hold, but the headroom that made this a "
             "SAFE deep fixture is much thinner than when it was chosen. If a later change "
-            "flips `exhausted` anywhere in this set, look here first."),
+            "flips `exhausted` anywhere in this set, look here first.\n\nIT CARRIES THE "
+            "`unsourced` CLAIM SINCE #170, AND THAT IS NOT INCIDENTAL COVERAGE. The mark "
+            "used to be pinned by `plan-unsourced-variant` alone, and #170 routed that "
+            "fixture's key so its plan carries no mark any more -- which would have left the "
+            "field with no golden gate in either language while every claim still passed. "
+            "Two of these 634 nodes are marked, measured rather than hoped for, and the "
+            "claim is positive so a port that drops the field fails here."),
     Target(
         "truncated", "fluid:nethengeic_fluid", max_nodes=40,
         expect=("depth", "truncated", "craft"),
@@ -626,21 +640,30 @@ TARGETS = [
             "exists."),
     Target(
         "unsourced-variant", "animus:kama_bound",
-        expect=("raw", "unsourced", "shopping_list", "not_truncated"),
-        why="#170's reported case, and the only fixture that reaches the THIRD face of "
-            "`reachable_form`. The Alchemy Array makes `animus:kama_bound#fd1adc426e12` and "
-            "four recipes ask for the bare key, so the graph holds a 53.35 route and "
-            "`cost._seed` still prices the bare key at BASE_RAW_COST -- which reads to a "
-            "player as \"you already have this\". 96 bare keys are in that state with "
-            "4,193 produced variants behind them.\n\nIT EXISTS BECAUSE NOTHING ELSE "
-            "REACHED IT. The first regeneration after the mark landed moved no fixture at "
-            "all, so the Java port of that branch had unit tests on one side and no golden "
-            "gate across the two. One node and a note is the cheapest thing that makes the "
-            "port prove it agrees.\n\nThe mark is REPORTING ONLY: `status` is still `raw` "
-            "and the key is still on the shopping list, because whether the solver should "
-            "ROUTE through a produced variant is contested -- #28 refused that widening in "
-            "`producers` and its test still passes. A fixture asserting the route would be "
-            "asserting the contested half."),
+        expect=("craft", "substituted", "oredict", "not_truncated"),
+        why="#170's reported case, and the only fixture that reaches the bare-to-variant "
+            "SUBSTITUTION. Reported as \"animus:kama_bound just says need, but the way it is "
+            "made is via the alchemy array with binding reagent and using the diamond "
+            "khopesh\". The Alchemy Array makes `animus:kama_bound#fd1adc426e12`, four "
+            "recipes ask for the bare key, and the two halves sat in one graph never "
+            "touching: 99 bare keys on this oracle, 7,177 produced variants behind the 501 "
+            "that pass the relation's clauses.\n\nIT EXISTS BECAUSE NOTHING ELSE REACHED IT. "
+            "The first regeneration after #178's mark landed moved no fixture at all, so the "
+            "Java port of that branch had unit tests on one side and no golden gate across "
+            "the two. That is still true of the route: this is the only plan in the set whose "
+            "root is a bare key nothing produces.\n\nIT USED TO ASSERT `raw` AND `unsourced` "
+            "AND NOW ASSERTS THE ROUTE, which is the behaviour change #170 is. The plan is 88 "
+            "nodes reaching the reagent and the diamond khopesh the array actually consumes, "
+            "the root is `craft`, and `substituted` is the claim that the node NAMES what it "
+            "planned instead of quietly swapping one key for another -- `resolved_to` plus a "
+            "note quoting the variant key, because the two keys share a label and a note "
+            "quoting the label would name nothing. The `unsourced` field kept its gate: "
+            "`plan-fluid-chain` carries two marked nodes and now claims it positively.\n\n"
+            "WHAT IT DOES NOT ASSERT is that every bare-to-variant key routes. 11 of the 99 "
+            "are refused because every variant of them is made FROM the bare key or from a "
+            "sibling variant, and 6 more have no variant the cost table can reach; those keep "
+            "the mark and the `UNSOURCED_COST` floor. `Graph.variant_subsumption` carries the "
+            "clauses and `tests/test_unsourced.py` covers each refusal."),
     Target(
         "unsourced-price", "contenttweaker:heuf_fuel",
         expect=("craft", "raw", "!unsourced", "shopping_list", "not_truncated"),
@@ -678,9 +701,10 @@ TARGETS = [
             "corrected, which is the coverage check doing its job: a fixture that no longer "
             "reaches the path it names passes forever while asserting nothing.\n\n"
             "`!unsourced` rather than dropping the claim, because the absence is now the "
-            "interesting fact about this plan. `plan-unsourced-variant` is the sole fixture "
-            "carrying a live mark, and `plan-unsourced-price` is the one asserting that a "
-            "mark the price removed stays removed."),
+            "interesting fact about this plan. `plan-fluid-chain` is the fixture carrying a "
+            "live mark since #170 routed `plan-unsourced-variant`'s key, and "
+            "`plan-unsourced-price` is the one asserting that a mark the price removed stays "
+            "removed."),
     Target(
         "same-name", "thermalfoundation:material:32",
         expect=("craft", "raw", "oredict", "not_truncated"),

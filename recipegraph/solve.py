@@ -17,6 +17,7 @@ The three things that make this non-trivial, and how each is handled:
 """
 
 import collections
+import math
 
 from .cost import input_cost, recipe_cost
 from .defaults import DEFAULT_MAX_NODES
@@ -236,7 +237,10 @@ class Solver:
                 score += 1.0   # an infinite source beats a finite pile of anything
             if key in self.craftables:
                 score += 0.5
-            if self.g.real_producers(key):
+            # `_routable`, NOT `real_producers`, since #170: a bare key the graph makes only
+            # under an NBT digest IS craftable, and scoring it as a dead end would rank it
+            # level with a key nothing can reach while `expand` goes on to route it.
+            if self._routable(key):
                 score += 0.25
         return (score, -self.slot_cost(key, qty))
 
@@ -433,8 +437,14 @@ class Solver:
                 per_run, recipe.category, bool(recipe.transfer),
                 recipe.not_production or "")
 
-    def _interchangeable_count(self, scored, chosen, key, cache):
+    def _interchangeable_count(self, scored, chosen, key, cache, variant_of):
         """How many recipes tied with `chosen` are the same offer as it. 1 when none are.
+
+        `variant_of` maps a recipe id to the NBT VARIANT of `key` that recipe makes, for the
+        #170 substitution where nothing makes `key` itself. `offer_shape` reads the per-run
+        output of the key being planned, and a substituted recipe does not output `key` at
+        all, so without this every such candidate would report a per-run of 0 and a recipe
+        yielding 1 would read as the same offer as one yielding 64.
 
         READS `scored`, WHICH `expand` ALREADY BUILT. No `score_recipe` call happens here and
         none may be added; see the note at the ranking site. The only new work is
@@ -458,12 +468,13 @@ class Solver:
             tied = [r for s, r in scored if s == score]
             # Cheap gate: the interchangeable subset is a SUBSET of the tied set, so a tie
             # too small to reach the threshold cannot produce a mark and needs no shapes.
-            cache[score] = (collections.Counter(self.offer_shape(r, key) for r in tied)
-                            if len(tied) >= TIE_MIN else None)
+            cache[score] = (collections.Counter(
+                self.offer_shape(r, variant_of.get(r.rid, key)) for r in tied)
+                if len(tied) >= TIE_MIN else None)
         counts = cache[score]
         if counts is None:
             return 1
-        return counts.get(self.offer_shape(chosen, key), 1)
+        return counts.get(self.offer_shape(chosen, variant_of.get(chosen.rid, key)), 1)
 
     def ore_backed(self, recipe, slots=None):
         """1 when every raw leaf this recipe rests on is something you mine, else 0.
@@ -530,7 +541,12 @@ class Solver:
                 continue
             if self.available(alt) >= qty:
                 continue
-            if not self.g.real_producers(alt):
+            # `_routable`, NOT `real_producers`, since #170. THIS LIST MUST MIRROR WHAT
+            # `expand` ACTUALLY STOPS ON, which is the sentence above about `raw` and the
+            # reason this method reads terminators rather than producer counts: a bare key
+            # made only under an NBT digest is routed now, so counting it as a leaf would
+            # have the ranker judge a recipe by a dead end the solver does not hit.
+            if not self._routable(alt):
                 leaves.append(alt)
         if not leaves:
             return 0
@@ -695,8 +711,24 @@ class Solver:
             return node
 
         candidates = self.g.real_producers(key)
+        kind = self.token_kinds.get(key)
+        variant_of = {}
+        if not candidates and not kind:
+            # NOTHING MAKES THIS EXACT KEY AND THE GRAPH MAKES AN NBT VARIANT OF IT, so a
+            # demand for the bare item is satisfied by the variant's recipe. #170: four
+            # recipes ask for `animus:kama_bound`, the Alchemy Array makes
+            # `animus:kama_bound#fd1adc426e12`, and until now the two halves sat in one graph
+            # never touching -- the plan said "no known source" for an item the graph knows a
+            # 60.0 route to. See `Graph.variant_subsumption` for the relation and for the
+            # direction, which is one way only.
+            #
+            # AFTER THE TOKEN CHECK, matching the order `cost._seed` seeds in. A placeholder
+            # is already an instruction with its own price for what the player must go and DO,
+            # so the price and the badge have to agree about which of the two answers a reader
+            # gets; a token key with a produced variant would otherwise be routed here and
+            # priced there.
+            candidates, variant_of = self._variant_candidates(key)
         if not candidates:
-            kind = self.token_kinds.get(key)
             if kind:
                 # Tallied apart from `leaf_totals`, which IS the shopping list. "1 Dungeon
                 # Drop" on a list of materials to gather reads as a thing to acquire; it is
@@ -726,6 +758,11 @@ class Solver:
                 # one predicate and agree by construction. DO NOT move a price from HERE
                 # instead: this branch runs once per plan node, after the routing decision
                 # that a price exists to inform, and no test in this module would notice.
+                #
+                # SINCE #170, REACHING HERE IS ITSELF NARROWER: a bare key whose variants are
+                # routable is planned through one before the branch is taken, so what arrives
+                # is a key neither #176 nor #170 could route -- every variant made from the
+                # bare key or a sibling, or none of them reachable.
                 node["unsourced"] = True
                 # ONE WORDING PER CLAIM, because a reader has to be able to act on the
                 # difference: an NBT STATE means "you have the item, this tier of it is out of
@@ -775,8 +812,10 @@ class Solver:
             if self.work > self.work_budget:
                 break
             snapshot = self._snapshot()
-            attempt = self._build(node, recipe, key, remainder, from_stock, nxt, depth,
-                                  self._interchangeable_count(scored, recipe, key, tie_cache))
+            attempt = self._build(
+                node, recipe, key, remainder, from_stock, nxt, depth,
+                self._interchangeable_count(scored, recipe, key, tie_cache, variant_of),
+                variant_of.get(recipe.rid))
             cycles = _count_cycles(attempt)
             if not cycles:
                 self._note_overruled_pin(key, recipe)
@@ -799,6 +838,80 @@ class Solver:
         self._note_overruled_pin(key, attempt.get("recipe"))
         return attempt
 
+    def _routable(self, key):
+        """Whether `expand` will find a recipe for `key`, substitution included. #170.
+
+        THE RANKER'S VERSION OF `expand`'s TERMINATORS, and it exists because there are now
+        two ways to have a recipe. `ore_backed` decides what a candidate recipe bottoms out
+        on and `_alternative_rank` decides whether a slot option is a dead end; both used to
+        ask `real_producers`, which is the whole answer for a key that is not a bare
+        NBT-digest stem and false for one that is. A ranker that believes the solver will stop
+        somewhere it does not is the drift `real_producers`' own docstring warns about, one
+        direction over.
+
+        THROUGH `_variant_candidates` RATHER THAN A SECOND SPELLING of its two clauses. It
+        returns empty on the first dict miss for all but 501 of the graph's live keys, so this
+        costs one lookup on the hot path.
+        """
+        return bool(self.g.real_producers(key)) or bool(self._variant_candidates(key)[0])
+
+    def _variant_candidates(self, key):
+        """`(recipes, {recipe id: variant})` for a bare demand only a VARIANT of which is made.
+
+        Empty for almost every key: `Graph.satisfying_variants` fires on 501 of the reference
+        graph's 171,271 live keys, and 88 of those 501 are consumed by any recipe. #170.
+
+        A FIELD OF ALTERNATIVES RATHER THAN ONE CHOSEN VARIANT, which is the point. Handing
+        `expand` the producing recipes of EVERY satisfying variant means the substituted route
+        is scored, backtracked out of and tie-flagged by the machinery that already does that
+        for an ordinary key: `score_recipe` ranks a cheap cycle below a performable route
+        (#172), the cycle guard rejects a subtree that loops, a pin overrules the ranking, and
+        #181's interchangeable count discloses a pick that was arbitrary. Choosing a variant
+        here and handing over its recipes alone would reimplement four of those badly, and the
+        one #170 cannot afford to get wrong is disclosure -- the variants of one bare key
+        differ by NBT the demanding slot never named, so the graph has no evidence that any of
+        them is the right one.
+
+        THE CHEAPEST VARIANT WINS, AND IT WINS THROUGH `score_recipe` RATHER THAN HERE. That
+        is the same rule `cost._relax` prices the bare key by, so the route the plan takes is
+        the route the price was computed from. The alternative orderings were considered and
+        each breaks that: "the first the dump saw" is arbitrary, and "whichever variant is in
+        stock" would have the plan craft what the cost table prices at 22.0 while claiming the
+        0.0 of a stack it cannot draw on, because `take` is keyed on the exact stock key and
+        stock widening is not part of this change.
+
+        UNREACHABLE VARIANTS ARE DROPPED, and that is what keeps `reachable_form`'s badge
+        alive for the keys that need it. 6 of the 88 have no variant the cost table can reach
+        at all -- `astralsorcery:itemtunedcelestialcrystal` and all three Draconic tools among
+        them, which are the same 6 the issue counted -- and offering those would trade a
+        one-line "no known source" for a large subtree bottoming out on the same dead end,
+        while the price stayed at `UNSOURCED_COST` because `_relax` cannot lower through an
+        infinite route. A route the price does not reflect is the #176 defect, at a smaller
+        magnitude.
+
+        DROPPING THEM CANNOT HIDE A ROUTE THE PRICE USED, and that is provable rather than
+        measured. `_relax` assigns a variant's `per_unit` to the variant BEFORE attributing it
+        to the bare key, and it only ever lowers -- so if the bare key's price came through a
+        variant, that variant's own cost is at most the same finite number and this filter
+        keeps it.
+
+        INERT WITHOUT A COST TABLE. `slot_cost` returns 0.0 for everything when `costs` is
+        None, which is `--no-cost`, so every satisfying variant is offered and the ranking
+        falls back to what it uses there anyway.
+        """
+        recipes, variant_of = [], {}
+        for variant in self.g.satisfying_variants(key):
+            if math.isinf(self.slot_cost(variant)):
+                continue
+            for recipe in self.g.real_producers(variant):
+                # A recipe emitting two satisfying variants of one bare key is counted once,
+                # under the variant the dump saw first. Listed twice it would be attempted
+                # twice for the same offer and would inflate #181's tie count.
+                if recipe.rid not in variant_of:
+                    variant_of[recipe.rid] = variant
+                    recipes.append(recipe)
+        return recipes, variant_of
+
     def _note_overruled_pin(self, key, recipe):
         """Record a pin the backtracking had to ignore.
 
@@ -820,8 +933,17 @@ class Solver:
         THREE WORDINGS FOR THREE CLAIMS, and collapsing them would lose the action. A STATE
         means "you have the item, this tier is out of reach"; a FORM means "this shape is
         not made, use the other one"; a VARIANT means "the thing IS made, just carrying
-        NBT this row does not name" -- which is the one where the player's next move is to
-        go and look at the variant rather than to substitute anything.
+        NBT this row does not name".
+
+        THE VARIANT WORDING IS NOW THE NARROW CASE, and #170 is why. `expand` routes a bare
+        demand through its variants' recipes, so a key reaching here on the variant branch is
+        one that route could not be taken for: every produced variant is made FROM the bare
+        key or from a sibling variant (11 keys on the reference graph, the Ender IO Soul Binder
+        and the Beer Mug shapes) or none of them is reachable at all (6 keys, the three
+        Draconic tools among them). For those the graph genuinely does make the item and
+        genuinely cannot get you one, so "go and look at the variant" is still the honest next
+        move. A ROUTED substitution says so on its own node instead: see `_build`, which
+        writes `resolved_to` and names the variant it took.
         """
         name = self.g.bare_name(other)
         if base_key(key) != key:
@@ -857,15 +979,29 @@ class Solver:
          self.machines_needed, self.nodes) = snap
 
     def _build(self, base, recipe, key, remainder, from_stock, ancestors, depth,
-               interchangeable=1):
+               interchangeable, variant):
         """Expand one specific recipe choice for `key`.
 
         `interchangeable` is how many equally-scored recipes are the SAME OFFER as this one,
         computed by the caller from scores it already had. 1 means the pick was not arbitrary
-        and nothing is rendered. Defaulted so the two call sites that are not the ranking
-        loop -- and any future one -- get the silent answer rather than a wrong number.
+        and nothing is rendered.
+
+        `variant` is the NBT variant of `key` this recipe actually outputs, or None when it
+        outputs `key` itself. Not None is the #170 substitution: nothing makes the bare key,
+        so a demand for it is being satisfied by the variant's recipe. See
+        `Graph.variant_subsumption`.
+
+        NEITHER IS DEFAULTED, and this docstring used to claim two other call sites needed
+        them to be. There is one caller, the ranking loop in `expand`. A default here is a
+        silent wrong answer waiting for the second caller to arrive: `interchangeable=1`
+        suppresses a mark that should have fired, and `variant=None` would price the runs of
+        a substituted recipe off an output it does not have.
         """
-        per_run = next((q for k, q in recipe.outputs if k == key), 1) or 1
+        # THE VARIANT'S OUTPUT, not the bare key's, when this is a substitution: the recipe
+        # makes `animus:kama_bound#fd1adc426e12` and yields per that key, so reading `key`
+        # would silently fall back to a per-run of 1 and plan the wrong number of runs.
+        made = variant or key
+        per_run = next((q for k, q in recipe.outputs if k == made), 1) or 1
         runs = -(-remainder // per_run)  # ceil
         node = dict(base)
         node.update({
@@ -874,8 +1010,33 @@ class Solver:
             "category": recipe.category,
             "runs": runs,
             "per_run": per_run,
-            "alternatives": len(self.g.real_producers(key)),
+            # OF THE KEY THE RECIPE ACTUALLY MAKES. For a substitution that is the variant,
+            # and counting the bare key's producers would report 0 -- "there was no other
+            # way to do this" -- on a node that is one of several ways.
+            "alternatives": len(self.g.real_producers(made)),
         })
+        if variant:
+            # SAY WHAT WAS SUBSTITUTED. `resolved_to` is the field `resolve_ore` already uses
+            # for "this demand resolved to that key". The claim cannot be proved from the dump
+            # -- see `Graph.variant_subsumption` on the 75 mod-machine slots whose NBT
+            # sensitivity is unfalsifiable -- so a reader has to be able to see the swap and
+            # pin another recipe if it is wrong. A silent identity would be the same defect
+            # with no way to notice it.
+            node["resolved_to"] = made
+            # THE KEY, NOT THE LABEL, AND THAT IS NOT A STYLE CHOICE. items.csv names a
+            # digest variant with the SAME label as its bare key more often than not --
+            # `animus:kama_bound#fd1adc426e12` is "Bound Khopesh", exactly as the bare key is
+            # -- so a note reading "planned as Bound Khopesh" on a row already labelled Bound
+            # Khopesh names nothing and the substitution is invisible. The key is what
+            # identifies the stack and what a reader can paste into search. `resolved_to`
+            # carries it for a UI that wants to link it; only the in-game panel reads that
+            # field today, so the note is what the browser has.
+            node["note"] = "nothing makes this exact item; planned as %s" % made
+            # AND THE VARIANT JOINS THE ANCESTOR SET, not just the bare key. No recipe making
+            # it consumes the bare key or a sibling variant (`variant_subsumption` clause 4),
+            # but a deeper node can demand the variant itself, and the guard on `key` alone
+            # would not see that.
+            ancestors = ancestors | {made}
         # Rendered as a badge, because a choice you cannot see is a choice you cannot
         # audit and this one changes every plan that touches the item.
         if recipe.rid in self.pinned.get(key, ()):

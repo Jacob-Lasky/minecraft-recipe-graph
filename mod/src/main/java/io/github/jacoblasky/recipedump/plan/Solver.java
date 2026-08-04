@@ -114,6 +114,18 @@ public final class Solver {
 
     /** Scratch for `realProducers`, which appends into a caller-supplied buffer. */
     private final IntArray scratch = new IntArray();
+    /**
+     * A SECOND buffer, for `satisfyingVariants`, because `variantCandidates` holds its result
+     * while calling `realProducers` and the two would share one array.
+     *
+     * A FIELD RATHER THAN A LOCAL, and the reason is the caller: `routable` runs from
+     * `alternativeScore`, once per slot alternative per resolution, and a fresh `IntArray` per
+     * call allocates a 16-int array on the hottest path in the ranker. One buffer per solver
+     * is safe for the same reason `scratch` is -- a Solver is used by one thread for one
+     * solve -- and unsafe for the same reason: DO NOT hold a view of it across a call that
+     * might reach `routable` again.
+     */
+    private final IntArray variantScratch = new IntArray();
 
     /**
      * The recipes {@link NonProduction} demoted: loot tables and JEI automation cards.
@@ -331,7 +343,10 @@ public final class Solver {
             if (craftables.contains(keyId)) {
                 score += 0.5;
             }
-            if (hasRealProducers(keyId)) {
+            // `routable`, NOT `hasRealProducers`, since #170: a bare key the graph makes only
+            // under an NBT digest IS craftable, and scoring it as a dead end would rank it
+            // level with a key nothing can reach while `expand` goes on to route it.
+            if (routable(keyId)) {
                 score += 0.25;
             }
         }
@@ -560,7 +575,12 @@ public final class Solver {
             if (available(slot.keyId) >= slot.qty) {
                 continue;
             }
-            if (!hasRealProducers(slot.keyId)) {
+            // `routable`, NOT `hasRealProducers`, since #170. THIS LIST MUST MIRROR WHAT
+            // `expand` ACTUALLY STOPS ON, which is the reason this method reads terminators
+            // rather than producer counts: a bare key made only under an NBT digest is routed
+            // now, so counting it as a leaf would have the ranker judge a recipe by a dead end
+            // the solver does not hit.
+            if (!routable(slot.keyId)) {
                 leaves.add(slot.keyId);
             }
         }
@@ -768,8 +788,19 @@ public final class Solver {
         }
 
         List<Integer> candidates = realProducers(keyId);
+        Integer kind = tokenKinds.get(keyId);
+        Map<Integer, Integer> variantOf = Collections.emptyMap();
+        if (candidates.isEmpty() && kind == null) {
+            // NOTHING MAKES THIS EXACT KEY AND THE GRAPH MAKES AN NBT VARIANT OF IT, so a
+            // demand for the bare item is satisfied by the variant's recipe. #170. AFTER the
+            // token check, matching the order the cost seed applies its rules in: a
+            // placeholder is already an instruction with its own price, so the price and the
+            // badge have to agree about which of the two answers a reader gets.
+            // Mirrors `Solver._variant_candidates` in python, which carries the argument.
+            variantOf = variantCandidates(keyId);
+            candidates = new ArrayList<Integer>(variantOf.keySet());
+        }
         if (candidates.isEmpty()) {
-            Integer kind = tokenKinds.get(keyId);
             if (kind != null) {
                 // Tallied apart from `leafTotals`, which IS the shopping list. "1 Dungeon
                 // Drop" on a list of materials to gather reads as a thing to acquire; it is
@@ -794,11 +825,14 @@ public final class Solver {
                 // the reference graph, 125 with any producer, and those 125 are exactly two
                 // tiers, the craftable fresh model and Self-Aware.
                 //
-                // THE MARK IS DISPLAY-ONLY AND MUST STAY THAT WAY. The underlying defect is
-                // the relaxation giving an unreachable leaf `BASE_RAW_COST`, which is what
-                // made the tier the CHEAPEST thing in the plan and won it the route. Fixing
-                // that is #136 and needs both cost audits; moving a price from here would
-                // change routing with none of that scrutiny, and no test here would notice.
+                // THE MARK IS STILL DISPLAY-ONLY HERE, and the reason has moved rather than
+                // gone. It used to be that no price existed for these at all: the relaxation
+                // gave an unreachable leaf `BASE_RAW_COST`, the cheapest value in the model,
+                // which is what made the tier the cheapest thing in the plan and won it the
+                // route. #176 priced the whole set at `UNSOURCED_COST` and #170 lowers the
+                // variant face of it to what the variant costs to make. So a key reaching
+                // THIS branch is one neither of those could route, and the mark is the only
+                // thing left to say about it.
                 node.unsourced = Boolean.TRUE;
                 node.note = unsourcedNote(keyId, other) + g.bareName(other);
             }
@@ -833,9 +867,11 @@ public final class Solver {
                 break;
             }
             Snapshot snapshot = snapshot();
+            Integer variant = variantOf.get(ranked.get(rank));
             PlanNode attempt = build(node, ranked.get(rank), keyId, remainder, fromStock,
                     next, depth,
-                    interchangeableCount(ranking, ranked.get(rank), keyId, tieCache));
+                    interchangeableCount(ranking, ranked.get(rank), keyId, tieCache, variantOf),
+                    variant == null ? -1 : variant.intValue());
             int cycles = attempt.countCycles();
             if (cycles == 0) {
                 noteOverruledPin(keyId, ranked.get(rank));
@@ -985,7 +1021,8 @@ public final class Solver {
      * would be a true number beside a false statement. Mirrors python.
      */
     private int interchangeableCount(Ranking ranking, int chosen, int keyId,
-                                     Map<RecipeScore, Map<Object, Integer>> cache) {
+                                     Map<RecipeScore, Map<Object, Integer>> cache,
+                                     Map<Integer, Integer> variantOf) {
         RecipeScore score = ranking.scores.get(chosen);
         if (score == null) {
             return 1;
@@ -1006,14 +1043,14 @@ public final class Solver {
             // too small to reach the threshold cannot produce a mark and needs no shapes.
             if (tied.size() >= TIE_MIN) {
                 for (int recipeId : tied) {
-                    Object shape = offerShape(recipeId, keyId);
+                    Object shape = offerShape(recipeId, producedKey(recipeId, keyId, variantOf));
                     Integer seen = counts.get(shape);
                     counts.put(shape, Integer.valueOf(seen == null ? 1 : seen.intValue() + 1));
                 }
             }
             cache.put(score, counts);
         }
-        Integer n = counts.get(offerShape(chosen, keyId));
+        Integer n = counts.get(offerShape(chosen, producedKey(chosen, keyId, variantOf)));
         return n == null ? 1 : n.intValue();
     }
 
@@ -1047,9 +1084,16 @@ public final class Solver {
      * THREE WORDINGS FOR THREE CLAIMS, and collapsing them loses the action. A STATE means
      * "you have the item, this tier is out of reach"; a FORM means "this shape is not made,
      * use the other one"; a VARIANT means "the thing IS made, just carrying NBT this row
-     * does not name" -- where the next move is to go and look at the variant rather than to
-     * substitute anything. Mirrors `Solver._unsourced_note` in python and is held to it by
-     * the golden gate.
+     * does not name".
+     *
+     * THE VARIANT WORDING IS NOW THE NARROW CASE, and #170 is why: `expand` routes a bare
+     * demand through its variants' recipes, so a key reaching here on the variant branch is
+     * one that route could not be taken for -- every produced variant made FROM the bare key
+     * or from a sibling, or none of them reachable. For those the graph genuinely does make
+     * the item and genuinely cannot get you one, so "go and look at the variant" is still the
+     * honest next move. A ROUTED substitution says so on its own node instead; see
+     * {@link #build}. Mirrors `Solver._unsourced_note` in python and is held to it by the
+     * golden gate.
      */
     private String unsourcedNote(int keyId, int other) {
         String key = g.key(keyId);
@@ -1154,11 +1198,15 @@ public final class Solver {
     /** Expand one specific recipe choice for `keyId`. */
     private PlanNode build(PlanNode base, int recipeId, int keyId, long remainder,
                            long fromStock, Set<Integer> ancestors, int depth,
-                           int interchangeable) {
+                           int interchangeable, int variant) {
         RecipeStore store = g.recipes();
+        // THE VARIANT'S OUTPUT, not the bare key's, when this is a #170 substitution: the
+        // recipe makes `animus:kama_bound#fd1adc426e12` and yields per that key, so reading
+        // `keyId` would fall through to a per-run of 1 and plan the wrong number of runs.
+        int made = variant >= 0 ? variant : keyId;
         long perRun = 1;
         for (int p = store.outputStart(recipeId); p < store.outputEnd(recipeId); p++) {
-            if (store.outputKeyAt(p) == keyId) {
+            if (store.outputKeyAt(p) == made) {
                 perRun = store.outputQtyAt(p);
                 break;
             }
@@ -1177,7 +1225,24 @@ public final class Solver {
         node.category = g.categoryName(store.categoryId(recipeId));
         node.runs = runs;
         node.perRun = perRun;
-        node.alternatives = realProducerCount(keyId);
+        // OF THE KEY THE RECIPE ACTUALLY MAKES. For a substitution that is the variant, and
+        // counting the bare key's producers would report 0 -- "there was no other way to do
+        // this" -- on a node that is one of several ways.
+        node.alternatives = realProducerCount(made);
+        if (variant >= 0) {
+            // SAY WHAT WAS SUBSTITUTED, and say it with the KEY: items.csv names a digest
+            // variant with the same label as its bare key more often than not, so a note
+            // quoting the label names nothing. `resolvedTo` is the field `resolveOre` already
+            // uses for "this demand resolved to that key". Mirrors `solve._build` in python.
+            node.resolvedTo = g.key(made);
+            node.note = "nothing makes this exact item; planned as " + g.key(made);
+            // AND THE VARIANT JOINS THE ANCESTOR SET, not just the bare key. No recipe making
+            // it consumes the bare key or a sibling (clause 4 of the relation), but a deeper
+            // node can demand the variant itself, and the guard on `keyId` alone would not
+            // see that.
+            ancestors = new HashSet<Integer>(ancestors);
+            ancestors.add(made);
+        }
 
         // Rendered as a badge, because a choice you cannot see is a choice you cannot audit
         // and this one changes every plan that touches the item.
@@ -1420,6 +1485,72 @@ public final class Solver {
     // -- helpers ------------------------------------------------------------------------
 
     /**
+     * Whether {@link #expand} will find a recipe for `keyId`, substitution included. #170.
+     *
+     * THE RANKER'S VERSION OF {@link #expand}'s TERMINATORS, and it exists because there are
+     * now two ways to have a recipe. {@link #oreBacked} decides what a candidate recipe bottoms
+     * out on and {@link #alternativeScore} decides whether a slot option is a dead end; both
+     * used to ask `hasRealProducers`, which is the whole answer for a key that is not a bare
+     * NBT-digest stem and false for one that is. A ranker that believes the solver will stop
+     * somewhere it does not is exactly the drift `realProducers` warns about, one direction
+     * over. Mirrors `Solver._routable` in python.
+     */
+    private boolean routable(int keyId) {
+        return hasRealProducers(keyId) || !variantCandidates(keyId).isEmpty();
+    }
+
+    /**
+     * `{recipe id: variant}` for a bare demand only a VARIANT of which is made. #170.
+     *
+     * Empty for almost every key. Mirrors `Solver._variant_candidates` in python, which
+     * carries the argument for offering these as a FIELD OF ALTERNATIVES rather than choosing
+     * a variant here, and for dropping the unreachable ones.
+     *
+     * A LINKED MAP, because its key order becomes the candidate order and a plan fixture that
+     * flips between runs is one people learn to regenerate instead of read. Variants come back
+     * in dump order and producers within a variant likewise, so the whole list is determined.
+     *
+     * DROPPING AN UNREACHABLE VARIANT CANNOT HIDE A ROUTE THE PRICE USED, and that is provable
+     * rather than measured. {@code Cost.relax} assigns a variant's `perUnit` to the variant
+     * BEFORE attributing it to the bare key, and it only ever lowers -- so if the bare key's
+     * price came through a variant, that variant's own cost is at most the same finite number
+     * and this filter keeps it.
+     */
+    private Map<Integer, Integer> variantCandidates(int keyId) {
+        variantScratch.clear();
+        if (g.satisfyingVariants(keyId, variantScratch) == 0) {
+            return Collections.emptyMap();
+        }
+        // COPIED OUT BEFORE `realProducers` RUNS. That call does not touch this buffer, but
+        // `variantCandidates` is what `routable` reaches through and a shared buffer read
+        // across a nested call is the bug this shape invites. `trimmed` is the cheap answer
+        // and it only ever runs for the 501 keys the relation admits.
+        int[] variants = variantScratch.trimmed();
+        Map<Integer, Integer> out = new LinkedHashMap<Integer, Integer>();
+        for (int i = 0; i < variants.length; i++) {
+            int variant = variants[i];
+            if (Double.isInfinite(slotCost(variant, 1))) {
+                continue;
+            }
+            for (int recipeId : realProducers(variant)) {
+                // A recipe emitting two satisfying variants of one bare key is counted once,
+                // under the variant the dump saw first. Listed twice it would be attempted
+                // twice for the same offer and would inflate #181's tie count.
+                Integer boxed = Integer.valueOf(recipeId);
+                if (!out.containsKey(boxed)) {
+                    out.put(boxed, Integer.valueOf(variant));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The key `recipeId` makes on this node: the substituted variant, or `keyId` itself. */
+    private int producedKey(int recipeId, int keyId, Map<Integer, Integer> variantOf) {
+        Integer variant = variantOf.get(Integer.valueOf(recipeId));
+        return variant == null ? keyId : variant.intValue();
+    }
+
      * `graph.real_producers`, materialised. Order is the graph's and must stay so.
      *
      * THE DEMOTED FILTER IS HERE AND NOT ON THE GRAPH, which is where python puts it, and the
