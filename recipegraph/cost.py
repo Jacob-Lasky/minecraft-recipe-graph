@@ -254,11 +254,16 @@ FLUID_SCALE = 1.0 / 1000.0
 #    stays rejected, because it is now redundant AND it keys on the wrong thing -- an ore
 #    tells you nothing about a material that has none.
 #
-# A FIFTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
-# TABLE. `_relax` only ever LOWERS, which `estimate` already states as the reason machine
-# entry costs need a second clean pass -- so raising a price after relaxation leaves every
-# consumer holding the price it banked before the raise. Measured: the nugget went 1.0 to
-# 10.0 and the ingot stayed at 10.0. A raise has to be an INPUT to a relaxation.
+# A FIFTH FINDING, AND IT CONSTRAINS ANY REPLACEMENT RATHER THAN REJECTING ONE CANDIDATE:
+# A FLOOR CANNOT BE PATCHED INTO A SETTLED TABLE. `_relax` only ever LOWERS, which `estimate`
+# already states as the reason machine entry costs need a second clean pass -- so raising a
+# price after relaxation leaves every consumer holding the price it banked before the raise.
+# Measured: the nugget went 1.0 to 10.0 and the ingot stayed at 10.0. A raise has to be an
+# INPUT to a relaxation, which is how #176 seeds `unsourced_keys` and why widening that set
+# propagates for free.
+#
+# (This read "general rather than about ores", which was true when every rule above it was
+# ore-shaped. The fourth is not.)
 BASE_RAW_COST = 1.0
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
