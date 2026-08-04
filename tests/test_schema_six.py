@@ -206,12 +206,15 @@ class TheRawCountIsNotTheCleanedCountTest(unittest.TestCase):
         self.assertEqual(names, {})
         self.assertIsNone(raw)
 
-    def test_load_still_returns_just_the_map(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "names.json")
-            with open(path, "w") as fh:
-                json.dump({"mod:a": "Anvil"}, fh)
-            self.assertEqual(dump_names.load(path), {"mod:a": "Anvil"})
+    def test_there_is_one_reader_and_not_a_map_only_twin(self):
+        """#194 left `load` as a wrapper whose only callers were its own tests. It is gone.
+
+        Asserted rather than left to a grep, because the wrapper is the shape that grows back:
+        a caller that wants only the map writes `[0]` at the call site, which says a count was
+        available and declined. A second entry point would be a second thing to keep in step
+        with `clean_label` and with `summary.json`'s `names`.
+        """
+        self.assertFalse(hasattr(dump_names, "load"))
 
 
 class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):

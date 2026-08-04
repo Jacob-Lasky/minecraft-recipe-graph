@@ -624,7 +624,7 @@ tooling only: recipegraph itself is Python 3 stdlib, the image copies `recipegra
 nothing else, and CI stays stdlib-only.
 
 **`getDisplayName()` returns format codes.** 14,425 of 340,324 names arrived as
-`§3Abyssalnite Axe`. `dump_names.load` cleans them now, the same way `load_items_csv`
+`§3Abyssalnite Axe`. `dump_names.load_with_count` cleans them now, the same way `load_items_csv`
 always did; if a new name source appears it needs `clean_label` too.
 
 **`getDisplayName()` also returns unlocalized lang keys.** 1,429 names arrived as
