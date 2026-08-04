@@ -491,7 +491,7 @@ EMC_COST = 0.5
 # for. "A constant I happened to add is in the hash" is instead exactly the reasoning
 # `fingerprint` names as going stale, and the next edit to the rule will add no constant and
 # inherit no such accident.
-FORMULA_VERSION = 12
+FORMULA_VERSION = 14
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
