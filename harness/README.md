@@ -10,6 +10,35 @@ harness/shot.sh <screen> [name] # any screen registered in ShotScreens
 Exit code zero means the PNG at the reported path is **this run's**. Non-zero means there is
 no new PNG, and the reason is on stdout on a line beginning `[mcrecipedump-shot]`.
 
+## THIS HARNESS CANNOT BOOT THE WHOLE PACK. `prodclient/` IS THE ONE THAT CAN
+
+`shot.sh` runs the client as RetroFuturaGradle's `runClient`, which is a **deobfuscated**
+workspace: FML rewrites every production mod jar from SRG names to MCP names as it loads. That
+is exactly what you want for developing one mod, and it is structurally fatal for a modpack,
+because a coremod whose ASM transformer looks up a hardcoded SRG name finds nothing after the
+rename. MeatballCraft has 75 coremods. Measured, out of ThaumcraftFix:
+
+```
+IllegalArgumentException: Target method boolean
+  thaumcraft/common/entities/construct/EntityArcaneBore.func_184645_a(EntityPlayer, EnumHand)
+  does not exist in the provided class
+```
+
+reported upward as a `ClassNotFoundException` for a class that is plainly in the jar, because
+`LaunchClassLoader` wraps a transformer failure in one.
+
+So do NOT reach for a flag that stages the whole pack into `run/mods`. One existed briefly
+(`-Ppack_all`) and was removed rather than documented, because the failure it leads to is
+expensive and reads like something else entirely. Use `prodclient/` instead: it assembles a real
+Forge client and launches it obfuscated, the way a launcher does.
+
+```bash
+python3 harness/prodclient/assemble.py
+harness/prodclient/prodshot.sh fixture packfixture -Dmcrecipedump.shotTimeoutSeconds=1800
+```
+
+Keep using `shot.sh` for ordinary GUI iteration. Ten mods and ninety seconds is why it exists.
+
 ## Why it exists
 
 This machine cannot run the game and the desktop can only run it by hand. Issue #19 is mostly

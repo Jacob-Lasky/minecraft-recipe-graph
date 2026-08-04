@@ -102,12 +102,22 @@ public final class ShotHarness {
      * hold, so 0 means BOTH that the PNG at the reported path is this run's AND that the screen
      * did not fail itself.
      *
-     * AND DO NOT EXPECT ANY OF THESE NUMBERS IN `$?`. The client runs under `runClient`, so a
-     * non-zero exit here fails the Gradle build and `gradlew` returns its own 1 -- every code
-     * below collapses to that by the time `harness/shot.sh` sees it. They survive in two places
-     * that are read by a person rather than by a script: Gradle's own "finished with non-zero
-     * exit value N" line, and the `!!` line this class logs on the way out. Which is why those
-     * log lines have to say what happened in words and not lean on the number.
+     * WHETHER THESE NUMBERS REACH `$?` DEPENDS ON WHO LAUNCHED THE CLIENT, and there are now
+     * two answers rather than one.
+     *
+     * Under `harness/shot.sh` they do NOT. That path runs the client as RetroFuturaGradle's
+     * `runClient` task, so a non-zero exit here fails the Gradle build and `gradlew` returns
+     * its own 1: every code below collapses to that before the script sees it. There they
+     * survive only in two places a person reads, Gradle's "finished with non-zero exit value
+     * N" line and the `!!` line this class logs on the way out.
+     *
+     * Under `harness/prodclient/prodshot.sh` they DO. That path launches a production client
+     * directly, with the container's entrypoint exec'ing into `launch.sh` exec'ing into
+     * `java`, so nothing between this call and the caller's `$?` can substitute a code of its
+     * own, and 2 can be told from 3 from 6 without reading the log.
+     *
+     * Which is why the log lines still have to say what happened in WORDS: one of the two
+     * callers cannot see the number, so a number is never the only record.
      */
     private static final int EXIT_OK = 0;
     private static final int EXIT_NO_SCREEN = 2;

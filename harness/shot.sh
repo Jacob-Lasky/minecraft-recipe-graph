@@ -103,8 +103,9 @@ MEMORY="${MEMORY:-4g}"
 SHOT_WIDTH="${SHOT_WIDTH:-1280}"
 SHOT_HEIGHT="${SHOT_HEIGHT:-800}"
 
-if [ ! -d "$LOCAL_BUILD/deps" ]; then
-    echo "shot.sh: no dev mod jars at $LOCAL_BUILD/deps" >&2
+DEPS_NAME="${DEPS_NAME:-deps}"
+if [ ! -d "$LOCAL_BUILD/$DEPS_NAME" ]; then
+    echo "shot.sh: no dev mod jars at $LOCAL_BUILD/$DEPS_NAME" >&2
     echo "  stage them out of the pack first; see the minecraft-recipe-graph skill." >&2
     exit 1
 fi
@@ -138,7 +139,7 @@ gated docker run --rm \
     --user 99:100 \
     --memory="$MEMORY" --memory-swap="$MEMORY" \
     -v "$HOST_REPO:/repo" \
-    -v "$HOST_BUILD/deps:/deps:ro" \
+    -v "$HOST_BUILD/$DEPS_NAME:/deps:ro" \
     -v "$HOST_BUILD/$CACHE_NAME:/gradle" \
     -v "$HOST_BUILD/shots:/shots" \
     $ORACLE_ARGS \
