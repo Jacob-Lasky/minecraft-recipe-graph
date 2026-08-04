@@ -3,7 +3,7 @@ package io.github.jacoblasky.recipedump.plan;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.TreeMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -50,13 +50,13 @@ final class KeyCounter {
      * `TreeMap`: both order these ids ascending, which is a plausible-looking wrong answer, for
      * the reasons in the class javadoc.
      */
-    private final TreeMap<Integer, long[]> counts;
+    private final LinkedHashMap<Integer, long[]> counts;
 
     KeyCounter() {
-        this.counts = new TreeMap<Integer, long[]>();
+        this.counts = new LinkedHashMap<Integer, long[]>();
     }
 
-    private KeyCounter(TreeMap<Integer, long[]> counts) {
+    private KeyCounter(LinkedHashMap<Integer, long[]> counts) {
         this.counts = counts;
     }
 
@@ -106,8 +106,8 @@ final class KeyCounter {
 
     /** `counter.copy()`: a snapshot that preserves insertion order, as Python's does. */
     KeyCounter copy() {
-        TreeMap<Integer, long[]> clone =
-                new TreeMap<Integer, long[]>();
+        LinkedHashMap<Integer, long[]> clone =
+                new LinkedHashMap<Integer, long[]>(counts.size() * 2);
         for (Map.Entry<Integer, long[]> entry : counts.entrySet()) {
             clone.put(entry.getKey(), new long[] {entry.getValue()[0]});
         }
