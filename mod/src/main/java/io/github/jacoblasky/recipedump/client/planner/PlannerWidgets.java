@@ -15,7 +15,6 @@ import com.cleanroommc.modularui.widgets.ListWidget;
 import com.cleanroommc.modularui.widgets.TextWidget;
 
 import io.github.jacoblasky.recipedump.common.PlanBook;
-import io.github.jacoblasky.recipedump.common.ScenarioSource;
 
 /**
  * Every widget the planner draws, as functions of plain data.
@@ -93,6 +92,29 @@ public final class PlannerWidgets {
     public static final int TODO_MAX_LIST_HEIGHT = 180;
 
     /**
+     * The TODO panel's width. 400, WIDENED FROM 260 BY #190, for the reason
+     * {@link #PICKER_WIDTH} went from 330: the rows grew a column that tells them apart and
+     * 260 cut it.
+     *
+     * MEASURED, NOT ESTIMATED. The panel carries five sections now instead of one and their
+     * rows are no longer "some quantity of a name": a shopping row whose label collides with
+     * another carries its registry key, and a free row names the generator supplying it. The
+     * longest key-bearing row across every fixture is
+     * `1x Soul Vial -- enderio:item_soul_vial:1#40f3a0f3892d`, 52 characters. At 260 the inner
+     * width is 248 pixels, which is 41 characters at {@link NodeRowText#CHAR_WIDTH}, so `fit`
+     * cut off precisely the column added to tell the two Soul Vials apart. At 400 the inner
+     * width is 388, which is 64, and it fits.
+     *
+     * 400 matches {@link #PANEL_WIDTH}, which the class header already sizes against the
+     * 427-pixel smallest screen Minecraft allows, so this needs no separate measurement.
+     *
+     * IT DOES NOT MAKE EVERY ROW FIT, and nothing can: a machine row runs to 124 characters,
+     * which is 744 pixels. Those are wrapped rather than cut; see {@link
+     * NodeRowText#machineLines}.
+     */
+    public static final int TODO_WIDTH = PANEL_WIDTH;
+
+    /**
      * Secondary panel widths, sized to their longest line at {@link NodeRowText#CHAR_WIDTH}.
      *
      * Fixed rather than fitted, because fitting means measuring, and measuring needs a font
@@ -155,6 +177,16 @@ public final class PlannerWidgets {
      *
      * Two fits today's five unread inputs at 64 characters a line with room to spare; three
      * leaves headroom for the ones Phase 5 has not turned live yet without the tree noticing.
+     *
+     * MEASURED AGAIN AT #190, when the line grew a pointer at the caveats panel: the five
+     * fields plus `-- click for what each costs you` is 109 characters, which is still two
+     * lines. The headroom is what absorbed it.
+     *
+     * AND IT IS WHY THE NOTES THEMSELVES ARE NOT HERE. Three lines is 192 characters and the
+     * five hand-written notes are around 470, so printing them on this panel would take a third
+     * of the body off the tree. That constraint is the whole reason `PlanCaveats` splits the
+     * disclosure in two; DO NOT raise this to fit them, raise it only if the FIELD LIST grows
+     * past two lines.
      */
     public static final int MAX_CAVEAT_LINES = 3;
 
@@ -263,7 +295,7 @@ public final class PlannerWidgets {
      * @param book the player's plan book, for the "still needed" column; may be empty.
      */
     public static ModularPanel plannerPanel(PlanView plan, PlanBook book,
-                                            PlannerActions actions) {
+                                            final PlannerActions actions) {
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
@@ -299,16 +331,38 @@ public final class PlannerWidgets {
         // RESERVED BEFORE THE TREE IS SIZED, not appended after. The tree takes whatever is
         // left, so a line added below it without taking its height out first is drawn past
         // the bottom of the panel -- ModularUI neither clamps nor clips a child (#125).
-        List<String> caveat = NodeRowText.wrap(ScenarioSource.summary(), CONTENT_WIDTH,
+        //
+        // IT NAMES THE FIELDS AND POINTS AT THE SENTENCES, which is #190. The line came from
+        // `ScenarioSource.summary()` alone, so a player read `planned without: have` and the
+        // hand-written sentence saying what an unread `have` COSTS them -- collected by
+        // `missingNotes()`, whose only callers were two tests -- never reached a screen. It
+        // cannot be printed here: five notes is around 470 characters against a 64-character
+        // line, which would spend half this panel on caveats. See `PlanCaveats` for the split.
+        List<String> caveat = NodeRowText.wrap(PlanCaveats.summaryLine(), CONTENT_WIDTH,
                                                MAX_CAVEAT_LINES);
         int footerLines = 1 + caveat.size();
         int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE * footerLines - 2;
         body.child(tree(plan, CONTENT_WIDTH, treeHeight, actions).pos(0, y));
         y += treeHeight + 2;
         body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
-        for (String caveatLine : caveat) {
-            y += LINE;
-            body.child(line(caveatLine, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y));
+        if (!caveat.isEmpty()) {
+            // ONE CLICK TARGET OVER THE WHOLE CAVEAT, not one per line: the lines are one
+            // wrapped sentence, and a reader who clicked its second half and got nothing would
+            // conclude the panel does not open rather than that they had missed.
+            ClickableGroup rows = new ClickableGroup(new Runnable() {
+                @Override
+                public void run() {
+                    actions.openCaveats();
+                }
+            });
+            rows.size(CONTENT_WIDTH, LINE * caveat.size());
+            for (int i = 0; i < caveat.size(); i++) {
+                rows.child(line(caveat.get(i), CONTENT_WIDTH, NodeStatus.INK_NEED)
+                                   .pos(0, i * LINE));
+            }
+            // The block starts one line below the footer, and `footerLines` above already took
+            // its whole height out of the tree.
+            body.child(rows.pos(0, y + LINE));
         }
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
@@ -773,7 +827,7 @@ public final class PlannerWidgets {
      * is the assertion that does.
      */
     public static ModularPanel todoPanel(PlanView plan, PlanBook book) {
-        int width = 260;
+        int width = TODO_WIDTH;
         int inner = width - PADDING * 2;
 
         List<String> lines = new java.util.ArrayList<String>();
@@ -792,10 +846,42 @@ public final class PlannerWidgets {
             lines.add("nothing outstanding");
             colours.add(NodeStatus.INK_MUTED);
         }
-        for (PlanView.ShoppingRow row : plan.shoppingList()) {
-            lines.add(NodeRowText.quantity(row.need()) + " " + row.label());
-            colours.add(NodeStatus.INK_NEED);
-        }
+        // THROUGH `entryLines` RATHER THAN COMPOSED HERE, and the reason is that two of these
+        // rows can carry the same name. A row built as label plus quantity draws
+        // `plan-fluid-chain`'s two Soul Vials as two lines a player cannot tell apart, and the
+        // mark saying nothing in the graph makes a row was dropped entirely. Both need the
+        // WHOLE list to decide -- which labels collide is not a property of one row -- so the
+        // composition lives beside the other row text and this takes what it returns.
+        addSection(lines, colours, null, NodeRowText.entryLines(plan.shoppingList(), inner),
+                   NodeStatus.INK_NEED);
+        // THE FOOTER'S "N machine(s) to build" IS A COUNT AND THESE ARE THE MACHINES. #190:
+        // every `MachineRow` accessor but `size()` was called from a test and nowhere else, so
+        // the player was told how many machines stood in the way and could never learn which.
+        addSection(lines, colours, "machines to build:",
+                   NodeRowText.machineLines(plan.machinesToBuild(), inner),
+                   NodeStatus.INK_WARN);
+        // THE FOUR SUMMARY LISTS, AS SECTIONS OF THIS LIST RATHER THAN FOUR PANELS. #190 asked
+        // for the decision to be made explicitly rather than by Phase 6 deleting their only
+        // reader, so: all four are read and all four are drawn HERE.
+        //
+        // NOT FOUR PANELS, because they are four instances of one shape -- a quantity, a name
+        // and one optional decoration -- and the browser's four cards are affordable on a
+        // browser page. This window is 400 pixels wide inside a 427-pixel minimum screen, and
+        // two of the four are empty until #50 and #112 land, so four panels would be four
+        // copies of one ListWidget of which two are permanently blank. A section header costs
+        // one row and an empty section costs nothing, which is what `addSection` is for.
+        //
+        // AND HERE RATHER THAN ON THE PLAN PANEL, because this is the surface a player works
+        // FROM while gathering. "You already own 377 of these" belongs next to "go and get
+        // these", not under a tree.
+        addSection(lines, colours, "used from your stock:",
+                   NodeRowText.entryLines(plan.usedFromStock(), inner), NodeStatus.INK_OK);
+        addSection(lines, colours, "drawn from infinite sources:",
+                   NodeRowText.entryLines(plan.fromSources(), inner), NodeStatus.INK_OK);
+        addSection(lines, colours, "go and get:",
+                   NodeRowText.entryLines(plan.tokensNeeded(), inner), NodeStatus.INK_NEED);
+        addSection(lines, colours, "transmuted from EMC:",
+                   NodeRowText.entryLines(plan.fromEmc(), inner), NodeStatus.INK_OK);
 
         int listHeight = Math.min(lines.size() * ROW_HEIGHT, TODO_MAX_LIST_HEIGHT);
         int height = PADDING * 2 + LINE + 1 + listHeight;
@@ -806,6 +892,71 @@ public final class PlannerWidgets {
         body.child(line("TODO", inner, NodeStatus.INK_MUTED).pos(0, 0));
         body.child(rowList(lines, colours, inner, listHeight).pos(0, LINE + 1));
         return ModularPanel.defaultPanel("mcrecipedump_todo", width, height).child(body);
+    }
+
+    /**
+     * A headed group of rows, or nothing at all when there are no rows.
+     *
+     * NOTHING AT ALL, WHICH IS THE POINT AND IS WHY THE HEADER IS THIS METHOD'S BUSINESS. Two
+     * of the four summary lists are empty until #50 and #112 land, and a header standing over
+     * no rows is a claim the panel cannot support -- "transmuted from EMC:" followed by blank
+     * space reads as a list that failed to load rather than as one that is legitimately empty.
+     * A caller that added the header itself would have to remember the guard four times.
+     *
+     * @param header null for a section whose caller already wrote its own heading, which is
+     *               the shopping list: it has an explicit "nothing outstanding" row because it
+     *               is the one section whose emptiness is worth stating.
+     */
+    private static void addSection(List<String> lines, List<Integer> colours, String header,
+                                   List<String> rows, int colour) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        if (header != null) {
+            lines.add(header);
+            colours.add(NodeStatus.INK_MUTED);
+        }
+        for (String row : rows) {
+            lines.add(row);
+            colours.add(Integer.valueOf(colour));
+        }
+    }
+
+    /**
+     * What the planner could not see, and what each missing input costs the player.
+     *
+     * THE PANEL BEHIND THE CAVEAT LINE (#190). `ScenarioSource.missingNotes` collected five
+     * hand-written player-facing sentences whose only callers were `ScenarioSourceTest` and
+     * `PinStoreTest`, so the planner named the missing FIELDS on its caveat line and never
+     * said what a missing field costs. `PlanCaveats` carries the argument for why this is a
+     * second panel rather than more lines on the first one.
+     *
+     * SIZED TO ITS CONTENT AND NOT CAPPED, unlike every other list in this class. The caps
+     * elsewhere exist because a tree or a viewport pays for the height; nothing is underneath
+     * this, and a cut-off list of what the planner could not see is a shorter, wrong list.
+     * Five notes wrap to about eleven lines, which is 110 pixels of a 240-pixel screen.
+     */
+    public static ModularPanel caveatsPanel() {
+        int width = PANEL_WIDTH;
+        int inner = width - PADDING * 2;
+        List<String> lines = PlanCaveats.detailLines(inner);
+
+        int height = PADDING * 2 + LINE + 1 + lines.size() * LINE;
+        Group body = new Group();
+        body.pos(PADDING, PADDING);
+        body.size(inner, height - PADDING * 2);
+        body.child(line(PlanCaveats.TITLE, inner, NodeStatus.INK_MUTED).pos(0, 0));
+        int y = LINE + 1;
+        for (String text : lines) {
+            // ALREADY WRAPPED, so `line` has nothing left to cut. Passing the full width is
+            // what keeps that true: a narrower box here would truncate text that was measured
+            // against `inner`, and the ellipsis would land mid-sentence in the one place in
+            // this class where a sentence has to arrive whole.
+            body.child(line(text, inner, NodeStatus.INK_NEED).pos(0, y));
+            y += LINE;
+        }
+        return ModularPanel.defaultPanel("mcrecipedump_plan_caveats", width, height)
+                .child(body);
     }
 
     /** A scrollable column of one-line rows. The same `ListWidget` reasoning as {@link #tree}. */

@@ -17,7 +17,6 @@ import com.cleanroommc.modularui.widgets.ListWidget;
 
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.common.PlanBook;
-import io.github.jacoblasky.recipedump.common.ScenarioSource;
 import org.junit.Test;
 
 /**
@@ -354,6 +353,35 @@ public class PlannerLayoutTest {
                            + area.x(), area.x() >= 0);
             }
         }
+    }
+
+    /**
+     * The caveats panel fits the screen. #190.
+     *
+     * ITS OWN TEST AND NOT A ROW IN `everyPanelFitsTheSmallestScreen`, because it is the one
+     * panel in this package that does not depend on a plan at all -- it is built from
+     * `ScenarioSource`, which answers for the runtime. Asserting it once per fixture would run
+     * it 24 times and report a failure against whichever fixture the loop happened to be on,
+     * which is a name that would send the next reader looking in the wrong place.
+     *
+     * IT IS ALSO THE ONLY PANEL SIZED TO ITS CONTENT WITH NO CAP, which is deliberate -- a
+     * cut-off list of what the planner could not see is a shorter, wrong list -- and this is
+     * the guard that keeps the trade honest. If the notes grow past the screen, the answer is
+     * to scroll them, not to drop one.
+     */
+    @Test
+    public void theCaveatsPanelFitsTheSmallestScreen() {
+        ModularPanel panel = PlannerWidgets.caveatsPanel();
+        HeadlessLayout.layOut(panel);
+        Area area = panel.getArea();
+        assertTrue("the caveats panel is " + area.h() + " tall, taller than the "
+                   + HeadlessLayout.SCREEN_HEIGHT + " screen",
+                   area.h() <= HeadlessLayout.SCREEN_HEIGHT);
+        assertTrue("the caveats panel is " + area.w() + " wide, wider than the "
+                   + HeadlessLayout.SCREEN_WIDTH + " screen",
+                   area.w() <= HeadlessLayout.SCREEN_WIDTH);
+        assertTrue("it starts off the screen at " + area.x() + "," + area.y(),
+                   area.x() >= 0 && area.y() >= 0);
     }
 
     @Test
@@ -695,7 +723,11 @@ public class PlannerLayoutTest {
      */
     @Test
     public void theCaveatWrapsRatherThanLosingItsLastInput() {
-        String caveat = ScenarioSource.summary();
+        // `PlanCaveats.summaryLine` AND NOT `ScenarioSource.summary`, because the panel wraps
+        // the former. This asserted the latter until #190, and once the line grew a pointer at
+        // the detail panel that made it a test of a string nothing draws: it would have stayed
+        // green while the line a player reads truncated.
+        String caveat = PlanCaveats.summaryLine();
         assertFalse("the fixture for this test is the real caveat; it must not be empty",
                     caveat.isEmpty());
         List<String> lines = NodeRowText.wrap(caveat, PlannerWidgets.CONTENT_WIDTH,
@@ -959,6 +991,11 @@ public class PlannerLayoutTest {
         }
 
         @Override
+        public void openCaveats() {
+            calls.add("caveats");
+        }
+
+        @Override
         public void pinRecipe(PlanNode node, RecipeChoice choice) {
             calls.add("pin:" + node.key() + ":" + choice.rid());
         }
@@ -1007,7 +1044,13 @@ public class PlannerLayoutTest {
         HeadlessLayout.layOut(panel);
 
         List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
-        assertEquals("one clickable per node", plan.flatten().size(), rows.size());
+        // ONE PER NODE PLUS THE CAVEAT BLOCK, which #190 made clickable. Counted rather than
+        // filtered out, so that a second unexplained click target added later fails here: this
+        // assertion is the only thing standing between "every row opens its own menu" and "a
+        // stray widget swallows a click somewhere in the panel".
+        assertEquals("one clickable per node, plus the caveat",
+                     plan.flatten().size() + (PlanCaveats.summaryLine().isEmpty() ? 0 : 1),
+                     rows.size());
         rows.get(0).onMousePressed(0);
         assertEquals(java.util.Arrays.asList("menu:" + plan.tree().key()), recorder.calls);
 
@@ -1017,6 +1060,66 @@ public class PlannerLayoutTest {
         rows.get(1).onMousePressed(0);
         assertEquals(java.util.Arrays.asList("menu:" + plan.tree().children().get(0).key()),
                      recorder.calls);
+    }
+
+    /**
+     * Clicking the caveat asks for the panel explaining it. #190.
+     *
+     * THE ONE ASSERTION THAT WOULD HAVE FAILED FOR THE WHOLE LIFE OF THE DEFECT. Everything
+     * else about the caveat -- that it wraps, that it does not cut, that it sits above the
+     * footer -- was already asserted and already passing while the five sentences explaining
+     * what each missing input costs a player reached nothing at all. Geometry is perfectly
+     * happy with text that leads nowhere.
+     *
+     * ON THE LAST CLICKABLE, because the caveat block is added after the tree and the footer.
+     * The count above is what pins that; if it moves, that assertion fails first and says so.
+     */
+    @Test
+    public void clickingTheCaveatOpensWhatThePlanCouldNotSee() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        assertFalse("the fixture for this test is the real caveat; it must not be empty",
+                    PlanCaveats.summaryLine().isEmpty());
+        Recorder recorder = new Recorder();
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder);
+        HeadlessLayout.layOut(panel);
+
+        List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
+        rows.get(rows.size() - 1).onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("caveats"), recorder.calls);
+    }
+
+    /**
+     * The caveat's click target really covers the text a player would aim at.
+     *
+     * A ZERO-HEIGHT OR ZERO-WIDTH TARGET IS THE FAILURE THIS CATCHES, and it is invisible in
+     * the test above: `onMousePressed` called directly does not care where the box is. The
+     * caveat is drawn as several stacked lines inside one group, and a group that forgot to
+     * size itself would draw all of them and be unclickable -- which is the exact shape of the
+     * bug the "look right and do nothing" comment on `planNodeContent`'s inert overload warns
+     * about, and ModularUI reports nothing for it.
+     */
+    @Test
+    public void theCaveatsClickTargetCoversItsLines() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder());
+        HeadlessLayout.layOut(panel);
+
+        List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
+        Area caveat = rows.get(rows.size() - 1).getArea();
+        int lines = NodeRowText.wrap(PlanCaveats.summaryLine(), PlannerWidgets.CONTENT_WIDTH,
+                                     PlannerWidgets.MAX_CAVEAT_LINES).size();
+        assertEquals("the target must be as tall as the caveat is",
+                     PlannerWidgets.LINE * lines, caveat.h());
+        assertEquals("and as wide as the line it sits under",
+                     PlannerWidgets.CONTENT_WIDTH, caveat.w());
+        // ABSOLUTE COORDINATES AFTER LAYOUT, so this compares against the PANEL's box rather
+        // than against `PANEL_HEIGHT`: the panel is centred on the screen and its `y` is not 0.
+        // #125 -- ModularUI neither clamps nor clips a child, so a caveat reserved wrongly is
+        // drawn past the bottom edge and nothing reports it.
+        Area box = panel.getArea();
+        assertTrue("the caveat is drawn past the bottom of the panel: " + caveat.y() + " + "
+                   + caveat.h() + " exceeds " + (box.y() + box.h()),
+                   caveat.y() + caveat.h() <= box.y() + box.h());
     }
 
     @Test

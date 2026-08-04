@@ -129,6 +129,12 @@ public final class ShotScreens {
                 PlannerShot.openTodo(arg);
             }
         });
+        register("planner-caveats", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openCaveats(arg);
+            }
+        });
         register("jei", new Opener() {
             @Override
             public void open(String arg) {

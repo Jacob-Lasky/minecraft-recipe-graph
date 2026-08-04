@@ -324,7 +324,22 @@ public enum ScenarioSource {
         return new JsonObject();
     }
 
-    /** The notes for every source that is not live, in declaration order. */
+    /**
+     * The notes for every source that is not live, in declaration order.
+     *
+     * WHAT A MISSING INPUT COSTS, WHERE {@link #summary} SAYS ONLY WHICH ONE IS MISSING. The
+     * two are halves of one disclosure and only this half is worth acting on: `summary` is
+     * built from `source.field`, so a player reads `planned without: have` whichever refusal
+     * happened, while this carries the sentence that names the refusal and the thing to go and
+     * do about it. Since #191 there are three different answers behind that one field name.
+     *
+     * DRAWN BY `client.planner.PlanCaveats`, AND IT WAS DRAWN BY NOTHING UNTIL #190. Its only
+     * callers were `ScenarioSourceTest` and `PinStoreTest` for long enough that the panel
+     * shipped naming five missing inputs with no explanation of any of them, which is a
+     * stricter version of the write-only pattern than the one that found it: not a missing
+     * feature, a missing ADMISSION of five missing features. If this comes to have no caller
+     * outside tests again, that is the defect returning and not a tidy-up opportunity.
+     */
     public static List<String> missingNotes() {
         List<String> out = new ArrayList<String>();
         for (ScenarioSource source : values()) {

@@ -284,6 +284,19 @@ final class PlannerShot {
     }
 
     /**
+     * `planner-caveats`: the five sentences saying what this plan could not see.
+     *
+     * NO FIXTURE ARGUMENT, because the subject is not the plan. What this panel draws comes
+     * from `ScenarioSource`, which answers for the RUNTIME -- so shot from the main menu with
+     * no world and no readers installed, it photographs the declared constants, which is
+     * exactly what a player gets when the client wiring did not run. `PlannerStockTest` is
+     * where the reader-installed wordings are asserted.
+     */
+    static void openCaveats(String arg) {
+        PlannerScreen.openPanel(PlannerWidgets.caveatsPanel());
+    }
+
+    /**
      * A book with something in it, since an empty TODO panel proves only that it opens.
      *
      * Real keys from the reference pack rather than "foo": the discriminated one is the shape
@@ -450,6 +463,10 @@ final class PlannerShot {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void openCaveats() {
         }
 
         @Override

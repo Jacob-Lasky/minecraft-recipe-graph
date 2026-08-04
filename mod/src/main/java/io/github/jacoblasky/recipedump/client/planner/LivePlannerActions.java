@@ -32,6 +32,7 @@ public final class LivePlannerActions implements PlannerActions {
     private ModularPanel parent;
     private IPanelHandler menu;
     private IPanelHandler picker;
+    private IPanelHandler caveats;
 
     /** The node the next sub-panel describes. Client thread only, like every field here. */
     private PlanNode current;
@@ -73,6 +74,11 @@ public final class LivePlannerActions implements PlannerActions {
     public void openRecipePicker(PlanNode node) {
         current = node;
         open(picker());
+    }
+
+    @Override
+    public void openCaveats() {
+        open(caveats());
     }
 
     /**
@@ -183,6 +189,28 @@ public final class LivePlannerActions implements PlannerActions {
             }, true);
         }
         return menu;
+    }
+
+    /**
+     * The caveats panel, built at open time like the other two.
+     *
+     * AND FOR A SHARPER REASON THAN THEY HAVE. `ScenarioSource.status` is documented as being
+     * read per plan and not cached, because a grid can go out of range between two plans -- so
+     * a panel built once at attach time would keep showing the refusal that applied when the
+     * window opened. `open` deletes the cached panel before every open, which is what makes
+     * this re-ask.
+     */
+    private IPanelHandler caveats() {
+        if (caveats == null && parent != null) {
+            caveats = IPanelHandler.simple(parent, new SecondaryPanel.IPanelBuilder() {
+                @Override
+                public ModularPanel build(ModularPanel opener,
+                                          net.minecraft.entity.player.EntityPlayer player) {
+                    return PlannerWidgets.caveatsPanel();
+                }
+            }, true);
+        }
+        return caveats;
     }
 
     private IPanelHandler picker() {

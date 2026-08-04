@@ -26,12 +26,23 @@ import com.google.gson.JsonParser;
  * called "Iron Plate" -- which is far better test data than anything anyone would write by
  * hand, and it is already checked in.
  *
- * IT READS A SUBSET OF THE RESULT AND IGNORES THE REST, on purpose. `target`, `qty`, `tree`,
- * `truncated`, `exhausted`, `nodes`, `max_nodes`, `shopping_list`, `machines_to_build` and
- * `pins_overruled` are what the panel draws; `work`, `work_budget`, `used_from_stock`,
- * `from_emc`, `from_sources` and `tokens_needed` are read past without complaint. An unknown
- * field is not an error -- the solver is free to add one -- and a panel that refused to render
- * a plan because it carried a field nobody draws would be the worse failure.
+ * IT READS EVERY KEY OF THE RESULT OBJECT, AND USED TO READ NINE OF THEM. The sentence that
+ * stood here listed `work`, `work_budget`, `used_from_stock`, `from_emc`, `from_sources` and
+ * `tokens_needed` as "read past without complaint", which was a correct design while
+ * `render.py` drew them and the in-game panel was a second view. #19 makes this panel the only
+ * view, so the same sentence became a list of features that get deleted when Phase 6 removes
+ * the Python renderer, and #190 read them instead. DO NOT drop a field from this reader again
+ * on the grounds that nothing draws it yet: the fix for a field with no reader is a reader.
+ *
+ * ONE FIELD INSIDE A SUMMARY ROW IS STILL NOT SURFACED AND IT IS `name`, deliberately. A row
+ * carries both `name` and `label` and they differ only on fluids -- `[fluid] Water` against
+ * `Water` -- where `render._rows` uses `label` and puts the unit on the QUANTITY instead,
+ * because the unit belongs to the number. {@link #readEntries} reads `name` only as the
+ * fallback for a row that has no `label`. Adding an accessor for it would offer two names for
+ * one row with nothing to say which to draw.
+ *
+ * AN UNKNOWN FIELD IS STILL NOT AN ERROR -- the solver is free to add one -- and a panel that
+ * refused to render a plan because it carried a field nobody draws would be the worse failure.
  *
  * EVERY FIELD IS READ DEFENSIVELY, and that is not paranoia about the fixtures. This same
  * reader is what a future `PlanResult.toJson` round-trip would go through, and a missing
@@ -73,15 +84,6 @@ public final class PlanJson {
         if (treeJson == null) {
             throw new IllegalArgumentException("a plan result must carry a `tree`");
         }
-        List<PlanView.ShoppingRow> shopping = new ArrayList<PlanView.ShoppingRow>();
-        JsonArray rows = result.getAsJsonArray("shopping_list");
-        if (rows != null) {
-            for (JsonElement row : rows) {
-                JsonObject o = row.getAsJsonObject();
-                shopping.add(new PlanView.ShoppingRow(string(o, "key"), string(o, "label"),
-                                                      number(o, "qty", 0L)));
-            }
-        }
         List<PlanView.MachineRow> machines = new ArrayList<PlanView.MachineRow>();
         JsonArray machineRows = result.getAsJsonArray("machines_to_build");
         if (machineRows != null) {
@@ -105,12 +107,56 @@ public final class PlanJson {
             }
         }
         Collections.sort(overruled);
-        return new PlanView(string(result, "target"), string(result, "target_name"),
-                            number(result, "qty", 1L), readNode(treeJson),
-                            bool(result, "truncated"), bool(result, "exhausted"),
-                            (int) number(result, "nodes", 0L),
-                            (int) number(result, "max_nodes", 0L),
-                            shopping, machines, overruled);
+        return new PlanView.Builder()
+                .target(string(result, "target"))
+                .targetName(string(result, "target_name"))
+                .qty(number(result, "qty", 1L))
+                .tree(readNode(treeJson))
+                .truncated(bool(result, "truncated"))
+                .exhausted(bool(result, "exhausted"))
+                .nodes((int) number(result, "nodes", 0L))
+                .maxNodes((int) number(result, "max_nodes", 0L))
+                .work((int) number(result, "work", 0L))
+                .workBudget((int) number(result, "work_budget", 0L))
+                // NAMED SETTERS AND NOT POSITION, because these five are the same type. See
+                // `PlanView.Builder` for the transposition this is here to make impossible.
+                .shoppingList(readEntries(result, "shopping_list"))
+                .usedFromStock(readEntries(result, "used_from_stock"))
+                .fromSources(readEntries(result, "from_sources"))
+                .tokensNeeded(readEntries(result, "tokens_needed"))
+                .fromEmc(readEntries(result, "from_emc"))
+                .machinesToBuild(machines)
+                .pinsOverruled(overruled)
+                .build();
+    }
+
+    /**
+     * One of the plan's five summary lists, or empty when the key is absent.
+     *
+     * ONE READER FOR ALL FIVE, matching `plan.PlanJson.writeEntries`, which is the one writer
+     * for all five. A per-list reader would be five places for a field to be forgotten in one
+     * of them, which is how `unsourced` came to be read on tree nodes and dropped on shopping
+     * rows in the first place.
+     */
+    private static List<PlanView.EntryRow> readEntries(JsonObject result, String field) {
+        List<PlanView.EntryRow> out = new ArrayList<PlanView.EntryRow>();
+        JsonArray rows = result.getAsJsonArray(field);
+        if (rows == null) {
+            return out;
+        }
+        for (JsonElement row : rows) {
+            JsonObject o = row.getAsJsonObject();
+            // `label` FALLS BACK TO `name`, WHICH IS NOT THE SAME KIND OF FALLBACK `readNode`
+            // FORBIDS. Both are written unconditionally by `writeEntries`, so this covers
+            // hand-written JSON only, and a row with neither would be a blank line in a list
+            // the player is meant to gather from.
+            String label = has(o, "label") ? string(o, "label") : string(o, "name");
+            out.add(new PlanView.EntryRow(string(o, "key"), label, number(o, "qty", 0L),
+                                          has(o, "kind") ? string(o, "kind") : "item",
+                                          optional(o, "why"), optional(o, "token_kind"),
+                                          longOrNull(o, "emc"), bool(o, "unsourced")));
+        }
+        return out;
     }
 
     /**

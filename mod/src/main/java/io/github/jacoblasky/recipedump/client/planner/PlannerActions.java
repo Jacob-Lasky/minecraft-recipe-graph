@@ -45,6 +45,16 @@ public interface PlannerActions {
     void openRecipePicker(PlanNode node);
 
     /**
+     * Clicking the "planned without" caveat: show what each missing input costs the player.
+     *
+     * ON THIS INTERFACE RATHER THAN A DIRECT PANEL CALL for the reason every other entry here
+     * is: a click is then assertable by a test that counts what was invoked, with no window
+     * anywhere. It takes no argument because the caveat is a statement about the SCENARIO
+     * rather than about a node -- `ScenarioSource` is a global the panel does not carry.
+     */
+    void openCaveats();
+
+    /**
      * Take `choice` for this node's key, or give up the pin when `choice` is already pinned.
      *
      * A TOGGLE, UNLIKE {@link #toggleFavourite}, WHICH ONLY ADDS -- and the asymmetry is
@@ -102,6 +112,10 @@ public interface PlannerActions {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void openCaveats() {
         }
 
         @Override

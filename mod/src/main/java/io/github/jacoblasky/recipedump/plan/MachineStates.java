@@ -106,10 +106,6 @@ public final class MachineStates {
         return categories.clone();
     }
 
-    public int describedCount() {
-        return categories.length;
-    }
-
     public RecipeGraph graph() {
         return graph;
     }

@@ -42,11 +42,6 @@ public final class Blueprints {
         return blueprintKeys.size();
     }
 
-    /** Machines named by either map, including one a blueprint points at with no name. */
-    public int machineCount() {
-        return machineIds.size();
-    }
-
     /** Machines the registry actually gave a localized name, which may be fewer. */
     public int namedMachineCount() {
         int total = 0;
