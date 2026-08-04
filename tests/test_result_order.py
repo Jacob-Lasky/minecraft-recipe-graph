@@ -282,12 +282,19 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
         # real spelling:
         #
         #   `<mod:c> * 16`  came back as `mod:c>`, a key nothing can ever match, because the
-        #                   trailing character is `6` and so `strip("<>")` left the `>` sitting
-        #                   in the middle. CraftTweaker writes exactly this form.
+        #                   trailing character is `6` and so `strip("<>")` had nothing to
+        #                   remove at the END and left the `>` sitting in the middle.
         #   `<mod:d:*>`     came back as the malformed `mod:d:`, because `split("*")[0]` ate
-        #                   the wildcard before the meta parser could see it. That also made
-        #                   `_norm_entry`'s own `parts[-1] == "*"` branch UNREACHABLE, so no
-        #                   wildcard membership ever resolved and nothing said so.
+        #                   the wildcard before the meta parser could see it, which also made
+        #                   `_norm_entry`'s `parts[-1] == "*"` branch unreachable from
+        #                   `from_json`.
+        #
+        # NEITHER MANGLED ANY EXISTING DATA, measured rather than hoped: the dump mod writes
+        # the meta as a NUMBER, so the reference pack's 789 wildcard members arrive as
+        # `:32767` and the served graph carries all 789 correctly with no malformed key in
+        # its 10,290. `_norm_entry`'s docstring has the full accounting of which spelling can
+        # reach which caller. These cases are here because an unreachable branch is a trap for
+        # the next caller, not because a plan was ever wrong.
         #
         # Both forms are held here rather than only in the document above, because the
         # document's assertion is about order and would still pass with every key mangled the
@@ -306,12 +313,15 @@ class OredictMemberOrderIsStableForTheSameReason(unittest.TestCase):
         # `/ct oredict` instead of the dump mod, and every ordering claim this class makes
         # about `from_json` applies to it identically.
         #
-        # It is also where the two spellings #192 fixed actually arrive. `ENTRY` hands over
-        # the INSIDE of each `<...>`, so a `* 16` written OUTSIDE the brackets never reaches
-        # `_norm_entry` from here, which is the only reason the bracket defect did not bite on
-        # this path. A `<mod:d:*>` wildcard does reach it, and was silently mangled to
-        # `mod:d:` until the fix, so the third group below is a regression test and not a
-        # curiosity.
+        # It is also the ONLY caller a `:*` wildcard can reach `_norm_entry` through. The dump
+        # mod writes the meta as a number, so `from_json` never sees one; here `ENTRY` hands
+        # over the INSIDE of each `<...>` and `<mod:d:*>` arrives intact, and was mangled to
+        # `mod:d:` until #192. So the third group below is the regression test for that fix,
+        # and this reader is the reason the fix was worth making rather than merely tidy.
+        #
+        # The same `ENTRY` behaviour is why the BRACKET half of #192's fix cannot bite here:
+        # a `* 16` written outside the brackets is dropped by the regex before `_norm_entry`
+        # runs, and the comma fallback only fires on a line with no brackets at all.
         lines = [
             "Ore entries for <ore:plateStuff>: <mod:z> * 16, <mod:a>\n",
             # No brackets, so the comma fallback runs instead of `ENTRY`, and the stack size

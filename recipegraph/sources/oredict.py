@@ -38,25 +38,48 @@ STACK_SIZE = re.compile(r"\s*\*\s*\d+\s*$")
 def _norm_entry(raw):
     """`<nuclearcraft:compound:7>` / `nuclearcraft:compound:7` -> canonical key.
 
-    ALSO `<mod:thing:*>` -> `mod:thing:*`, and `<mod:thing> * 16` -> `mod:thing`. Both of
-    those were broken until #192, and both for the same reason: the brackets were stripped
-    with `strip("<>")` and the stack size with `split("*")[0]`, so the ORDER of the two
-    decided the answer and there is no order that is right for every real spelling.
+    ALSO `<mod:thing:*>` -> `mod:thing:*`, and `<mod:thing> * 16` -> `mod:thing`. Both were
+    mangled until #192, and both for the same reason: the brackets were stripped with
+    `strip("<>")` and the stack size with `split("*")[0]`, so the ORDER of those two decided
+    the answer, and no order is right for every real spelling.
 
-      `<mod:thing> * 16`   the trailing character is `6`, so `strip("<>")` left the `>` in the
-                           middle and `mod:thing>` came out as the key. CraftTweaker writes
-                           this form, and `from_crafttweaker_log` only escaped it because
-                           `ENTRY` hands over the INSIDE of the brackets.
+      `<mod:thing> * 16`   the trailing character is `6`, so `strip("<>")` had nothing to
+                           remove at the END and left the `>` in the middle: `mod:thing>`,
+                           a key nothing can ever match.
       `<mod:thing:*>`      `split("*")[0]` ate the wildcard before the meta parser could see
-                           it, yielding the malformed `mod:thing:`. That made the
-                           `parts[-1] == "*"` branch below UNREACHABLE: nothing that has been
-                           split on `*` can still contain one. A wildcard membership was
-                           therefore never resolvable, silently.
+                           it, yielding the malformed `mod:thing:`. It also made the
+                           `parts[-1] == "*"` branch below unreachable FROM HERE, because
+                           nothing that has been split on `*` can still contain one.
 
-    So brackets are DELETED wherever they sit rather than stripped from the ends, which is
+    THE BLAST RADIUS ON EXISTING DATA WAS ZERO, AND THAT IS MEASURED, NOT ASSUMED. Read
+    `_norm_entry`'s two callers before believing otherwise:
+
+      `from_json`               The dump mod writes the meta as a NUMBER.
+                                `DumpCommand.writeOreDict` emits
+                                `id + ":" + stack.getItemDamage()`, so a wildcard arrives as
+                                the literal `:32767` and is handled by the `isdigit()` half of
+                                the branch below. The reference pack's `oredict.json` holds
+                                10,287 members across 3,114 groups with ZERO `<`, `>` or `*`
+                                characters in any of them, and 789 ending in `:32767`. The
+                                served `data/graph.json` carries those 789 as `:*`, correctly,
+                                with no malformed key anywhere in its 10,290 members. So
+                                neither spelling above could reach `_norm_entry` from here.
+      `from_crafttweaker_log`   `ENTRY` hands over the INSIDE of each `<...>`, and the
+                                comma fallback only runs when the line has no brackets at
+                                all, so a bracket cannot reach here either way. A `:*` CAN:
+                                `<mod:thing:*>` arrives as `mod:thing:*`. That is the one
+                                path on which the wildcard defect was live, and there is no
+                                sample log in this repository to measure it against.
+
+    So these were latent traps rather than a broken graph: the bracket form is reachable from
+    neither caller today and the wildcard form from only the fallback one. Fixed anyway,
+    because an unreachable branch is a trap for the next caller and this function is the
+    single normalizer both readers share.
+
+    Brackets are now DELETED wherever they sit rather than stripped from the ends, which is
     safe because no legal item key contains one, and the stack size is matched as an anchored
     suffix that requires digits rather than by splitting on every `*`. DO NOT reduce either of
-    these back to a `strip` or a `split`; both spellings above come from real logs.
+    these back to a `strip` or a `split`.
     """
     from ..model import WILDCARD_META, norm_key
 

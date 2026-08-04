@@ -384,7 +384,7 @@ public class PlanFixtureTest {
      * problem.
      */
     @Test
-    public void everyFixturePlansExactlyAsThePythonOracleDoes() throws IOException {
+    public void renamedToSimulateSomeoneDeletingTheGoldenGate() throws IOException {
         String oracle = System.getenv("RECIPEGRAPH_ORACLE");
         Assume.assumeTrue("set RECIPEGRAPH_ORACLE to the oracle graph to run the golden gate",
                 oracle != null && new File(oracle).isFile());
