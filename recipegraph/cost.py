@@ -191,12 +191,13 @@ FLUID_SCALE = 1.0 / 1000.0
 # THAT ASSUMPTION IS SOMETIMES FALSE AND #136 IS WHERE IT SHOWS. A key nothing makes may be a
 # thing you pick up, or it may be a PROCESSED FORM the pack simply never authored a recipe
 # for -- the Sednanite Nugget has no producer at all, and 9 of them at 1.0 beat mining the
-# ore at 801.0, so the shopping list named a step nobody can perform. Nothing structural
-# separates the two cases; `Graph.reachable_form` reports the ones it CAN identify rather
-# than repricing them, deliberately.
+# ore at 801.0, so the shopping list named a step nobody can perform. This constant is still
+# the right answer for a cobblestone, so the fix is a NARROWER set rather than a different
+# number: `Graph.reachable_form` is the set with positive evidence the graph cannot explain
+# the route, and `_seed` prices exactly that set at `UNSOURCED_COST`.
 #
-# THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED. Do not re-propose one
-# without new evidence, and add to this list rather than rediscovering it:
+# THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED, none of them that one.
+# Do not re-propose one without new evidence, and add to this list rather than rediscovering it:
 #
 #  * NO SEED AT ALL for an unobtainable processed form ("infinity is the honest reading").
 #    243 keys go finite -> infinity on the reference graph, `abyssalcraft:nitre` and
@@ -207,10 +208,13 @@ FLUID_SCALE = 1.0 / 1000.0
 #    the number the bug produced and nothing moves.
 #  * FLOOR IT AT THE MATERIAL'S WORLD ORE, re-seeded into a clean relaxation. Structurally
 #    sound and measured clean -- 6 keys floored, 0 lost, 0 cheaper, every control unchanged
-#    -- and it still produces a WORSE plan than the bug: with the nugget gone the solver
-#    falls to a cyclic route whose shopping list contains the item being planned. The root
-#    defect is that `score_recipe` ranks `cheap` above `-cyclic`, so a cheap cycle beats an
-#    expensive real route; fix that first and this may be moot.
+#    -- and it still produced a WORSE plan than the bug at the time: with the nugget gone the
+#    solver fell to a cyclic route whose shopping list contained the item being planned. That
+#    second defect was the deeper one and #172 fixed it in `score_recipe`, which is why the
+#    prediction "fix that first and this may be moot" came true: #176 then repriced the
+#    nuggets with no ore floor at all, and the reported plan routes through the ore. The rule
+#    stays rejected, because it is now redundant AND it keys on the wrong thing -- an ore
+#    tells you nothing about a material that has none.
 #
 # A FOURTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
 # TABLE. `_relax` only ever LOWERS, which `estimate` already states as the reason machine

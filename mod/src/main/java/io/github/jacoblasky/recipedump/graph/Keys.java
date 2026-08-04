@@ -180,8 +180,14 @@ public final class Keys {
      *
      * `ore` IS ABSENT ON PURPOSE and its absence is load-bearing: an ore is the OBTAINABLE
      * end of a family, so including it would let a family be named by the very thing that is
-     * out of reach. `block` is absent because `chisel:diamond` is in `blockDiamond`, so
-     * accepting it readmits the decorative blocks #61 spent its measurement demoting.
+     * out of reach.
+     *
+     * `block` IS ABSENT TOO, AND ITS REASON HOLDS IN ONE DIRECTION ONLY. `chisel:diamond` is in
+     * `blockDiamond`, so a family this list could name a BLOCK for would point a reader at a
+     * decorative panel, which is the cluster #61 demoted. That is about the ANSWER
+     * {@code Unsourced.obtainableSibling} returns. Whether a producerless `blockMyrmitite` is a
+     * shape of a material is a different question, and {@link #storageMaterialOfOreGroup}
+     * answers it. See `model.storage_form_material` in python for the measurement.
      *
      * KEEP THIS LIST BYTE-EQUAL TO `model.PROCESSED_FORM_PREFIXES`. It decides which keys get
      * #136's "nothing makes this form" mark, that mark is a field on a plan node, and
@@ -213,6 +219,26 @@ public final class Keys {
             }
         }
         return best == null ? null : oreName.substring(best.length());
+    }
+
+    /**
+     * Forge's `block&lt;Material&gt;`: nine ingots pressed into one block for storage.
+     *
+     * NOT AN ENTRY IN {@link #PROCESSED_FORM_PREFIXES}, because that list is also the naming
+     * set -- see the `block` paragraph on it. This reads the same registration on the QUESTION
+     * side only: a storage block nobody can press is as unobtainable as a nugget nobody can
+     * split, which is where #136 finished. Mirrors `model.storage_form_material` in python and
+     * carries its measurement.
+     */
+    public static final String STORAGE_FORM_PREFIX = "block";
+
+    /** The material half of `blockMyrmitite`, or null when the name is not that shape. */
+    public static String storageMaterialOfOreGroup(String oreName) {
+        if (oreName == null || oreName.length() <= STORAGE_FORM_PREFIX.length()
+                || !oreName.toLowerCase(java.util.Locale.ROOT).startsWith(STORAGE_FORM_PREFIX)) {
+            return null;
+        }
+        return oreName.substring(STORAGE_FORM_PREFIX.length());
     }
 
     /** The index of the discriminator's `#`, or -1. */

@@ -36,7 +36,7 @@
     "kind": "fluid",
     "label": "Water",
     "name": "[fluid] Water",
-    "qty": 30100,
+    "qty": 30200,
     "why": "vanilla infinite water (two source blocks and a bucket)"
    }
   ],
@@ -112,6 +112,12 @@
     "machine": "The Vat",
     "state": "buildable",
     "why": "craftable: enderio:block_vat"
+   },
+   {
+    "category": "actuallyadditions.crushing",
+    "machine": "Crusher",
+    "state": "buildable",
+    "why": "craftable: actuallyadditions:block_grinder"
    },
    {
     "category": "actuallyadditions.reconstructor",
@@ -210,10 +216,22 @@
     "why": "craftable: cyclicmagic:block_hydrator"
    },
    {
+    "category": "ie.arcFurnace",
+    "machine": "Arc Furnace",
+    "state": "buildable",
+    "why": "craftable: immersiveengineering:metal_multiblock:13"
+   },
+   {
     "category": "ie.blastfurnace",
     "machine": "Blast Furnace",
     "state": "buildable",
     "why": "craftable: immersiveengineering:stone_device:1"
+   },
+   {
+    "category": "ie.crusher",
+    "machine": "Crusher",
+    "state": "buildable",
+    "why": "craftable: immersiveengineering:metal_multiblock:1"
    },
    {
     "category": "ie.mixer",
@@ -366,10 +384,10 @@
     "why": "craftable: nuclearcraft:heat_exchanger_tube_copper"
    },
    {
-    "category": "nuclearcraft_ingot_former",
-    "machine": "Ingot Former",
+    "category": "nuclearcraft_infuser",
+    "machine": "Fluid Infuser",
     "state": "buildable",
-    "why": "craftable: nuclearcraft:ingot_former_idle"
+    "why": "craftable: nuclearcraft:infuser_idle"
    },
    {
     "category": "nuclearcraft_manufactory",
@@ -462,6 +480,12 @@
     "why": "craftable: thermalexpansion:machine:14 (as thermalexpansion:machine:14#baa7f6d95be3)"
    },
    {
+    "category": "thermalexpansion.pulverizer",
+    "machine": "Pulverizer",
+    "state": "buildable",
+    "why": "craftable: thermalexpansion:machine:1 (as thermalexpansion:machine:1#f56885268ad5)"
+   },
+   {
     "category": "thermalexpansion.refinery",
     "machine": "Fractionating Still",
     "state": "buildable",
@@ -486,14 +510,26 @@
     "why": "craftable: tinker_io:smart_output"
    },
    {
+    "category": "xu2_machine_extrautils2:furnace",
+    "machine": "Furnace",
+    "state": "buildable",
+    "why": "craftable: extrautils2:machine"
+   },
+   {
     "category": "zmaster587.AR.chemicalReactor",
     "machine": "Chemical Reactor",
     "state": "buildable",
     "why": "craftable: advancedrocketry:chemicalreactor"
+   },
+   {
+    "category": "zmaster587.AR.electrolyzer",
+    "machine": "Electrolyser",
+    "state": "buildable",
+    "why": "craftable: advancedrocketry:electrolyser"
    }
   ],
   "max_nodes": 4000,
-  "nodes": 634,
+  "nodes": 641,
   "pins_overruled": {},
   "qty": 1,
   "shopping_list": [
@@ -643,6 +679,20 @@
     "kind": "item",
     "label": "Nether Coal Ore",
     "name": "Nether Coal Ore",
+    "qty": 9
+   },
+   {
+    "key": "abyssalcraft:dreadiumboots:*",
+    "kind": "item",
+    "label": "Dreadium Boots (*)",
+    "name": "Dreadium Boots (*)",
+    "qty": 9
+   },
+   {
+    "key": "nuclearcraft:ingot:4",
+    "kind": "item",
+    "label": "Uranium Ingot",
+    "name": "Uranium Ingot",
     "qty": 9
    },
    {
@@ -867,13 +917,6 @@
     "kind": "item",
     "label": "Ardite Ore",
     "name": "Ardite Ore",
-    "qty": 1
-   },
-   {
-    "key": "contenttweaker:sub_block_holder_1",
-    "kind": "item",
-    "label": "Block of Dreadite",
-    "name": "Block of Dreadite",
     "qty": 1
    },
    {
@@ -2316,31 +2359,137 @@
          "children": [
           {
            "alternatives": 5,
-           "category": "nuclearcraft_ingot_former",
+           "category": "nuclearcraft_alloy_furnace",
            "children": [
             {
-             "alternatives": 7,
-             "category": "nuclearcraft_melter",
+             "alternatives": 25,
+             "category": "crafting_shaped",
              "children": [
               {
-               "key": "contenttweaker:sub_block_holder_1",
+               "alternatives": 22,
+               "category": "xu2_machine_extrautils2:furnace",
+               "children": [
+                {
+                 "key": "abyssalcraft:dreadiumboots:*",
+                 "kind": "item",
+                 "label": "Dreadium Boots (*)",
+                 "name": "Dreadium Boots (*)",
+                 "need": 9,
+                 "status": "raw"
+                }
+               ],
+               "interchangeable": 4,
+               "key": "abyssalcraft:ingotnugget:2",
                "kind": "item",
-               "label": "Block of Dreadite",
-               "name": "Block of Dreadite",
-               "need": 1,
-               "status": "raw"
+               "label": "Dreadium Nugget",
+               "machine": "Furnace",
+               "machine_state": "buildable",
+               "machine_why": "craftable: extrautils2:machine",
+               "name": "Dreadium Nugget",
+               "need": 9,
+               "per_run": 1,
+               "recipe": "hei:xu2_machine_extrautils2:furnace:329970",
+               "runs": 9,
+               "status": "craft"
               }
              ],
-             "key": "fluid:dreadite",
-             "kind": "fluid",
-             "label": "Molten Dreadite",
-             "machine": "Melter",
+             "key": "abyssalcraft:dreadiumingot",
+             "kind": "item",
+             "label": "Dreadium Ingot",
+             "machine": "Crafting (shaped)",
+             "machine_state": "have",
+             "name": "Dreadium Ingot",
+             "need": 1,
+             "per_run": 1,
+             "recipe": "AbyssalCraft-1.12.2-1.11.2.jar!assets/abyssalcraft/recipes/dreadiumingot_alt.json",
+             "runs": 1,
+             "status": "craft"
+            },
+            {
+             "alternatives": 9,
+             "category": "nuclearcraft_infuser",
+             "children": [
+              {
+               "alt_count": 3,
+               "alternatives": 48,
+               "category": "crafting_shapeless",
+               "children": [
+                {
+                 "alternatives": 8,
+                 "category": "minecraft.crafting",
+                 "children": [
+                  {
+                   "key": "nuclearcraft:ingot:4",
+                   "kind": "item",
+                   "label": "Uranium Ingot",
+                   "name": "Uranium Ingot",
+                   "need": 9,
+                   "status": "raw"
+                  }
+                 ],
+                 "key": "immersiveengineering:storage:5",
+                 "kind": "item",
+                 "label": "Block of Uranium",
+                 "machine": "Crafting",
+                 "machine_state": "have",
+                 "name": "Block of Uranium",
+                 "need": 1,
+                 "per_run": 1,
+                 "recipe": "hei:minecraft.crafting:25167",
+                 "runs": 1,
+                 "status": "craft"
+                }
+               ],
+               "key": "immersiveengineering:metal:5",
+               "kind": "item",
+               "label": "Uranium Ingot",
+               "machine": "Crafting (shapeless)",
+               "machine_state": "have",
+               "name": "Uranium Ingot",
+               "need": 1,
+               "per_run": 9,
+               "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/metal_storage/uranium_block_uncraft.json",
+               "runs": 1,
+               "status": "craft"
+              },
+              {
+               "alternatives": 24,
+               "category": "zmaster587.AR.electrolyzer",
+               "children": [
+                {
+                 "key": "fluid:water",
+                 "kind": "fluid",
+                 "label": "Water",
+                 "name": "[fluid] Water",
+                 "need": 100,
+                 "note": "vanilla infinite water (two source blocks and a bucket)",
+                 "status": "source"
+                }
+               ],
+               "key": "fluid:oxygen",
+               "kind": "fluid",
+               "label": "Oxygen",
+               "machine": "Electrolyser",
+               "machine_state": "buildable",
+               "machine_why": "craftable: advancedrocketry:electrolyser",
+               "name": "[fluid] Oxygen",
+               "need": 1000,
+               "per_run": 100,
+               "recipe": "hei:zmaster587.AR.electrolyzer:114198",
+               "runs": 10,
+               "status": "craft"
+              }
+             ],
+             "key": "nuclearcraft:ingot_oxide:1",
+             "kind": "item",
+             "label": "Uranium Oxide Ingot",
+             "machine": "Fluid Infuser",
              "machine_state": "buildable",
-             "machine_why": "craftable: nuclearcraft:melter_idle",
-             "name": "[fluid] Molten Dreadite",
-             "need": 144,
-             "per_run": 1296,
-             "recipe": "hei:nuclearcraft_melter:332405",
+             "machine_why": "craftable: nuclearcraft:infuser_idle",
+             "name": "Uranium Oxide Ingot",
+             "need": 1,
+             "per_run": 1,
+             "recipe": "hei:nuclearcraft_infuser:331756",
              "runs": 1,
              "status": "craft"
             }
@@ -2348,13 +2497,13 @@
            "key": "contenttweaker:material_part:40",
            "kind": "item",
            "label": "Dreadite Ingot",
-           "machine": "Ingot Former",
+           "machine": "Alloy Furnace",
            "machine_state": "buildable",
-           "machine_why": "craftable: nuclearcraft:ingot_former_idle",
+           "machine_why": "craftable: nuclearcraft:alloy_furnace_idle",
            "name": "Dreadite Ingot",
            "need": 1,
-           "per_run": 1,
-           "recipe": "hei:nuclearcraft_ingot_former:332799",
+           "per_run": 2,
+           "recipe": "hei:nuclearcraft_alloy_furnace:331725",
            "runs": 1,
            "status": "craft"
           },
@@ -9756,7 +9905,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 28012,
+  "work": 28024,
   "work_budget": 80000
  },
  "scenario": {

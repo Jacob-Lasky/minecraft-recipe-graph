@@ -11,36 +11,42 @@ Measured on the reference graph: 374 data-model keys, 125 with any producer, and
 are exactly two tiers -- the craftable fresh model and Self-Aware. The four middle tiers are
 248 keys the graph cannot reach.
 
-WHAT THIS DOES **NOT** CLAIM, because #136 measured both alternatives and rejected them:
-
-  * It does not say "nothing produces this", which is true of cobblestone too and would badge
-    most of a shopping list.
-  * It does not change any price. The cost model's seeding of unreachable leaves at
-    BASE_RAW_COST is the underlying defect and it stays open on #176; a display badge that
-    quietly moved a number would be the worst of both.
+WHAT THIS DOES **NOT** CLAIM. It does not say "nothing produces this", which is true of
+cobblestone too and would badge most of a shopping list. #136 measured every rule that keyed
+on `producers == 0` alone and rejected all of them.
 
 It claims exactly one thing: THE GRAPH CAN MAKE THIS MATERIAL, BUT NOT IN THE SHAPE BEING
 ASKED FOR. That is checkable, non-obvious, and it is the sentence a reader needs in order to
 distrust the line.
 
-THREE WAYS A KEY CAN BE THE WRONG SHAPE, and all three are covered, one class each:
+THE MARK IS ALSO THE PRICE, SINCE #176. #139 shipped the badge and deliberately left the
+number alone, so an item the graph had proven it could not account for still seeded at
+`BASE_RAW_COST` -- the cheapest value in the model, which is what won it the route in the
+first place. `cost._seed` now prices this same set at `UNSOURCED_COST`, so the badge and the
+routing read one predicate and cannot disagree. What is asserted here is the badge; the
+ordering of the constant is `tests/test_progression.py`.
+
+FOUR WAYS A KEY CAN BE THE WRONG SHAPE, and all four are covered, one class each:
 
   * an NBT STATE of a producible item -- a levelled data model, the case above.
     `TheReportedFailureTest`.
   * a PROCESSED FORM of a producible material -- the Sednanite Nugget that opened #136.
     `nuggetSednanite` and `ingotSednanite` are one material by Forge's own convention, and
     the ingot has 27 producers, so there is a specific other form to name. `ProcessedFormTest`.
+  * a STORAGE BLOCK of a producible material -- the Block of Myrmitite the planner fell to
+    once the nuggets were priced, and where #136 finished. `StorageBlockTest`.
   * a BARE key made only under an NBT digest -- `animus:kama_bound`, #170.
     `ProducedOnlyAsAVariantTest`.
 
 The second clause -- that there is a specific other form to NAME -- is what every one of
 them refuses to badge without, and `ScopeTest` is where that refusal is pinned.
 
-ONE PREDICATE ANSWERS ALL THREE, and it lives on `Graph`. It used to live on `Solver` with a
-hand-kept copy in `api._reachable_form`, and the second and third shapes above were each
-added to one spelling and not the other, so `/api/sweep` under-reported for both while a
-test comparing the two copies passed. `ThereIsOnlyOneSpellingOfThePredicateTest` is what
-replaced that comparison; see it for why the assertion is structural rather than behavioural.
+ONE PREDICATE ANSWERS ALL FOUR, and it lives on `Graph`. It used to live on `Solver` with a
+hand-kept copy in `api._reachable_form`, and the processed-form shape and the produced-variant
+shape were each added to one spelling and not the other, so `/api/sweep` under-reported for
+both while a test comparing the two copies passed. `ThereIsOnlyOneSpellingOfThePredicateTest`
+is what replaced that comparison; see it for why the assertion is structural rather than
+behavioural.
 """
 
 import os
@@ -50,6 +56,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from recipegraph import cost as cost_mod  # noqa: E402
 from recipegraph import present  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
@@ -282,6 +289,139 @@ class ProcessedFormTest(unittest.TestCase):
             self.assertEqual("mod:plate", Graph.obtainable_sibling(g, "mod:nugget"))
 
 
+class StorageBlockTest(unittest.TestCase):
+    """A `block<Material>` nobody can press. The #136 shape one denomination the other way.
+
+    #176 priced the processed forms nothing makes, which killed the nugget ladder #136
+    reported -- and the planner fell the other way. Measured on the reference graph, a plan
+    for Myrmitite Ingot came out as
+
+        Myrmitite Ingot  <- Molten Myrmitite  <- 1 Block of Myrmitite   [raw]
+
+    and a Block of Myrmitite has no producer, no stock and no world generation. It is the
+    reported defect with the denomination reversed: nine ingots pressed into one block is
+    production, so a block nobody can press is as unobtainable as a nugget nobody can split.
+
+    THE SECOND CLAUSE IS WHAT MAKES THIS SAFE, and the two refusal tests below are where that
+    is pinned rather than asserted in prose. On the reference graph 50 producerless keys
+    priced at a raw leaf carry a `block*` group and no processed one; 36 are excluded and 14
+    are badged. The 36 break down as 19 world glasses whose `Glass` family has no producible
+    member, 15 wildcard metas, and 2 materials registered in no processed shape at all. See
+    `model.storage_form_material` for the full census.
+    """
+
+    @staticmethod
+    def _graph(block_group="blockMyrmitite", ingot_producible=True):
+        g = Graph()
+        g.names = {"mod:block": "Block of Myrmitite", "mod:ingot": "Myrmitite Ingot",
+                   "mod:ore": "Myrmitite Ore", "mod:out": "Molten Myrmitite"}
+        g.ore_members = {block_group: ["mod:block"], "ingotMyrmitite": ["mod:ingot"]}
+        # The plan reaches the block: the melter takes one and gives the fluid.
+        g.add(Recipe("r1", "test", [("mod:out", 1)], [Ingredient(["mod:block"], 1)]))
+        if ingot_producible:
+            g.add(Recipe("r2", "test", [("mod:ingot", 1)], [Ingredient(["mod:ore"], 1)]))
+        return g
+
+    def _leaf(self, g, target="mod:out"):
+        return Solver(g).solve(target, 1)["tree"]["children"][0]
+
+    def test_the_unpressable_storage_block_is_marked(self):
+        leaf = self._leaf(self._graph())
+        self.assertEqual(leaf["key"], "mod:block")
+        self.assertTrue(leaf.get("unsourced"))
+
+    def test_the_note_names_the_form_that_IS_makeable(self):
+        self.assertIn("Myrmitite Ingot", self._leaf(self._graph())["note"])
+
+    def test_the_wording_says_FORM(self):
+        # A storage block is a shape of the material, so it gets the FORM sentence rather
+        # than the STATE one. Nothing about levelling is involved.
+        self.assertIn("nothing makes this form", self._leaf(self._graph())["note"])
+
+    @staticmethod
+    def _world_glass():
+        """A world block and an ordinary pane, both members of `blockGlass`.
+
+        A FRESH GRAPH PER ARM, because `material_forms` is cached on the instance and the
+        widening test below moves the list the cache was built from.
+        """
+        g = Graph()
+        g.names = {"mod:quicksoil": "Quicksoil Glass", "mod:pane": "Glass Pane",
+                   "mod:sand": "Sand", "mod:out": "Something"}
+        g.ore_members = {"blockGlass": ["mod:quicksoil", "mod:pane"]}
+        g.add(Recipe("r1", "test", [("mod:out", 1)], [Ingredient(["mod:quicksoil"], 1)]))
+        g.add(Recipe("r2", "test", [("mod:pane", 1)], [Ingredient(["mod:sand"], 1)]))
+        return g
+
+    def test_a_world_block_whose_material_has_no_processed_form_is_NOT_marked(self):
+        # THE 35. `blockGlass` names a material the pack registers in no processed shape, so
+        # there is nothing to point a reader at and Quicksoil Glass stays an ordinary NEED --
+        # which is right, because you mine it in the Aether.
+        self.assertFalse(self._leaf(self._world_glass()).get("unsourced"))
+
+    def test_admitting_block_to_the_naming_list_would_break_the_glass_family(self):
+        # WHY THE TWO LISTS ARE SEPARATE, stated as a test rather than only as a comment.
+        # With `block` in PROCESSED_FORM_PREFIXES the Glass family gains a producible member
+        # -- the ordinary pane above -- and the world glass beside it is suddenly badged and
+        # repriced. On the reference graph that is 20 keys, each consumed by ~320 recipes.
+        from recipegraph import model
+        original = model.PROCESSED_FORM_PREFIXES
+        try:
+            model.PROCESSED_FORM_PREFIXES = original + ("block",)
+            widened = Graph.reachable_form(self._world_glass(), "mod:quicksoil")
+        finally:
+            model.PROCESSED_FORM_PREFIXES = original
+        self.assertEqual("mod:pane", widened)
+        self.assertIsNone(Graph.reachable_form(self._world_glass(), "mod:quicksoil"))
+
+    def test_a_family_with_nothing_makeable_is_NOT_marked(self):
+        # Same refusal every other shape makes: with no obtainable sibling the mark collapses
+        # to "no recipe", which the NEED badge already says.
+        self.assertFalse(self._leaf(self._graph(ingot_producible=False)).get("unsourced"))
+
+    def test_a_world_ore_group_is_still_not_a_form(self):
+        # `oreMyrmitite` is the obtainable end of the family. A key registered only as one is
+        # something you mine, and the storage split must not have widened that.
+        self.assertFalse(self._leaf(self._graph(block_group="oreMyrmitite")).get("unsourced"))
+
+    def test_a_key_registered_as_BOTH_an_ore_and_a_block_is_not_marked(self):
+        # THE CEILING `cost._seed` PROMISES FOR AN ORE. Mining is what a world ore costs at
+        # worst, and the unsourced seed runs after that loop and only raises -- so badging one
+        # would price it above its own ceiling, and `Solver.expand` returns "mined, not
+        # crafted" before this mark is consulted, so the badge would appear only in a sweep.
+        # 0 keys on the reference graph carry both groups; this is what keeps that true.
+        g = self._graph()
+        g.ore_members["oreMyrmitite"] = ["mod:block"]
+        self.assertIsNone(Graph.reachable_form(g, "mod:block"))
+        self.assertFalse(self._leaf(g).get("unsourced"))
+
+    def test_the_named_form_is_never_a_block(self):
+        # The naming set is unchanged, so a decorative block can never be the answer however
+        # many producers it has. That is the half of the `block` exclusion that still stands.
+        g = self._graph()
+        g.names["mod:decorative"] = "Chiselled Myrmitite"
+        g.ore_members["blockMyrmitite"].append("mod:decorative")
+        for rid in ("d1", "d2", "d3"):
+            g.add(Recipe(rid, "test", [("mod:decorative", 1)], [Ingredient(["mod:ore"], 1)]))
+        self.assertEqual("mod:ingot", Graph.obtainable_sibling(g, "mod:block"))
+
+    def test_a_processed_group_wins_over_a_storage_one(self):
+        # A key in both `blockX` and `dustY` resolves through the processed group, so nothing
+        # that answered before the widening answers differently now.
+        g = self._graph()
+        g.names["mod:dust"] = "Sednanite Dust"
+        g.ore_members["dustSednanite"] = ["mod:block", "mod:dust"]
+        g.add(Recipe("r3", "test", [("mod:dust", 1)], [Ingredient(["mod:ore"], 1)]))
+        self.assertEqual("mod:dust", Graph.obtainable_sibling(g, "mod:block"))
+
+    def test_it_is_priced_as_unsourced_rather_than_as_a_raw_leaf(self):
+        # THE HALF THAT MOVES A PLAN. The badge alone left the block at `BASE_RAW_COST`, the
+        # cheapest value in the model, so the melter route through it beat mining the ore.
+        table = cost_mod.estimate(self._graph())
+        self.assertEqual(cost_mod.UNSOURCED_COST, table["mod:block"])
+        self.assertGreater(table["mod:block"], cost_mod.BASE_RAW_COST)
+
+
 class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
     """`PROCESSED_FORM_PREFIXES` decides who gets marked, so the two copies must agree.
 
@@ -313,10 +453,22 @@ class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
         # OBTAINABLE end of a family, so admitting it would let a family be named by the very
         # thing that is out of reach; `block` would readmit `chisel:diamond` through
         # `blockDiamond`, which is the decorative-block cluster #61 demoted.
+        #
+        # `block` IS READ ELSEWHERE, and `StorageBlockTest` is where. Keeping it out of THIS
+        # list is what stops the widening from badging 20 world glasses; see
+        # `test_admitting_block_to_the_naming_list_would_break_the_glass_family`.
         from recipegraph.model import PROCESSED_FORM_PREFIXES
         for forms in (list(PROCESSED_FORM_PREFIXES), self._java_list()):
             self.assertNotIn("ore", forms)
             self.assertNotIn("block", forms)
+
+    def test_both_languages_spell_the_storage_prefix_the_same_way(self):
+        # Same seam as the list above and the same failure mode: it decides which keys carry
+        # the `unsourced` field, and `PlanFixtureTest` compares that field node for node.
+        from recipegraph.model import STORAGE_FORM_PREFIX
+        with open(self.JAVA) as fh:
+            src = fh.read()
+        self.assertIn('STORAGE_FORM_PREFIX = "%s"' % STORAGE_FORM_PREFIX, src)
 
     def test_the_split_agrees_with_the_convention(self):
         from recipegraph.model import split_ore_group
@@ -328,6 +480,15 @@ class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
         # A bare form name has no material after it and names nothing.
         self.assertIsNone(split_ore_group("dust"))
         self.assertIsNone(split_ore_group("plankWood".replace("plank", "zzz")))
+
+    def test_the_storage_split_agrees_with_the_convention(self):
+        from recipegraph.model import storage_form_material
+        self.assertEqual("Myrmitite", storage_form_material("blockMyrmitite"))
+        self.assertEqual("Iridium", storage_form_material("blockIridium"))
+        # Not a storage group, so a nugget keeps being answered by the processed-form split.
+        self.assertIsNone(storage_form_material("nuggetSednanite"))
+        # A bare form name names no material, exactly as `split_ore_group` refuses `dust`.
+        self.assertIsNone(storage_form_material("block"))
 
 
 class ProducedOnlyAsAVariantTest(unittest.TestCase):
