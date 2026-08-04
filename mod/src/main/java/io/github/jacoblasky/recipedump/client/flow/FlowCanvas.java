@@ -36,24 +36,51 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
 public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
 
     /**
-     * The narrowest node that carries everything the row can draw.
+     * The narrowest node that carries everything a two-line node can draw.
      *
-     * DERIVED FROM THE ROW'S OWN COLUMNS, so it follows when the status vocabulary grows and
-     * widens `BADGE`. `FlowLayout.NODE_WIDTH` must equal this and a test says so; the layout
-     * writes the number out instead of importing it, because importing `PlannerWidgets` would
-     * drag ModularUI into a file whose value is being testable without it.
+     * DERIVED FROM THE NODE'S OWN COLUMNS, so it follows when the status vocabulary grows and
+     * widens `BADGE`. `FlowLayout.NODE_WIDTH` must be at least this and a test says so; the
+     * layout writes its number out instead of importing it, because importing `PlannerWidgets`
+     * would drag ModularUI into a file whose value is being testable without it.
+     *
+     * THE WIDER OF THE TWO LINES, WHICH IS LINE ONE. Since #213's companion work put the label
+     * on its own line, the two are measured separately: line one is the quantity and the badge
+     * beside the icon, line two is the label beside the icon, and both sit inside
+     * `NODE_PAD` of the box's border. It used to be a single sum because everything shared one
+     * line, and the label was what lost -- eight characters of item name against a 90px badge.
+     *
+     * AT LEAST, NOT EQUAL, and the change of relation is deliberate. What the pin protects is
+     * the direction that goes wrong silently: `BADGE` grows, a node left at the old width
+     * starts DROPPING the badge instead of following, and nothing says so. A node wider than
+     * the minimum spends the surplus on the label, which is the thing there is never enough of.
      */
-    public static final int NARROWEST_NODE = PlannerWidgets.ICON + PlannerWidgets.GAP
-            + PlannerWidgets.QTY + PlannerWidgets.GAP + PlannerWidgets.MIN_LABEL
-            + PlannerWidgets.GAP + PlannerWidgets.BADGE;
+    public static final int NARROWEST_NODE = PlannerWidgets.NODE_PAD * 2 + Math.max(
+            PlannerWidgets.NODE_ICON + PlannerWidgets.GAP + PlannerWidgets.QTY
+                    + PlannerWidgets.GAP + PlannerWidgets.BADGE,
+            PlannerWidgets.NODE_ICON + PlannerWidgets.GAP + PlannerWidgets.MIN_LABEL);
+
+    /**
+     * The shortest node that holds two text lines clear of its own frame.
+     *
+     * `FlowLayout.NODE_HEIGHT` must be at least this. It was 20 -- exactly two lines and no
+     * slack -- while the node drew ONE of them, so the shortfall could not show; the moment the
+     * label moved to a second line the top one was drawn on the nine-slice's bevel.
+     */
+    public static final int SHORTEST_NODE =
+            PlannerWidgets.LINE * 2 + PlannerWidgets.NODE_PAD * 2;
 
     /** Edge colour, muted so the nodes stay the thing you read. */
     private static final int EDGE = 0x66FFFFFF;
 
     private final FlowLayout.Laid laid;
     private final FlowCulling culling;
-    /** One widget per box, built once and positioned absolutely. Parallel to `laid.boxes`. */
-    private final List<IWidget> boxWidgets;
+    /**
+     * One widget per box, built once and positioned absolutely. Parallel to `laid.boxes`.
+     *
+     * TYPED AS `NodeContent` AND NOT AS `IWidget`, so {@link #preDraw} can tell a node to drop
+     * its label at a zoom where the label is a smear. See `FlowZoom.LABEL_LEGIBLE`.
+     */
+    private final List<PlannerWidgets.NodeContent> boxWidgets;
     /** What the last {@link #preDraw} decided was on screen. */
     private final List<IWidget> visible = new ArrayList<IWidget>();
     /**
@@ -72,7 +99,7 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         super(new HorizontalScrollData(), new VerticalScrollData());
         this.laid = FlowLayout.of(tree);
         this.culling = new FlowCulling(laid);
-        this.boxWidgets = new ArrayList<IWidget>(laid.size());
+        this.boxWidgets = new ArrayList<PlannerWidgets.NodeContent>(laid.size());
         for (FlowLayout.Box box : laid.boxes) {
             // A BACKGROUND, unlike the tree's rows: on a canvas a row is text floating on a
             // panel rather than something bounded by its neighbours.
@@ -91,18 +118,24 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
             //
             // Found by screenshot, and only by screenshot. If a dark canvas is ever actually
             // wanted, the fix is a dark-theme ink set in `NodeStatus` -- s2layout owns it --
-            // and not a background swap here. Selection highlighting composes with this by
-            // swapping the BACKGROUND rather than the ink, for the same reason.
+            // and not a background swap here.
+            //
+            // SELECTION HIGHLIGHTING COMPOSES WITH THIS, and #213 settled how: a translucent
+            // wash plus a frame, drawn by `PlannerWidgets.ClickableGroup.draw` over this
+            // background and under the node's own text. This comment used to predict a
+            // BACKGROUND SWAP, which would have violated the paragraph above it -- swapping
+            // the nine-slice for a selected variant means choosing a second surface, and the
+            // inks are only correct on this one. A wash keeps the surface and tints it.
             //
             // The node keeps the panel's own surface and is delimited by the nine-slice's
             // border. That border is also what makes this read as a graph at all: in a list a
             // row is bounded by the rows above and below it, and the first screenshot of this
             // canvas was three nodes and an elbow that read as unrelated captions.
-            IWidget widget = PlannerWidgets
-                    .planNodeContent(box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT)
-                    .background(GuiTextures.MC_BACKGROUND)
-                    .pos(box.x, box.y)
-                    .size(FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT);
+            PlannerWidgets.NodeContent widget = PlannerWidgets
+                    .planNodeContent(box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT);
+            widget.background(GuiTextures.MC_BACKGROUND);
+            widget.pos(box.x, box.y);
+            widget.size(FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT);
             boxWidgets.add(widget);
             // Added to the real child list so ModularUI initialises and RESIZES every one of
             // them exactly once. `getChildren` culls what is DRAWN; it must not cull what is
@@ -409,6 +442,28 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      * instead of a draw. The per-frame work here is proportional to what ENTERED or LEFT the
      * viewport, not to the plan: panning a few pixels touches a handful of flags, and a plan
      * of four thousand nodes with forty on screen draws forty.
+     *
+     * <h2>And decide how much of each node is worth drawing at this zoom</h2>
+     *
+     * LEVEL OF DETAIL, and the two alternatives lose for different reasons.
+     *
+     * TRUNCATION does not answer the question at all: the label is already cut to its column by
+     * `NodeRowText.fit`, and zooming out does not overflow it -- it scales it. A label that
+     * fits perfectly and is three physical pixels tall is not a truncation problem. Cutting it
+     * FURTHER by screen width would make one node say different words at different zooms, which
+     * costs the diagram its reproducibility: a screenshot of `flow:plan-in-stock` would no
+     * longer be a picture of a plan, it would be a picture of a plan at a zoom.
+     *
+     * AN ICON-ONLY NODE loses on the keys that have no icon. 1,198 of this pack's fluids exist
+     * only as `fluid:<name>` and an `ore:` node is a group rather than an item, so
+     * `NodeActions.iconFor` correctly answers EMPTY for them -- and a diagram whose zoomed-out
+     * form is empty boxes for every fluid in a fluid chain is worse than one with no zoom.
+     * `plan-fluid-chain` is 634 nodes and is exactly that case.
+     *
+     * So the icon and the QUANTITY stay at every zoom, and the label and the badge word go
+     * below `FlowZoom.LABEL_LEGIBLE`. That is what `FlowZoom.MIN`'s own comment says a reader
+     * zoomed out is reading, and the quantity carries `NodeStatus.colour`, so status keeps a
+     * channel with no text at all.
      */
     @Override
     public void preDraw(ModularGuiContext context, boolean transformed) {
@@ -416,6 +471,11 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         if (transformed) {
             return;
         }
+        // EVERY VISIBLE NODE EVERY FRAME, not only the ones that just entered the viewport.
+        // Zoom changes without the visible set changing at all -- a control-scroll on a small
+        // plan moves no node in or out -- so detail applied only on entry would leave the
+        // labels showing at 0.5 until the next pan. It is a boolean write per drawn node.
+        boolean detail = zoom >= FlowZoom.LABEL_LEGIBLE;
         // CONVERTED, because the scroll offset is screen pixels and the culler works in layout
         // pixels. `FlowZoom` rounds the two edges outward; passing `getScrollX() / zoom` and
         // `width / zoom` directly rounds both inward and hides a strip of nodes along the
@@ -432,11 +492,17 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
         visibleBoxes.clear();
         for (int i = 0; i < shown.size(); i++) {
             int index = shown.get(i);
-            IWidget widget = boxWidgets.get(index);
+            PlannerWidgets.NodeContent widget = boxWidgets.get(index);
             widget.setEnabled(true);
+            widget.showDetail(detail);
             visible.add(widget);
             visibleBoxes.add(index);
         }
+    }
+
+    /** Whether the current zoom is one at which a node's name is drawn. For a test or a log. */
+    public boolean showsLabels() {
+        return zoom >= FlowZoom.LABEL_LEGIBLE;
     }
 
     /**

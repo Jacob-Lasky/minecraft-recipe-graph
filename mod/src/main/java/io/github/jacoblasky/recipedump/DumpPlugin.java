@@ -64,7 +64,7 @@ public class DumpPlugin implements IModPlugin {
         runtime = jeiRuntime;
         // HERE AND NOT IN `register`, because this is the callback that proves a runtime
         // exists -- and a NodeActions installed without one would answer true to
-        // `canShowInRecipeViewer` and then open nothing.
+        // `canShowUses` and then open nothing.
         //
         // THE REAL HOLDER, which is the one argument #157 said this would become. It answers
         // null until the graph is READY -- exactly what NO_GRAPH did -- so the two

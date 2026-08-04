@@ -8,6 +8,7 @@ import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
+import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
@@ -43,13 +44,74 @@ final class PlannerShot {
     /** `planner`, or `planner:<fixture>`; `arg` is whatever followed the colon. */
     static void openTree(String arg) {
         PlanView plan = fixture(arg);
-        armNodeActions(plan);
-        PlannerScreen.openPlan(plan, book());
+        armNodeActions(plan.tree());
+        PlannerScreen.openPlan(plan, book(plan));
+    }
+
+    /**
+     * `planner-selected`: the tree with one node's key selected, so the highlight is in shot.
+     *
+     * A SCREEN OF ITS OWN RATHER THAN A FLAG ON `planner`, because a highlight is not the
+     * default state of a freshly opened planner and a shot that always drew one would be
+     * photographing something no player sees on open. `ShotScreens` costs one line per screen
+     * precisely so this is the cheap option.
+     *
+     * THE SELECTED KEY IS ONE THAT OCCURS MORE THAN ONCE. Highlighting is by KEY, so every
+     * occurrence lights up -- that is `PlanSelection`'s whole design and the property a picture
+     * has to show, since a shot of one highlighted row is equally consistent with a holder that
+     * only ever lit the box that was clicked.
+     */
+    static void openSelectedTree(String arg) {
+        PlanView plan = fixture(arg == null || arg.trim().isEmpty() ? SELECTION_FIXTURE : arg);
+        armNodeActions(plan.tree());
+        PlanSelection.select(mostRepeated(plan));
+        PlannerScreen.openPlan(plan, book(plan));
+    }
+
+    /** `flow-selected`: the same, on the diagram, where the wash sits on a busy canvas. */
+    static void openSelectedFlow(String arg) {
+        PlanView plan = fixture(arg == null || arg.trim().isEmpty() ? SELECTION_FIXTURE : arg);
+        armNodeActions(plan.tree());
+        PlanSelection.select(mostRepeated(plan));
+        FlowCanvas canvas = new FlowCanvas(plan.tree());
+        canvas.pos(4, 4).size(612, 372);
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+    }
+
+    /**
+     * A fixture with one key at more than one occurrence. `PlanSelectionTest`'s choice, and for
+     * its reason: `plan-in-stock` uses every key once, so it is IMMUNE to the property being
+     * photographed -- one highlighted row proves nothing about "every occurrence".
+     */
+    private static final String SELECTION_FIXTURE = "plan-same-name";
+
+    /**
+     * The node whose key appears most often in `plan`, first occurrence wins ties.
+     *
+     * DETERMINISTIC, so a shot of a given fixture is the same picture every time -- the same
+     * rule {@link #mostAlternatives} follows and for the same reason.
+     */
+    static PlanNode mostRepeated(PlanView plan) {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<String, Integer>();
+        for (PlanNode node : plan.flatten()) {
+            Integer seen = counts.get(node.key());
+            counts.put(node.key(), Integer.valueOf(seen == null ? 1 : seen.intValue() + 1));
+        }
+        PlanNode best = plan.tree();
+        int bestCount = 0;
+        for (PlanNode node : plan.flatten()) {
+            int count = counts.get(node.key()).intValue();
+            if (count > bestCount) {
+                best = node;
+                bestCount = count;
+            }
+        }
+        return best;
     }
 
     static void openMenu(String arg) {
         PlanView plan = fixture(arg);
-        armNodeActions(plan);
+        armNodeActions(plan.tree());
         PlannerScreen.openPanel(PlannerWidgets.nodeMenu(plan.tree(), SHOT_ACTIONS));
     }
 
@@ -148,7 +210,14 @@ final class PlannerShot {
                 throw new IllegalArgumentException("bad zoom '" + value + "' in '" + arg + "'");
             }
         }
-        final FlowCanvas canvas = new FlowCanvas(flowTree(spec));
+        PlanNode tree = flowTree(spec);
+        // ARMED HERE TOO, AND IT WAS NOT UNTIL #213. `openTree` armed the seam and this did
+        // not, so every screenshot of the diagram was taken against `NodeActions.NONE` -- the
+        // icon column was charged on all 634 nodes of `plan-fluid-chain` and nothing was ever
+        // drawn in it. The picture looked like a diagram with no icons, which is also what a
+        // diagram with a broken icon lookup looks like.
+        armNodeActions(tree);
+        final FlowCanvas canvas = new FlowCanvas(tree);
         canvas.pos(4, 4).size(612, 372);
         canvas.setZoom(zoom);
         PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
@@ -280,7 +349,12 @@ final class PlannerShot {
     }
 
     static void openTodo(String arg) {
-        PlannerScreen.openPanel(PlannerWidgets.todoPanel(fixture(arg), book()));
+        PlanView plan = fixture(arg);
+        // ARMED, LIKE `openTree`, AND FOR THE SAME REASON IT WAS MISSING HERE: the TODO panel
+        // draws an icon per row now, and a shot taken against `NodeActions.NONE` is a picture
+        // of the icon column being charged and never filled.
+        armNodeActions(plan.tree());
+        PlannerScreen.openPanel(PlannerWidgets.todoPanel(plan, book(plan)));
     }
 
     /**
@@ -305,17 +379,40 @@ final class PlannerShot {
     /**
      * A book with something in it, since an empty TODO panel proves only that it opens.
      *
-     * Real keys from the reference pack rather than "foo": the discriminated one is the shape
-     * that overflows a row, and 934,400 mB of water is a real Borax draw.
+     * ROWS FROM THE PLAN FIRST, WHICH IS THE ONLY WAY A ROW GETS ON THIS LIST IN GAME: "Add to
+     * TODO" in the node menu sends `node.key()` and nothing else writes it. A book of keys the
+     * plan has never heard of is not the usual case, it is the leftover case -- and while it was
+     * the ONLY case this screen photographed, the shot could not show a resolved display name
+     * at all, so the panel printing raw keys looked like the only thing it could do.
+     *
+     * THE THREE HAND-WRITTEN KEYS STAY, and one of them is the point: nothing in the fixture set
+     * names `thaumadditions:vis_pod#0116bb2287a7`, so it is the row that exercises the fallback
+     * to the key. Keeping it means one picture shows both the fix and what happens when the
+     * plan cannot help. The discriminated key is also the shape that overflows a row, and
+     * 934,400 mB of water is a real Borax draw.
      */
-    private static PlanBook book() {
+    private static PlanBook book(PlanView plan) {
         PlanBook book = new PlanBook();
         book.addFavourite("minecraft:iron_ingot");
+        for (PlanNode node : plan.flatten()) {
+            book.setTodo(node.key(), node.need());
+            if (book.todoKeys().size() >= PLAN_TODO_ROWS) {
+                break;
+            }
+        }
         book.setTodo("nuclearcraft:borax", 64L);
         book.setTodo("fluid:water", 934_400L);
         book.setTodo("thaumadditions:vis_pod#0116bb2287a7", 3L);
         return book;
     }
+
+    /**
+     * How many rows the shot's book takes from the plan.
+     *
+     * Three, so the panel is not all TODO and no shopping list: the "still needed" half below
+     * is the other thing the screen is for, and `TODO_MAX_LIST_HEIGHT` scrolls at sixteen rows.
+     */
+    private static final int PLAN_TODO_ROWS = 3;
 
     /**
      * The tree to draw: a fixture, or `synthetic:<n>` for a plan of a chosen size.
@@ -508,9 +605,9 @@ final class PlannerShot {
      * `plan-in-stock` (minecraft:hopper) or `plan-free-source` (minecraft:cobblestone) to see
      * the populated case.
      */
-    static void armNodeActions(PlanView plan) {
+    static void armNodeActions(PlanNode tree) {
         GraphBuilder builder = new GraphBuilder();
-        intern(plan.tree(), builder);
+        intern(tree, builder);
         final RecipeGraph graph = builder.build();
         JeiBridge.indexFor(graph);
         JeiNodeActions.install(new JeiNodeActions.GraphAccess() {

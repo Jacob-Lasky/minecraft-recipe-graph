@@ -11,7 +11,6 @@ import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.utils.Alignment;
 import com.cleanroommc.modularui.widget.ParentWidget;
-import com.cleanroommc.modularui.widgets.ItemDisplayWidget;
 import com.cleanroommc.modularui.widgets.ListWidget;
 import com.cleanroommc.modularui.widgets.TextWidget;
 
@@ -57,19 +56,73 @@ public final class PlannerWidgets {
     public static final int MAX_INDENT_DEPTH = 8;
 
     /**
-     * The item-icon column, filled by {@link NodeActions#iconFor}.
+     * The item-icon column, filled by {@link NodeActions#iconFor} or
+     * {@link NodeActions#iconForKey}.
      *
-     * THE ONE STATEMENT OF THE COLUMN RULE, for both builders below to point at rather than
+     * THE ONE STATEMENT OF THE COLUMN RULE, for every builder below to point at rather than
      * restate. `x` ADVANCES BY THIS WHETHER OR NOT AN ICON IS DRAWN: a width that depended on
      * whether a stack came back would re-flow every row the moment a `NodeActions` was
      * installed, or a graph finished loading mid-session and `iconFor` began answering.
      *
-     * THE WIDGET, unlike the width, is added only when there is a stack -- an
-     * `ItemDisplayWidget` holding EMPTY draws its slot frame rather than nothing, which is the
-     * sort of claim that reads identically either way in review and is only true one way
-     * round. Measured: 49 empty boxes down the left edge of the first screenshot.
+     * THE WIDGET, unlike the width, is added only when there is a stack, and that half lives in
+     * exactly one place -- {@link #iconIfAny} -- so the four surfaces that draw an icon cannot
+     * disagree about it. See that method for what the guard is worth now that {@link Icon}
+     * replaced `ItemDisplayWidget`; the "49 empty boxes down the left edge" it was written for
+     * was that widget painting its slot frame for an EMPTY stack.
      */
     public static final int ICON = 10;
+    /**
+     * The icon on a node that got a SECOND LINE for its label; see {@link #planNodeContent}.
+     *
+     * 16 IS THE NATIVE SIZE OF A 1.12.2 ITEM TEXTURE, so this is the one place in the planner
+     * that draws a stack at 1:1 rather than scaled down. {@link Icon} scales the stack to the
+     * box it is given, so the tree's 10px column is a downscale and this is not, which is worth
+     * having on the surface where a node is the only thing identifying itself.
+     *
+     * THE COLUMN RULE IS {@link #ICON}'S AND IS NOT RESTATED HERE: the width is charged
+     * whether or not a stack comes back, and the widget is added only when one does.
+     */
+    public static final int NODE_ICON = 16;
+    /**
+     * The inset between a diagram node's box and its contents, on all four sides.
+     *
+     * THE BOX HAS A BORDER AND THE CONTENT WAS DRAWN ON IT. `FlowCanvas` gives every node
+     * `GuiTextures.MC_BACKGROUND`, a nine-slice whose frame occupies the outer two or three
+     * pixels, and content positioned from 0 lands underneath it: `icons-flow.png` at 11:06 has
+     * the hopper's icon sliced down its left edge by the bevel and every item name resting on
+     * the bottom one. Nothing failed, and nothing could -- the widgets were exactly where the
+     * sizer put them.
+     *
+     * ONLY THE DIAGRAM NEEDS IT. A tree row has no border of its own; the panel's own
+     * {@link #PADDING} is what keeps those off the window frame.
+     */
+    public static final int NODE_PAD = 3;
+    /**
+     * What a TOKEN node draws in the icon column instead of a sprite.
+     *
+     * A TOKEN IS AN INSTRUCTION AND NOT AN ITEM, and the trap is that it is a REGISTERED item, so
+     * `iconFor` succeeds and returns a perfectly good picture of a thing that does not exist.
+     * `contenttweaker:dungeon_drop` is the case #174 was reported on: "the osiris spinel shows it
+     * requires a Dungeon Drop which implies it is an item". A sprite plus a red quantity plus a
+     * count is three signals all saying "item", so the sprite is the one to drop.
+     *
+     * A GLYPH RATHER THAN A BLANK, and that is the half worth arguing. Suppressing the sprite
+     * alone leaves the token distinguishable from a genuine RAW row only by the absence of an
+     * icon -- which is also true of every fluid and every oredict group, so it separates nothing.
+     * A mark is a POSITIVE carrier.
+     *
+     * IN THE ICON COLUMN BECAUSE THE ICON COLUMN SURVIVES THE ZOOM. `NodeContent.showDetail`
+     * drops the label and the badge word below `FlowZoom.LABEL_LEGIBLE`, and without this the
+     * zoomed-out diagram would separate a token from a NEED by hue alone -- which is what
+     * `NodeStatus`'s inks and `present.STATUS_STYLE` both deliberately refuse to do, and what a
+     * colour-blind player cannot read. The mark is not `detail`, so it stays at every zoom, and
+     * it survives greyscale.
+     *
+     * `!` AND NOT AN INVENTED GLYPH: it matches the web renderer's `graphview.TOKEN_MARK` on
+     * #174, agreed with that agent directly. A rule taught in the browser and broken in game is
+     * worse than neither, which is the whole reason that conversation happened.
+     */
+    public static final String TOKEN_MARK = "!";
     /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
     public static final int QTY = 52;
     /**
@@ -224,6 +277,51 @@ public final class PlannerWidgets {
         return width - labelStart - GAP - BADGE >= MIN_LABEL ? BADGE : 0;
     }
 
+    /**
+     * The badge column on a line the LABEL DOES NOT SHARE. All or nothing, as above.
+     *
+     * SAME RULE, DIFFERENT COMPETITOR, and it needs its own method rather than a call to
+     * {@link #badgeWidthFor} with a fudged `labelStart`. On the two-line diagram node the
+     * badge sits beside the quantity and the label has a line of its own, so asking
+     * `badgeWidthFor` would reserve {@link #MIN_LABEL} on a line no label is drawn on and
+     * would drop the badge off nodes with room for it.
+     *
+     * @param room the pixels left on the line after the quantity and its gap
+     */
+    public static int badgeWidthBeside(int room) {
+        return room >= BADGE ? BADGE : 0;
+    }
+
+    /**
+     * The wash drawn behind a selected row or node, and the frame around it.
+     *
+     * A TINT AND NOT AN INK SWAP, which is what `FlowCanvas`'s draw-path comment predicted
+     * and is the only option that composes with both surfaces. `NodeStatus`'s inks are the
+     * web UI's LIGHT theme because a ModularUI panel is vanilla's light grey, and the diagram
+     * node's background is load-bearing for exactly that -- recolouring the text to say
+     * "selected" would spend the one channel that already carries the node's STATUS.
+     *
+     * TRANSLUCENT, at 25%, so `INK_MUTED` text stays legible over it. Opaque blue swallowed
+     * the item name, which is the same failure the diagram's background comment records from
+     * the other direction.
+     *
+     * {@link NodeStatus#INK_CRAFT}'s hue, deliberately reused rather than a sixth colour
+     * invented: selection is not a status, and a hue the palette does not already contain
+     * would read as one more thing the row is telling you about the item.
+     */
+    private static final int SELECTION_FILL = 0x402F5F96;
+
+    /**
+     * The frame around a selected row. Opaque, one pixel.
+     *
+     * THE FRAME IS WHAT CARRIES THE SELECTION IN THE TREE, where a row has no border of its
+     * own and a 10px band of pale blue reads as a status colour rather than as a cursor. On
+     * the diagram it sits just inside the nine-slice's border and doubles it, which is the
+     * price of one implementation serving both surfaces and is the cheaper half of the trade:
+     * a doubled edge on a busy canvas is legible, a missing one in the tree is not.
+     */
+    private static final int SELECTION_EDGE = 0xCC2F5F96;
+
     /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
     private static int widestBadge() {
         int widest = NodeStatus.UNSOURCED_BADGE.length();
@@ -245,9 +343,13 @@ public final class PlannerWidgets {
      */
     public static ModularPanel flowPanel(IWidget canvas) {
         // NEARLY THE WHOLE SCREEN, unlike the tree panel. A diagram is only useful at the
-        // width it can show a couple of columns in, and a node is 214px because that is what
-        // a full row needs -- a 360px panel shows one column and half of the next, which is a
-        // list with extra steps. 620x380 fits a 1280x800 client at the default 2x GUI scale.
+        // width it can show a couple of columns in, and `FlowLayout.NODE_WIDTH` is 209 -- a
+        // 360px panel shows one column and half of the next, which is a list with extra steps.
+        // 620x380 fits a 1280x800 client at the default 2x GUI scale.
+        //
+        // 214 UNTIL NOW, IN THIS COMMENT ONLY: the node has been 209 since `FlowLayout`'s own
+        // pin caught the hand-added figure, and this sentence kept quoting the wrong one while
+        // reading as the reason for the panel size.
         ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow", 620, 380);
         panel.child(canvas);
         return panel;
@@ -266,13 +368,85 @@ public final class PlannerWidgets {
      * a wall of boxes. What is wanted is a click target the width of the row and no visual
      * change at all.
      */
-    public static final class ClickableGroup extends ParentWidget<ClickableGroup>
+    public static class ClickableGroup extends ParentWidget<ClickableGroup>
             implements com.cleanroommc.modularui.api.widget.Interactable {
 
         private final Runnable onClick;
 
+        /**
+         * The key this row draws, or "" for a row that is not about one item.
+         *
+         * `isSelected` TAKES A KEY AND NOT A NODE, per {@link PlanSelection}'s design note:
+         * the same item appears once per parent that needs it, and lighting up every
+         * occurrence is the whole value of highlighting. A menu row or a picker row passes
+         * "", and {@link PlanSelection#isSelected} answers false for it -- asserted, because
+         * a node whose key failed to parse would otherwise read as permanently selected.
+         */
+        private final String selectionKey;
+
         ClickableGroup(Runnable onClick) {
+            this(onClick, "");
+        }
+
+        ClickableGroup(Runnable onClick, String selectionKey) {
             this.onClick = onClick;
+            this.selectionKey = selectionKey == null ? "" : selectionKey;
+        }
+
+        /**
+         * The selection wash, under this row's own children.
+         *
+         * DRAWN PER FRAME RATHER THAN BAKED IN AT BUILD TIME, and that is the half #213 was
+         * missing rather than a performance note. The tree panel is built once when the
+         * window opens and a click does not rebuild it, so a highlight decided in the
+         * constructor would be correct only for rows built AFTER the click -- which is never.
+         *
+         * `draw` RATHER THAN `drawBackground`: ModularUI runs a widget's own `draw` before
+         * its children and after its background, so a fill here lands over the diagram node's
+         * `MC_BACKGROUND` nine-slice and under the text. That is what "composes with this"
+         * meant on `FlowCanvas`'s draw path.
+         *
+         * THE COST IS A STRING COMPARE PER ROW DRAWN, and only the diagram bounds that by the
+         * viewport -- `FlowCanvas.preDraw` disables what is off screen, about forty of four
+         * thousand. A `ListWidget` makes no such claim, so the tree pays 634 of these a frame on
+         * `plan-fluid-chain`, which is fine and is stated rather than assumed: nothing is
+         * selected most of the time and `PlanSelection.isSelected` answers on an `isEmpty`
+         * check, and when something IS selected a failing `String.equals` returns on the length.
+         * `PlanSelection`'s own note settles the same question for the canvas.
+         */
+        /**
+         * Whether this row would draw itself selected right now.
+         *
+         * PUBLIC BECAUSE IT IS THE ONLY HEADLESS VIEW OF THE READ #213 WAS MISSING. Everything
+         * past this point is `GuiDraw`, which needs a GL context, so a test that could only
+         * reach `draw` could assert that a selection was WRITTEN and never that anything read
+         * it -- which is exactly the state the issue describes. `PlannerLayoutTest`'s
+         * `everyOccurrenceOfTheSelectedItemHighlightsInTheTree` asserts against this and goes
+         * red on the pre-#213 tree.
+         */
+        public boolean drawsAsSelected() {
+            return PlanSelection.isSelected(selectionKey);
+        }
+
+        @Override
+        public void draw(com.cleanroommc.modularui.screen.viewport.ModularGuiContext context,
+                         com.cleanroommc.modularui.theme.WidgetThemeEntry<?> widgetTheme) {
+            super.draw(context, widgetTheme);
+            if (!drawsAsSelected()) {
+                return;
+            }
+            int width = getArea().width;
+            int height = getArea().height;
+            com.cleanroommc.modularui.drawable.GuiDraw
+                    .drawRect(0, 0, width, height, SELECTION_FILL);
+            com.cleanroommc.modularui.drawable.GuiDraw
+                    .drawRect(0, 0, width, 1, SELECTION_EDGE);
+            com.cleanroommc.modularui.drawable.GuiDraw
+                    .drawRect(0, height - 1, width, 1, SELECTION_EDGE);
+            com.cleanroommc.modularui.drawable.GuiDraw
+                    .drawRect(0, 0, 1, height, SELECTION_EDGE);
+            com.cleanroommc.modularui.drawable.GuiDraw
+                    .drawRect(width - 1, 0, 1, height, SELECTION_EDGE);
         }
 
         /**
@@ -287,6 +461,67 @@ public final class PlannerWidgets {
                 int button) {
             onClick.run();
             return com.cleanroommc.modularui.api.widget.Interactable.Result.SUCCESS;
+        }
+    }
+
+    /**
+     * What {@link #planNodeContent} returns: a clickable node that can shed its text.
+     *
+     * A TYPE RATHER THAN A `ParentWidget<?>` SO THE DIAGRAM CAN DIM ITS OWN LABELS. At zoom
+     * 0.5 Minecraft's bitmap font is drawn at half scale and is unreadable rather than merely
+     * small -- `FlowZoom.MIN`'s own comment says so, and says what a reader zoomed out is
+     * actually reading: the badge colour and the quantity. So the diagram drops the label and
+     * the badge WORD below `FlowZoom.LABEL_LEGIBLE` and keeps the icon and the coloured
+     * quantity. See `FlowCanvas.preDraw` for the two alternatives and why they lose.
+     *
+     * NAMED IN BACKTICKS AND NOT IN A `{@link}`, because `flow` calls `planner` and never the
+     * reverse. A javadoc reference does not compile to a dependency, which is exactly why it is
+     * the one that gets written without anybody noticing the direction.
+     *
+     * {@link ClickableGroup} IS THE BASE AND IS THEREFORE NOT FINAL, which is worth saying out
+     * loud: the click target has to stay one widget per node, because
+     * `aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes` asserts exactly one `ClickableGroup` in a
+     * node and a nested second one would make a click ambiguous.
+     */
+    public static final class NodeContent extends ClickableGroup {
+
+        /**
+         * The widgets a low zoom hides. NOT the icon and NOT the quantity.
+         *
+         * Collected as they are built rather than found afterwards by type, because "every
+         * `TextWidget` in here" would also catch the quantity -- and the quantity is half of
+         * what `FlowZoom.MIN` says a reader zoomed out is reading.
+         */
+        private final List<IWidget> detail = new java.util.ArrayList<IWidget>();
+
+        NodeContent(Runnable onClick, String selectionKey) {
+            super(onClick, selectionKey);
+        }
+
+        /**
+         * Add a child that only appears when the node is drawn large enough to read.
+         *
+         * VOID RATHER THAN FLUENT. Both callers use it as a statement, and a returned `this`
+         * nobody reads is an invitation to chain onto a builder that has no other steps.
+         */
+        void detail(IWidget widget) {
+            detail.add(widget);
+            child(widget);
+        }
+
+        /**
+         * Show or hide the label and the badge word.
+         *
+         * CALLED FROM A DRAW PASS AND NEVER FROM CONSTRUCTION, deliberately. A widget built
+         * disabled is a widget the sizer may skip, and one that came back at 0x0 would stay
+         * invisible after the zoom went up again -- the same shape as the culling bug
+         * `FlowCanvas.preDraw` avoids by toggling `enabled` instead of overriding
+         * `getChildren`. Everything here is built enabled and sized once.
+         */
+        public void showDetail(boolean visible) {
+            for (IWidget widget : detail) {
+                widget.setEnabled(visible);
+            }
         }
     }
 
@@ -437,6 +672,12 @@ public final class PlannerWidgets {
      * content is shared and the container is not, which is why this takes both dimensions and
      * assumes nothing about a panel.
      *
+     * THE HEIGHT DECIDES THE SHAPE, and that is the seam keeping its promise rather than a
+     * special case. A box tall enough for two lines gets the label on the second one, where it
+     * is not competing with a 90px badge for the same pixels; a row-height box gets the
+     * columns side by side, as it always did. See {@link #twoLineNode} for what the second
+     * line bought and {@link #oneLineNode} for who still asks for one.
+     *
      * CLICKABLE, LIKE {@link #row}, AND THIS COMMENT USED TO SAY THE OPPOSITE. It read "a
      * canvas of clickable rows would fight" the viewport's own hit-testing, which was an
      * assumption written as though it were a constraint somebody had paid for -- and it
@@ -459,35 +700,96 @@ public final class PlannerWidgets {
      * own dict of bare strings, so adding a status drew silently wrong. `NodeStatusTest` reads
      * that file and asserts both directions, so there is one mapping and it is enforced.
      */
-    public static ParentWidget<?> planNodeContent(final PlanNode node, int width, int height,
-                                                  final PlannerActions actions) {
-        ClickableGroup box = new ClickableGroup(new Runnable() {
+    public static NodeContent planNodeContent(final PlanNode node, int width, int height,
+                                              final PlannerActions actions) {
+        NodeContent box = new NodeContent(new Runnable() {
             @Override
             public void run() {
                 actions.openNodeMenu(node);
             }
-        });
+        }, node.key());
         box.size(width, height);
-        int x = 0;
-        // Width unconditional, widget conditional. Both halves and the measurement behind them
-        // are stated once, on ICON; DO NOT restate them here or make either half depend on the
-        // stack.
-        net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
-        if (!stack.isEmpty()) {
-            box.child(icon(stack).pos(x, 0));
-        }
-        x += ICON + GAP;
         int colour = NodeStatus.colour(node);
+        if (height >= LINE * 2) {
+            twoLineNode(box, node, width, height, colour);
+        } else {
+            oneLineNode(box, node, width, colour);
+        }
+        return box;
+    }
+
+    /**
+     * The node as an icon with a quantity above its name. THE DIAGRAM'S SHAPE.
+     *
+     * WHY TWO LINES AT ALL: on one line the label competed with the badge for the same
+     * pixels, and the badge is 90 of them. A 209px node gave the item's NAME 48px -- eight
+     * characters -- so `plan-fluid-chain`'s "Sodium Fluoride Solution" rendered as
+     * "Sodium…" and the first screenshot of this canvas read as a column of quantities. The
+     * node box was already 20px tall and drew one 10px line, so the second line was free:
+     * it costs no diagram area and takes the name from 8 characters to 31.
+     *
+     * THE ICON SPANS BOTH LINES at {@link #NODE_ICON}, which is what makes the box read as
+     * being about an item rather than as a caption with a sprite stuck on it.
+     *
+     * The badge keeps line one beside the quantity and is still ALL OR NOTHING -- see
+     * {@link #badgeWidthBeside}, which is the same rule against a different competitor.
+     *
+     * THE LABEL AND NOT {@link #labelAndMeta}: the diagram's job is to say what the box is.
+     * The meta run ("pinned", "172 recipes", "-> ...") is a second sentence about the same
+     * node, it is what the tree row is for, and appending it here would push the name back
+     * off the end of the line this method exists to give it.
+     */
+    private static void twoLineNode(NodeContent box, PlanNode node, int width, int height,
+                                    int colour) {
+        int x = NODE_PAD + NODE_ICON + GAP;
+        int right = width - NODE_PAD;
+        // A TOKEN GETS THE MARK AND NOT ITS SPRITE; see TOKEN_MARK. On the mark's line rather
+        // than the icon's, so it sits beside the quantity and reads as part of the row.
+        int top = (height - LINE * 2) / 2;
+        if (!tokenMark(box, node, NODE_ICON, NODE_PAD, top)) {
+            iconIfAny(box, NodeActionsHolder.actions().iconFor(node), NODE_ICON, NODE_PAD,
+                      (height - NODE_ICON) / 2);
+        }
+        // The width is charged whether or not that drew anything; see ICON.
+        // `top` is CENTRED VERTICALLY rather than pinned to the top, so a caller that hands
+        // over a taller box than two lines need gets a node that looks deliberate instead of one
+        // whose text has slid to the ceiling. At `FlowLayout.NODE_HEIGHT` it comes out at exactly
+        // NODE_PAD, which is the inset the sides get.
+        box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, top));
+        int badgeWidth = badgeWidthBeside(right - x - QTY - GAP);
+        if (badgeWidth > 0) {
+            box.detail(line(NodeStatus.badge(node), badgeWidth, colour)
+                               .pos(right - badgeWidth, top));
+        }
+        box.detail(line(NodeRowText.label(node), right - x, NodeStatus.INK_MUTED)
+                           .pos(x, top + LINE));
+    }
+
+    /**
+     * The node on one line: the tree row's columns, without its indent or its meta run.
+     *
+     * KEPT FOR A CALLER THAT HANDS OVER A ROW-HEIGHT BOX, and both remaining ones are
+     * assertions: `aNodeTooNarrowForBothDropsTheBadgeAndKeepsTheLabel` sweeps widths at
+     * {@link #ROW_HEIGHT}, which is where the all-or-nothing badge rule is pinned. The
+     * geometry a caller asks for decides the shape, which is what the seam promised; nothing
+     * in production draws a node this short.
+     */
+    private static void oneLineNode(NodeContent box, PlanNode node, int width, int colour) {
+        int x = 0;
+        if (!tokenMark(box, node, ICON, x, 0)) {
+            iconIfAny(box, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
+        }
+        // The width is charged whether or not that drew anything; see ICON.
+        x += ICON + GAP;
         box.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
         x += QTY + GAP;
         int badgeWidth = badgeWidthFor(width, x);
         int labelWidth = Math.max(GAP, width - x - (badgeWidth > 0 ? badgeWidth + GAP : 0));
-        box.child(line(NodeRowText.label(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
+        box.detail(line(NodeRowText.label(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
         if (badgeWidth > 0) {
-            box.child(line(NodeStatus.badge(node), badgeWidth, colour)
-                              .pos(width - badgeWidth, 0));
+            box.detail(line(NodeStatus.badge(node), badgeWidth, colour)
+                               .pos(width - badgeWidth, 0));
         }
-        return box;
     }
 
     /**
@@ -498,7 +800,7 @@ public final class PlannerWidgets {
      * since a layout assertion is exactly what this overload is FOR. If a diagram is meant to
      * open menus and does not, this is the overload it is on.
      */
-    public static ParentWidget<?> planNodeContent(PlanNode node, int width, int height) {
+    public static NodeContent planNodeContent(PlanNode node, int width, int height) {
         return planNodeContent(node, width, height, PlannerActions.NONE);
     }
 
@@ -517,19 +819,16 @@ public final class PlannerWidgets {
             public void run() {
                 actions.openNodeMenu(node);
             }
-        });
+        }, node.key());
         row.size(width, ROW_HEIGHT);
 
         int indent = Math.min(depth, MAX_INDENT_DEPTH) * INDENT;
         int x = indent;
 
-        // Width unconditional, widget conditional. Both halves and the measurement behind them
-        // are stated once, on ICON; DO NOT restate them here or make either half depend on the
-        // stack.
-        net.minecraft.item.ItemStack stack = NodeActionsHolder.actions().iconFor(node);
-        if (!stack.isEmpty()) {
-            row.child(icon(stack).pos(x, 0));
+        if (!tokenMark(row, node, ICON, x, 0)) {
+            iconIfAny(row, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
         }
+        // The width is charged whether or not that drew anything; see ICON.
         x += ICON + GAP;
 
         int colour = NodeStatus.colour(node);
@@ -570,19 +869,30 @@ public final class PlannerWidgets {
      */
     public static ModularPanel nodeMenu(final PlanNode node, final PlannerActions actions) {
         List<Entry> entries = new java.util.ArrayList<Entry>();
-        if (actions.nodeActions().canShowInRecipeViewer(node)) {
-            entries.add(new Entry("Show recipes", new Runnable() {
-                @Override
-                public void run() {
-                    actions.nodeActions().showRecipes(node);
-                }
-            }));
-            entries.add(new Entry("Show uses", new Runnable() {
-                @Override
-                public void run() {
-                    actions.nodeActions().showUses(node);
-                }
-            }));
+        // ASKED SEPARATELY, because a token answers differently to the two (#174). It is a
+        // registered item, so JEI will open on it -- and what "Show recipes" opens is the recipes
+        // that MAKE a Dungeon Drop, of which there are none. "Show uses" is a real question with
+        // real answers and is the honest form of what a reader wanted when they clicked it.
+        Entry recipes = new Entry("Show recipes", new Runnable() {
+            @Override
+            public void run() {
+                actions.nodeActions().showRecipes(node);
+            }
+        });
+        Entry uses = new Entry("Show uses", new Runnable() {
+            @Override
+            public void run() {
+                actions.nodeActions().showUses(node);
+            }
+        });
+        // RECIPES FIRST WHEN IT IS THERE, because on an ordinary item "what makes this" is the
+        // question the menu was opened for. On a token it is absent, so "Show uses" is promoted by
+        // simply being the only one left rather than by a second ordering rule.
+        if (actions.nodeActions().canShowRecipes(node)) {
+            entries.add(recipes);
+        }
+        if (actions.nodeActions().canShowUses(node)) {
+            entries.add(uses);
         }
         if (node.alternatives() > 1) {
             entries.add(new Entry("Choose another recipe (" + node.alternatives() + ")",
@@ -831,66 +1141,7 @@ public final class PlannerWidgets {
         int width = TODO_WIDTH;
         int inner = width - PADDING * 2;
 
-        List<String> lines = new java.util.ArrayList<String>();
-        List<Integer> colours = new java.util.ArrayList<Integer>();
-        for (String key : book.todoKeys()) {
-            // THE SAME UNIT RULE AS THE SECTIONS BELOW, WHICH THE FIRST SCREENSHOT OF THE WIDER
-            // PANEL IS WHAT CAUGHT. These rows used a bare `quantity`, so 934,400 mB of water
-            // read as `934,400x fluid:water` four lines above a shopping row rendering the same
-            // fluid as `934,400 mB Water`. One panel cannot measure the same fluid two ways.
-            //
-            // THE KEY STAYS RATHER THAN A LABEL, and that half is not a defect: the plan book
-            // stores keys and has no display name to draw, which is the honest thing to show
-            // for a row the player added by key. Only the unit was wrong.
-            lines.add(NodeRowText.amount(book.todoQuantity(key), Keys.kind(key)) + " " + key);
-            colours.add(NodeStatus.INK_CRAFT);
-        }
-        if (lines.isEmpty()) {
-            lines.add("nothing on the list");
-            colours.add(NodeStatus.INK_MUTED);
-        }
-        lines.add("still needed for this plan:");
-        colours.add(NodeStatus.INK_MUTED);
-        if (plan.shoppingList().isEmpty()) {
-            lines.add("nothing outstanding");
-            colours.add(NodeStatus.INK_MUTED);
-        }
-        // THROUGH `entryLines` RATHER THAN COMPOSED HERE, and the reason is that two of these
-        // rows can carry the same name. A row built as label plus quantity draws
-        // `plan-fluid-chain`'s two Soul Vials as two lines a player cannot tell apart, and the
-        // mark saying nothing in the graph makes a row was dropped entirely. Both need the
-        // WHOLE list to decide -- which labels collide is not a property of one row -- so the
-        // composition lives beside the other row text and this takes what it returns.
-        addSection(lines, colours, null, NodeRowText.entryLines(plan.shoppingList(), inner),
-                   NodeStatus.INK_NEED);
-        // THE FOOTER'S "N machine(s) to build" IS A COUNT AND THESE ARE THE MACHINES. #190:
-        // every `MachineRow` accessor but `size()` was called from a test and nowhere else, so
-        // the player was told how many machines stood in the way and could never learn which.
-        addSection(lines, colours, "machines to build:",
-                   NodeRowText.machineLines(plan.machinesToBuild(), inner),
-                   NodeStatus.INK_WARN);
-        // THE FOUR SUMMARY LISTS, AS SECTIONS OF THIS LIST RATHER THAN FOUR PANELS. #190 asked
-        // for the decision to be made explicitly rather than by Phase 6 deleting their only
-        // reader, so: all four are read and all four are drawn HERE.
-        //
-        // NOT FOUR PANELS, because they are four instances of one shape -- a quantity, a name
-        // and one optional decoration -- and the browser's four cards are affordable on a
-        // browser page. This window is 400 pixels wide inside a 427-pixel minimum screen, and
-        // two of the four are empty until #50 and #112 land, so four panels would be four
-        // copies of one ListWidget of which two are permanently blank. A section header costs
-        // one row and an empty section costs nothing, which is what `addSection` is for.
-        //
-        // AND HERE RATHER THAN ON THE PLAN PANEL, because this is the surface a player works
-        // FROM while gathering. "You already own 377 of these" belongs next to "go and get
-        // these", not under a tree.
-        addSection(lines, colours, "used from your stock:",
-                   NodeRowText.entryLines(plan.usedFromStock(), inner), NodeStatus.INK_OK);
-        addSection(lines, colours, "drawn from infinite sources:",
-                   NodeRowText.entryLines(plan.fromSources(), inner), NodeStatus.INK_OK);
-        addSection(lines, colours, "go and get:",
-                   NodeRowText.entryLines(plan.tokensNeeded(), inner), NodeStatus.INK_NEED);
-        addSection(lines, colours, "transmuted from EMC:",
-                   NodeRowText.entryLines(plan.fromEmc(), inner), NodeStatus.INK_OK);
+        List<Line> lines = todoLines(plan, book, inner);
 
         int listHeight = Math.min(lines.size() * ROW_HEIGHT, TODO_MAX_LIST_HEIGHT);
         int height = PADDING * 2 + LINE + 1 + listHeight;
@@ -899,35 +1150,165 @@ public final class PlannerWidgets {
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
         body.child(line("TODO", inner, NodeStatus.INK_MUTED).pos(0, 0));
-        body.child(rowList(lines, colours, inner, listHeight).pos(0, LINE + 1));
+        body.child(rowList(lines, inner, listHeight).pos(0, LINE + 1));
         return ModularPanel.defaultPanel("mcrecipedump_todo", width, height).child(body);
     }
 
     /**
-     * A headed group of rows, or nothing at all when there are no rows.
+     * WHAT THE TODO PANEL SAYS, as rows, with no widget anywhere near it.
      *
-     * NOTHING AT ALL, WHICH IS THE POINT AND IS WHY THE HEADER IS THIS METHOD'S BUSINESS. Two
-     * of the four summary lists are empty until #50 and #112 land, and a header standing over
-     * no rows is a claim the panel cannot support -- "transmuted from EMC:" followed by blank
-     * space reads as a list that failed to load rather than as one that is legitimately empty.
-     * A caller that added the header itself would have to remember the guard four times.
+     * SEPARATE SO THE WORDS CAN BE ASSERTED, the same split {@link #warnings} has and for the
+     * same reason: a layout assertion is perfectly happy with a row that says
+     * `thaumadditions:vis_pod#0116bb2287a7`, and that is what this panel said for as long as it
+     * existed. `TextWidget` holds an `IKey` whose rendered string cannot be read back headlessly,
+     * so a test that could only reach the widgets could check that a row EXISTS and never what is
+     * in it.
      *
-     * @param header null for a section whose caller already wrote its own heading, which is
-     *               the shopping list: it has an explicit "nothing outstanding" row because it
-     *               is the one section whose emptiness is worth stating.
+     * @param widthPx how wide a row is, because {@link NodeRowText#entryLine} wraps to it and
+     *                hands back lines that already fit.
      */
-    static void addSection(List<String> lines, List<Integer> colours, String header,
-                           List<String> rows, int colour) {
+    static List<Line> todoLines(PlanView plan, PlanBook book, int widthPx) {
+        // THE NAMES COME FROM THE PLAN, WHICH IS WHERE THEY ALREADY ARE. See `PlanNames`.
+        //
+        // THIS DOES NOT CONTRADICT #190's "THE KEY STAYS RATHER THAN A LABEL", IT SATISFIES IT.
+        // That rule was written because the plan book stores keys and has no display name of its
+        // own, so inventing one would be dishonest. `PlanNames` invents nothing: it reads the name
+        // off the plan the key came from, and "Add to TODO" sends `node.key()` from a node the
+        // player was looking at while nothing else writes this list. A key the CURRENT plan does
+        // not mention still renders as the key, which is exactly the row #190 was protecting.
+        PlanNames names = PlanNames.of(plan);
+        List<Line> lines = new java.util.ArrayList<Line>();
+        for (String key : book.todoKeys()) {
+            // #190's UNIT RULE, KEPT: `amount` and not `quantity`, so 934,400 mB of water does not
+            // read as `934,400x` four lines above a shopping row rendering the same fluid as
+            // `934,400 mB Water`. One panel cannot measure the same fluid two ways.
+            lines.add(new Line(key,
+                               NodeRowText.amount(book.todoQuantity(key), Keys.kind(key))
+                                       + " " + names.labelFor(key),
+                               NodeStatus.INK_CRAFT));
+        }
+        if (lines.isEmpty()) {
+            lines.add(new Line("", "nothing on the list", NodeStatus.INK_MUTED));
+        }
+        lines.add(new Line("", "still needed for this plan:", NodeStatus.INK_MUTED));
+        if (plan.shoppingList().isEmpty()) {
+            lines.add(new Line("", "nothing outstanding", NodeStatus.INK_MUTED));
+        }
+        addEntries(lines, null, plan.shoppingList(), NodeStatus.INK_NEED, widthPx);
+        // THE FOOTER'S "N machine(s) to build" IS A COUNT AND THESE ARE THE MACHINES. #190: every
+        // `MachineRow` accessor but `size()` was called from a test and nowhere else, so the
+        // player was told how many machines stood in the way and could never learn which.
+        //
+        // NO KEY ON THESE, and that is right rather than an omission: a machine row names a
+        // CATEGORY and a machine, not an item, so there is nothing for an icon to resolve.
+        addSection(lines, "machines to build:",
+                   NodeRowText.machineLines(plan.machinesToBuild(), widthPx), NodeStatus.INK_WARN);
+        // THE FOUR SUMMARY LISTS, AS SECTIONS OF THIS LIST RATHER THAN FOUR PANELS. #190 asked for
+        // the decision to be made explicitly rather than by Phase 6 deleting their only reader, so
+        // all four are read and all four are drawn HERE. Not four panels, because they are four
+        // instances of one shape, this window is 400 pixels wide inside a 427-pixel minimum
+        // screen, and two of the four are empty until #50 and #112 land.
+        addEntries(lines, "used from your stock:", plan.usedFromStock(), NodeStatus.INK_OK,
+                   widthPx);
+        addEntries(lines, "drawn from infinite sources:", plan.fromSources(), NodeStatus.INK_OK,
+                   widthPx);
+        addEntries(lines, "go and get:", plan.tokensNeeded(), NodeStatus.INK_NEED, widthPx);
+        addEntries(lines, "transmuted from EMC:", plan.fromEmc(), NodeStatus.INK_OK, widthPx);
+        return lines;
+    }
+
+    /**
+     * A headed group of ENTRY rows, each keeping the key its icon is looked up by.
+     *
+     * ROW BY ROW THROUGH {@link NodeRowText#entryLine} RATHER THAN {@link
+     * NodeRowText#entryLines}, which is the seam #190 split out for exactly this caller. The flat
+     * `List<String>` that wrapper returns has already thrown away which `EntryRow` produced which
+     * line, and a row can wrap over two of them, so the key cannot be recovered by index.
+     *
+     * {@link NodeRowText#ambiguousLabels} IS ASKED ONCE FOR THE WHOLE LIST, because which labels
+     * collide is not a property of one row. Passing `false` for a colliding row draws two rows a
+     * player cannot tell apart, which is the defect #190 exists to fix.
+     *
+     * THE ICON GOES ON THE FIRST LINE ONLY. A wrapped row is one entry and `CONTINUATION` indents
+     * its tail so it reads as one; a second icon down the left edge would undo that and claim the
+     * continuation was another item.
+     */
+    static void addEntries(List<Line> lines, String header, List<PlanView.EntryRow> rows,
+                           int colour, int widthPx) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        if (header != null) {
+            lines.add(new Line("", header, NodeStatus.INK_MUTED));
+        }
+        java.util.Set<String> ambiguous = NodeRowText.ambiguousLabels(rows);
+        for (PlanView.EntryRow row : rows) {
+            boolean first = true;
+            for (String text : NodeRowText.entryLine(row, ambiguous.contains(row.label()),
+                                                     widthPx)) {
+                lines.add(new Line(first ? row.key() : "", text, colour));
+                first = false;
+            }
+        }
+    }
+
+    /**
+     * A headed group of rows that are NOT about one item, or nothing at all when there are none.
+     *
+     * NOTHING AT ALL, WHICH IS THE POINT AND IS WHY THE HEADER IS THIS METHOD'S BUSINESS. A header
+     * standing over no rows is a claim the panel cannot support: "machines to build:" followed by
+     * blank space reads as a list that failed to load rather than as one that is legitimately
+     * empty. A caller that added the header itself would have to remember the guard every time.
+     *
+     * NO KEY, unlike {@link #addEntries}, and the split is the point rather than duplication: the
+     * one caller draws machines, and a machine is not an item. A shared method taking an optional
+     * key would let a future caller pass one for a row that cannot have an icon.
+     *
+     * @param header null for a section whose caller already wrote its own heading.
+     */
+    static void addSection(List<Line> lines, String header, List<String> rows, int colour) {
         if (rows.isEmpty()) {
             return;
         }
         if (header != null) {
-            lines.add(header);
-            colours.add(NodeStatus.INK_MUTED);
+            lines.add(new Line("", header, NodeStatus.INK_MUTED));
         }
         for (String row : rows) {
-            lines.add(row);
-            colours.add(Integer.valueOf(colour));
+            lines.add(new Line("", row, colour));
+        }
+    }
+
+    /**
+     * One line of a list that may carry an icon: the key it is about, its words, its colour.
+     *
+     * THE KEY IS HELD SEPARATELY FROM THE WORDS, which is the shape #213's `PlanSelection` note
+     * argues for in the other direction: what is DRAWN is a display name and what IDENTIFIES the
+     * row is the key, and folding the two together is how this panel came to print
+     * `thaumadditions:vis_pod#0116bb2287a7` at a player. "" for a line that is not about one item
+     * -- a heading, a machine, or the continuation of a wrapped entry.
+     *
+     * INTRODUCED HERE AND NOT ON #190's BRANCH, deliberately. It was offered to that branch and
+     * declined for the right reason: nothing there draws an icon, so `key` would have landed as a
+     * field whose only consumer was another branch -- the write-only pattern, inside the change
+     * that deletes seven instances of it. It arrives with the column that reads it.
+     */
+    static final class Line {
+        final String key;
+        final String text;
+        final int colour;
+
+        Line(String key, String text, int colour) {
+            // "" AND NEVER NULL, because `rowList` asks `isEmpty()` once per row per frame and a
+            // `EntryRow` key comes out of gson. The same asymmetry `ClickableGroup`'s own key
+            // guard names: a null there is an NPE inside a draw, not a missing icon.
+            this.key = key == null ? "" : key;
+            this.text = text;
+            this.colour = colour;
+        }
+
+        @Override
+        public String toString() {
+            return (key.isEmpty() ? "-" : key) + " => " + text;
         }
     }
 
@@ -979,17 +1360,32 @@ public final class PlannerWidgets {
                 .child(body);
     }
 
-    /** A scrollable column of one-line rows. The same `ListWidget` reasoning as {@link #tree}. */
+
+    /**
+     * A scrollable column of one-line rows, each with the icon column charged.
+     *
+     * THE COLUMN IS CHARGED ON EVERY ROW INCLUDING THE HEADINGS, so the text down the panel
+     * lines up whether or not a given key resolved to a stack. That is {@link #ICON}'s rule
+     * applied one level further out: a width that depended on what came back would step the
+     * left margin in and out down the list.
+     *
+     * The same `ListWidget` reasoning as {@link #tree}.
+     */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static ListWidget<?, ?> rowList(List<String> lines, List<Integer> colours,
-                                            int width, int height) {
+    private static ListWidget<?, ?> rowList(List<Line> lines, int width, int height) {
         ListWidget list = new ListWidget();
         list.size(width, height);
         list.crossAxisAlignment(Alignment.CrossAxis.START);
-        for (int i = 0; i < lines.size(); i++) {
+        for (Line entry : lines) {
             Group row = new Group();
             row.size(width, ROW_HEIGHT);
-            row.child(line(lines.get(i), width, colours.get(i).intValue()).pos(0, 0));
+            if (!entry.key.isEmpty()) {
+                // A `fluid:` key has no item form at all -- 1,198 of this pack's fluids -- so
+                // an absent icon here is the ordinary case rather than a lookup that failed.
+                iconIfAny(row, NodeActionsHolder.actions().iconForKey(entry.key), ICON, 0, 0);
+            }
+            row.child(line(entry.text, width - ICON - GAP, entry.colour)
+                              .pos(ICON + GAP, 0));
             list.child(row);
         }
         return list;
@@ -1029,17 +1425,179 @@ public final class PlannerWidgets {
     }
 
     /**
-     * The icon column's widget. ONLY BUILT WHEN THERE IS SOMETHING TO DRAW.
+     * Put a square icon for `stack` at (x, y), or nothing at all when there is no stack.
      *
-     * `ItemDisplayWidget` holding `ItemStack.EMPTY` paints its slot frame, not nothing. Both
-     * callers guard on that and both say why, because "returns EMPTY and nothing draws" and
-     * "returns EMPTY and a slot frame draws" are indistinguishable in a code review.
+     * THE ONE GUARD, so the four surfaces that draw an icon cannot each get it right and a
+     * fifth get it wrong. It used to be four copies of `if (!stack.isEmpty())` with three
+     * copies of the comment explaining why. The reason has CHANGED with {@link Icon} and the
+     * old one is no longer true of this code: `ItemDisplayWidget` holding EMPTY painted its
+     * SLOT FRAME rather than nothing, which is what put 49 empty boxes down the left edge of
+     * the first screenshot. `GuiDraw.drawItem` returns on an empty stack, so an unguarded
+     * `Icon` would draw nothing -- the guard now buys not building 634 widgets that do nothing,
+     * which is a smaller reason and is the honest one.
+     *
+     * THE WIDTH IS STILL THE CALLER'S, and deliberately so. {@link #ICON} states why the column
+     * is charged whether or not this draws: a width that depended on whether a stack came back
+     * would re-flow every row the moment a `NodeActions` was installed, or a graph finished
+     * loading mid-session and `iconFor` began answering. A helper that also advanced the cursor
+     * would make that conditional again.
      */
-    private static ItemDisplayWidget icon(net.minecraft.item.ItemStack stack) {
-        ItemDisplayWidget widget = new ItemDisplayWidget();
-        widget.size(ICON, ROW_HEIGHT);
-        widget.item(stack);
+    /**
+     * Draw {@link #TOKEN_MARK} in the icon column when `node` is a token, and say whether it did.
+     *
+     * A BOOLEAN SO THE CALLER SKIPS THE SPRITE, rather than this suppressing it: the three call
+     * sites already own the geometry of their own icon column, and a method that drew a mark AND
+     * silently swallowed the sprite lookup would hide which of the two happened.
+     *
+     * IT MUST BE ASKED BEFORE `iconIfAny` AND NOT AFTER. A token's key resolves -- that is the
+     * whole trap -- so an icon drawn first is a sprite the mark would then be painted on top of.
+     */
+    private static boolean tokenMark(ParentWidget<?> box, PlanNode node, int width, int x, int y) {
+        if (!NodeStatus.isToken(node)) {
+            return false;
+        }
+        box.child(line(TOKEN_MARK, width, NodeStatus.colour(node)).pos(x, y));
+        return true;
+    }
+
+    private static void iconIfAny(ParentWidget<?> box, net.minecraft.item.ItemStack stack,
+                                  int size, int x, int y) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        box.child(icon(stack, size, size).pos(x, y));
+    }
+
+    /**
+     * The icon column's widget. ONLY REACHED WHEN THERE IS SOMETHING TO DRAW; see
+     * {@link #iconIfAny}, which is the only caller and holds the guard.
+     *
+     * IT DRAWS THE REAL STACK THROUGH THE GAME'S OWN RENDERER, which is the whole argument for
+     * doing this in game rather than reading the atlas `IconAtlas` writes for the browser.
+     * That class's header records the three reasons an offline extractor cannot get this right
+     * -- the texture name is not the registry name, metadata variants have separate models, and
+     * a TESR or a runtime-tinted item has no static texture at all -- and all three are free
+     * here because the model system is loaded and this is asking it the same question the
+     * player's inventory asks.
+     *
+     * NOT `ItemDisplayWidget`, WHICH WAS THE FIRST CHOICE AND CANNOT DO THIS. Its `draw` is
+     * `GuiDraw.drawItem(stack, 1, 1, 16f, 16f, z)` -- the offset and BOTH dimensions are
+     * constants in the bytecode, and its own area is read only for the stack-size text. So it
+     * draws a 16x16 item one pixel inside whatever box it is given and a `size(10, 11)` on it
+     * does nothing.
+     *
+     * FOUND BY THE SCREENSHOT, and it is the reason that instruction exists. The first
+     * `icons-planner` shot had the hopper, the ingot and the iron block spilling out of their
+     * 10px column across the quantity beside them and into the rows above and below -- five
+     * overlapping sprites down the left edge. Every layout assertion in `PlannerLayoutTest` was
+     * green through it, and correctly so: the WIDGET was 10x11 and in the right place. What it
+     * put on the screen was not.
+     */
+    private static Icon icon(net.minecraft.item.ItemStack stack, int width, int height) {
+        reportIfModelless(stack);
+        Icon widget = new Icon(stack);
+        widget.size(width, height);
         return widget;
+    }
+
+    /**
+     * Registry names already reported by {@link #reportIfModelless}, so it says each one once.
+     *
+     * STATIC MUTABLE STATE IN THIS PACKAGE, WHICH THE HEADER OTHERWISE ARGUES AGAINST, and it is
+     * here on purpose with a bound: one entry per distinct item whose model is missing, which on
+     * the reference pack is a handful and on a healthy pack is zero. Without it the line would be
+     * printed once per row per panel build.
+     */
+    private static final java.util.Set<String> REPORTED_MISSING_MODELS =
+            new java.util.HashSet<String>();
+
+    /**
+     * Log, once per item, when a resolved stack has no model and will therefore draw the
+     * missing-texture checkerboard.
+     *
+     * WHY LOGGING AND NOT A FALLBACK. `packplanner.png` has the magenta-and-black checkerboard on
+     * its top row, and there are two possible causes that want OPPOSITE fixes: a genuinely
+     * modelless item (a TESR-drawn or runtime-tinted thing, which wants a text fallback) or an
+     * artifact of rendering headlessly with no resource packs bound (which wants nothing at all,
+     * and where a fallback would suppress an icon no player is missing). Guessing means shipping a
+     * guard against a case that may not exist, so this converts the question into something the
+     * next pack run answers for free instead of costing a 22-minute slot of its own.
+     *
+     * IT NAMES THE REGISTRY NAME, because that is the one thing the picture cannot tell you and
+     * the only thing that distinguishes the two causes.
+     *
+     * AT BUILD TIME AND NOT IN `draw`. A model does not change under a running client, so asking
+     * once per widget rather than once per frame costs nothing on the render path -- and the
+     * render path is where this file's other comments are careful about cost.
+     *
+     * IT CANNOT THROW. Every call site is inside a GUI build, and `getItemModelMesher` is client
+     * state that a test JVM does not have, so the whole body is guarded: a diagnostic that takes
+     * the screen down is worse than the checkerboard it is diagnosing.
+     */
+    private static void reportIfModelless(net.minecraft.item.ItemStack stack) {
+        try {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+            if (mc == null || mc.getRenderItem() == null) {
+                return;
+            }
+            net.minecraft.client.renderer.block.model.IBakedModel model =
+                    mc.getRenderItem().getItemModelMesher().getItemModel(stack);
+            if (model == null || model != mc.getRenderItem().getItemModelMesher()
+                    .getModelManager().getMissingModel()) {
+                return;
+            }
+            String name = stack.getItem().getRegistryName() == null
+                    ? stack.toString() : stack.getItem().getRegistryName().toString();
+            String id = name + "#" + stack.getItemDamage();
+            if (REPORTED_MISSING_MODELS.add(id)) {
+                org.apache.logging.log4j.LogManager
+                        .getLogger(io.github.jacoblasky.recipedump.RecipeDumpMod.MODID)
+                        .warn("planner icon for " + id + " has no baked model, so it draws the"
+                              + " missing-texture checkerboard. Either the item is genuinely"
+                              + " modelless (a TESR or runtime-tinted item) or this client bound"
+                              + " no resource pack for it; those want opposite fixes, so the"
+                              + " registry name is the thing to report.");
+            }
+        } catch (Throwable ignored) {
+            // A DIAGNOSTIC MUST NOT BE THE THING THAT BREAKS A GUI BUILD. `Minecraft` is absent in
+            // a test JVM and the mesher is absent before the model system loads, and neither is a
+            // reason for a row not to draw.
+        }
+    }
+
+    /**
+     * One item, drawn at exactly the size its column reserves.
+     *
+     * THE SCALE IS THE BOX. `GuiDraw.drawItem`'s two float arguments are a WIDTH and a HEIGHT
+     * in GUI pixels, not a scale factor: it translates by (x, y), scales by `width / 16` and
+     * `height / 16`, and hands the stack to `RenderItem.renderItemAndEffectIntoGUI`. Reading
+     * them off `getArea()` is the whole of this class, and it is what `ItemDisplayWidget` does
+     * not do.
+     *
+     * SIZED BY THE CALLER AND SQUARE BY CONVENTION, not by construction: a 1.12.2 item texture
+     * is 16x16, so a box that is not square draws the item stretched. Both callers pass a
+     * square, {@link #ICON} in a tree or TODO row and {@link #NODE_ICON} on a diagram node.
+     *
+     * NO GL STATE HANDLING HERE. `drawItem` is already wrapped in `Platform.setupDrawItem` /
+     * `endDrawItem` and a push/pop of the matrix, so an item drawn from a widget leaves the
+     * lighting and the depth range as it found them. Doing it again outside would be a second
+     * owner of state that has exactly one.
+     */
+    private static final class Icon extends com.cleanroommc.modularui.widget.Widget<Icon> {
+
+        private final net.minecraft.item.ItemStack stack;
+
+        Icon(net.minecraft.item.ItemStack stack) {
+            this.stack = stack;
+        }
+
+        @Override
+        public void draw(com.cleanroommc.modularui.screen.viewport.ModularGuiContext context,
+                         com.cleanroommc.modularui.theme.WidgetThemeEntry<?> widgetTheme) {
+            com.cleanroommc.modularui.drawable.GuiDraw.drawItem(
+                    stack, 0, 0, getArea().width, getArea().height,
+                    context.getCurrentDrawingZ());
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

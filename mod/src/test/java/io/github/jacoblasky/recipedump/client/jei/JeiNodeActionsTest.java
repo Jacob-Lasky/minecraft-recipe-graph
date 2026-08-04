@@ -206,7 +206,7 @@ public class JeiNodeActionsTest {
         // IDLE, so `GraphService.graph()` is null -- the state a real client is in for the
         // whole load. The entries are hidden and that is the correct answer, not a gap.
         PlanNode stick = node("minecraft:stick");
-        assertFalse(installed.canShowInRecipeViewer(stick));
+        assertFalse(installed.canShowUses(stick));
 
         loadGraph();
         ItemStack real = new ItemStack(Items.STICK);
@@ -216,7 +216,7 @@ public class JeiNodeActionsTest {
 
         // NOTHING RE-INSTALLED. Same object, new answer.
         assertTrue("the installed source must be re-asked, not resolved once",
-                   installed.canShowInRecipeViewer(stick));
+                   installed.canShowUses(stick));
         assertSame(real, installed.iconFor(stick));
     }
 
@@ -233,7 +233,7 @@ public class JeiNodeActionsTest {
     public void withNoGraphEveryNodeAnswersLikeANodeWithNoItemBehindIt() {
         NodeActions actions = new JeiNodeActions(JeiNodeActions.NO_GRAPH);
         PlanNode node = node("minecraft:stick");
-        assertFalse(actions.canShowInRecipeViewer(node));
+        assertFalse(actions.canShowUses(node));
         assertSame(ItemStack.EMPTY, actions.iconFor(node));
         // Not reachable from the menu -- it hides the entries -- but reachable from a plan
         // reloaded between the menu opening and the click, which is a click into nothing.
@@ -247,7 +247,7 @@ public class JeiNodeActionsTest {
         // returning null here would be an NPE per row rather than a missing icon.
         NodeActions actions = new JeiNodeActions(source(graphOf("minecraft:stick")));
         assertSame(ItemStack.EMPTY, actions.iconFor(null));
-        assertFalse(actions.canShowInRecipeViewer(null));
+        assertFalse(actions.canShowUses(null));
     }
 
     @Test
@@ -277,12 +277,12 @@ public class JeiNodeActionsTest {
 
     @Test
     public void aFluidNodeAnswersFalseWithEverythingElseWiredUp() {
-        // The reason `canShowInRecipeViewer` is asked PER NODE rather than per session: JEI is
+        // The reason `canShowUses` is asked PER NODE rather than per session: JEI is
         // running, the graph is loaded, and this row still has nothing to focus on. 1,198 of
         // this pack's fluids exist only as `fluid:<name>`.
         Fixture f = wired();
-        assertTrue(f.actions.canShowInRecipeViewer(node("minecraft:stick")));
-        assertFalse(f.actions.canShowInRecipeViewer(node("fluid:water")));
+        assertTrue(f.actions.canShowUses(node("minecraft:stick")));
+        assertFalse(f.actions.canShowUses(node("fluid:water")));
         assertSame(ItemStack.EMPTY, f.actions.iconFor(node("fluid:water")));
     }
 
@@ -305,9 +305,9 @@ public class JeiNodeActionsTest {
         PlanNode ore = PlanJson.readNode(group);
         assertEquals("minecraft:stick", ore.resolvedTo());
         assertFalse("the group is not an item, even though it knows which one it chose",
-                    f.actions.canShowInRecipeViewer(ore));
+                    f.actions.canShowUses(ore));
         assertTrue("the row beneath it is the item, and answers for itself",
-                   f.actions.canShowInRecipeViewer(ore.children().get(0)));
+                   f.actions.canShowUses(ore.children().get(0)));
     }
 
     @Test
@@ -317,7 +317,7 @@ public class JeiNodeActionsTest {
         // and answering with a neighbouring item's stack would be a wrong answer dressed as a
         // right one.
         Fixture f = wired();
-        assertFalse(f.actions.canShowInRecipeViewer(node("mod:never_dumped")));
+        assertFalse(f.actions.canShowUses(node("mod:never_dumped")));
         assertSame(ItemStack.EMPTY, f.actions.iconFor(node("mod:never_dumped")));
     }
 
@@ -329,8 +329,89 @@ public class JeiNodeActionsTest {
         // and the distinction from the test above is that this key IS in the graph.
         Fixture f = wired();
         PlanNode variant = node("minecraft:stick#deadbeef");
-        assertTrue(f.actions.canShowInRecipeViewer(variant));
+        assertTrue(f.actions.canShowUses(variant));
         assertSame(f.stick, f.actions.iconFor(variant));
+    }
+
+    /**
+     * `iconForKey` answers exactly what `iconFor` does for the same key.
+     *
+     * WHY IT MATTERS RATHER THAN BEING A TAUTOLOGY. The TODO panel draws from the plan BOOK,
+     * which holds keys and not nodes, and its shopping list sits in the same window as the
+     * tree. Two lookups that disagreed would draw one item with an icon in one panel and
+     * without in the other, and nothing would report it -- so the two share one private
+     * resolver and this asserts they still do.
+     *
+     * SWEPT OVER EVERY SHAPE THE INDEX ANSWERS DIFFERENTLY FOR, because a pair of methods can
+     * agree on the easy case and come apart on the weakenings: a plain item, an NBT variant
+     * that only the digest strip reaches, a fluid with no item form, an oredict group, and a
+     * key the graph never saw.
+     */
+    @Test
+    public void aBareKeyGetsTheSameIconItsNodeWouldGet() {
+        Fixture f = wired();
+        String[] keys = {DumpCommand.stackKey(f.stick), "minecraft:stick#deadbeef",
+                         "fluid:water", "ore:stickWood", "mod:never_dumped"};
+        for (String key : keys) {
+            assertSame("iconForKey disagreed with iconFor on " + key,
+                       f.actions.iconFor(node(key)), f.actions.iconForKey(key));
+        }
+        // AND THE SWEEP MUST CONTAIN BOTH ANSWERS, or it would pass against two methods that
+        // both returned EMPTY for everything.
+        assertSame(f.stick, f.actions.iconForKey(DumpCommand.stackKey(f.stick)));
+        assertSame(ItemStack.EMPTY, f.actions.iconForKey("fluid:water"));
+    }
+
+    @Test
+    public void aNullKeyIsAMissingIconRatherThanACrashInADrawCall() {
+        // `PlannerWidgets` calls `iconForKey(key).isEmpty()` with no null check of its own, and
+        // it runs once per TODO row per frame. `StringTable.idOf` hashes the string before it
+        // can answer -1, so an unguarded null arrives as an NPE inside a render pass.
+        Fixture f = wired();
+        assertSame(ItemStack.EMPTY, f.actions.iconForKey(null));
+        assertSame(ItemStack.EMPTY, new JeiNodeActions(JeiNodeActions.NO_GRAPH)
+                .iconForKey("minecraft:stick"));
+    }
+
+    /**
+     * A token answers NO to "Show recipes" and YES to "Show uses" (#174).
+     *
+     * THE TRAP THIS EXISTS FOR: a pack placeholder is a REGISTERED item, so `stackFor` succeeds and
+     * every check in `canShowUses` passes. JEI will open on it happily, on the recipes that MAKE a
+     * Dungeon Drop, of which there are none, because the solver classified it as an instruction and
+     * kept it out of `shopping_list` for exactly that reason. #174 was reported on a reader
+     * concluding a token was an item, and an entry that opens an empty screen is that conclusion
+     * with a click behind it.
+     *
+     * BOTH HALVES ARE ASSERTED, and the second is the one that stops an over-correction. "Show
+     * uses" must stay: what CONSUMES a Dungeon Drop is a real question with real answers, and it is
+     * the honest form of what the reader wanted. Suppressing both would trade a misleading entry
+     * for a missing one.
+     */
+    @Test
+    public void aTokenHidesShowRecipesAndKeepsShowUses() {
+        Fixture f = wired();
+        // A REAL STACK BEHIND IT, asserted, or this test passes for the wrong reason: if the key did
+        // not resolve, `canShowUses` would answer false and the interesting half would be vacuous.
+        String key = DumpCommand.stackKey(f.stick);
+        assertSame(f.stick, f.actions.iconForKey(key));
+
+        JsonObject json = json(key, "item");
+        json.addProperty("status", "token");
+        json.addProperty("token_kind", "loot");
+        PlanNode token = PlanJson.readNode(json);
+        assertTrue("the fixture must be a token or this asserts nothing",
+                   io.github.jacoblasky.recipedump.client.planner.NodeStatus.isToken(token));
+
+        assertFalse("a token has nothing that makes it", f.actions.canShowRecipes(token));
+        assertTrue("but what consumes it is a real question", f.actions.canShowUses(token));
+
+        // AND THE SAME KEY AS AN ORDINARY ITEM ANSWERS YES TO BOTH, so the difference is the
+        // STATUS and not the key. Without this the test would pass against an implementation that
+        // rejected `minecraft:stick` for some unrelated reason.
+        PlanNode plain = node(key);
+        assertTrue(f.actions.canShowRecipes(plain));
+        assertTrue(f.actions.canShowUses(plain));
     }
 
     // -- state 3: an item, but no JEI runtime --------------------------------------------------
@@ -347,7 +428,7 @@ public class JeiNodeActionsTest {
 
         PlanNode stick = node("minecraft:stick");
         assertFalse(JeiBridge.isAvailable());
-        assertFalse(f.actions.canShowInRecipeViewer(stick));
+        assertFalse(f.actions.canShowUses(stick));
         assertSame(f.stick, f.actions.iconFor(stick));
     }
 
@@ -382,7 +463,7 @@ public class JeiNodeActionsTest {
         f.actions.showRecipes(stick);
         f.actions.showUses(stick);
         // Still answers, because the failure was JEI's and the runtime is still there.
-        assertTrue(f.actions.canShowInRecipeViewer(stick));
+        assertTrue(f.actions.canShowUses(stick));
     }
 
     // -- fixtures ---------------------------------------------------------------------------

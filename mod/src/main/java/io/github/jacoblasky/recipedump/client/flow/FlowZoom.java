@@ -39,6 +39,20 @@ public final class FlowZoom {
     /** Unzoomed. The value {@link FlowCanvas} starts at. */
     public static final float DEFAULT = 1.0f;
 
+    /**
+     * The zoom at which a node's name is still worth drawing.
+     *
+     * THE SAME ARGUMENT {@link #MIN} ALREADY MAKES, taken to its conclusion. Minecraft's font
+     * is a bitmap: a 6px glyph at 0.5 is three physical pixels and is not a small name, it is
+     * a smear, and MIN's own note says what a reader zoomed out is really reading -- the badge
+     * colour and the quantity. So below this the diagram drops the label and the badge word
+     * and keeps the icon and the coloured quantity. `FlowCanvas.preDraw` applies it.
+     *
+     * 0.75 is 4.5 physical pixels per glyph, which is the last step where a familiar item name
+     * is guessable. Not a technical limit: nothing breaks at 0.6, it simply says nothing.
+     */
+    public static final float LABEL_LEGIBLE = 0.75f;
+
     private FlowZoom() {
     }
 

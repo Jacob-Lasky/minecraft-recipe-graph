@@ -399,33 +399,48 @@ public class PlannerLayoutTest {
      */
     @Test
     public void anEmptySummaryListContributesNeitherRowsNorAHeader() {
-        List<String> lines = new java.util.ArrayList<String>();
-        List<Integer> colours = new java.util.ArrayList<Integer>();
+        // THE PARALLEL `List<String>` / `List<Integer>` THIS USED TO PASS IS NOW ONE `List<Line>`,
+        // because a row's icon needs the row's KEY and two lists appended in lockstep had already
+        // thrown it away. The assertions are unchanged in substance: a header appears only over
+        // rows, it is muted rather than the section's colour, and a null header adds nothing.
+        List<PlannerWidgets.Line> lines = new java.util.ArrayList<PlannerWidgets.Line>();
 
-        PlannerWidgets.addSection(lines, colours, "transmuted from EMC:",
+        PlannerWidgets.addSection(lines, "transmuted from EMC:",
                                   java.util.Collections.<String>emptyList(),
                                   NodeStatus.INK_OK);
         assertTrue("an empty list must not leave its header behind: " + lines, lines.isEmpty());
-        assertTrue(colours.isEmpty());
 
-        PlannerWidgets.addSection(lines, colours, "used from your stock:",
+        PlannerWidgets.addSection(lines, "used from your stock:",
                                   java.util.Arrays.asList("5x Iron Ingot", "2x Chest"),
                                   NodeStatus.INK_OK);
-        assertEquals(java.util.Arrays.asList("used from your stock:", "5x Iron Ingot",
-                                             "2x Chest"), lines);
-        assertEquals("one colour per line", lines.size(), colours.size());
+        assertEquals(java.util.Arrays.asList("used from your stock:", "5x Iron Ingot", "2x Chest"),
+                     textOf(lines));
         assertEquals("the header is muted, not the section's colour",
-                     Integer.valueOf(NodeStatus.INK_MUTED), colours.get(0));
-        assertEquals(Integer.valueOf(NodeStatus.INK_OK), colours.get(1));
+                     NodeStatus.INK_MUTED, lines.get(0).colour);
+        assertEquals(NodeStatus.INK_OK, lines.get(1).colour);
+        // AND NO SECTION ROW CLAIMS A KEY. These come from `machineLines`, which names a machine
+        // rather than an item, so an icon column drawn from one would look up a category.
+        for (PlannerWidgets.Line line : lines) {
+            assertEquals("a plain section row has no key: " + line, "", line.key);
+        }
 
         // A null header is the shopping list, which writes its own heading and its own
         // "nothing outstanding" row because it is the one section whose emptiness is worth
         // stating. It must not gain a second heading from here.
         int before = lines.size();
-        PlannerWidgets.addSection(lines, colours, null,
+        PlannerWidgets.addSection(lines, null,
                                   java.util.Arrays.asList("3x Iron Ore"), NodeStatus.INK_NEED);
         assertEquals(before + 1, lines.size());
-        assertEquals("3x Iron Ore", lines.get(lines.size() - 1));
+        assertEquals("3x Iron Ore", lines.get(lines.size() - 1).text);
+    }
+
+    /** The words of each line, so a list of rows can be compared with a list of strings. */
+    private static List<String> textOf(List<PlannerWidgets.Line> lines) {
+        List<String> out = new java.util.ArrayList<String>();
+        for (PlannerWidgets.Line line : lines) {
+            out.add(line.text);
+        }
+        return out;
     }
 
     /**
@@ -1029,12 +1044,30 @@ public class PlannerLayoutTest {
         }
 
         @Override
-        public boolean canShowInRecipeViewer(PlanNode node) {
-            return recipeViewerAvailable;
+        public boolean canShowRecipes(PlanNode node) {
+            // The seam's own rule, so the menu tests exercise the token asymmetry rather than
+            // only the installed/not-installed one. See `JeiNodeActions.canShowRecipes`.
+            return recipeViewerAvailable && !NodeStatus.isToken(node);
         }
 
         @Override
+        public boolean canShowUses(PlanNode node) {
+            return recipeViewerAvailable;
+        }
+
+        /**
+         * EMPTY, so the geometry assertions in this class do not depend on whether a stack
+         * came back. That is the whole reason `PlannerActions.NONE` refuses to hand out
+         * `NodeActionsHolder.actions()`: an installed one adds an icon widget and would
+         * silently change the boxes another test asserts.
+         */
+        @Override
         public net.minecraft.item.ItemStack iconFor(PlanNode node) {
+            return net.minecraft.item.ItemStack.EMPTY;
+        }
+
+        @Override
+        public net.minecraft.item.ItemStack iconForKey(String key) {
             return net.minecraft.item.ItemStack.EMPTY;
         }
 
@@ -1232,6 +1265,434 @@ public class PlannerLayoutTest {
             assertFalse("nothing may reach the recipe viewer when it is not installed: " + call,
                         call.startsWith("show"));
         }
+    }
+
+    /**
+     * The TODO panel says an item's NAME, not its graph key.
+     *
+     * WHAT THE SCREENSHOT SHOWED. `planner-todo` printed
+     * `3x thaumadditions:vis_pod#0116bb2287a7` three rows above `500x Life Essence`, in one
+     * window -- the graph names were already on screen, and nothing joined them to the rows
+     * that came out of the plan book. Red on the pre-change tree, where every TODO row was
+     * `quantity(key) + " " + key`.
+     */
+    @Test
+    public void theTodoPanelShowsNamesRatherThanGraphKeys() {
+        PlanView plan = PlanFixtures.load("plan-same-name");
+        PlanNode named = plan.tree();
+        assertTrue("the fixture's root must carry a label for this to mean anything",
+                   named.label() != null && !named.label().isEmpty());
+        assertFalse("and the label must not simply BE the key, or the assertion is vacuous",
+                    named.label().equals(named.key()));
+
+        PlanBook book = new PlanBook();
+        book.setTodo(named.key(), 64L);
+        List<PlannerWidgets.Line> lines = PlannerWidgets.todoLines(plan, book, 248);
+        assertEquals("64x " + named.label(), lines.get(0).text);
+        assertFalse("the key must not appear in the words: " + lines.get(0).text,
+                    lines.get(0).text.contains(named.key()));
+        // AND THE KEY IS STILL REACHABLE, on the row, because that is what the icon lookup
+        // needs. Showing a name and losing the identity would be the same defect mirrored.
+        assertEquals(named.key(), lines.get(0).key);
+    }
+
+    /**
+     * A key this plan never named still says something.
+     *
+     * THE CASE A PLAN-DERIVED LOOKUP REALLY HITS: a row added while planning one target and
+     * still on the list while the player plans another. The fallback is the key, per
+     * `NodeRowText.label`'s rule -- a blank row would hide that anything is on the list.
+     */
+    @Test
+    public void aTodoKeyTheCurrentPlanNeverMentionedFallsBackToTheKey() {
+        PlanBook book = new PlanBook();
+        book.setTodo("thaumadditions:vis_pod#0116bb2287a7", 3L);
+        List<PlannerWidgets.Line> lines =
+                PlannerWidgets.todoLines(PlanFixtures.load("plan-in-stock"), book, 248);
+        assertEquals("3x thaumadditions:vis_pod#0116bb2287a7", lines.get(0).text);
+    }
+
+    /**
+     * Every row that is about one item carries its key, and no heading pretends to.
+     *
+     * The key is what the icon column is looked up by, so a shopping row without one would
+     * draw text where every row beside it draws an item -- and "still needed for this plan:"
+     * carrying a key would try to draw an icon for a sentence.
+     */
+    @Test
+    public void everyTodoRowAboutAnItemCarriesItsKeyAndNoHeadingDoes() {
+        PlanView plan = PlanFixtures.load("plan-truncated");
+        assertFalse("this fixture must have a shopping list", plan.shoppingList().isEmpty());
+        PlanBook book = new PlanBook();
+        book.setTodo(plan.tree().key(), 1L);
+
+        List<PlannerWidgets.Line> lines = PlannerWidgets.todoLines(plan, book, 248);
+
+        // NOT AN EXACT COUNT, and it used to be one. That was wrong twice over once #190's five
+        // summary sections landed: they contribute keyed rows of their own, and a row long enough
+        // to wrap contributes a CONTINUATION line which correctly carries no key. Counting is the
+        // wrong shape for a property about which rows may claim an item.
+        int withKeys = 0;
+        for (PlannerWidgets.Line line : lines) {
+            if (!line.key.isEmpty()) {
+                withKeys++;
+            }
+        }
+        assertTrue("the TODO row and the shopping rows must all claim their item, saw " + withKeys,
+                   withKeys >= 1 + plan.shoppingList().size());
+        for (PlannerWidgets.Line line : lines) {
+            if (line.text.endsWith(":")) {
+                assertEquals("a heading must not claim an item: " + line, "", line.key);
+            }
+            if (line.text.startsWith(NodeRowText.CONTINUATION)) {
+                assertEquals("a wrapped row's tail is not a second item: " + line, "", line.key);
+            }
+        }
+    }
+
+    /**
+     * A node given two lines of height puts the label on the second one and gives it real room.
+     *
+     * THE MEASUREMENT GAP 2 WAS ABOUT. On one line the label competed with a 90px badge, so a
+     * 209px diagram node gave the item's NAME 48 pixels -- eight characters -- and the first
+     * screenshots of the canvas read "Iron ..." and "Block...". A dependency diagram whose
+     * boxes do not say what they are is decoration. Red on the pre-change tree, where the
+     * widest label widget in a 209x24 node was 48.
+     */
+    @Test
+    public void aTallNodePutsItsLabelOnASecondLineWithRoomForAWholeName() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        // `FlowLayout.NODE_WIDTH` and `NODE_HEIGHT`, spelled rather than imported: `flow`
+        // depends on `planner` and not the reverse, and a test that inverted that would be the
+        // first thing in the package to do so. `FlowCanvasTest` pins the two numbers.
+        int width = 209;
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, width, 26);
+        HeadlessLayout.layOutPanel("two-line-node", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+
+        int widest = 0;
+        for (IWidget child : box.getChildren()) {
+            widest = Math.max(widest, child.getArea().w());
+        }
+        // The label is the widest column on a two-line node, because it has a line to itself.
+        // 24 characters is "Sodium Fluoride Solution"; the old node had eight.
+        assertTrue("the widest column is " + widest + "px, which is not a name",
+                   widest >= 24 * NodeRowText.CHAR_WIDTH);
+
+        // AND THE TWO LINES DO NOT OVERLAP, which is the failure a wider label invites: a
+        // TextWidget handed a box it does not fit wraps and draws over what is beneath it,
+        // and the sizer reports nothing (see NodeRowText.fit).
+        for (IWidget first : box.getChildren()) {
+            for (IWidget second : box.getChildren()) {
+                if (first == second) {
+                    continue;
+                }
+                assertFalse("two columns overlap: " + first.getArea() + " and "
+                            + second.getArea(), overlaps(first.getArea(), second.getArea()));
+            }
+        }
+        assertTrue("and everything stays inside the box",
+                   box.getArea().h() == 26 && box.getArea().w() == width);
+    }
+
+    /** A row-height node keeps the single-line columns, which is what the seam promised. */
+    @Test
+    public void aRowHeightNodeStillDrawsOneLine() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        ParentWidget<?> box =
+                PlannerWidgets.planNodeContent(node, 209, PlannerWidgets.ROW_HEIGHT);
+        HeadlessLayout.layOutPanel("one-line-node", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+        for (IWidget child : box.getChildren()) {
+            assertEquals("a one-line node draws everything on the same row", 0,
+                         child.getArea().ry);
+        }
+    }
+
+    private static boolean overlaps(Area a, Area b) {
+        return a.x() < b.ex() && b.x() < a.ex() && a.y() < b.ey() && b.y() < a.ey();
+    }
+
+    /**
+     * The badge is all-or-nothing on the line it shares with the quantity too.
+     *
+     * The two-line node asks {@link PlannerWidgets#badgeWidthBeside} rather than
+     * {@link PlannerWidgets#badgeWidthFor}, because on that line no label is competing. The
+     * rule it must not lose in the move is that a truncated badge is always a bug: the
+     * vocabulary is fixed, so the alternative to truncating is omitting.
+     */
+    @Test
+    public void theBadgeBesideTheQuantityIsAlsoNeverPartiallyDrawn() {
+        for (int room = 0; room <= 400; room += 3) {
+            int badge = PlannerWidgets.badgeWidthBeside(room);
+            assertTrue("with " + room + "px beside the quantity the badge came out " + badge,
+                       badge == 0 || badge == PlannerWidgets.BADGE);
+        }
+        assertEquals("exactly enough room is enough", PlannerWidgets.BADGE,
+                     PlannerWidgets.badgeWidthBeside(PlannerWidgets.BADGE));
+        assertEquals("one pixel short is nothing", 0,
+                     PlannerWidgets.badgeWidthBeside(PlannerWidgets.BADGE - 1));
+    }
+
+    /**
+     * A node can shed its label without losing its icon or its quantity.
+     *
+     * WHAT THE DIAGRAM DOES BELOW `FlowZoom.LABEL_LEGIBLE`. The quantity must survive, because
+     * `FlowZoom.MIN`'s own comment says the badge COLOUR and the quantity are what a reader
+     * zoomed out is going by -- and `NodeStatus.colour` is applied to the quantity, so hiding
+     * it would take the status channel with it.
+     */
+    @Test
+    public void hidingDetailKeepsTheQuantityAndTakesTheLabel() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
+        HeadlessLayout.layOutPanel("detail-node", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+
+        int all = box.getChildren().size();
+        assertTrue("a node must have more than one column for this to say anything", all > 1);
+        for (IWidget child : box.getChildren()) {
+            assertTrue("everything is built enabled, so the sizer never skips it",
+                       child.isEnabled());
+        }
+
+        box.showDetail(false);
+        int left = 0;
+        for (IWidget child : box.getChildren()) {
+            if (child.isEnabled()) {
+                left++;
+            }
+        }
+        assertTrue("something must go, or the level of detail has no levels", left < all);
+        assertTrue("and something must stay: the quantity carries the status colour", left > 0);
+
+        box.showDetail(true);
+        for (IWidget child : box.getChildren()) {
+            assertTrue("the labels must come back when the zoom does", child.isEnabled());
+        }
+    }
+
+    /**
+     * #213: every occurrence of the selected ITEM highlights, in the tree.
+     *
+     * THE MISSING HALF. `LivePlannerActions.openNodeMenu` wrote a selection on every click and
+     * nothing in `mod/src/main` read `isSelected`, `selectedKey` or `selectedNode` -- so the
+     * write was correct and no highlight was drawn on any surface. This is red on the
+     * pre-change tree because `ClickableGroup` had no notion of a key at all.
+     *
+     * BY KEY AND NOT BY NODE, which is `PlanSelection`'s design and the property a picture
+     * cannot distinguish: a shot of one highlighted row is equally consistent with a holder
+     * that only lit the box that was clicked. `plan-same-name` uses `minecraft:iron_ingot`
+     * twice, so a key-only read lights two rows and a node-identity read lights one.
+     */
+    @Test
+    public void everyOccurrenceOfTheSelectedItemHighlightsInTheTree() {
+        PlanView plan = PlanFixtures.load("plan-same-name");
+        String repeated = "minecraft:iron_ingot";
+        int occurrences = 0;
+        for (PlanNode node : plan.flatten()) {
+            if (repeated.equals(node.key())) {
+                occurrences++;
+            }
+        }
+        assertTrue("the fixture must use " + repeated + " more than once, saw " + occurrences,
+                   occurrences > 1);
+
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder());
+        HeadlessLayout.layOut(panel);
+        List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
+        try {
+            for (PlannerWidgets.ClickableGroup row : rows) {
+                assertFalse("nothing is selected yet", row.drawsAsSelected());
+            }
+
+            PlanSelection.select(occurrenceOf(plan, repeated));
+            int lit = 0;
+            for (PlannerWidgets.ClickableGroup row : rows) {
+                if (row.drawsAsSelected()) {
+                    lit++;
+                }
+            }
+            assertEquals("every row for the selected key lights up, and only those",
+                         occurrences, lit);
+        } finally {
+            // A STATIC HOLDER IS SHARED BY EVERY TEST IN THIS JVM. A leftover selection makes
+            // an unrelated geometry assertion draw a highlight it never set up.
+            PlanSelection.clear();
+        }
+    }
+
+    /**
+     * A diagram node reads the same selection the tree does, from the same one change.
+     *
+     * #213 predicted this: "a tree row and a diagram node already share `planNodeContent`, so
+     * one change covers both surfaces". They share `ClickableGroup` rather than that method --
+     * `row` is deliberately separate, see its own note -- and the click target is what carries
+     * the key, so the prediction holds through a different seam than the issue named.
+     */
+    @Test
+    public void aDiagramNodeHighlightsFromTheSameSelectionTheTreeReads() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
+        try {
+            assertFalse(box.drawsAsSelected());
+            PlanSelection.select(node);
+            assertTrue("the diagram node must read the selection too", box.drawsAsSelected());
+        } finally {
+            PlanSelection.clear();
+        }
+    }
+
+    /**
+     * A menu row and a picker row are not about one item, and must never light up.
+     *
+     * `PlanSelection.isSelected("")` is false and `PlanSelectionTest` asserts it -- otherwise a
+     * node whose key failed to parse would read as permanently selected. This is the other end
+     * of that: the rows that legitimately have no key pass "" and stay dark whatever is
+     * selected, including while the menu FOR the selected node is open, which is every time
+     * one is open at all.
+     */
+    @Test
+    public void aMenuRowNeverHighlightsEvenWhileItsOwnNodeIsSelected() {
+        PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        Recorder recorder = new Recorder();
+        recorder.recipeViewerAvailable = true;
+        ModularPanel menu = PlannerWidgets.nodeMenu(node, recorder);
+        HeadlessLayout.layOut(menu);
+        try {
+            PlanSelection.select(node);
+            for (PlannerWidgets.ClickableGroup entry : clickables(menu)) {
+                assertFalse("a menu entry is not the item", entry.drawsAsSelected());
+            }
+        } finally {
+            PlanSelection.clear();
+        }
+    }
+
+    /**
+     * A TOKEN draws a mark in the icon column, where an item would draw its sprite.
+     *
+     * WHY, AND IT IS NOT A STYLE CHOICE. A pack token is a REGISTERED item -- `plan-token-gate`
+     * is `contenttweaker:dungeon_drop`, `status=token`, `token_kind=loot` -- so `iconFor`
+     * succeeds and hands back a perfectly good picture of a thing that does not exist. #174 was
+     * reported on exactly that read: "the osiris spinel shows it requires a Dungeon Drop which
+     * implies it is an item". Sprite plus red quantity plus a count is three signals all saying
+     * "item".
+     *
+     * ASSERTED AS A CHILD IN THE ICON COLUMN, which is the strongest thing a headless test can
+     * say here: a `TextWidget`'s `IKey` cannot be read back without a font renderer, so this
+     * cannot check that the character is `!`. What it can check is that a token node carries a
+     * column an otherwise identical non-token node does not, at the icon's own x and width. Red
+     * on the pre-change tree, where a token drew a sprite and nothing else.
+     *
+     * THE SPRITE BEING SKIPPED IS STRUCTURAL AND NOT ASSERTED HERE: `twoLineNode`, `oneLineNode`
+     * and `row` all read `if (!tokenMark(...)) iconIfAny(...)`, and proving the negative would
+     * need a populated `NodeActions` and therefore a real `ItemStack` and Bootstrap, which would
+     * put global mutable state under every geometry assertion in this class. See
+     * `PlannerActions.NONE` for why that trade is refused.
+     */
+    @Test
+    public void aTokenNodeMarksTheIconColumnInsteadOfDrawingASprite() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        assertTrue("the fixture must actually be a token, or this asserts nothing",
+                   NodeStatus.isToken(token));
+        assertFalse("and the control must not be one", NodeStatus.isToken(item));
+
+        List<IWidget> marked = columnsOf(PlannerWidgets.planNodeContent(token, 209, 26));
+        List<IWidget> plain = columnsOf(PlannerWidgets.planNodeContent(item, 209, 26));
+        assertEquals("a token carries exactly one column a plain item does not",
+                     plain.size() + 1, marked.size());
+
+        // AND IT IS IN THE ICON COLUMN, not appended after the label. The position is the point:
+        // `NodeContent.showDetail` drops the label and the badge word below
+        // `FlowZoom.LABEL_LEGIBLE`, and the icon column is not `detail`, so a mark placed there
+        // is the one carrier that survives a zoomed-out diagram. A mark in the label would be
+        // dropped at exactly the zoom where hue becomes the only difference from a genuine NEED.
+        IWidget mark = marked.get(0);
+        assertEquals("the mark starts where the icon would", PlannerWidgets.NODE_PAD,
+                     mark.getArea().rx);
+        assertEquals("and is the icon column's width", PlannerWidgets.NODE_ICON,
+                     mark.getArea().w());
+    }
+
+    /** A tree row marks a token the same way, so the two surfaces cannot disagree. */
+    @Test
+    public void aTreeRowMarksATokenToo() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        int marked = columnsOf(PlannerWidgets.row(token, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                 PlannerActions.NONE)).size();
+        int plain = columnsOf(PlannerWidgets.row(item, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                PlannerActions.NONE)).size();
+        assertEquals("the tree row marks a token as well as the diagram node",
+                     plain + 1, marked);
+    }
+
+    /** A node's own columns, laid out. Not `flatten`, which would include the node itself. */
+    private static List<IWidget> columnsOf(ParentWidget<?> box) {
+        HeadlessLayout.layOutPanel("columns", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+        return new java.util.ArrayList<IWidget>(box.getChildren());
+    }
+
+    private static PlanNode occurrenceOf(PlanView plan, String key) {
+        for (PlanNode node : plan.flatten()) {
+            if (key.equals(node.key())) {
+                return node;
+            }
+        }
+        throw new AssertionError("no node with key " + key);
+    }
+
+    /**
+     * A token's menu offers "Show uses" and not "Show recipes" (#174).
+     *
+     * The node-menu half of the same defect the icon column has: a token is a registered item, so
+     * every JEI check passes and "Show recipes" would open a recipe screen for what makes a Dungeon
+     * Drop, which is nothing. Red on the pre-change tree, where one `canShowInRecipeViewer` gated
+     * both entries together and a token therefore got both.
+     */
+    @Test
+    public void aTokensMenuOffersUsesAndNotRecipes() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        assertTrue(NodeStatus.isToken(token));
+        assertFalse(NodeStatus.isToken(item));
+
+        Recorder recorder = new Recorder();
+        recorder.recipeViewerAvailable = true;
+
+        // ASSERTED BY CLICKING EVERY ENTRY, NOT BY COMPARING THE TWO MENUS' SIZES. The first
+        // version of this test asserted the token menu had one entry fewer than the item's, and it
+        // FAILED for a reason that had nothing to do with tokens: `plan-in-stock`'s root carries
+        // `alternatives = 5` so it also gets "Choose another recipe", and `plan-token-gate`'s root
+        // carries none, so the two menus differ by two entries rather than one. Two fixtures that
+        // differ in more than the property under test is the trap this package keeps re-finding,
+        // and a count cannot say WHICH entry was dropped anyway. What each menu invokes can.
+        assertEquals("an ordinary item offers both",
+                     java.util.Arrays.asList("showRecipes:" + item.key(),
+                                             "showUses:" + item.key()),
+                     viewerCalls(PlannerWidgets.nodeMenu(item, recorder), recorder));
+        assertEquals("a token offers what uses it and not what makes it",
+                     java.util.Arrays.asList("showUses:" + token.key()),
+                     viewerCalls(PlannerWidgets.nodeMenu(token, recorder), recorder));
+    }
+
+    /** Click every entry of `menu` and return only the recipe-viewer calls, in menu order. */
+    private static List<String> viewerCalls(ModularPanel menu, Recorder recorder) {
+        HeadlessLayout.layOut(menu);
+        recorder.calls.clear();
+        for (PlannerWidgets.ClickableGroup row : clickables(menu)) {
+            row.onMousePressed(0);
+        }
+        List<String> viewer = new java.util.ArrayList<String>();
+        for (String call : recorder.calls) {
+            if (call.startsWith("showRecipes:") || call.startsWith("showUses:")) {
+                viewer.add(call);
+            }
+        }
+        return viewer;
     }
 
     private static int countRows(ModularPanel panel) {

@@ -30,13 +30,18 @@ import io.github.jacoblasky.recipedump.plan.PlanResult;
 public final class FlowLayout {
 
     /**
-     * Node box size, in GUI pixels.
+     * Node box width, in GUI pixels.
      *
-     * 209 IS NOT A ROUND NUMBER, IT IS A SUM: `ICON + GAP + QTY + GAP + MIN_LABEL + GAP +
-     * BADGE` from `PlannerWidgets` -- 10 + 3 + 52 + 3 + 48 + 3 + 90 -- the narrowest node that
-     * carries an icon, a quantity, at least eight characters of name and a full badge. Below
-     * it the row drops the badge rather than truncating it, which is right for a diagram and
-     * wrong for a default.
+     * 209 IS NOT A ROUND NUMBER, IT IS A NAME LENGTH. The node draws its label on a line of its
+     * own beside a 16px icon, so a 209px node gives the item's name 184px -- 30 characters at
+     * `NodeRowText.CHAR_WIDTH`, which covers "Sodium Fluoride Solution" and the great majority
+     * of this pack's names outright.
+     *
+     * IT MUST ALSO CLEAR `FlowCanvas.NARROWEST_NODE`, which is 170: the icon, the quantity and
+     * a full badge on line one, inside `NODE_PAD` either side. Below that the node drops the
+     * badge rather than truncating it, which is right for a diagram and wrong for a default.
+     * The surplus over 170 is what the label gets, and the label is the thing there is never
+     * enough of -- so this number is chosen for it rather than derived from the minimum.
      *
      * IT WAS 214 FOR ONE COMMIT, from a hand-added figure quoted in a message, and the pin
      * below caught it the first time it ran. That is the whole argument for the pin: five
@@ -44,11 +49,26 @@ public final class FlowLayout {
      *
      * WRITTEN OUT RATHER THAN IMPORTED, because this class is pure geometry and reaching for
      * `PlannerWidgets` would drag ModularUI into a file whose whole value is being testable
-     * without it. `FlowCanvasTest.theLayoutsNodeWidthIsTheSumTheRowActuallyNeeds` pins the two
-     * together, so the badge vocabulary growing fails a test rather than silently truncating.
+     * without it. `FlowCanvasTest.theLayoutsNodeWidthClearsWhatTheNodeActuallyNeeds` pins the
+     * two together, so the badge vocabulary growing fails a test rather than silently
+     * truncating, and `aNodeHasRoomForAWholeItemName` pins the label's share.
      */
     public static final int NODE_WIDTH = 209;
-    public static final int NODE_HEIGHT = 20;
+    /**
+     * Node box height. TWO TEXT LINES, PLUS `NODE_PAD` ABOVE AND BELOW.
+     *
+     * 26 AND NOT 20, WHICH IS WHAT IT WAS WHILE THE NODE DREW ONE LINE AND WASTED THE OTHER
+     * HALF OF ITSELF. `PlannerWidgets.LINE` is 10 and `NODE_PAD` is 3, so two lines clear of
+     * the nine-slice's bevel need 26; at 20 they fit exactly and flush, and the first shot of
+     * the two-line node had every item name resting on the bottom border.
+     * `FlowCanvasTest.aNodeIsTallEnoughForItsTwoLines` pins it against `FlowCanvas.SHORTEST_NODE`.
+     *
+     * THE DIAGRAM GOT TALLER FOR THIS and it is worth saying by how much rather than waving at
+     * it: the row pitch goes from 26 to 32, so a 4,000 node plan is about 23% longer to scroll.
+     * The culler draws what a viewport holds rather than what a plan contains, so no frame costs
+     * more; what it costs is scrolling, and it buys an item name you can read.
+     */
+    public static final int NODE_HEIGHT = 26;
     /** Gap between a column and the next. The edge lines are drawn across this. */
     public static final int COLUMN_GAP = 40;
     /** Gap between two stacked nodes. */
