@@ -399,12 +399,16 @@ def is_non_recipe(category, keep=()):
 
     A DECLARED LOOT TABLE IS EXEMPT, and that is #211's half of this function. `loot` and
     `.drop` are substring patterns, so `intestines_loot_table` and `aoa_extraction_loot` match
-    and were being deleted -- while `TechReborn.Scrapbox`, the same defect at ten times the
-    size, matches nothing here. Deleting them is a weaker answer than
-    `notproduction.mark` gives: it strands any output whose only route was the loot table at
-    `cost.BASE_RAW_COST` and it throws away a JEI card a player might want to read. So the
-    declaration in `tokens.LOOT_TABLE_CATEGORIES` outranks the patterns, and all three names
-    go through ONE mechanism instead of two that disagree.
+    and were being deleted -- while `TechReborn.Scrapbox`, the same defect at six times the
+    size, matches nothing here. Deleting them is a weaker answer than `notproduction.mark`
+    gives: it strands any output whose only route was the loot table at `cost.BASE_RAW_COST`
+    and it throws away a JEI card a player might want to read. So the declaration in
+    `tokens.LOOT_TABLE_CATEGORIES` outranks the patterns, and all three names go through ONE
+    mechanism instead of two that disagree.
+
+    BY EXACT UID, not case-folded like the `keep` test below. A category uid is a uid: the dump
+    writes `TechReborn.Scrapbox` with those capitals and a declaration that matched
+    case-insensitively would be claiming to know about a category the pack does not have.
     """
     if category in tokens.LOOT_TABLE_CATEGORIES:
         return False
