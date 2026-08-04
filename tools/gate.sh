@@ -51,7 +51,23 @@
 # that runs a container takes the gate around its OWN `docker run`, and callers do not wrap it.
 
 GATE_LOCK=${GATE_LOCK-/tmp/recipegraph-container.gate.lock}
-GATE_WAIT=${GATE_WAIT:-3600}
+# SIX HOURS, AND THE OLD ONE HOUR WAS DERIVED FROM THE WRONG QUANTITY. The reasoning above for
+# an hour is per-CONTAINER: longer than any single run here, so hitting it means something is
+# wedged. That does not hold for a QUEUE. The honest wait for the last arrival is up to N times
+# the container time, so the cap fires on a healthy host as soon as more than a handful of
+# runners share it, and what it then prints tells the reader to consider deleting a lock that is
+# being held correctly. Measured 2026-08-04, ten agents on this repo: `check.sh --java` took 16
+# minutes rather than its documented 3 under the load they created, four waiters were queued at
+# once, and the later ones would have failed at 3600 with the host working exactly as designed.
+#
+# So this is now longer than any plausible QUEUE rather than any single container, and the
+# give-up message below reports whether the holder changed while waiting -- which is the signal
+# that tells "busy" from "wedged" and is the thing the old message lacked. #214 records the
+# better fix, which resets the deadline each time the lock changes hands rather than picking a
+# bigger number; it needs a loop of bounded waits, and this file's header rejects polling for a
+# stated starvation reason, so it is a design change rather than a constant change and it is not
+# being made while ten runners are live on the lock.
+GATE_WAIT=${GATE_WAIT:-21600}
 
 gated() {
     if [ -z "${GATE_LOCK:-}" ]; then
@@ -74,9 +90,27 @@ gated() {
             fi
             echo "   (one heavy container at a time; GATE_LOCK= to opt out, GATE_WAIT= to cap)"
             waited_from=$(date +%s)
+            # CAPTURED BEFORE THE WAIT so the failure below can tell "busy" from "wedged". A
+            # holder that CHANGED while we waited means the queue is moving and the cap was
+            # simply too short; the same holder throughout means one run is stuck. The old
+            # message could not distinguish them and advised deleting the lock either way,
+            # which on a moving queue destroys a run that is doing the right thing. #214.
+            held_before=$(cat "$GATE_LOCK" 2>/dev/null || echo "(unreadable)")
             flock -w "$GATE_WAIT" 9 || {
+                held_after=$(cat "$GATE_LOCK" 2>/dev/null || echo "(unreadable)")
                 echo "!! gave up after ${GATE_WAIT}s waiting for $GATE_LOCK." >&2
-                echo "!! Something is holding it: check \`docker ps\` before deleting it." >&2
+                if [ "$held_before" = "$held_after" ]; then
+                    echo "!! The SAME run held it the whole time, so it is probably stuck:" >&2
+                    echo "!!   $held_after" >&2
+                    echo "!! Check \`docker ps\` and that pid before deleting the lock." >&2
+                else
+                    echo "!! The holder CHANGED while waiting, so the queue is MOVING and this" >&2
+                    echo "!! cap was too short for it. Nothing is wedged." >&2
+                    echo "!!   at the start: $held_before" >&2
+                    echo "!!   at give-up:   $held_after" >&2
+                    echo "!! Re-run, or raise GATE_WAIT. DO NOT delete the lock: you would be" >&2
+                    echo "!! killing a run that is working correctly." >&2
+                fi
                 exit 75
             }
             echo "== gate acquired after $(( $(date +%s) - waited_from ))s =="

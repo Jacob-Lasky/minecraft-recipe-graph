@@ -170,5 +170,92 @@ class TheGateLockLivesOnALocalFilesystemTest(unittest.TestCase):
                          "filesystem." % (lock, fstype))
 
 
+class TheGiveUpMessageTellsBusyFromWedgedTest(unittest.TestCase):
+    """`GATE_WAIT` firing on a MOVING queue must not read as a wedged host. #214.
+
+    The old message printed "Something is holding it: check `docker ps` before deleting it"
+    however long the queue was, and the reader who follows that advice on a moving queue
+    destroys a run that is doing the right thing -- which is how one queue that merely LOOKS
+    stuck becomes several concurrent 8 GB JVMs on a host that also runs a household's Home
+    Assistant. That is the outcome the whole file exists to prevent, reached by following its
+    own error message.
+
+    DRIVEN RATHER THAN GREPPED. An assertion that the script CONTAINS the word "CHANGED" would
+    pass against a branch that never reaches the line. These run the real `gated` against a real
+    `flock` on a real lock, with a real holder, and read what it actually printed.
+    """
+
+    def _run_waiter(self, script):
+        return subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True, text=True,
+                              timeout=60)
+
+    def test_a_holder_that_changed_is_reported_as_a_moving_queue(self):
+        # The flock is on the DESCRIPTOR and the identity line is the file's CONTENT, so a
+        # holder can be simulated by taking the lock and rewriting the text under it. That is
+        # exactly what a real handover does: the next `gated` writes its own line in.
+        script = r'''
+        L=$(mktemp /tmp/gatetest-moving-XXXXXX)
+        printf 'pid 111, first holder\n' > "$L"
+        # Hold the lock for longer than the waiter's cap, and change the identity mid-wait.
+        ( flock 9; sleep 2; printf 'pid 222, second holder\n' > "$L"; sleep 4 ) 9< "$L" &
+        sleep 0.5
+        . tools/gate.sh
+        GATE_LOCK="$L" GATE_WAIT=3 gated true
+        echo "EXIT=$?"
+        rm -f "$L"
+        '''
+        out = self._run_waiter(script)
+        combined = out.stdout + out.stderr
+        self.assertIn("EXIT=75", combined,
+                      "the cap must still FAIL rather than wait forever:\n" + combined)
+        self.assertIn("holder CHANGED", combined,
+                      "a queue that moved while waiting must be reported as moving:\n"
+                      + combined)
+        self.assertIn("Nothing is wedged", combined, combined)
+        self.assertNotIn("before deleting the lock", combined,
+                         "a MOVING queue must not be given the delete-the-lock advice, which "
+                         "would kill a run that is working correctly:\n" + combined)
+
+    def test_a_holder_that_never_changed_is_reported_as_probably_stuck(self):
+        """The control. Without it the test above passes on a script that always says CHANGED."""
+        script = r'''
+        L=$(mktemp /tmp/gatetest-stuck-XXXXXX)
+        printf 'pid 333, the only holder\n' > "$L"
+        ( flock 9; sleep 6 ) 9< "$L" &
+        sleep 0.5
+        . tools/gate.sh
+        GATE_LOCK="$L" GATE_WAIT=3 gated true
+        echo "EXIT=$?"
+        rm -f "$L"
+        '''
+        out = self._run_waiter(script)
+        combined = out.stdout + out.stderr
+        self.assertIn("EXIT=75", combined, combined)
+        self.assertIn("SAME run held it", combined,
+                      "one holder throughout is the case where something really is stuck:\n"
+                      + combined)
+        self.assertIn("before deleting the lock", combined,
+                      "the stuck case is the one where checking and deleting IS the advice:\n"
+                      + combined)
+
+    def test_the_default_cap_is_sized_for_a_queue_and_not_for_one_container(self):
+        """The number itself, because the old one was derived from the wrong quantity.
+
+        An hour is longer than any single run here, which is what the original comment argued.
+        It is NOT longer than a queue of them: measured 2026-08-04 with ten agents sharing this
+        host, `check.sh --java` took 16 minutes rather than its documented 3, and four waiters
+        were queued at once. Ten of those serialised is over two hours, so an hour fires on a
+        healthy host. The floor here is deliberately well above that and below "forever".
+        """
+        with open(os.path.join(ROOT, GATE), encoding="utf-8") as handle:
+            body = handle.read()
+        match = re.search(r'GATE_WAIT=\$\{GATE_WAIT:-(\d+)\}', body)
+        self.assertIsNotNone(match, "tools/gate.sh no longer declares a GATE_WAIT default")
+        seconds = int(match.group(1))
+        self.assertGreaterEqual(seconds, 4 * 3600,
+                                "a %ds cap fires on a healthy queue of the size this repo "
+                                "actually runs; see #214" % seconds)
+
+
 if __name__ == "__main__":
     unittest.main()
