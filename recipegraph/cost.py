@@ -475,7 +475,23 @@ EMC_COST = 0.5
 #
 # `tests/test_plan_fixtures.py` pins this number against the fixtures, so a bump costs an oracle
 # regeneration and must ride with one. #136 learned that the hard way: the guard failed first.
-FORMULA_VERSION = 11
+#
+# A RULE IN CODE THAT THE FINGERPRINT CANNOT SEE IS ANOTHER SOURCE, and #211 is the case.
+# `notproduction.annotation_markers` decides whether a recipe is a JEI documentation card from
+# three conditions in code. Two of its inputs ARE hashed -- the resolved token map, and
+# `tokens.LOOT_TABLE_CATEGORIES` -- which is what makes it easy to believe the rule is covered.
+# It is not: loosen one of the conditions and every price that route touched moves while every
+# hashed input stays exactly where it was. This is the "output, not mechanism" test above,
+# applied to a source the list does not name.
+#
+# AND A NEW CONSTANT ACCIDENTALLY COVERING YOU IS NOT A REASON TO DECLINE. #211 added
+# `NON_PRODUCTION_PENALTY` to the hashed tuple, so a warm cache written before it is invalidated
+# by that alone -- measured, the fingerprint differs. That is not the same claim as #175's:
+# #175 measured that the PRICES were bit-identical, which is the positive claim this file asks
+# for. "A constant I happened to add is in the hash" is instead exactly the reasoning
+# `fingerprint` names as going stale, and the next edit to the rule will add no constant and
+# inherit no such accident.
+FORMULA_VERSION = 12
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
