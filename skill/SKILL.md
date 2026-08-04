@@ -888,6 +888,36 @@ stock and machine states, and a formula change moves none of them -- so a warm
 `.cost-cache.json` goes on serving nugget-ladder prices forever, which reads as "the fix did not
 work" rather than as a stale cache.
 
+**"IS THIS KEY PRODUCED" HAS ONE SPELLING, `Graph.real_production`, AND EVERY READER CALLS IT.**
+It had three until #193: the authority on `Graph`, a hand-rolled copy inside `cost._relax` whose
+own comment admitted it mirrored the authority, and `graph.by_output` read raw in `cost._seed`,
+which excluded nothing. The two cost readers therefore disagreed with each other, and the gap has
+a shape: a fluid whose only route is emptying a can IS in `by_output`, so `_seed` did not seed it,
+and `_relax` then applied the exclusion and refused to price it from that recipe. Nothing seeded
+it and nothing relaxed it, while `Solver.expand` reported it `raw` and shopping-listed it -- cost
+saying impossible, plan saying go and buy it, and every parent inheriting the cost model's
+version. Measured on the reference oracle: 120 keys, all fluids, `forestry.squeezer` in nearly
+all of them; fixing it moved 11,036 prices, 553 of them from infinity to finite and none the
+other way.
+
+- **`Graph.real_output` is NOT `real_producers`, and the difference is load-bearing.** `_relax`
+  writes `cost[k]` only for keys a recipe LITERALLY outputs, so the seed's predicate must not
+  widen to the wildcard-meta sibling the way `real_producers` does. 478 input alternatives are
+  reachable only through a `mod:item:*` producer -- every damaged Electroblob wand -- and calling
+  those "produced" strands all 478 at infinity with nothing able to price them.
+- **A mirror that is currently correct is still a mirror.** `test_unsourced` asserts structurally
+  that nothing outside `model.py` combines a transfer test with a fluid test, because "defined
+  once" does not catch an INLINE copy, which is what `_relax` had.
+
+**`craftables` AND `raw` ARE PRICING INPUTS, on the same footing as `have`.** Both terminate a
+branch in `Solver.expand` -- one request to AE2, or "stop, I will get this myself" -- and until
+#193 neither reached `cost.estimate` at all, so the ranker priced a route through an
+autocraftable item at its full subtree while the solver was going to stop dead at it. The error
+ran one way and such routes lost to worse ones. `_seed` reproduces `expand`'s cascade by loop
+ORDER plus the under-a-raw-leaf guard, so stock, an infinite source and a learned EMC item still
+win, while a token, the unsourced mark and a dimension surcharge all lose. **Both are in
+`cost.fingerprint`**, or a warm cache serves one player's inventory to another.
+
 Three heuristics have been measured and REJECTED, so do not re-propose any of them without
 new evidence (#61):
 
@@ -923,11 +953,14 @@ one side made every fluid-to-fluid hop divide the cost by 1000, so a ten-hop cha
 for: a plan that routes through a nuclear fission chain to obtain a common reagent.
 
 Chemistry chains run 10+ hops, so the Bellman-Ford relaxation needs ~20 passes, not 6. The
-table is fingerprinted on graph mtime, stock, machine states, the machine ITEMS, the multiblock
-structures, the tuning constants AND `cost.FORMULA_VERSION` -- so editing `MACHINE_COST`
-invalidates it, and so does changing the arithmetic, which moves no other input at all.
-**Bump `FORMULA_VERSION` whenever you touch the per-unit formula**, or every machine holding a
-cache keeps serving pre-change prices and the fix looks like it did not work.
+table is fingerprinted on graph mtime, stock, what AE2 can autocraft, the declared raw stops,
+machine states, the machine ITEMS, the multiblock structures, the tuning constants AND
+`cost.FORMULA_VERSION` -- so editing `MACHINE_COST` invalidates it, and so does changing the
+arithmetic, which moves no other input at all.
+**Bump `FORMULA_VERSION` whenever you touch what `_seed` or `_relax` DOES**, not only the
+per-unit arithmetic, or every machine holding a cache keeps serving pre-change prices and the fix
+looks like it did not work. #193 is the case that widened that rule: it changed which keys count
+as a leaf, moved 11,036 prices, and moved no constant the hash reads.
 
 **The cache file lands BESIDE THE GRAPH, via `cost.cache_beside(graph_path)`, not at the relative
 `data/.cost-cache.json`** (PR #97). `estimate_cached(cache_path=None)` resolves through it, so

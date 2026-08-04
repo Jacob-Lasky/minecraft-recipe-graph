@@ -78,19 +78,26 @@ class TheCensusReadsStockTheWayTheServerDoesTest(unittest.TestCase):
             return census.load_stock(path)
 
     def test_all_three_namespaces_arrive(self):
-        have, placed = self.stock({"items": {"mod:a": 3}, "fluids": {"water": 1000},
-                                   "essentia": {"Perditio": 5},
-                                   "placed": {"mod:machine": 1}})
+        have, placed, _craftables = self.stock(
+            {"items": {"mod:a": 3}, "fluids": {"water": 1000},
+             "essentia": {"Perditio": 5}, "placed": {"mod:machine": 1}})
         self.assertEqual(have, {"mod:a": 3, "fluid:water": 1000, "essentia:perditio": 5})
         self.assertEqual(placed, {"mod:machine": 1})
 
     def test_an_aspect_is_lowercased_like_the_server_does(self):
-        have, _ = self.stock({"essentia": {"ORDO": 2}})
+        have, _placed, _craftables = self.stock({"essentia": {"ORDO": 2}})
         self.assertIn("essentia:ordo", have)
 
+    def test_what_ae2_can_autocraft_arrives_too(self):
+        # A PRICING INPUT SINCE #193, and the census exists to reproduce what the running
+        # server charges. Dropped here, every entry cost resting on a craftable would differ
+        # from the server's with nothing on the page to say why.
+        _have, _placed, craftables = self.stock({"craftables": ["mod:widget"]})
+        self.assertEqual({"mod:widget"}, craftables)
+
     def test_a_missing_file_is_empty_rather_than_an_error(self):
-        self.assertEqual(census.load_stock(None), ({}, {}))
-        self.assertEqual(census.load_stock("/nonexistent/have.json"), ({}, {}))
+        self.assertEqual(census.load_stock(None), ({}, {}, set()))
+        self.assertEqual(census.load_stock("/nonexistent/have.json"), ({}, {}, set()))
 
 
 if __name__ == "__main__":

@@ -149,6 +149,12 @@ OVERWORLD_ONLY = {".": 1}
 BARE = {
     "have": {},
     "craftables": [],
+    # The user's declared "stop here, I will get this myself". A solver input on both sides
+    # since the feature shipped and a COST input since #193, so it is declared here for the
+    # reason `derive_inputs` gives: the argument list of `cost.estimate` is the checklist, and
+    # an input the generator does not resolve prices every fixture for a configuration nobody
+    # is running. Empty in every scenario -- see the note below `scenario` for why.
+    "raw": [],
     "placed": {},
     "machine_overrides": {},
     "no_machine": [],
@@ -180,7 +186,7 @@ def scenario(**kw):
     return out
 
 
-# ONE SCENARIO FIELD IS DELIBERATELY UNEXERCISED, and it is a decision rather than a hole.
+# TWO SCENARIO FIELDS ARE DELIBERATELY UNEXERCISED, and each is a decision rather than a hole.
 # `source_overrides` is a loader whose entire output is the `free_sources` dict, which the
 # `free-source` target below already drives end to end -- and the solver cannot tell whether
 # an entry in that dict came from `generators.DEFAULT_GENERATORS` or from the user's file, so
@@ -189,7 +195,14 @@ def scenario(**kw):
 # something it does not emit, and a golden fixture asserting a false claim about the pack is
 # worse than an unexercised field. `tests/test_sources.py` covers the loader itself.
 #
-# It stays DECLARED regardless, because a fixture's `scenario` block is the port's description
+# `raw` is unexercised for a different reason: A DECLARED STOP LEAVES NOTHING ON THE NODE TO
+# CLAIM. `expand` marks it `raw` with no note, which is indistinguishable by status from an
+# ordinary leaf, so the only observable is an ABSENT SUBTREE -- a claim about tree shape that
+# the `CHECKS` table cannot express and that would therefore have to be a comment, which is
+# the thing `CHECKS` exists to replace. What #193 added is a PRICE, and both implementations
+# pin it directly: `tests/test_produced.py` and `mod/.../plan/CostTest.java`.
+#
+# Both stay DECLARED regardless, because a fixture's `scenario` block is the port's description
 # of what a solver input IS, and an incomplete description is the worse failure.
 
 
@@ -211,6 +224,13 @@ def derive_inputs(graph, sc):
     return {
         "info": info,
         "have": have,
+        # PRICING INPUTS SINCE #193, which is why they are resolved here rather than in
+        # `resolve_scenario` with the pins. Both terminate a branch in `expand`, so a table
+        # computed without them ranks routes over a different set of terminals than the plan
+        # walks -- and because they are per-inventory, two scenarios differing only in these
+        # must not share one cost table. `cost_signature` picks them up from this dict.
+        "craftables": set(sc["craftables"]),
+        "raw": set(sc["raw"]),
         "states": {uid: (i["state"], i["why"]) for uid, i in info.items()},
         # The overrides DOCUMENT, not a path: `generators.resolve` takes either, and handing
         # it the dict is what keeps `vanilla_water` on its documented default of true. A
@@ -234,13 +254,19 @@ def cost_signature(derived):
     strictly sharper, because `emc_knowledge` that resolves to no available keys genuinely
     IS the bare table, which a field-name key could never notice.
     """
-    # `default=list` renders the tuples in `states` and `targets`; `emc_available` is a set
-    # and is sorted rather than left to `default`, because a set has no order to render and
-    # two equal sets must produce one signature. 3.8 is the floor CI tests, so no dict
-    # merge operator here.
+    # `default=list` renders the tuples in `states` and `targets`; the three SETS are sorted
+    # rather than left to `default`, because a set has no order to render and two equal sets
+    # must produce one signature. 3.8 is the floor CI tests, so no dict merge operator here.
     signature = dict((k, derived[k]) for k in
                      ("have", "states", "free", "tokens", "gates", "targets"))
     signature["emc_available"] = sorted(derived["emc_available"])
+    # #193's two, and the reason this function keys on what `estimate` is HANDED rather than on
+    # a list of scenario field names: `craftables` moved from a non-pricing input to a pricing
+    # one, and a hand-maintained partition would have gone on letting the bare scenario and the
+    # stocked one share a table. Sharing across two inventories is a cache hit serving the
+    # wrong answer, which is the same failure `cost.fingerprint` covers for the disk cache.
+    signature["craftables"] = sorted(derived["craftables"])
+    signature["raw"] = sorted(derived["raw"])
     return json.dumps(signature, sort_keys=True, default=list)
 
 
@@ -256,23 +282,35 @@ def priced_environment(graph, derived):
         graph, have=derived["have"], machine_states=derived["states"],
         free_sources=derived["free"], machine_items=derived["targets"],
         token_kinds=derived["tokens"], dimension_gates=derived["gates"],
-        emc_available=derived["emc_available"])
+        emc_available=derived["emc_available"], craftables=derived["craftables"],
+        raw=derived["raw"])
     return env
 
 
 def resolve_scenario(graph, sc, priced):
-    """A priced environment plus the two inputs that do not reach the cost model."""
+    """A priced environment plus the ONE input that does not reach the cost model.
+
+    That input is the pins. `craftables` was here too until #193, on the reasoning that it
+    was a solver-only input; it prices now, so it is resolved in `derive_inputs` where the
+    cost signature can see it.
+    """
     pinned, pin_notes = pins_mod.resolve(graph, sc["pins"])
     env = dict(priced)
-    env.update(pinned=pinned, pin_notes=pin_notes,
-               craftables=set(sc["craftables"]))
+    env.update(pinned=pinned, pin_notes=pin_notes)
     return env
 
 
 def solver_for(graph, env, max_nodes):
-    """The same Solver `server.State.solver` builds. Keep the argument list in step."""
+    """The same Solver `server.State.solver` builds. Keep the argument list in step.
+
+    ONE DELIBERATE DIFFERENCE: `raw` is passed here and not there, because the server has no
+    way for a user to declare a stop and so has no set to hand over. It is always EMPTY in
+    every scenario, so the two solvers are identical in behaviour as well as in effect; what
+    it buys is that the fixture's `scenario` block describes the whole input surface, which
+    is what the Java side reconstructs from.
+    """
     return Solver(graph, have=env["have"], craftables=env["craftables"],
-                  machine_states=env["states"], costs=env["costs"],
+                  raw=env["raw"], machine_states=env["states"], costs=env["costs"],
                   free_sources=env["free"], token_kinds=env["tokens"],
                   pinned=env["pinned"], max_nodes=max_nodes,
                   dimension_gates=env["gates"], emc_available=env["emc_available"])
@@ -456,29 +494,41 @@ TARGETS = [
     Target(
         "fluid-chain", "fluid:nethengeic_fluid",
         expect=("fluid", "craft", "raw", "oredict", "alternatives", "token",
-                "tokens_needed", "machine", "source", "not_truncated"),
-        why="Strong Mythic Essence, and this is BOTH the fluid fixture and the deep one. A "
-            "fluid is not a small variation on an item: `cost.FLUID_SCALE` divides both "
-            "sides of every recipe it touches, and scaling one side alone makes every "
-            "fluid-to-fluid hop 1000x cheaper while the table still looks populated (see "
-            "cost.py). It is also 634 nodes finishing inside the default budget, which is "
-            "the only fixture here that pins the whole walk rather than the first few "
-            "hops: recipe choice at every level, the ancestor set, 44 oredict nodes, 7 "
-            "token leaves reported apart from the shopping list, machines and free "
-            "sources. A port that gets one scoring term wrong diverges somewhere in here "
-            "even when every small fixture agrees.\n\nIt took over the deep-chain role "
-            "from `extendedcrafting:singularity_custom:1012`, which completed on the "
-            "schema-3 oracle and EXHAUSTS ITS WORK BUDGET on the schema-5 one after 135 "
-            "seconds. A 135-second fixture on a tool that reruns whenever a cost constant "
-            "moves is a fixture that stops being regenerated.\n\nWATCH THE WORK BUDGET "
-            "HERE, for exactly the reason the previous paragraph retired its predecessor. "
-            "#176 took this plan from 347 to 388 to 634 nodes and its `work` from 400 to "
-            "28,012 against a budget of 80,000 -- 0.5% of the budget to 35% in one change, "
-            "because the search no longer stops at 40 unsourced dead ends and instead "
-            "explores the routes behind them. `truncated` and `exhausted` are both still "
-            "false, so the claims above still hold, but the headroom that made this a "
-            "SAFE deep fixture is much thinner than when it was chosen. If a later change "
-            "flips `exhausted` anywhere in this set, look here first."),
+                "tokens_needed", "machine", "truncated"),
+        why="Strong Mythic Essence, and this is the fluid fixture. A fluid is not a small "
+            "variation on an item: `cost.FLUID_SCALE` divides both sides of every recipe it "
+            "touches, and scaling one side alone makes every fluid-to-fluid hop 1000x "
+            "cheaper while the table still looks populated (see cost.py). Recipe choice at "
+            "every level, the ancestor set, oredict nodes, token leaves reported apart from "
+            "the shopping list and machines are all exercised here, so a port that gets one "
+            "scoring term wrong diverges somewhere in this plan even when every small "
+            "fixture agrees.\n\nIt took over the deep-chain role from "
+            "`extendedcrafting:singularity_custom:1012`, which completed on the schema-3 "
+            "oracle and EXHAUSTS ITS WORK BUDGET on the schema-5 one after 135 seconds. A "
+            "135-second fixture on a tool that reruns whenever a cost constant moves is a "
+            "fixture that stops being regenerated.\n\nAND IT HAS NOW LOST THAT ROLE THE "
+            "SAME WAY, WHICH THE PREVIOUS VERSION OF THIS NOTE PREDICTED IN SO MANY WORDS. "
+            "It said to watch the work budget, because #176 took this plan from 347 to 388 "
+            "to 634 nodes and its `work` from 400 to 28,012 of 80,000 -- 0.5% of the budget "
+            "to 35% in one change -- \"because the search no longer stops at 40 unsourced "
+            "dead ends and instead explores the routes behind them\", and warned that the "
+            "headroom which made this a safe deep fixture was much thinner than when it was "
+            "chosen. #193 spent the rest of it: 553 more keys stop being infinite, the "
+            "search behind them is explored, and `work` goes to the budget. Measured, 152 "
+            "nodes and `exhausted` true at max_nodes 4,000 (budget 80,000) AND at 20,000 "
+            "(budget 400,000) -- the same 152 nodes both times, so this is not a budget that "
+            "can be raised into. It claims `truncated` now, which is what it does.\n\nA "
+            "REPLACEMENT WAS SEARCHED FOR AND THERE IS NONE, so nobody repeats the search: "
+            "of the 372 fluids priced within a factor of four of this one, the 60 solved "
+            "come closest at 90 nodes and no free-source draw (`fluid:acacia_resin`) or 701 "
+            "nodes and exhausted (`fluid:aerotheum`). The ten-claim combination this target "
+            "used to carry is not available on this graph. `source` and `from_sources` stay "
+            "covered by `free-source` and `not_truncated` by eighteen other targets, so no "
+            "CHECK is dropped -- what is lost is the whole-walk pin, and the honest place to "
+            "get it back is the ranking defect that spends the budget: `score_recipe` ranks "
+            "`cheap` above `-cyclic`, so cheaper prices make cheap cycles win and the search "
+            "pays for backtracking out of them. See the third rejected repricing under "
+            "`cost.BASE_RAW_COST`, which names the same defect and defers to it."),
     Target(
         "truncated", "fluid:nethengeic_fluid", max_nodes=40,
         expect=("depth", "truncated", "craft"),
@@ -952,10 +1002,10 @@ COST_PROBE_ITEMS = [key for key, _label in _cost_probe().PROBES]
 # EXEMPTIONS GO IN `NOT_PINNED` WITH A REASON, never by quietly leaving a name out of here.
 PINNED_CONSTANTS = (
     "BASE_RAW_COST", "BLOCKED_CEILING", "BLOCKED_FLOOR", "BUILD_KNEE", "BUILD_SCALE",
-    "BUILD_SLOPE", "BUILD_SPREAD", "DIMENSION_COST", "EMC_COST", "FLUID_SCALE",
-    "GATE_COST", "LOOT_COST", "PASSES", "PRICED_CEILING", "SETTLED_FRACTION",
-    "TRANSFER_PENALTY", "UNGATED_MACHINE_COST", "UNPRICED_MACHINE_COST",
-    "UNSOURCED_COST",
+    "BUILD_SLOPE", "BUILD_SPREAD", "CRAFTABLE_COST", "DIMENSION_COST", "EMC_COST",
+    "FLUID_SCALE", "GATE_COST", "LOOT_COST", "PASSES", "PRICED_CEILING",
+    "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
+    "UNPRICED_MACHINE_COST", "UNSOURCED_COST",
 )
 
 # The only numeric constants in `cost` that are deliberately NOT in the recorded set, each

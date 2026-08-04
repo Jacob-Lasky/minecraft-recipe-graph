@@ -351,13 +351,61 @@ TOKEN_COST = {LOOT: LOOT_COST, GATE: GATE_COST,
 # open question 1 in that issue and is unanswered.
 EMC_COST = 0.5
 
+# What an item the AE2 network can AUTOCRAFT costs: one request. Issue #193.
+#
+# `Solver.expand` has terminated on a craftable since the feature shipped -- status `have`,
+# note "AE2 can autocraft", and deliberately no contribution to `used_from_stock`, which
+# `tests/fixtures/plan/plan-in-stock.json` records -- and until now the cost model was never
+# told. So the ranker priced a route through a craftable at its FULL SUBTREE COST while the
+# solver was going to stop dead at it, and the error ran one way: such routes lost to worse
+# ones. The cost model and the plan were ranking two different sets of terminals.
+#
+# BETWEEN AN INFINITE SOURCE AND A RAW LEAF, and both bounds are the claim:
+#
+#     0.0 (stock) < SOURCE_COST < CRAFTABLE_COST < EMC_COST < BASE_RAW_COST
+#
+# Above SOURCE_COST because a generator you own is genuinely free and this is not: the
+# network spends real materials to fill the request, and they have to be replaced. Below
+# BASE_RAW_COST because the alternative to typing one request is going and gathering the
+# thing, which is what a raw leaf prices -- the same argument EMC_COST makes for a learned
+# transmutation, and the reason a craftable must not simply be seeded at 0.0 like stock: you
+# do not hold it.
+#
+# BELOW EMC_COST, AND THAT ORDERING IS READ OFF `expand` RATHER THAN GUESSED. A craftable
+# comes back `have`, the same status as a stack in the network; a learned transmutation gets
+# its own `emc` status and a note naming the balance it will spend. The display already
+# treats one as nearer to owning the item than the other. A DISTINCT figure from EMC_COST
+# regardless, per #95: two unrelated statements sharing one number destroys the ordering
+# among both.
+#
+# IT DOES NOT DECIDE WHICH TERMINAL WINS FOR A KEY THAT IS BOTH, and that is worth knowing
+# before anyone moves it. `_seed` reproduces `expand`'s cascade by ORDER and by the
+# under-a-raw-leaf guard, so a key that is learned AND autocraftable keeps EMC_COST whatever
+# this number is, exactly as `expand` returns at the EMC branch first. The magnitude only
+# separates two DIFFERENT keys competing for one slot, and nobody has measured that trade.
+#
+# NO RELAXATION CAN UNDERCUT IT, which is what makes seeding a terminal sound at all.
+# `_relax` prices an output at `base + ingredients / qty` with `base` undivided, and the
+# cheapest `base` there is is `MACHINE_COST["have"]` = 1.0 = `BASE_RAW_COST`
+# (`AMachineCostsAtLeastAsMuchAsMiningTest` pins that equality), so anything seeded below a
+# raw leaf is a floor rather than a suggestion. That is the same property `_settle_reshaped`
+# leans on, read in the other direction.
+CRAFTABLE_COST = 0.25
+
 # Bumped whenever the per-unit FORMULA in `estimate` changes, and folded into `fingerprint`.
 # The cache is keyed on the inputs (graph, stock, machine states, tuning constants) and a
 # formula change moves none of them, so without this a machine holding `.cost-cache.json`
 # would keep serving prices computed by the old arithmetic forever -- the one failure this
 # cache must never have, and one that looks like "the fix did not work" rather than like a
 # stale cache.
-FORMULA_VERSION = 10
+#
+# ANY CHANGE TO WHAT `_seed` OR `_relax` DOES COUNTS AS A FORMULA CHANGE, not just the
+# arithmetic. 11 is #193 changing which keys `_seed` calls a leaf, which moved 11,036 prices on
+# the reference graph while every constant it reads stayed exactly where it was. Adding
+# CRAFTABLE_COST to the hash happens to invalidate the same caches today, and leaning on that
+# would be the reasoning `fingerprint` already warns against: "the cache is correct because of
+# how a constant happens to be defined" goes stale the moment the constant does.
+FORMULA_VERSION = 11
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -575,8 +623,14 @@ def _cheapest_alternative(cost, ingredient, ore_members):
 
 def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=None,
              machine_items=None, token_kinds=None, dimension_gates=None,
-             emc_available=None):
+             emc_available=None, craftables=None, raw=None):
     """{item key: estimated cost}. Lower is easier to get.
+
+    `craftables` and `raw` are PER-INVENTORY, on the same footing as `have`, which is why
+    they are arguments here rather than anything read off the graph. Both terminate a branch
+    in `Solver.expand` and until #193 neither reached a price. `fingerprint` covers them for
+    the same reason it covers `have`: a table computed for one player's network served to
+    another is a wrong answer that looks like a cache hit.
 
     With `machine_items` (`{category: (machine item key, ...)}` from
     `machines.build_targets`) this runs the relaxation TWICE, and the second run is issue
@@ -593,7 +647,8 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
     machine price this relaxation used instead of re-deriving a flat one.
     """
-    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates, emc_available)
+    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates, emc_available,
+                 craftables, raw)
     cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
                             passes, machine_states, None)
     if not machine_items:
@@ -646,8 +701,15 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
 
 
 def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
-          emc_available=None):
-    """Starting costs, before any recipe is considered. Shared by both relaxation passes."""
+          emc_available=None, craftables=None, raw=None):
+    """Starting costs, before any recipe is considered. Shared by both relaxation passes.
+
+    THE ORDER OF THESE LOOPS IS `Solver.expand`'s CASCADE, not a sequence of independent
+    rules. Where two of them could answer for one key, whichever the solver returns at first
+    has to be the one that sets the price, or the plan stops at a node the ranking priced as
+    something else. The `min`/`max`/guard on each loop is what implements that, and every one
+    of them says which branch of `expand` it is standing in for.
+    """
     from .generators import SOURCE_COST
 
     cost = {}
@@ -671,7 +733,41 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # you cannot go and get it, you have never been where it is. Left to the loop below,
     # `min` would already be holding BASE_RAW_COST from this pass and would keep it -- the
     # gate would compute, appear in the plan's note, and change no price at all.
-    produced = graph.by_output
+    #
+    # LEAF-NESS COMES FROM `Graph.real_output` AND NOT FROM `by_output`, WHICH IS #193. This
+    # loop used to test `alt not in graph.by_output`, the one place in the codebase that
+    # answered "is this key produced" without excluding container empties -- so a fluid whose
+    # only route is emptying a can was not a leaf here and got no seed, while `_relax` below
+    # applied the exclusion and refused to price it from that recipe. Nothing seeded it and
+    # nothing relaxed it; the cost model held infinity while `Solver.expand` called it raw and
+    # put it on the shopping list. 120 fluids on the reference graph, `fluid:liquid_uu_matter`
+    # and `fluid:sewage` among them, nearly all of them produced only by a Forestry Squeezer.
+    # Every parent's price inherited the cost model's version, so cost said impossible while
+    # the plan said go and buy it.
+    #
+    # THEY DO NOT END AT THE LEAF PRICE THIS LOOP GIVES THEM. The rule below that raises
+    # `graph.produced_in_name_only` to UNSOURCED_COST collects exactly this population, because
+    # a key whose only producers are container empties is one the graph has PROVEN it cannot
+    # explain. This loop makes them finite; that one says what finite number.
+    #
+    # AND NOT ONE OF THE 120 CARRIES THE `unsourced` BADGE, measured, which is worth recording
+    # because #193 states the opposite. `reachable_form` returns None for every one of them: a
+    # fluid has no meta sibling, no NBT variant and no `<form><Material>` group, so there is no
+    # other form to name and #139's mark correctly stays off. The plan said "go and buy this"
+    # with no annotation at all, which is why nothing on screen hinted at the disagreement.
+    #
+    # RESOLVED ONCE INTO A SET RATHER THAN ASKED PER OCCURRENCE. The loop below reaches an
+    # already-priced key by `alt not in cost` and a PRODUCED one every single time it appears
+    # as an ingredient, which on the reference graph is millions of visits against 51,486
+    # distinct output keys. Asked per occurrence the predicate cost 23s of the seed; asked once
+    # per key it is the same dict lookup the old `by_output` test was.
+    #
+    # THE PREDICATE IS READ DIRECTLY HERE, not derived as the complement of
+    # `graph.produced_in_name_only` below. The two are the same answer by construction and the
+    # complement is one line shorter, and a reader then has to hold the identity in their head
+    # to see what this loop tests. One more pass over 51,486 keys costs nothing beside the
+    # relaxation. Java does the same, in the same two places, for the same reason.
+    produced = frozenset(key for key in graph.by_output if graph.real_output(key))
     gates = dimension_gates or {}
     for r in graph.recipes:
         for ing in r.inputs:
@@ -782,10 +878,35 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # own price for what the player must go and DO, and `Solver.expand` returns at the token
     # branch before it ever reaches the unsourced mark -- so the price has to agree with the
     # display about which of the two answers a reader gets.
-    for key in graph.unsourced_keys:
-        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
-            continue
-        cost[key] = max(cost.get(key, BASE_RAW_COST), UNSOURCED_COST)
+    #
+    # TWO SETS, ONE RULE, AND #193 IS THE SECOND OF THEM. A key every one of whose producers
+    # is a container empty is one the graph has proven it cannot explain, on exactly the
+    # positive evidence UNSOURCED_COST exists for -- see `Graph.produced_in_name_only`, whose
+    # docstring carries the measurement and the reason the two sets cannot be merged into one.
+    # They are disjoint by construction (`unsourced_keys` needs `by_output` empty, this needs it
+    # non-empty), so which one is walked first cannot matter, and both are genuine `frozenset`s
+    # whose iteration order varies between processes. That is safe HERE for the same reason
+    # `_settle_reshaped` gives: every iteration writes the same constant to a distinct key, so
+    # the result is order-independent by construction rather than by luck of the hash seed.
+    #
+    # NOT `BASE_RAW_COST`, WHICH IS THE OTHER READING AND WAS BUILT AND MEASURED. A raw leaf is
+    # the arithmetic that agrees with `expand`'s `raw` verdict most literally -- and it is the
+    # CHEAPEST value in the model, so it makes a route through a fluid the tool cannot source
+    # more attractive than any route it can account for. That is verbatim #176's defect, in the
+    # one population #176's set cannot reach, and #176's argument decides it: what #193 reported
+    # is an INFINITY, finiteness is what fixes it, and the cheapest finite number is not owed.
+    #
+    # THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, exactly as for UNSOURCED_COST itself, and
+    # the magnitude measures nearly inert on the one target that could be checked end to end.
+    # `fluid:nethengeic_fluid` plans 141 nodes and 41 shopping rows at BASE_RAW_COST against 152
+    # and 43 at UNSOURCED_COST, and BOTH shopping-list `fluid:liquid_uu_matter` and `fluid:meat`
+    # because on that target there is no alternative to prefer. The ordering is what matters
+    # where there IS one.
+    for population in (graph.unsourced_keys, graph.produced_in_name_only):
+        for key in population:
+            if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+                continue
+            cost[key] = max(cost.get(key, BASE_RAW_COST), UNSOURCED_COST)
 
     # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
     # rule above answers "how cheaply can this be had"; a token answers "what does the
@@ -798,6 +919,42 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
         if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
             continue
         cost[key] = TOKEN_COST.get(kind, BASE_RAW_COST)
+
+    # AND LAST OF ALL, THE TWO TERMINALS THE PLAYER DECLARES. #193. Both stop `Solver.expand`
+    # dead and until now neither changed a price, so the cost model ranked routes over one set
+    # of terminals while the solver planned with another.
+    #
+    # AFTER EVERY OTHER RULE BECAUSE THAT IS WHERE `expand` CHECKS THEM: the `raw`/`craftables`
+    # branch sits above the cycle check, above the world-ore stop, above the token branch and
+    # above the unsourced mark, so each of those has to lose here. A `raw` key that is also a
+    # gated world ore drops from 801 to a raw leaf, and that is the right way round -- the
+    # player saying "I will get this myself" is a statement about THIS world, which outranks
+    # the graph's inference that they have never been to Sedna.
+    #
+    # THE GUARD IS THE SAME ONE THE TOKENS USE, and it is what keeps the three earlier
+    # branches of `expand` winning: anything already priced below a raw leaf is stock, an
+    # infinite generator or a learned EMC item, and `expand` returns at all three before it
+    # reaches this branch. So the cascade is reproduced by structure rather than by the
+    # relative size of the constants.
+    for key in raw or ():
+        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+            continue
+        # BASE_RAW_COST AND NOT A CONSTANT OF ITS OWN, which is not a #95 violation but the
+        # opposite. #95 forbids one figure carrying two unrelated STATEMENTS; a declared stop
+        # and a key no recipe makes are the same statement -- "you go and get this yourself" --
+        # and `expand` backs that up by giving both `STATUS_RAW` and adding both to
+        # `leaf_totals`. A separate number would assert a difference the solver does not make.
+        #
+        # ASSIGNMENT RATHER THAN `min`, because this has to be able to LOWER a token, an
+        # unsourced mark or a dimension surcharge that a rule above already wrote.
+        cost[key] = BASE_RAW_COST
+
+    # AFTER `raw`, because `expand` prefers the craftable reading when a key is in both: it
+    # reports `have` with the autocraft note rather than putting the key on the shopping list.
+    for key in craftables or ():
+        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+            continue
+        cost[key] = CRAFTABLE_COST
     return cost
 
 
@@ -830,11 +987,13 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
             if math.isinf(ingredients):
                 continue
             for key, qty in r.outputs:
-                # A container transfer never makes its fluid cheaper: emptying a can you
-                # own is not production. Mirrors Graph.real_producers, which is what the
-                # solver walks -- if these disagree the ranker prices a route the solver
-                # cannot take.
-                if r.transfer and key.startswith(FLUID_PREFIX):
+                # A container transfer never makes its fluid cheaper: emptying a can you own
+                # is not production. THROUGH `Graph.real_production`, which is the predicate
+                # the solver walks -- if these disagree the ranker prices a route the solver
+                # cannot take. This used to be a hand-rolled copy of it (#193), correct on
+                # the day it was written, and a mirror that is currently correct is still a
+                # mirror: the failure is at the next edit to `real_production`.
+                if not graph.real_production(r, key):
                     continue
                 # ONLY THE INGREDIENTS AMORTISE. `base` is what running this recipe costs
                 # you at all -- overwhelmingly the machine -- and dividing it by the batch
@@ -856,7 +1015,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
 
 def fingerprint(graph_path, have, machine_states, free_sources, machine_items=None,
                 multiblocks=None, token_kinds=None, dimension_gates=None,
-                emc_available=None):
+                emc_available=None, craftables=None, raw=None):
     """Stable digest of everything `estimate` reads, for cache validation.
 
     Deliberately hashes the machine states and stock CONTENTS rather than the file mtimes:
@@ -895,8 +1054,9 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     # that moves without any constant moving; these are the PRICES those data are charged
     # at, and both halves are needed.
     from .generators import SOURCE_COST
-    h.update(("%r %r %r %r %r"
-              % (LOOT_COST, GATE_COST, DIMENSION_COST, EMC_COST, UNSOURCED_COST)).encode())
+    h.update(("%r %r %r %r %r %r"
+              % (LOOT_COST, GATE_COST, DIMENSION_COST, EMC_COST, UNSOURCED_COST,
+                 CRAFTABLE_COST)).encode())
     h.update(("%r" % (SOURCE_COST,)).encode())
     # Beside the stock rather than with the constants: a gate depends on which dimensions
     # the SAVE has terrain for, so it moves when the player flies somewhere without the
@@ -913,6 +1073,18 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     h.update(b"\x00")
     for key, qty in sorted((have or {}).items()):
         h.update(("%s=%s;" % (key, qty)).encode())
+    h.update(b"\x00")
+    # Beside the stock, because they are the same KIND of input: what this player's network can
+    # autocraft and what this player has declared they will fetch themselves. #193 fed both to
+    # `estimate`, and an input the prices depend on that the fingerprint does not cover is a
+    # cache HIT serving one inventory's table to another -- a silent wrong answer, which is the
+    # one failure this function exists to prevent. Two separate runs rather than one merged
+    # set, so a key moving between `raw` and `craftables` moves the digest.
+    for key in sorted(craftables or ()):
+        h.update(("%s;" % key).encode())
+    h.update(b"\x00")
+    for key in sorted(raw or ()):
+        h.update(("%s;" % key).encode())
     h.update(b"\x00")
     for uid, state in sorted((machine_states or {}).items()):
         h.update(("%s=%s;" % (uid, state[0])).encode())
@@ -968,7 +1140,7 @@ def cache_beside(graph_path):
 
 def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sources=None,
                     cache_path=None, passes=PASSES, machine_items=None, token_kinds=None,
-                    dimension_gates=None, emc_available=None):
+                    dimension_gates=None, emc_available=None, craftables=None, raw=None):
     """`estimate`, memoised on disk. Falls back to computing on any cache problem.
 
     `cache_path` defaults to `cache_beside(graph_path)`; see there for why it is not the
@@ -1001,7 +1173,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
                         getattr(graph, "multiblocks", None), token_kinds, dimension_gates,
-                        emc_available)
+                        emc_available, craftables, raw)
     if cache_path and os.path.exists(cache_path):
         try:
             with open(cache_path) as fh:
@@ -1017,7 +1189,7 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     cost = estimate(graph, have=have, machine_states=machine_states, passes=passes,
                     token_kinds=token_kinds, dimension_gates=dimension_gates,
                     free_sources=free_sources, machine_items=machine_items,
-                    emc_available=emc_available)
+                    emc_available=emc_available, craftables=craftables, raw=raw)
     if cache_path:
         try:
             os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)

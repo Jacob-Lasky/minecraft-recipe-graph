@@ -165,10 +165,36 @@ class ContainerFluidTest(unittest.TestCase):
         self.assertEqual(result["tree"]["status"], "raw")
 
     def test_cost_model_agrees_with_the_solver(self):
-        # If these disagree the ranker prices a route the solver cannot walk.
+        """If these disagree the ranker prices a route the solver cannot walk.
+
+        AGREEMENT IS A FINITE PRICE, NOT AN INFINITY, and this test asserted infinity until
+        #193. The solver calls this fluid `raw` and shopping-lists it -- the assertion right
+        above -- so a cost model saying "unobtainable" is the disagreement rather than the
+        agreement, and every parent's price inherited it.
+
+        WHAT IT COULD AND COULD NOT CATCH, because the difference is the point. It would fail
+        if the container exclusion were dropped, since the squeezer route would then price the
+        fluid and the assertion below is against exactly that number. It could NOT see #193's
+        defect: nothing in `_graph` CONSUMED the fluid,
+        `cost._seed`'s leaf rule walks recipe INPUTS, so the key was never offered to the
+        predicate at all and came out absent from the table, which the `math.isinf` default
+        answered for. A consumer is what makes the assertion about the rule.
+
+        The figure is `UNSOURCED_COST` rather than a raw leaf, which was measured; see
+        `Graph.produced_in_name_only`. The wider population and the enumerated agreement
+        between the three readers are in `tests/test_produced.py`.
+        """
         g = self._graph()
+        g.add(Recipe("enrich", "t", [("mod:enriched", 1)],
+                     [Ingredient(["fluid:uranium_fluoride"], 1000, "fluid")],
+                     category="minecraft.crafting"))
         costs = cost.estimate(g)
-        self.assertTrue(math.isinf(costs.get("fluid:uranium_fluoride", math.inf)))
+        self.assertEqual(cost.UNSOURCED_COST, costs.get("fluid:uranium_fluoride"))
+        # And the price is not one the CAN computed, which is the constraint the exclusion
+        # guards: the squeezer route would land on machine + TRANSFER_PENALTY + the can.
+        self.assertNotEqual(cost.UNGATED_MACHINE_COST + cost.TRANSFER_PENALTY
+                            + costs.get("forestry:can:1", 0.0),
+                            costs.get("fluid:uranium_fluoride"))
 
 
 class ContainerDetectionTest(unittest.TestCase):
@@ -324,12 +350,34 @@ class CacheTest(unittest.TestCase):
             fh.write("{not json")
         self.assertIn("fluid:water", cost.estimate_cached(g, "x.json", cache_path=path))
 
-    def test_infinite_costs_survive_a_cache_round_trip(self):
-        g = ContainerFluidTest._graph()
+    def test_a_null_in_a_cache_file_reads_back_as_infinity(self):
+        """The `None`/`inf` encoding, exercised through the branch a real cache reaches.
+
+        THIS TEST USED TO ASSERT NOTHING. It primed a cache from `ContainerFluidTest._graph`
+        and then checked `reloaded.get(key, math.inf)` was infinite -- but the key was never in
+        the table at all, so the DEFAULT supplied the answer and the assertion held whatever
+        the encoding did.
+
+        The write half is unreachable from `estimate` today: every seed rule stores a finite
+        number and `_relax` only ever lowers to a finite one, so no key comes out of `estimate`
+        holding an infinity to encode. The READ half is reachable by anything on disk -- a file
+        written by an older version, or by a future rule that does store one -- so that is the
+        direction worth pinning, and it is pinned against a hand-written document rather than
+        against one this code produced.
+        """
+        g = chain_graph()
         path = os.path.join(tempfile.mkdtemp(), "cost.json")
-        cost.estimate_cached(g, "x.json", cache_path=path)
-        reloaded = cost.estimate_cached(g, "x.json", cache_path=path)
-        self.assertTrue(math.isinf(reloaded.get("fluid:uranium_fluoride", math.inf)))
+        stamp = cost.fingerprint("x.json", None, None, None, None,
+                                 getattr(g, "multiblocks", None), None, None, None, None, None)
+        with open(path, "w") as fh:
+            json.dump({"fingerprint": stamp, "cost": {"mod:unreachable": None,
+                                                      "fluid:water": 3.5}}, fh)
+        table = cost.estimate_cached(g, "x.json", cache_path=path)
+        self.assertIn("mod:unreachable", table)
+        self.assertTrue(math.isinf(table["mod:unreachable"]))
+        # And the hit really was served from the file rather than recomputed, or the assertion
+        # above would be about a key `estimate` never wrote.
+        self.assertEqual(3.5, table["fluid:water"])
 
     def test_no_cache_path_memoises_beside_the_graph_not_the_cwd(self):
         """The default must follow the GRAPH, because `plan` runs in a container too.

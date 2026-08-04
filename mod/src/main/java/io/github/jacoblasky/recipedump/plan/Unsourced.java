@@ -102,16 +102,45 @@ final class Unsourced {
             if (!g.isLive(keyId)) {
                 continue;
             }
-            // `hasProducers`, not `realProducers`: python tests `graph.by_output.get(key)`,
-            // which is every recipe that outputs it INCLUDING a container empty. The
-            // predicate below then applies the narrower `real_producers` test itself, so a
-            // key produced only by a transfer is excluded here and re-admitted there -- and
-            // that asymmetry is python's, deliberately, because a transfer is a route the
-            // relaxation may still lower this price through.
+            // A KEY WITH ANY PRODUCER IS OUT, INCLUDING A CONTAINER EMPTY, which is what
+            // python's `not self.by_output.get(key)` says. `hasProducers` also widens to the
+            // wildcard-meta sibling and `by_output.get` does not, and the two still agree on
+            // the SET: for a wildcard-produced key, python's second clause calls
+            // `real_producers`, which widens, finds the producer and returns None. So this
+            // skip is the same population either way.
+            //
+            // A key produced ONLY by a transfer is therefore excluded here -- and it is not
+            // left unpriced, because {@link #producedInNameOnly} above collects exactly those
+            // and {@link Cost#seed} charges them the same figure. Before #193 nothing did, and
+            // the seed and the relaxation between them left 120 fluids at infinity.
             if (g.hasProducers(keyId)) {
                 continue;
             }
             if (reachableForm(g, keyId, scratch) >= 0) {
+                Bits.set(out, keyId);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Keys some recipe OUTPUTS while {@link RecipeGraph#realProduction} says none of them
+     * makes it. 120 on the reference graph, every one a fluid. #193.
+     *
+     * THE SAME CLAIM AS {@link #keys} AND A DIFFERENT POPULATION, which is why it is a second
+     * bitset rather than a widening of that one. Both mean "the graph has POSITIVE EVIDENCE it
+     * cannot explain where this comes from", so {@link Cost#seed} charges both
+     * {@code UNSOURCED_COST}. They cannot be merged: {@link #keys} requires byOutput EMPTY and
+     * this requires it non-empty, so the intersection is zero by construction -- measured 0 on
+     * the reference graph -- and {@link #keys}'s second clause needs another form the graph CAN
+     * make, which is None for all 120 because a fluid has no meta sibling, no NBT variant and
+     * no form group. Mirrors `Graph.produced_in_name_only` in python, whose docstring carries
+     * the measurement and the argument for the price.
+     */
+    static long[] producedInNameOnly(RecipeGraph g) {
+        long[] out = Bits.ofSize(g.keyCount());
+        for (int keyId = 0; keyId < g.keyCount(); keyId++) {
+            if (g.byOutput().count(keyId) > 0 && !g.realOutput(keyId)) {
                 Bits.set(out, keyId);
             }
         }

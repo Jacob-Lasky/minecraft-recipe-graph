@@ -794,7 +794,12 @@ class State:
             free_sources=self.free_sources, cache_path=self.cost_cache_path,
             machine_items=machines_mod.build_targets(self.machine_info),
             token_kinds=self.token_kinds, dimension_gates=self.dimension_gates,
-            emc_available=self.emc_available)
+            emc_available=self.emc_available,
+            # Same rule as the stock: what AE2 can autocraft terminates a branch in the
+            # solver, so it has to terminate one in the ranking too, or every route through
+            # a craftable is priced at a subtree the plan will never walk (#193). `solver`
+            # below hands the same set to `Solver`, and one answer is the point.
+            craftables=self.craftables)
         # The two search indexes, built here rather than on first use. Between them they
         # scan every label and take about two seconds, and the ONLY thing that triggers
         # them is a keystroke -- so left lazy, the first search of a session stalls while
