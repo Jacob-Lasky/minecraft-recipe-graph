@@ -112,9 +112,12 @@ public class PlannerLayoutTest {
 
     @Test
     public void theBiggestTreeStillFitsInTheViewportAndOverflowsIt() {
-        // The hard case the scroll area exists for: 634 nodes in a 400x220 panel. 347 before
+        // The hard case the scroll area exists for: 512 nodes in a 400x220 panel. 347 before
         // #172 reordered the cycle term, 388 before #176 priced the unsourced set and the
-        // plan stopped dead-ending on 40 items the graph could not explain.
+        // plan stopped dead-ending on 40 items the graph could not explain, 634 before #211 and
+        // #169 demoted the loot tables and automation cards it was routing through. See
+        // `PlanJsonTest.theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive`, which carries the
+        // measurement for why a DROP here is the plan getting more honest and not smaller.
         //
         // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved twice
         // and the method was still called `aThreeHundredNodeTree` at 388. A test name that
@@ -123,7 +126,7 @@ public class PlannerLayoutTest {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(634, tree.getChildren().size());
+        assertEquals(512, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
