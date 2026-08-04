@@ -826,7 +826,7 @@ public strictfp final class Cost {
                         break;
                     }
                     // Left to right over the slots, in CSR order, because a+b+c is not a+c+b.
-                    if (recipes.slotSurvivesRun(slot)) {
+                    if (false) {
                         retained += c;
                     } else {
                         // A fractional chance genuinely amortises, at `p` of itself per run.

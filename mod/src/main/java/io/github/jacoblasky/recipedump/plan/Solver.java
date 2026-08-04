@@ -1196,7 +1196,7 @@ public final class Solver {
             // Blaze Data Models when the answer is one. Still expanded, because you genuinely
             // cannot run the recipe without it; the quantity was the defect, not the row.
             PlanNode child = expand(slot.keyId,
-                    slot.survivesRun() ? slot.qty : slot.qty * runs, ancestors, depth + 1);
+                    slot.qty * runs, ancestors, depth + 1);
             if (slot.options > 1) {
                 child.altCount = slot.options;
             }
@@ -1290,7 +1290,7 @@ public final class Solver {
      * otherwise land in different buckets, splitting a row on a distinction nothing else makes.
      */
     private static long mergeBucket(int keyId, float chance) {
-        return ((long) keyId << 32) | (Float.floatToIntBits(chance + 0.0f) & 0xffffffffL);
+        return (long) keyId;
     }
 
     // -- the wire format ----------------------------------------------------------------
