@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client.jei;
 
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
+import io.github.jacoblasky.recipedump.client.planner.NodeStatus;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
@@ -18,7 +19,7 @@ import org.apache.logging.log4j.LogManager;
  *
  * <h2>An ore or fluid node answers false, and that is the right answer rather than a gap</h2>
  *
- * `canShowInRecipeViewer` is asked per node, and for an `ore:` node it says no even though the
+ * `canShowUses` is asked per node, and for an `ore:` node it says no even though the
  * plan does know which concrete item was chosen. That is deliberate. `Solver.resolveOre`
  * attaches the resolved member AS THE NODE'S ONLY CHILD -- `solve.py`'s `resolve_ore` returns
  * `{"status": "oredict", "resolved_to": best, "children": [child]}` -- so the concrete item is
@@ -137,8 +138,27 @@ public final class JeiNodeActions implements NodeActions {
     /**
      * {@inheritDoc}
      *
-     * <p>Both halves are load-bearing. The stack decides whether there is anything to focus
-     * on; {@link JeiBridge#isAvailable} decides whether focusing it would do anything.
+     * <p>A TOKEN ANSWERS NO EVEN THOUGH IT HAS A STACK, which is the whole reason this is not one
+     * method with {@link #canShowUses}. `contenttweaker:dungeon_drop` is a REGISTERED item, so
+     * `stackFor` succeeds and JEI opens happily, on the recipes that MAKE a Dungeon Drop, of which
+     * there are none: the solver classified it as an instruction and kept it out of `shopping_list`
+     * for that reason. #174 was reported on a reader concluding a token was an item, and an entry
+     * that opens an empty screen is that conclusion with a click behind it.
+     *
+     * DELEGATES RATHER THAN REPEATING THE TWO CHECKS, so the token gate is the only difference
+     * between the two answers and a reader can see that it is.
+     */
+    @Override
+    public boolean canShowRecipes(PlanNode node) {
+        return !NodeStatus.isToken(node) && canShowUses(node);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>THE OLD `canShowInRecipeViewer`, BODY UNCHANGED. Both halves are load-bearing. The stack
+     * decides whether there is anything to focus on; {@link JeiBridge#isAvailable} decides whether
+     * focusing it would do anything.
      *
      * THE RUNTIME CHECK IS NOT REDUNDANT, though it reads that way: the index is built from
      * JEI's item list, so no JEI usually means no stacks anyway. But `DumpPlugin` captures the
@@ -149,7 +169,7 @@ public final class JeiNodeActions implements NodeActions {
      * worse than no entry at all.
      */
     @Override
-    public boolean canShowInRecipeViewer(PlanNode node) {
+    public boolean canShowUses(PlanNode node) {
         return JeiBridge.isAvailable() && stackFor(node) != null;
     }
 

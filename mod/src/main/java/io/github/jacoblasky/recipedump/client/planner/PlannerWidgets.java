@@ -869,19 +869,30 @@ public final class PlannerWidgets {
      */
     public static ModularPanel nodeMenu(final PlanNode node, final PlannerActions actions) {
         List<Entry> entries = new java.util.ArrayList<Entry>();
-        if (actions.nodeActions().canShowInRecipeViewer(node)) {
-            entries.add(new Entry("Show recipes", new Runnable() {
-                @Override
-                public void run() {
-                    actions.nodeActions().showRecipes(node);
-                }
-            }));
-            entries.add(new Entry("Show uses", new Runnable() {
-                @Override
-                public void run() {
-                    actions.nodeActions().showUses(node);
-                }
-            }));
+        // ASKED SEPARATELY, because a token answers differently to the two (#174). It is a
+        // registered item, so JEI will open on it -- and what "Show recipes" opens is the recipes
+        // that MAKE a Dungeon Drop, of which there are none. "Show uses" is a real question with
+        // real answers and is the honest form of what a reader wanted when they clicked it.
+        Entry recipes = new Entry("Show recipes", new Runnable() {
+            @Override
+            public void run() {
+                actions.nodeActions().showRecipes(node);
+            }
+        });
+        Entry uses = new Entry("Show uses", new Runnable() {
+            @Override
+            public void run() {
+                actions.nodeActions().showUses(node);
+            }
+        });
+        // RECIPES FIRST WHEN IT IS THERE, because on an ordinary item "what makes this" is the
+        // question the menu was opened for. On a token it is absent, so "Show uses" is promoted by
+        // simply being the only one left rather than by a second ordering rule.
+        if (actions.nodeActions().canShowRecipes(node)) {
+            entries.add(recipes);
+        }
+        if (actions.nodeActions().canShowUses(node)) {
+            entries.add(uses);
         }
         if (node.alternatives() > 1) {
             entries.add(new Entry("Choose another recipe (" + node.alternatives() + ")",

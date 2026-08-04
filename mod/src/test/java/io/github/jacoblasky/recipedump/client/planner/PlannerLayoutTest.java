@@ -1044,7 +1044,14 @@ public class PlannerLayoutTest {
         }
 
         @Override
-        public boolean canShowInRecipeViewer(PlanNode node) {
+        public boolean canShowRecipes(PlanNode node) {
+            // The seam's own rule, so the menu tests exercise the token asymmetry rather than
+            // only the installed/not-installed one. See `JeiNodeActions.canShowRecipes`.
+            return recipeViewerAvailable && !NodeStatus.isToken(node);
+        }
+
+        @Override
+        public boolean canShowUses(PlanNode node) {
             return recipeViewerAvailable;
         }
 
@@ -1636,6 +1643,56 @@ public class PlannerLayoutTest {
             }
         }
         throw new AssertionError("no node with key " + key);
+    }
+
+    /**
+     * A token's menu offers "Show uses" and not "Show recipes" (#174).
+     *
+     * The node-menu half of the same defect the icon column has: a token is a registered item, so
+     * every JEI check passes and "Show recipes" would open a recipe screen for what makes a Dungeon
+     * Drop, which is nothing. Red on the pre-change tree, where one `canShowInRecipeViewer` gated
+     * both entries together and a token therefore got both.
+     */
+    @Test
+    public void aTokensMenuOffersUsesAndNotRecipes() {
+        PlanNode token = PlanFixtures.load("plan-token-gate").tree();
+        PlanNode item = PlanFixtures.load("plan-in-stock").tree();
+        assertTrue(NodeStatus.isToken(token));
+        assertFalse(NodeStatus.isToken(item));
+
+        Recorder recorder = new Recorder();
+        recorder.recipeViewerAvailable = true;
+
+        // ASSERTED BY CLICKING EVERY ENTRY, NOT BY COMPARING THE TWO MENUS' SIZES. The first
+        // version of this test asserted the token menu had one entry fewer than the item's, and it
+        // FAILED for a reason that had nothing to do with tokens: `plan-in-stock`'s root carries
+        // `alternatives = 5` so it also gets "Choose another recipe", and `plan-token-gate`'s root
+        // carries none, so the two menus differ by two entries rather than one. Two fixtures that
+        // differ in more than the property under test is the trap this package keeps re-finding,
+        // and a count cannot say WHICH entry was dropped anyway. What each menu invokes can.
+        assertEquals("an ordinary item offers both",
+                     java.util.Arrays.asList("showRecipes:" + item.key(),
+                                             "showUses:" + item.key()),
+                     viewerCalls(PlannerWidgets.nodeMenu(item, recorder), recorder));
+        assertEquals("a token offers what uses it and not what makes it",
+                     java.util.Arrays.asList("showUses:" + token.key()),
+                     viewerCalls(PlannerWidgets.nodeMenu(token, recorder), recorder));
+    }
+
+    /** Click every entry of `menu` and return only the recipe-viewer calls, in menu order. */
+    private static List<String> viewerCalls(ModularPanel menu, Recorder recorder) {
+        HeadlessLayout.layOut(menu);
+        recorder.calls.clear();
+        for (PlannerWidgets.ClickableGroup row : clickables(menu)) {
+            row.onMousePressed(0);
+        }
+        List<String> viewer = new java.util.ArrayList<String>();
+        for (String call : recorder.calls) {
+            if (call.startsWith("showRecipes:") || call.startsWith("showUses:")) {
+                viewer.add(call);
+            }
+        }
+        return viewer;
     }
 
     private static int countRows(ModularPanel panel) {
