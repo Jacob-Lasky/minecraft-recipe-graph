@@ -284,6 +284,25 @@ final class PlannerShot {
     }
 
     /**
+     * `planner-caveats`: the five sentences saying what this plan could not see.
+     *
+     * NO FIXTURE ARGUMENT, because the subject is not the plan. What this panel draws comes
+     * from `ScenarioSource`, which answers for the RUNTIME rather than for a plan.
+     *
+     * SO IT PHOTOGRAPHS WHATEVER THE CLIENT INSTALLED, AND THAT IS #191's WORDINGS RATHER THAN
+     * THE DECLARED CONSTANTS. An earlier version of this comment claimed the opposite -- "no
+     * readers installed, so it photographs the declared constants" -- and the screenshot
+     * disproved it: `ClientProxy` runs in this harness, `PlannerStock.install()` puts a reader
+     * on `have`, and the picture came back reading "your ME network has not been read yet ...
+     * open the planner again to ask". Which is the better subject, because it is what a player
+     * with a working client actually sees. To photograph a declared constant you would have to
+     * call `ScenarioSource.resetReaders()` first, and that is a different picture.
+     */
+    static void openCaveats(String arg) {
+        PlannerScreen.openPanel(PlannerWidgets.caveatsPanel());
+    }
+
+    /**
      * A book with something in it, since an empty TODO panel proves only that it opens.
      *
      * Real keys from the reference pack rather than "foo": the discriminated one is the shape
@@ -450,6 +469,10 @@ final class PlannerShot {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void openCaveats() {
         }
 
         @Override

@@ -191,12 +191,29 @@ public class NodeRowTextTest {
                    meta.indexOf("Rolling Machine") < meta.indexOf("172 recipes"));
     }
 
+    /**
+     * THIS TEST'S NAME WAS ASPIRATIONAL UNTIL #190 and now describes what it asserts.
+     *
+     * It said the row says WHY and checked only that the row says `(buildable)`, which is the
+     * STATE -- a fixed word from `NodeStatus`'s vocabulary saying a machine is in the way, not
+     * what to do about it. `machine_why` carries that and had no reader anywhere, main or test,
+     * so the name was the only thing in the repository claiming the feature existed. A test
+     * named for a behaviour it does not check is what stops the next reader noticing, exactly
+     * as a javadoc naming a caller that was never written is.
+     */
     @Test
     public void aBlockedMachineSaysWhyInTheRowRatherThanOnlyInAPanel() {
         PlanNode root = PlanFixtures.load("plan-truncated").tree();
         String meta = NodeRowText.meta(root);
         assertTrue(meta, meta.contains("Centrifuge (buildable)"));
         assertTrue(meta, meta.contains("3 recipes"));
+        // The part the name has always promised: what to do about the roadblock.
+        assertTrue("the row says a machine is in the way and not what to do about it: " + meta,
+                   meta.contains("craftable: nuclearcraft:centrifuge_idle"));
+        // AND NOT RUN TOGETHER WITH THE STATE. `buildable` and `craftable: ...` restate each
+        // other, so packing the reason inside the state's parentheses read as a formatting
+        // fault: "Centrifuge (buildable: craftable: nuclearcraft:centrifuge_idle)".
+        assertFalse(meta, meta.contains("buildable: craftable:"));
     }
 
     @Test
@@ -246,6 +263,219 @@ public class NodeRowTextTest {
         // arithmetic bug. It said exactly that in the first screenshot.
         assertFalse(warning, warning.contains(" of "));
         assertEquals("", NodeRowText.truncationWarning(PlanFixtures.load("plan-in-stock")));
+    }
+
+    /**
+     * The exhausted warning quotes the WORK budget, which is why `work` is read at all. #190.
+     *
+     * IT SAID "search gave up early" WITH NO NUMBERS, and `PlanResult.exhausted`'s javadoc is
+     * emphatic about why the numbers matter here: the node count is far below its cap in this
+     * case, so quoting the cap is wrong, and the reader is being asked to accept "raise the node
+     * budget" on trust. `work` and `work_budget` were parsed into `PlanView` and drawn nowhere,
+     * which is the same write-only shape this issue is about, so this test is what stops them
+     * going back to having no reader.
+     *
+     * HAND-BUILT, because no committed fixture is exhausted: `plan-truncated` hits the NODE cap
+     * and `plan-fluid-chain` spends 35% of its work budget without exhausting it. A fixture that
+     * exhausted would have to be generated, and this asserts wording rather than solver output.
+     */
+    @Test
+    public void theExhaustedWarningQuotesTheWorkBudgetRatherThanTheNodeCap() {
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "mod:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.CRAFT);
+        result.add("tree", tree);
+        result.addProperty("exhausted", true);
+        result.addProperty("nodes", 118);
+        result.addProperty("max_nodes", 4000);
+        result.addProperty("work", 80001);
+        result.addProperty("work_budget", 80000);
+
+        String warning = NodeRowText.truncationWarning(PlanJson.readResult(result));
+        assertTrue(warning, warning.contains("80,001"));
+        assertTrue(warning, warning.contains("80,000"));
+        // AND NOT THE NODE CAP, which is the specific mistake `PlanResult.exhausted` warns
+        // against: 118 of 4,000 nodes were emitted, so "cut off at the 4,000 node budget" would
+        // be a false explanation of a real problem.
+        assertFalse("the node cap is the wrong number to quote here: " + warning,
+                    warning.contains("4,000"));
+        // The lever the player actually has. `workBudget` derives from `maxNodes`, and naming a
+        // budget they cannot set would be worse than naming none.
+        assertTrue(warning, warning.contains("node budget"));
+    }
+
+    /**
+     * Two shopping rows with the same name are told apart. #190.
+     *
+     * `plan-fluid-chain` holds two distinct keys both labelled "Soul Vial", which is the
+     * shopping list's own instance of the collision `plan-same-name` was built for -- 5,095
+     * display names are shared on this pack. A list drawn as quantity plus label renders them
+     * as two rows a player cannot tell apart, and the quantity does not help: it is what they
+     * are being asked to gather, not which item it is.
+     *
+     * AND THE ROWS THAT DO NOT COLLIDE STAY CLEAN, which is the second half of the rule and the
+     * reason this takes the whole list. A registry key on all 63 rows would push the name out
+     * of the panel to serve two of them.
+     *
+     * SEARCHED RATHER THAN INDEXED, because a row may wrap over two lines and the indices then
+     * stop lining up. An index-aligned version of this passed while asserting nothing about
+     * half the rows, which is worse than failing.
+     */
+    @Test
+    public void aShoppingRowWithADuplicateNameCarriesItsKeyAndTheOthersDoNot() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        List<String> lines = NodeRowText.entryLines(plan.shoppingList(), TODO_INNER);
+        String all = join(lines);
+        int colliding = 0;
+        int keyed = 0;
+        for (PlanView.EntryRow row : plan.shoppingList()) {
+            boolean hasKey = all.contains(row.key());
+            if (hasKey) {
+                keyed++;
+            }
+            if ("Soul Vial".equals(row.label())) {
+                assertTrue("two rows both called Soul Vial and neither says which: " + all,
+                           hasKey);
+                colliding++;
+            }
+        }
+        assertEquals("the fixture must still hold the two colliding rows", 2, colliding);
+        assertEquals("only the colliding rows pay for the key", 2, keyed);
+    }
+
+    /**
+     * An unsourced shopping row says so, in the same words the tree badge uses.
+     *
+     * ONE VOCABULARY FOR BOTH SURFACES, which is why this asserts against
+     * `NodeStatus.UNSOURCED_BADGE` rather than against a string spelled here: `present.py`'s
+     * own docstring records four components each keeping a private dict of bare status words,
+     * and adding one drew silently wrong.
+     */
+    @Test
+    public void anUnsourcedShoppingRowSaysSoInTheTreesWords() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        String all = join(NodeRowText.entryLines(plan.shoppingList(), TODO_INNER));
+        int marked = 0;
+        for (PlanView.EntryRow row : plan.shoppingList()) {
+            if (row.unsourced()) {
+                marked++;
+                assertTrue("an unsourced row reads as an ordinary thing to go and fetch: "
+                           + row.label(), all.contains(row.label()));
+            }
+        }
+        assertEquals("the fixture must still hold two unsourced rows", 2, marked);
+        // COUNTED, so a mark that appears on every row would fail here rather than pass. The
+        // badge is only believable while it is rare.
+        assertEquals("the mark must appear exactly as often as the flag does",
+                     marked, occurrences(all, NodeStatus.UNSOURCED_BADGE));
+    }
+
+    /** A fluid quantity is mB and says so, matching `render._rows`. Never buckets. */
+    @Test
+    public void aFluidRowIsMeasuredInMilliBucketsAndAnItemRowIsNot() {
+        assertEquals("30,100 mB", NodeRowText.amount(30100L, "fluid"));
+        assertEquals("64x", NodeRowText.amount(64L, "item"));
+    }
+
+    /**
+     * The machines the footer counts are nameable, with the roadblock spelled out. #190.
+     *
+     * "3 machine(s) to build" was the whole of what the panel said, and every `MachineRow`
+     * accessor except `size()` was called only from `PlanJsonTest`. The values are
+     * `plan-in-stock`'s, asserted there too.
+     */
+    @Test
+    public void theMachinesToBuildAreNameableWithTheirReasons() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        List<String> lines = NodeRowText.machineLines(plan.machinesToBuild(), TODO_INNER);
+        assertTrue("three machines, at least one line each: " + lines, lines.size() >= 3);
+        String all = join(lines);
+        assertTrue(all, all.contains("Chiseling"));
+        assertTrue(all, all.contains("buildable"));
+        assertTrue("the reason a machine is a roadblock is the actionable half: " + all,
+                   all.contains("craftable: chisel:chisel_iron"));
+    }
+
+    /**
+     * The longest machine row in the fixture set survives whole, over as many lines as it takes.
+     *
+     * 124 CHARACTERS, WHICH IS 744 PIXELS AND FITS NO SCREEN MINECRAFT RUNS ON. `fit` would cut
+     * it, and what it would cut is the registry name of the thing the player has to go and
+     * craft: `craftable: modularmachinery:mythic_processor_chemical_reactor_controller`. So
+     * these wrap, and this asserts both halves of that -- nothing lost, and nothing left over
+     * the panel's width for the caller's `fit` to cut after all.
+     */
+    @Test
+    public void theLongestMachineRowSurvivesWholeAcrossLines() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        List<String> lines = NodeRowText.machineLines(plan.machinesToBuild(), TODO_INNER);
+        String rejoined = join(lines).replace(NodeRowText.CONTINUATION, " ");
+        assertTrue("the machine's own registry name was cut: " + lines,
+                   rejoined.contains(
+                           "modularmachinery:mythic_processor_chemical_reactor_controller"));
+        assertFalse("a wrapped row must not also be cut", rejoined.contains(NodeRowText.ELLIPSIS));
+        for (String line : lines) {
+            assertTrue("this line still overflows the panel and `fit` will cut it: " + line,
+                       line.length() * NodeRowText.CHAR_WIDTH <= TODO_INNER);
+        }
+    }
+
+    /** The TODO panel's inner width, which is what its rows are wrapped against. */
+    private static final int TODO_INNER =
+            PlannerWidgets.TODO_WIDTH - PlannerWidgets.PADDING * 2;
+
+    private static String join(List<String> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(line);
+        }
+        return sb.toString();
+    }
+
+    private static int occurrences(String haystack, String needle) {
+        int count = 0;
+        for (int at = haystack.indexOf(needle); at >= 0;
+                at = haystack.indexOf(needle, at + needle.length())) {
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * A roadblocked machine's reason rides in the node's meta run. #190.
+     *
+     * `machine_why` was parsed into `PlanNode` and read by NOTHING, main or test, until #190.
+     * The state label alone says a machine is in the way; the `why` says what to do about it,
+     * which is the difference `ScenarioSource.Status.unavailable` argues about at length.
+     */
+    @Test
+    public void aRoadblockedMachineSaysWhyInTheMetaRun() {
+        String meta = NodeRowText.meta(machineNode("unavailable", "no blueprint in reach"));
+        assertTrue(meta, meta.contains("no blueprint in reach"));
+        // And a machine the player HAS gets no reason, because `solve.py` writes none.
+        String owned = NodeRowText.meta(machineNode("have", null));
+        assertFalse(owned, owned.contains("no blueprint in reach"));
+    }
+
+    private static PlanNode machineNode(String state, String why) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("category", "thermalexpansion.pulverizer");
+        json.addProperty("machine", "Pulverizer");
+        json.addProperty("machine_state", state);
+        if (why != null) {
+            json.addProperty("machine_why", why);
+        }
+        return PlanJson.readNode(json);
     }
 
     private static PlanNode node(String ignored) {

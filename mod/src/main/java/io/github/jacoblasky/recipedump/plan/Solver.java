@@ -42,9 +42,10 @@ import io.github.jacoblasky.recipedump.graph.RecipeStore;
  * format is. `solve` is where ids become names, and nowhere else.
  *
  * ITERATION ORDER IS PART OF THE ANSWER. `RecipeGraph.realProducers` returns candidates in a
- * fixed order and `pickRecipe` takes the FIRST maximum, which is what makes a plan
- * reproducible across processes. Nothing here may iterate a `HashMap` and let the result
- * reach the output.
+ * fixed order and `rank` sorts them with a STABLE sort, so equally-scored candidates
+ * keep that order and the first of them is the one taken -- which is what makes a plan
+ * reproducible across processes and what matches Python's `max` returning the FIRST maximum.
+ * Nothing here may iterate a `HashMap` and let the result reach the output.
  */
 public final class Solver {
 
@@ -83,7 +84,6 @@ public final class Solver {
 
     private final int maxDepth;
     private final int maxNodes;
-    private final int branchTries;
     private final int workBudget;
     private final MachineStates machineStates;
     private final CostTable costs;
@@ -127,8 +127,17 @@ public final class Solver {
         this.dimensionGates = b.dimensionGates;
         this.maxDepth = b.maxDepth;
         this.maxNodes = b.maxNodes;
-        this.branchTries = b.branchTries;
-        this.workBudget = b.workBudget > 0 ? b.workBudget : Math.max(50000, b.maxNodes * 20);
+        // DERIVED FROM `maxNodes` AND NOT SETTABLE, WHICH IS THE ONE ASYMMETRY WITH PYTHON, and
+        // `branchTries` is gone from the builder for the same reason. `solve.Solver.__init__`
+        // takes both `work_budget` and `branch_tries` because the browser exposes the first as
+        // an editable URL parameter that `test_server` clamps. The in-game planner has no such
+        // control and never had one, so the two `Builder` setters sat uncalled -- and the
+        // `b.workBudget > 0 ? ... : ...` branch here had a first arm nothing could reach.
+        // The knob a caller actually turns is `maxNodes`, and `PlanResult.exhausted`'s javadoc
+        // is what says why that is enough: raising the node cap raises this with it.
+        // DO NOT add a setter back without a control that drives it; the formula must keep
+        // matching `solve.py`'s `work_budget or max(50000, max_nodes * 20)`.
+        this.workBudget = Math.max(50000, b.maxNodes * 20);
         this.machineStates = b.machineStates;
         this.costs = b.costs;
     }
@@ -396,9 +405,11 @@ public final class Solver {
      *     a recipe emitting (Heart Fruit x12, Heart Fruit Seeds x1) while consuming Heart
      *     Fruit Seeds is cyclic through an output that is NOT the one being planned, and no
      *     ancestor set ever holds it.
-     *   * `scoreRecipe` called with NO ancestors, which is what the recipe-chooser page does
-     *     -- the order shown to someone about to pin. There a self-consuming recipe ranked
-     *     top and was the tool's recommendation.
+     *   * `scoreRecipe` called with NO ancestors, which is what {@link #solve} does at the
+     *     root: it opens the walk with `Collections.emptySet()`, so the target's own producers
+     *     are ranked against an empty ancestor set and a self-consuming recipe there has
+     *     nothing to trip the hard term. Without `own` such a recipe ranked top and became the
+     *     plan for the very thing the player asked for.
      *
      * THE TWO HALVES SIT ON OPPOSITE SIDES OF `cheap`, AND THAT IS THE WHOLE OF #172. They
      * used to be one counter below it, with a note here saying it "only ever settles a cost
@@ -562,54 +573,21 @@ public final class Solver {
         return machineStates == null ? -1 : machineStates.state(categoryId);
     }
 
-    /**
-     * The candidates a pin permits, or empty when there is no pin or it matches none.
-     *
-     * Empty rather than the full list when a pin matches nothing, so the caller decides what
-     * an unsatisfiable pin means. Falling back silently is the right answer for planning -- a
-     * plan is better than an error -- but `Pins.resolve` has already reported the lapse, so
-     * nothing is being hidden.
-     */
-    private List<Integer> acceptable(int keyId, List<Integer> candidates) {
-        Set<String> wanted = pinned.get(keyId);
-        if (wanted == null || wanted.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<Integer> out = new ArrayList<Integer>();
-        for (int recipeId : candidates) {
-            if (wanted.contains(g.recipes().rid(recipeId))) {
-                out.add(recipeId);
-            }
-        }
-        return out;
-    }
-
-    /**
-     * The best recipe for `keyId`, or -1 when nothing makes it.
-     *
-     * Public because the recipe-chooser page ranks with it, and it is called there with no
-     * ancestors at all -- see {@link #scoreRecipe} for why that case needs `own`.
-     */
-    public int pickRecipe(int keyId, Set<Integer> ancestors) {
-        List<Integer> candidates = realProducers(keyId);
-        if (candidates.isEmpty()) {
-            return -1;
-        }
-        List<Integer> allowed = acceptable(keyId, candidates);
-        List<Integer> pool = allowed.isEmpty() ? candidates : allowed;
-        int best = pool.get(0);
-        RecipeScore bestScore = scoreRecipe(best, ancestors);
-        // STRICTLY greater: Python's `max` returns the FIRST maximum, and `realProducers`
-        // returning an ordered list is what makes that reproducible across processes.
-        for (int i = 1; i < pool.size(); i++) {
-            RecipeScore score = scoreRecipe(pool.get(i), ancestors);
-            if (score.compareTo(bestScore) > 0) {
-                best = pool.get(i);
-                bestScore = score;
-            }
-        }
-        return best;
-    }
+    // A PIN NARROWS NOTHING; IT REORDERS. `acceptable(keyId, candidates)` used to live here
+    // and returned only the recipes a pin permits, for `pickRecipe` to plan from -- and the
+    // two went together, so removing that method left this one with no caller. `rank` is the
+    // surviving way a pin reaches a decision and it MOVES the pinned candidates to the front
+    // instead of replacing the list, which is the stronger version of the same constraint:
+    // an unsatisfiable pin still leaves the backtracking somewhere to go. DO NOT reintroduce
+    // a filtering variant; see `rank` for why a plan beats an error here.
+    //
+    // `pickRecipe` CLAIMED THE RECIPE-CHOOSER PAGE RANKED WITH IT, AND THE PAGE NOW EXISTS AND
+    // DOES NOT. #188 built the picker; `RecipeChoices.forNode` is its data source and its own
+    // javadoc says why it declines to rank -- "any cost-based order here would be a second
+    // opinion about ranking that the solver has already formed". So the javadoc was not merely
+    // ahead of its time, it was wrong about a design decision that has since been made the
+    // other way. DO NOT add a public ranking entry point back for that page; it does not want
+    // one.
 
     // -- expansion ---------------------------------------------------------------------
 
@@ -822,7 +800,12 @@ public final class Solver {
         int bestNodes = 0;
         PlanNode bestAttempt = null;
         Snapshot bestRestore = null;
-        int tries = Math.min(branchTries, ranked.size());
+        // THE CONSTANT DIRECTLY, because there is nothing to vary it. This read a
+        // `branchTries` field that only ever held `DEFAULT_BRANCH_TRIES`; see the constructor
+        // for why its `Builder` setter went. Must stay equal to `solve.py`'s `branch_tries`
+        // default of 4 -- the golden gate compares plans byte for byte, so a divergence here
+        // shows up as every backtracked branch differing.
+        int tries = Math.min(DEFAULT_BRANCH_TRIES, ranked.size());
         for (int rank = 0; rank < tries; rank++) {
             if (work > workBudget) {
                 break;
@@ -1438,8 +1421,6 @@ public final class Solver {
         private Map<Integer, String> dimensionGates = new LinkedHashMap<Integer, String>();
         private int maxDepth = DEFAULT_MAX_DEPTH;
         private int maxNodes = DEFAULT_MAX_NODES;
-        private int branchTries = DEFAULT_BRANCH_TRIES;
-        private int workBudget;
         private MachineStates machineStates;
         private CostTable costs;
 
@@ -1547,16 +1528,6 @@ public final class Solver {
 
         public Builder maxNodes(int nodeCap) {
             this.maxNodes = nodeCap;
-            return this;
-        }
-
-        public Builder branchTries(int tries) {
-            this.branchTries = tries;
-            return this;
-        }
-
-        public Builder workBudget(int budget) {
-            this.workBudget = budget;
             return this;
         }
 

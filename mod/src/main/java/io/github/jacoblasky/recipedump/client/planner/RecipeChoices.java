@@ -88,7 +88,7 @@ public final class RecipeChoices {
         // `realProducers` AND NOT `producers`, WHICH IS A WIDER SET AND THE WRONG ONE.
         // For a FLUID key the two differ: `producers` includes container transfers -- a
         // bucket emptied to "make" the fluid -- and `realProducers` drops them. Everything
-        // downstream of a click here uses the narrow set: `Solver.pickRecipe` ranks over
+        // downstream of a click here uses the narrow set: `Solver.rank` ranks over
         // `realProducers`, `Pins.resolve` matches a fingerprint against `realProducers`, and
         // `node.alternatives` is `realProducerCount`. Offering the wide set would put rows in
         // the picker that the solver can never take, and clicking one would write a pin that

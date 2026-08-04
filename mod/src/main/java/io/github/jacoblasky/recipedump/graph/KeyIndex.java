@@ -35,10 +35,6 @@ public final class KeyIndex {
         return keys.length;
     }
 
-    public int keyAt(int slot) {
-        return keys[slot];
-    }
-
     /** The slot holding `keyId`, or -1. Tolerates the -1 an unknown key lookup returns. */
     public int slotOf(int keyId) {
         if (keyId < 0) {

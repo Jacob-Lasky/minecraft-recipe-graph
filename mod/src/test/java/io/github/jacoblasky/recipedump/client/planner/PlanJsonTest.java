@@ -274,9 +274,118 @@ public class PlanJsonTest {
         PlanView.MachineRow first = plan.machinesToBuild().get(0);
         assertEquals("chisel.chiseling", first.category());
         assertEquals("Chiseling", first.machine());
-        assertEquals("buildable", first.state());
         assertEquals("craftable: chisel:chisel_iron", first.why());
         assertEquals("buildable", first.stateLabel());
+    }
+
+    /**
+     * The raw machine state lands in the right slot, proved through the word a player reads.
+     *
+     * WHY NOT `assertEquals("buildable", row.state())`, WHICH IS WHAT THIS USED TO BE. All 125
+     * committed machine rows are `buildable`, and `NodeStatus.machineStateLabel("buildable")`
+     * returns "buildable" -- so that assertion and the `stateLabel()` one beside it could not
+     * fail independently, and a reader that put `why` into the state slot would have passed
+     * both. `unavailable` is the state whose label DIFFERS, "no route", so asserting the label
+     * on a hand-built row proves the raw value arrived AND that it went through the mapping.
+     * No fixture can do this, which is why it is built here rather than loaded.
+     *
+     * #190 deleted `MachineRow.state()` on the strength of this: it had no caller but the test,
+     * and the test it had was weaker than the one that replaces it.
+     */
+    @Test
+    public void aMachineStateOtherThanBuildableArrivesAndIsWordedForAPlayer() {
+        com.google.gson.JsonObject result = new com.google.gson.JsonObject();
+        com.google.gson.JsonObject tree = new com.google.gson.JsonObject();
+        tree.addProperty("key", "mod:thing");
+        tree.addProperty("label", "Thing");
+        tree.addProperty("need", 1);
+        tree.addProperty("status", NodeStatus.CRAFT);
+        result.add("tree", tree);
+        com.google.gson.JsonArray machines = new com.google.gson.JsonArray();
+        com.google.gson.JsonObject machine = new com.google.gson.JsonObject();
+        machine.addProperty("category", "mod.press");
+        machine.addProperty("machine", "Mythic Press");
+        machine.addProperty("state", "unavailable");
+        machine.addProperty("why", "no recipe makes mod:press_controller");
+        machines.add(machine);
+        result.add("machines_to_build", machines);
+
+        PlanView.MachineRow row = PlanJson.readResult(result).machinesToBuild().get(0);
+        assertEquals("no route", row.stateLabel());
+        assertEquals("no recipe makes mod:press_controller", row.why());
+        assertEquals("Mythic Press", row.machine());
+    }
+
+    /**
+     * The four summary lists the reader used to discard reach {@link PlanView}. #190.
+     *
+     * ONE TEST OVER ALL FOUR AND WITH THE VALUES SPELLED OUT, because the failure this is
+     * guarding against is not "the list is empty", it is "the list holds the wrong one". Five
+     * lists of the same type go into `PlanView.Builder`, and a transposition would leave every
+     * one of them non-empty while the panel said stock came from EMC. The counts and the first
+     * row of each are quoted from the committed fixtures.
+     */
+    @Test
+    public void theFourSummaryListsReadBackWithTheirDecorations() {
+        PlanView stock = PlanFixtures.load("plan-in-stock");
+        assertEquals(2, stock.usedFromStock().size());
+        assertEquals("minecraft:iron_ingot", stock.usedFromStock().get(0).key());
+        assertEquals("Iron Ingot", stock.usedFromStock().get(0).label());
+        assertEquals(5L, stock.usedFromStock().get(0).need());
+        assertTrue("a stock row must not be marked unsourced",
+                   !stock.usedFromStock().get(0).unsourced());
+
+        PlanView free = PlanFixtures.load("plan-free-source");
+        assertEquals(1, free.fromSources().size());
+        // `why` is the whole value of this list: "free" must not mean "invisible", and a
+        // quantity with no generator named is a row a player cannot act on.
+        assertEquals("placed: nuclearcraft:cobblestone_generator", free.fromSources().get(0).why());
+
+        PlanView tokens = PlanFixtures.load("plan-fluid-chain");
+        assertEquals(4, tokens.tokensNeeded().size());
+        assertEquals("method", tokens.tokensNeeded().get(0).tokenKind());
+
+        PlanView emc = PlanFixtures.load("plan-emc-terminator");
+        assertEquals(1, emc.fromEmc().size());
+        // The NUMBER, not "from EMC": a cost a player can look up is a claim they can check.
+        assertEquals(Long.valueOf(2048L), emc.fromEmc().get(0).emc());
+    }
+
+    /**
+     * A shopping row keeps the mark saying nothing in the graph makes it. #136 on both surfaces.
+     *
+     * `plan-fluid-chain` keeps exactly two such rows after #176, and the tree side has badged
+     * them since #136 while the shopping row parsed the flag and dropped it. The count is
+     * quoted rather than asserted as "more than zero" because zero and two are the two states
+     * this test exists to tell apart, and #176 is what moved it from 42.
+     */
+    @Test
+    public void anUnsourcedShoppingRowKeepsSayingSo() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        int marked = 0;
+        for (PlanView.EntryRow row : plan.shoppingList()) {
+            if (row.unsourced()) {
+                marked++;
+            }
+        }
+        assertEquals("the unsourced mark is lost on the surface a player gathers from",
+                     2, marked);
+    }
+
+    /**
+     * `work` and `work_budget` arrive, so "raising the cap will not help" can be checked.
+     *
+     * TERMINAL-ONLY UNTIL #190. `cli.cmd_plan` prints both and the panel said "search gave up
+     * early" with no numbers, which asks the player to trust a rule instead of reading one.
+     * The values are `plan-fluid-chain`'s, the fixture that spends 35% of its budget.
+     */
+    @Test
+    public void theWorkCounterAndItsBudgetBothArrive() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        assertEquals(28012, plan.work());
+        assertEquals(80000, plan.workBudget());
+        assertFalse("this fixture is not exhausted; the pair must be readable anyway",
+                    plan.exhausted());
     }
 
     @Test

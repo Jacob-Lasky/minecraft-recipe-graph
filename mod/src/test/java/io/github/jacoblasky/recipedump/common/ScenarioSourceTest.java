@@ -114,22 +114,21 @@ public class ScenarioSourceTest {
         // failure message says to delete THIS sweep rather than to keep `note()` alive for
         // it: `note()` is still how a runtime refusal names itself.
         //
-        // A SECOND REASON THIS GUARD MATTERS, and it is the worse one: THE REASONS DO NOT
-        // REACH A SCREEN (#190). Be precise about which half is missing, because the two
-        // read alike from outside. `summary()` IS drawn -- `PlannerWidgets:290` wraps it into
-        // the caveat line -- but it is built from `source.field`, so what a player sees is
-        // "planned without: have, craftables, placed, visited_dimensions, emc_knowledge".
-        // The five hand-written `note()` strings, the ones carrying what to DO about it, are
-        // collected only by `missingNotes()`, whose sole callers are this test and
-        // `PinStoreTest`.
+        // A SECOND REASON THIS GUARD MATTERS: THESE FIVE STRINGS ARE NOW ON A SCREEN, and
+        // until #190 they were not. `summary()` was drawn on its own -- it is built from
+        // `source.field`, so what a player saw was "planned without: have, craftables,
+        // placed, visited_dimensions, emc_knowledge" -- while the hand-written `note()`
+        // strings, the ones carrying what to DO about it, were collected only by
+        // `missingNotes()`, whose sole callers were this test and `PinStoreTest`.
         //
-        // That is exactly the failure `Status.unavailable`'s own javadoc argues against in
+        // That was exactly the failure `Status.unavailable`'s own javadoc argues against in
         // the sentence justifying why it takes a string rather than a boolean: "AE2 stock is
         // not read yet" tells a player nothing they can act on, "no wireless access point in
         // range" tells them to walk toward their base. The strings were written for that
-        // reason and the player gets the boolean. Until `missingNotes()` is rendered, this
-        // loop is the only thing asserting those five strings exist at all -- which is
-        // precisely the state in which it must not quietly stop running.
+        // reason and the player got the boolean. `client.planner.PlanCaveats` renders them
+        // now, so a note that went missing would also be a blank line on the caveats panel --
+        // but this loop is still the assertion that every not-live source HAS one, and a
+        // vacuous version of it would stop noticing a new source added without a note.
         int asserted = 0;
         for (ScenarioSource source : ScenarioSource.values()) {
             if (!source.live()) {

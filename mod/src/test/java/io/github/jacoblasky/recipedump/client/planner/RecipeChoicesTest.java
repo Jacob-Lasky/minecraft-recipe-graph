@@ -202,7 +202,7 @@ public class RecipeChoicesTest {
      * A container transfer is NOT offered, because the solver would never take it.
      *
      * `RecipeGraph.producers` returns both for a fluid; `realProducers` drops the transfer,
-     * and that narrow set is what `Solver.pickRecipe` ranks over, what `Pins.resolve` matches
+     * and that narrow set is what `Solver.rank` ranks over, what `Pins.resolve` matches
      * a fingerprint against, and what `node.alternatives` counts. A picker built on the wide
      * one offers a row that pins to nothing: the click succeeds, the file is written, and the
      * next plan reports the pin DEAD -- about a recipe the picker had just shown as a choice.
