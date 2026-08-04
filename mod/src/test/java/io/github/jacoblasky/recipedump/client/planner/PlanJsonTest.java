@@ -45,7 +45,7 @@ public class PlanJsonTest {
             assertNotNull(name + " has no tree", plan.tree());
             assertFalse(name + " has no target", plan.target().isEmpty());
             // `nodes` is the solver's own count. If the reader dropped a child, or read one
-            // twice, this is where it shows -- across 856 nodes and 21 trees.
+            // twice, this is where it shows -- across 863 nodes and 21 trees.
             assertEquals(name + " lost or gained nodes in the read",
                          plan.nodes(), plan.flatten().size());
         }
@@ -390,10 +390,10 @@ public class PlanJsonTest {
 
     @Test
     public void theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive() {
-        // 634 nodes in one viewport. 347 before #172, 388 before #176. Named here so a future
-        // change that makes the tree panel O(n^2) has something to fail against rather than
-        // just feeling slow in game -- so when this number MOVES UP it is the test getting
-        // harder, and the only wrong response is to stop asserting it.
+        // 641 nodes in one viewport. 347 before #172, 388 before #176, 634 before #136. Named
+        // here so a future change that makes the tree panel O(n^2) has something to fail
+        // against rather than just feeling slow in game -- so when this number MOVES UP it is
+        // the test getting harder, and the only wrong response is to stop asserting it.
         //
         // WHY IT GREW, MEASURED RATHER THAN REASONED. All 42 of this plan's `unsourced` nodes
         // were LEAVES before #176 -- dead ends resting on items the graph cannot explain.
@@ -411,8 +411,16 @@ public class PlanJsonTest {
         // of 80,000, so this fixture now spends 35% of its search budget where it used to
         // spend 0.5%. Still passing, with much less headroom. If a later change flips
         // `exhausted` on any fixture, this is the one to look at first.
+        //
+        // 634 -> 641 FOR #136, and it is the same mechanism a third time on a much smaller
+        // scale. Exactly one branch moved: this plan reached Dreadite Ingot by melting a Block
+        // of Dreadite, a key nothing presses, and pricing that at UNSOURCED_COST sent the
+        // branch through Dreadium Nuggets and an alloy furnace instead, for seven more nodes
+        // and one more shopping row. `work` moved 28,012 -> 28,024, so the headroom the
+        // paragraph above warns about is unchanged, and `truncated` and `exhausted` are both
+        // still false.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(634, plan.flatten().size());
+        assertEquals(641, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

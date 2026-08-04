@@ -24,7 +24,7 @@ import org.junit.Test;
  *
  * WHAT THIS IS FOR, given that the PR also carries screenshots: a screenshot costs about two
  * minutes and shows one plan. This runs every fixture in seconds and can assert things a
- * picture cannot -- that no row overlaps the next across 634 of them, that nothing overflows
+ * picture cannot -- that no row overlaps the next across 641 of them, that nothing overflows
  * the panel, that the deepest chain in the pack still leaves room for a label. Screenshots
  * answer "does it look right"; this answers "is it right", and it is the one a future change
  * gets immediately.
@@ -111,18 +111,19 @@ public class PlannerLayoutTest {
 
     @Test
     public void theBiggestTreeStillFitsInTheViewportAndOverflowsIt() {
-        // The hard case the scroll area exists for: 634 nodes in a 400x220 panel. 347 before
-        // #172 reordered the cycle term, 388 before #176 priced the unsourced set and the
-        // plan stopped dead-ending on 40 items the graph could not explain.
+        // The hard case the scroll area exists for: 641 nodes in a 400x220 panel. 347 before
+        // #172 reordered the cycle term, 388 before #176 priced the unsourced set and the plan
+        // stopped dead-ending on 40 items the graph could not explain, 634 before #136 priced
+        // the storage blocks nothing presses.
         //
-        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved twice
-        // and the method was still called `aThreeHundredNodeTree` at 388. A test name that
-        // states a number goes stale silently -- the assertion below is the thing that must
-        // fail when the number moves, and it does.
+        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved three
+        // times and the method was still called `aThreeHundredNodeTree` at 388. A test name
+        // that states a number goes stale silently -- the assertion below is the thing that
+        // must fail when the number moves, and it does.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(634, tree.getChildren().size());
+        assertEquals(641, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
