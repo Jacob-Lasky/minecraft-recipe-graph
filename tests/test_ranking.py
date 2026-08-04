@@ -1250,6 +1250,7 @@ class ATieAmongIDENTICALOFFERSIsAdmittedTest(unittest.TestCase):
                           "number beside a false statement")
 
 
+
 class TheMarkIsStatedOncePerKeyTest(unittest.TestCase):
     """A repeated key carries the same true finding at 24 nodes. #206
 
@@ -1459,3 +1460,51 @@ class CrossLanguageWordingTest(unittest.TestCase):
                       "python says %r" % (present.INTERCHANGEABLE_NOTE,))
         self.assertIn('"%s"' % tail, source,
                       "python says %r" % (present.INTERCHANGEABLE_NOTE,))
+
+class ADiscardedAttemptLeavesNothingBehindTest(unittest.TestCase):
+    """`_snapshot` must carry every accumulator, and `machines_needed` was not carried.
+
+    Found on #211's reproduction. Demoting the loot tables makes the backtracker discard
+    attempts on plans where it never used to, and a three-node plan for a Chest -- eight planks
+    and a log -- then reported "machines you do not have yet: Chiseling, Alloy Furnace", neither
+    of which appears anywhere in the tree. It reads as the plan asking for two machines it does
+    not need. The leak predates the demotion; only its visibility is new.
+
+    A PIN FORCES THE DISCARD, and it has to be a pin rather than a price. A cyclic route's own
+    price CONTAINS the price of the thing being planned, so it can never come out cheaper than
+    the clean sibling it competes with and `cheap` will never put it first. The pin is the
+    documented way the cycle guard gets overruled -- see `_note_overruled_pin` -- so this
+    exercises a real path rather than a contrived ordering.
+    """
+
+    STATES = {"mod.press": ("buildable", "craftable: mod:press")}
+
+    def _solver(self):
+        g = Graph()
+        g.names = {"mod:widget": "Widget", "mod:scrap": "Scrap", "mod:plank": "Plank"}
+        # The pinned route, through a machine the player has to build. Its subtree feeds back
+        # into `mod:widget`, so `_build` discards the whole attempt.
+        g.add(Recipe("recycle", "t", [("mod:widget", 1)],
+                     [Ingredient(["mod:scrap"], 1)], category="mod.press"))
+        g.add(Recipe("shred", "t", [("mod:scrap", 1)],
+                     [Ingredient(["mod:widget"], 1)], category="mod.press"))
+        # The route that survives, and it needs no machine at all.
+        g.add(Recipe("carve", "t", [("mod:widget", 1)],
+                     [Ingredient(["mod:plank"], 4)], category="crafting_shaped"))
+        return g, Solver(g, machine_states=self.STATES,
+                         costs=cost.estimate(g, machine_states=self.STATES),
+                         pinned={"mod:widget": {"recycle"}})
+
+    def test_the_pinned_cyclic_route_really_is_tried_and_discarded(self):
+        # Without this the assertion below could pass because no discard ever happened, which
+        # is the bug failing to reproduce rather than the fix working.
+        _g, solver = self._solver()
+        result = solver.solve("mod:widget", 1)
+        self.assertEqual("carve", result["tree"]["recipe"])
+        self.assertIn("mod:widget", result.get("pins_overruled") or {})
+
+    def test_a_machine_only_a_discarded_attempt_entered_is_not_reported(self):
+        _g, solver = self._solver()
+        result = solver.solve("mod:widget", 1)
+        self.assertEqual([], [row["machine"]
+                              for row in result.get("machines_to_build") or ()])

@@ -1664,7 +1664,9 @@ def sources_page(state, message=""):
 def stats_page(state):
     from . import index as index_mod
 
-    cov = index_mod.coverage(state.graph)
+    # The SERVED token map, not the curated default, so the demotion counts on this page are
+    # the ones the plans this server answers were computed with. See notproduction.
+    cov = index_mod.coverage(state.graph, state.token_kinds)
     rows = "".join("<tr><td><code>%s</code></td><td class='n'>%s</td></tr>"
                    % (_esc(k), "{:,}".format(v))
                    for k, v in list(cov["by_category"].items())[:25])

@@ -35,6 +35,7 @@ import math
 import os
 
 from . import multiblocks as multiblocks_mod
+from . import tokens
 from .defaults import DEFAULT_COST_CACHE
 from .model import FLUID_PREFIX
 from .tokens import GATE, HINT, LOOT, METHOD
@@ -267,6 +268,36 @@ FLUID_SCALE = 1.0 / 1000.0
 BASE_RAW_COST = 1.0
 TRANSFER_PENALTY = 500.0   # container fill/empty is not production; never prefer it
 
+# What a route through JEI PROSE costs: a random loot table, or a card explaining how to
+# automate something. #211 and #169. `notproduction` decides which recipes these are.
+#
+# A PENALTY RATHER THAN A DROP OR AN INFINITY, and all three were built and measured.
+# Dropping the recipe collapses `contenttweaker:imp_skin` to `BASE_RAW_COST`, because the
+# annotation is its only producer and `_seed` then treats it as a leaf -- the plan stops lying
+# about HOW and starts lying about HOW MUCH, which is worse because the first is visible in the
+# tree and the second is not. Declining to relax through it reaches a different failure:
+# 26 keys go from a finite price to infinity, five of #169's seven infusion catalysts among
+# them. A finite penalty added to `base` strands 0 and keeps every output PRICED, which is what
+# makes the demotion honest: the route is still there, still visible in `used_in`, no longer
+# cheap, and never chosen -- `Graph.real_producers` withholds it from the solver outright.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, exactly as for DIMENSION_COST and
+# UNSOURCED_COST, and there is only one bound to state:
+#
+#     MACHINE_COST["unavailable"] < NON_PRODUCTION_PENALTY
+#
+# ABOVE the 5,000 wall, which is the highest price anything else in this file can reach, and
+# the reason is what the two statements are. "You cannot have this machine" is a true statement
+# about the world and a route through it is a real route with a real obstacle. A loot table or
+# an automation card is not a route at all -- nothing in the game turns those inputs into that
+# output -- so it has to lose to every claim the graph can actually account for, including the
+# worst of them. Asserted in `tests/test_progression.py` rather than left to the reader.
+#
+# NOT AMORTISED, because it is added to `base`. That is load-bearing here rather than merely
+# consistent with #29: a scrapbox entry yielding a stack would otherwise divide this by 64 and
+# come out under a raw leaf.
+NON_PRODUCTION_PENALTY = 50000.0
+
 # What a PLACEHOLDER costs, by what it asks of the player. See `tokens.py` for the kinds.
 #
 # Until #105 this file never mentioned tokens at all, so every one of them fell through the
@@ -444,7 +475,23 @@ EMC_COST = 0.5
 #
 # `tests/test_plan_fixtures.py` pins this number against the fixtures, so a bump costs an oracle
 # regeneration and must ride with one. #136 learned that the hard way: the guard failed first.
-FORMULA_VERSION = 11
+#
+# A RULE IN CODE THAT THE FINGERPRINT CANNOT SEE IS ANOTHER SOURCE, and #211 is the case.
+# `notproduction.annotation_markers` decides whether a recipe is a JEI documentation card from
+# three conditions in code. Two of its inputs ARE hashed -- the resolved token map, and
+# `tokens.LOOT_TABLE_CATEGORIES` -- which is what makes it easy to believe the rule is covered.
+# It is not: loosen one of the conditions and every price that route touched moves while every
+# hashed input stays exactly where it was. This is the "output, not mechanism" test above,
+# applied to a source the list does not name.
+#
+# AND A NEW CONSTANT ACCIDENTALLY COVERING YOU IS NOT A REASON TO DECLINE. #211 added
+# `NON_PRODUCTION_PENALTY` to the hashed tuple, so a warm cache written before it is invalidated
+# by that alone -- measured, the fingerprint differs. That is not the same claim as #175's:
+# #175 measured that the PRICES were bit-identical, which is the positive claim this file asks
+# for. "A constant I happened to add is in the hash" is instead exactly the reasoning
+# `fingerprint` names as going stale, and the next edit to the rule will add no constant and
+# inherit no such accident.
+FORMULA_VERSION = 12
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -680,6 +727,11 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     Returns a `CostTable` carrying those entry costs, so `recipe_cost` charges the same
     machine price this relaxation used instead of re-deriving a flat one.
     """
+    # BEFORE THE SEED, because `_seed`'s leaf rule reads `graph.by_output` and `_relax` reads
+    # the flag on every recipe. Memoised on the graph, so the solver asking the same question
+    # after this does no work. See `notproduction` for what it decides and why it is derived
+    # here rather than stored in the graph.
+    graph.mark_non_production(token_kinds)
     seed = _seed(graph, have, free_sources, token_kinds, dimension_gates, emc_available)
     cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
                             passes, machine_states, None)
@@ -906,6 +958,29 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
             base = machine_cost[r.category]
             if r.transfer:
                 base += TRANSFER_PENALTY
+            # A LOOT TABLE OR A JEI AUTOMATION CARD IS NOT PRODUCTION EITHER, and it is CHARGED
+            # rather than skipped. #211 and #169.
+            #
+            # THE ASYMMETRY WITH THE TRANSFER SKIP BELOW IS DELIBERATE AND MEASURED. Skipping
+            # was written first, because it makes this loop agree exactly with
+            # `Graph.real_producers`, which is what the solver walks. It STRANDS 26 KEYS: five
+            # of #169's seven infusion catalysts, `techreborn:rubber_sapling` and 20 others go
+            # from a finite price to infinity, because their only route that is not
+            # documentation is itself unreachable. Charging the penalty strands 0 and produces
+            # a byte-identical plan on the #211 reproduction.
+            #
+            # That is the same finding `UNSOURCED_COST` records above -- infinity was measured
+            # there too and rejected for stranding 2,372 priced keys, while "every FINITE
+            # candidate strands zero". The magnitude differs; the reason does not.
+            #
+            # SO THE TWO DISAGREE, AND THE HARM THE MIRRORING RULE GUARDS AGAINST STILL CANNOT
+            # HAPPEN. That rule exists so the ranker never prefers a route the solver cannot
+            # take, and this penalty is above the 5,000 wall, so every route the graph can
+            # account for outranks it. What survives is only that a key with NO accountable
+            # route reads 50,000-odd rather than unreachable, and a plan still reports it raw.
+            # A number saying "nothing here can obtain this" beats a missing number.
+            if r.not_production:
+                base += NON_PRODUCTION_PENALTY
             ingredients = 0.0
             # A RETAINED INPUT IS ECONOMICALLY A MACHINE, so its cost joins `base` and NOT the
             # amortising term below. #175: an input with `consume_chance == 0.0` survives the
@@ -988,10 +1063,17 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     # would in fact cover them today -- they are listed anyway, because "the cache is correct
     # because of how a constant happens to be defined" is the kind of reasoning that goes stale
     # the moment someone gives one of them a literal value.
-    h.update(("%r %r %r %r %r %r %r %r %r %r %r %r %r"
+    h.update(("%r %r %r %r %r %r %r %r %r %r %r %r %r %r"
               % (UNGATED_MACHINE_COST, FLUID_SCALE, BASE_RAW_COST, TRANSFER_PENALTY, PASSES,
                  FORMULA_VERSION, BUILD_SPREAD, BUILD_SCALE, BUILD_KNEE, BUILD_SLOPE,
-                 UNPRICED_MACHINE_COST, BLOCKED_FLOOR, BLOCKED_CEILING)).encode())
+                 UNPRICED_MACHINE_COST, BLOCKED_FLOOR, BLOCKED_CEILING,
+                 NON_PRODUCTION_PENALTY)).encode())
+    # AND THE LOOT-TABLE DECLARATION, which is neither a price nor a per-world input: adding a
+    # category name to `tokens.LOOT_TABLE_CATEGORIES` moves the prices of everything that
+    # category claimed to produce and moves no other input at all. The token map is hashed
+    # further down with the other per-world data, and it is the second half of what
+    # `notproduction` reads.
+    h.update(repr(sorted(tokens.LOOT_TABLE_CATEGORIES)).encode())
     # AND EVERY CONSTANT `_seed` READS, which this hash did not cover until #176 added one.
     # The docstring above has always claimed that "editing MACHINE_COST invalidates the cache
     # instead of silently reusing prices computed under the old table" -- true of the
@@ -1108,6 +1190,12 @@ def estimate_cached(graph, graph_path, have=None, machine_states=None, free_sour
     relaxation the cache is serving -- a divergence visible only on a cache HIT, which is the
     hard way to find it.
     """
+    # ON THE HIT PATH TOO, which `estimate` cannot cover. A cache hit returns before
+    # `estimate` runs, and the flag has consumers besides the relaxation: `recipe_cost` charges
+    # the penalty, `Solver.score_recipe` ranks on it, and `/api/recipe` reports it. A warm
+    # cache would otherwise serve correct PRICES beside a graph that says every recipe is a
+    # production route, which is the divergence that only shows up on the second run.
+    graph.mark_non_production(token_kinds)
     cache_path = cache_path or cache_beside(graph_path)
     stamp = fingerprint(graph_path, have, machine_states, free_sources, machine_items,
                         getattr(graph, "multiblocks", None), token_kinds, dimension_gates,
@@ -1170,6 +1258,8 @@ def recipe_cost(cost, recipe, ore_members, machine_states=None, pick=None):
                                 getattr(cost, "machine_entry", None))
     if recipe.transfer:
         total += TRANSFER_PENALTY
+    if recipe.not_production:
+        total += NON_PRODUCTION_PENALTY
     for ing in recipe.inputs:
         alt = pick(ing) if pick else _cheapest_alternative(cost, ing, ore_members)
         best = input_cost(cost, alt, ing.qty, ore_members)

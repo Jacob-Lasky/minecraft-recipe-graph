@@ -332,6 +332,12 @@ def _recipe_brief(graph, recipe, have, direction):
         "category": recipe.category,
         "machine": recipe.machine,
         "source": recipe.source,
+        # WHY THIS ROW IS LISTED AND STILL NOT A ROUTE, or None. `describe` reads
+        # `graph.producers`, not `real_producers`, so a loot table or a JEI automation card
+        # appears here on purpose -- #211 asked for the entry to stay readable while the
+        # planner refuses to use it. Without the ground on the row, the page shows a recipe the
+        # plan then silently declines, which reads as the plan being wrong. See notproduction.
+        "not_production": recipe.not_production,
     }
     # Outputs unconditionally: the two branches built the same list, so the "used" branch was
     # a second copy of it kept in step by hand.

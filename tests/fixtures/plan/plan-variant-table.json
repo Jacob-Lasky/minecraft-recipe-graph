@@ -86,7 +86,7 @@
        "children": [
         {
          "alt_count": 12,
-         "alternatives": 20,
+         "alternatives": 19,
          "category": "bdew.jeibees.produce.rootTrees",
          "children": [
           {
@@ -112,7 +112,7 @@
          "status": "craft"
         },
         {
-         "alternatives": 110,
+         "alternatives": 109,
          "category": "minecraft.crafting",
          "children": [
           {
@@ -122,7 +122,7 @@
             {
              "children": [
               {
-               "alternatives": 63,
+               "alternatives": 62,
                "category": "minecraft.smelting",
                "children": [
                 {
@@ -169,7 +169,7 @@
            "status": "craft"
           },
           {
-           "alternatives": 63,
+           "alternatives": 62,
            "category": "minecraft.smelting",
            "children": [
             {
@@ -207,7 +207,7 @@
          "status": "craft"
         },
         {
-         "alternatives": 63,
+         "alternatives": 62,
          "category": "minecraft.smelting",
          "children": [
           {

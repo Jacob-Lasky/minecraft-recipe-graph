@@ -3,7 +3,7 @@
 import os
 import sys
 
-from . import dimensions, multiblocks
+from . import dimensions, multiblocks, notproduction, tokens
 from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
@@ -163,6 +163,15 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     if flagged:
         say("container transfers: %d recipes flagged as fluid moves, not production "
             "(%d container items detected)" % (flagged, len(containers)))
+
+    # REPORTED HERE, DECIDED AT PLAN TIME. Nothing below is written into the graph: the rule
+    # reads the per-world token map, so `notproduction` recomputes it on every load and this
+    # is a report about what the curated defaults will demote rather than a baked verdict.
+    # It is said at build time anyway because this is the log a human reads once per redump,
+    # and a rule that has drifted away from the pack shows up as a count that moved.
+    demotions = g.mark_non_production(tokens.resolve())
+    for line in notproduction.report(demotions):
+        say("not production -- " + line)
 
     # LAST, and after the drop pass on purpose: `known` is derived from the finished recipe
     # set, so parsing earlier would resolve blockstate metas against keys this graph no longer
@@ -342,7 +351,10 @@ def _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say):
 #   EIOTank/bottler  fluid container fill and empty
 #   information      JEI info panels (drop sources, usage notes)
 #   jeresources.*    world generation, villager trades, plant drops
-#   loot/drops       mob and chest loot tables
+#   loot/drops       mob and chest loot tables, EXCEPT the ones
+#                    `tokens.LOOT_TABLE_CATEGORIES` declares by name: those are priced out
+#                    rather than deleted, so the JEI card stays readable and a sole-producer
+#                    output keeps its route. See `is_non_recipe` and `notproduction`.
 #   enchant*         enchanting permutations
 #   _stats           material stat tables (Tinkers' harvest/ranged/projectile), listing
 #                    every part a material yields against every form of that material
@@ -383,6 +395,23 @@ NON_RECIPE_CATEGORY_PATTERNS = (
 
 
 def is_non_recipe(category, keep=()):
+    """True when this JEI category should not reach the graph at all.
+
+    A DECLARED LOOT TABLE IS EXEMPT, and that is #211's half of this function. `loot` and
+    `.drop` are substring patterns, so `intestines_loot_table` and `aoa_extraction_loot` match
+    and were being deleted -- while `TechReborn.Scrapbox`, the same defect at six times the
+    size, matches nothing here. Deleting them is a weaker answer than `notproduction.mark`
+    gives: it strands any output whose only route was the loot table at `cost.BASE_RAW_COST`
+    and it throws away a JEI card a player might want to read. So the declaration in
+    `tokens.LOOT_TABLE_CATEGORIES` outranks the patterns, and all three names go through ONE
+    mechanism instead of two that disagree.
+
+    BY EXACT UID, not case-folded like the `keep` test below. A category uid is a uid: the dump
+    writes `TechReborn.Scrapbox` with those capitals and a declaration that matched
+    case-insensitively would be claiming to know about a category the pack does not have.
+    """
+    if category in tokens.LOOT_TABLE_CATEGORIES:
+        return False
     lc = str(category).lower()
     if lc in keep:
         return False
@@ -524,7 +553,7 @@ def apply_recipe_filters(g, keep_categories=(), say=None):
         dropped = sum(dropped_by_cat.values())
         top = sorted(dropped_by_cat.items(), key=lambda t: -t[1])[:4]
         say("non-recipes: dropped %d of %d entries (%s) -- info panels, anvil "
-            "permutations, loot tables and container fills are not production"
+            "permutations, undeclared loot tables and container fills are not production"
             % (dropped, before,
                ", ".join("%s x%d" % (c, n) for c, n in top)))
     return {"dropped": dropped_by_cat, "loops": loops_by_cat, "tables": tables_by_cat,
@@ -693,13 +722,26 @@ def mark_container_transfers(g, quiet=True):
     return flagged, containers
 
 
-def coverage(g):
-    """Quick stats to tell how complete the graph is."""
+def coverage(g, token_kinds=None):
+    """Quick stats to tell how complete the graph is.
+
+    `not_production` is here rather than only in the build log because #211's report is that a
+    silent exclusion reads as "we considered everything". A maintainer asking how many entries
+    the planner refuses to route through, and on what grounds, should be able to get the answer
+    from `recipegraph stats` rather than from a build they would have to re-run.
+
+    `token_kinds` defaults to the CURATED map rather than to empty, and the difference matters:
+    empty would report zero annotation demotions for every pack and read as "the rule found
+    nothing" instead of "the rule was not given its input".
+    """
     by_source = {}
     by_cat = {}
     for r in g.recipes:
         by_source[r.source] = by_source.get(r.source, 0) + 1
         by_cat[r.category] = by_cat.get(r.category, 0) + 1
+    if token_kinds is None:
+        token_kinds = tokens.resolve()
+    demotions = g.mark_non_production(token_kinds)
     return {
         "recipes": len(g.recipes),
         "produced_keys": len(g.by_output),
@@ -707,4 +749,9 @@ def coverage(g):
         "oredict_entries": len(g.ore_members),
         "by_source": by_source,
         "by_category": dict(sorted(by_cat.items(), key=lambda t: -t[1])[:25]),
+        "not_production": {
+            "priced_out": demotions["demoted"],
+            "withheld_by_guard": demotions["withheld"],
+            "annotation_markers": demotions["markers"],
+        },
     }

@@ -47,7 +47,7 @@
    "category": "modularmachinery.recipes.ender_stone_crucible",
    "children": [
     {
-     "alternatives": 3,
+     "alternatives": 2,
      "category": "minecraft.crafting",
      "children": [
       {

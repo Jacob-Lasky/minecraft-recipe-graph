@@ -121,9 +121,15 @@ class WhatTheGraphCannotExplainCostsTest(unittest.TestCase):
     def test_the_whole_chain_holds_in_one_assertion(self):
         # The band as `cost.py` states it, so a constant moved past its neighbour fails here
         # and not somewhere confusing three modules away.
+        #
+        # NON_PRODUCTION_PENALTY IS THE TOP OF IT, and that is #211's claim rather than a
+        # bigger number for its own sake. Every other figure here prices an OBSTACLE on a route
+        # that exists -- an afternoon of fighting, a trip, a locked chapter, a machine you
+        # cannot have. A loot table or a JEI automation card is not a route at all, so it has to
+        # lose to every claim the graph can account for, including the worst of them.
         chain = [cost_mod.BASE_RAW_COST, cost_mod.LOOT_COST, cost_mod.DIMENSION_COST,
                  cost_mod.GATE_COST, cost_mod.UNSOURCED_COST,
-                 cost_mod.MACHINE_COST["unavailable"]]
+                 cost_mod.MACHINE_COST["unavailable"], cost_mod.NON_PRODUCTION_PENALTY]
         self.assertEqual(chain, sorted(chain))
         self.assertEqual(len(chain), len(set(chain)))
 
@@ -135,7 +141,8 @@ class WhatTheGraphCannotExplainCostsTest(unittest.TestCase):
         # real and this is where it would come back.
         args = ("graph.json", {}, {}, ())
         before = cost_mod.fingerprint(*args)
-        for name in ("UNSOURCED_COST", "GATE_COST", "LOOT_COST", "DIMENSION_COST"):
+        for name in ("UNSOURCED_COST", "GATE_COST", "LOOT_COST", "DIMENSION_COST",
+                     "NON_PRODUCTION_PENALTY"):
             original = getattr(cost_mod, name)
             try:
                 setattr(cost_mod, name, original + 7.0)
