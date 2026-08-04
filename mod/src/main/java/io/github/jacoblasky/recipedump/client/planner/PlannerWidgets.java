@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.plan.Pins;
 
@@ -833,7 +834,15 @@ public final class PlannerWidgets {
         List<String> lines = new java.util.ArrayList<String>();
         List<Integer> colours = new java.util.ArrayList<Integer>();
         for (String key : book.todoKeys()) {
-            lines.add(NodeRowText.quantity(book.todoQuantity(key)) + " " + key);
+            // THE SAME UNIT RULE AS THE SECTIONS BELOW, WHICH THE FIRST SCREENSHOT OF THE WIDER
+            // PANEL IS WHAT CAUGHT. These rows used a bare `quantity`, so 934,400 mB of water
+            // read as `934,400x fluid:water` four lines above a shopping row rendering the same
+            // fluid as `934,400 mB Water`. One panel cannot measure the same fluid two ways.
+            //
+            // THE KEY STAYS RATHER THAN A LABEL, and that half is not a defect: the plan book
+            // stores keys and has no display name to draw, which is the honest thing to show
+            // for a row the player added by key. Only the unit was wrong.
+            lines.add(NodeRowText.amount(book.todoQuantity(key), Keys.kind(key)) + " " + key);
             colours.add(NodeStatus.INK_CRAFT);
         }
         if (lines.isEmpty()) {

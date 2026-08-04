@@ -580,6 +580,14 @@ public final class Solver {
     // instead of replacing the list, which is the stronger version of the same constraint:
     // an unsatisfiable pin still leaves the backtracking somewhere to go. DO NOT reintroduce
     // a filtering variant; see `rank` for why a plan beats an error here.
+    //
+    // `pickRecipe` CLAIMED THE RECIPE-CHOOSER PAGE RANKED WITH IT, AND THE PAGE NOW EXISTS AND
+    // DOES NOT. #188 built the picker; `RecipeChoices.forNode` is its data source and its own
+    // javadoc says why it declines to rank -- "any cost-based order here would be a second
+    // opinion about ranking that the solver has already formed". So the javadoc was not merely
+    // ahead of its time, it was wrong about a design decision that has since been made the
+    // other way. DO NOT add a public ranking entry point back for that page; it does not want
+    // one.
 
     // -- expansion ---------------------------------------------------------------------
 
