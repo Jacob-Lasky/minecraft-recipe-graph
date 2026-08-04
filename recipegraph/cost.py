@@ -196,7 +196,7 @@ FLUID_SCALE = 1.0 / 1000.0
 # number: `Graph.reachable_form` is the set with positive evidence the graph cannot explain
 # the route, and `_seed` prices exactly that set at `UNSOURCED_COST`.
 #
-# THREE WAYS OF REPRICING IT HAVE BEEN BUILT AND MEASURED AND REJECTED, none of them that one.
+# FOUR WAYS OF REPRICING IT HAVE BEEN BUILT OR MEASURED AND REJECTED, none of them that one.
 # Do not re-propose one without new evidence, and add to this list rather than rediscovering it:
 #
 #  * NO SEED AT ALL for an unobtainable processed form ("infinity is the honest reading").
@@ -206,6 +206,17 @@ FLUID_SCALE = 1.0 / 1000.0
 #  * FLOOR IT AT THE MATERIAL'S CHEAPEST OBTAINABLE MEMBER. Circular. The floor picks the
 #    INGOT, whose price was itself earned through the nugget, so the nugget rises to exactly
 #    the number the bug produced and nothing moves.
+#  * INHERIT A BARE KEY'S PRICE FROM A PRODUCED VARIANT OF IT, which is the shape #170 reaches
+#    for and a different rule from the one above: it keys on the NBT axis rather than on the
+#    material family. `extratrees:drink` is why not. Nothing makes the bare Beer Mug, and all
+#    30 produced variants are FILLED mugs a Fluid Transposer makes from an EMPTY mug variant,
+#    so the rule prices "Beer Mug" at what a Mug of Apple Juice costs. A one-hop cycle check
+#    does not save it, because the empty mug is another VARIANT and not the bare key. Measured
+#    on the reference graph by the agent on #170; recorded here rather than on that branch
+#    because the branch is a draft that is not landing and this list is what stops the rule
+#    being re-proposed. NOTE WHAT IT DOES NOT ARGUE AGAINST: #176 assigns the flat
+#    `UNSOURCED_COST` to this set and inherits nothing, so the Beer Mug costs 2,000 today and
+#    not the price of a filled one. The hazard is specific to inheritance.
 #  * FLOOR IT AT THE MATERIAL'S WORLD ORE, re-seeded into a clean relaxation. Structurally
 #    sound and measured clean -- 6 keys floored, 0 lost, 0 cheaper, every control unchanged
 #    -- and it still produced a WORSE plan than the bug at the time: with the nugget gone the
@@ -216,7 +227,7 @@ FLUID_SCALE = 1.0 / 1000.0
 #    stays rejected, because it is now redundant AND it keys on the wrong thing -- an ore
 #    tells you nothing about a material that has none.
 #
-# A FOURTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
+# A FIFTH FINDING, general rather than about ores: A FLOOR CANNOT BE PATCHED INTO A SETTLED
 # TABLE. `_relax` only ever LOWERS, which `estimate` already states as the reason machine
 # entry costs need a second clean pass -- so raising a price after relaxation leaves every
 # consumer holding the price it banked before the raise. Measured: the nugget went 1.0 to
