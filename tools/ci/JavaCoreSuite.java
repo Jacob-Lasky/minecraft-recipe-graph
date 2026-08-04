@@ -33,6 +33,27 @@ import org.junit.runner.notification.RunListener;
  * identical to "the suite is fast" -- #86's `unittest.main()` mid-file ran 31 of 77 tests and
  * complained about none of it.
  *
+ * AND AN ALLOWLISTED NAME THAT DOES NOT EXIST FAILS THE RUN, which is the same argument one
+ * level up and was a live hole until #192. An allowlist entry is a CLAIM that a specific
+ * assertion exists and that CI cannot run it. Deleting the assertion makes the claim false, and
+ * before this guard it did so silently:
+ *
+ *   renaming the gate     CAUGHT, though not by this. The renamed method still carries its
+ *                         `Assume`, so it still skips, under a name that is not allowlisted,
+ *                         and `SKIPPED, NOT ALLOWED` fires.
+ *   DELETING the gate     MISSED. No method means no `Assume`, so nothing skips and nothing is
+ *                         missing from the allowlist. `PlanFixtureTest` has fourteen other
+ *                         tests so the collected-nothing guard cannot fire, and
+ *                         `ci-java.sh` counts *.java files against *.class files rather than
+ *                         methods, so its count still balances. Measured: the run printed
+ *                         `275 run, 0 failed, 0 skipped` and `== java core green ==` with the
+ *                         repository's single most important assertion gone from the tree.
+ *
+ * So the two outcomes an allowlisted name can have are now told apart. It RAN (someone set
+ * $RECIPEGRAPH_ORACLE and the gate is being enforced, the best case and not an error), or it
+ * SKIPPED as expected, or IT IS NOT THERE, which is a failure. The third case is the only one
+ * that used to look like the first.
+ *
  * Deliberately dependency-free beyond JUnit 4 itself, and deliberately not in
  * `mod/src/test/java`: it is CI plumbing rather than a test, and a class in there would be
  * compiled into the Gradle test set and run by the real build.
@@ -44,6 +65,13 @@ public final class JavaCoreSuite {
         List<String> classNames = new ArrayList<String>();
         for (int i = 0; i < args.length; i++) {
             if ("--allow-skip".equals(args[i])) {
+                // SAID, not thrown. A trailing `--allow-skip` used to walk off the end of the
+                // array and die with a bare ArrayIndexOutOfBoundsException, which in a CI log
+                // reads as a broken runner rather than as a malformed invocation.
+                if (i + 1 >= args.length) {
+                    System.err.println("!! --allow-skip needs a Class.method after it");
+                    System.exit(2);
+                }
                 allowedSkips.add(args[++i]);
             } else {
                 classNames.add(args[i]);
@@ -86,13 +114,28 @@ public final class JavaCoreSuite {
                     + skip.getKey() + "  (" + skip.getValue() + ")");
             bad = bad || !allowed;
         }
-        // NAMED, not counted, so a skip that stops happening is visible too: an allowlist entry
-        // that never fires is either a fixed gap nobody removed from the list or a test that
-        // stopped running altogether, and both are worth a line.
+        // AN ALLOWLIST ENTRY IS A CLAIM THAT THE ASSERTION EXISTS, so a name that never turned
+        // up in ANY form is a failure and not a note. `testStarted` fires for a test that runs
+        // AND for one that then trips an `Assume`, and `testIgnored` covers `@Ignore`, so
+        // `counting.seen` holds every method JUnit knew about. A name in neither that set nor
+        // the skip map has been renamed or deleted, and the entry naming it is now a lie.
         for (String allowed : allowedSkips) {
-            if (!counting.skipped.containsKey(allowed)) {
-                System.out.println("-- allowlisted skip did NOT skip (it ran, or it is gone): "
-                        + allowed);
+            if (counting.skipped.containsKey(allowed)) {
+                continue;
+            }
+            if (counting.seen.contains(allowed)) {
+                // The good case, and deliberately not an error: someone exported
+                // $RECIPEGRAPH_ORACLE and the gate is actually being enforced.
+                System.out.println("-- allowlisted skip RAN rather than skipping, so it is "
+                        + "being enforced here: " + allowed);
+            } else {
+                System.out.println("!! ALLOWLISTED TEST DOES NOT EXIST: " + allowed);
+                System.out.println("   Nothing skipped under that name and nothing ran under "
+                        + "it, so it has been renamed or deleted. Either restore it, or "
+                        + "remove the --allow-skip entry in tools/ci-java.sh that claims CI "
+                        + "cannot run it. An allowlist naming a test that is gone is the "
+                        + "exact lie this runner exists to refuse.");
+                bad = true;
             }
         }
         for (Class<?> type : classes) {
@@ -114,10 +157,17 @@ public final class JavaCoreSuite {
         /** `Class.method` -> why, sorted so two runs of one tree print identical lines. */
         final Map<String, String> skipped = new TreeMap<String, String>();
         final Set<String> classesThatRan = new LinkedHashSet<String>();
+        /**
+         * Every `Class.method` JUnit knew about, whether it passed, failed, skipped or was
+         * ignored. This is what lets an allowlisted name that RAN be told apart from one that
+         * is not in the tree at all; without it those two look identical from the outside.
+         */
+        final Set<String> seen = new LinkedHashSet<String>();
 
         @Override
         public void testStarted(Description description) {
             classesThatRan.add(description.getClassName());
+            seen.add(name(description));
         }
 
         @Override
@@ -128,7 +178,10 @@ public final class JavaCoreSuite {
         @Override
         public void testIgnored(Description description) {
             // @Ignore counts as a skip here on purpose. It is a different mechanism from
-            // Assume and the same lie in the output.
+            // Assume and the same lie in the output. It does NOT fire `testStarted`, so the
+            // name has to be recorded here too or an allowlisted @Ignore would read as
+            // missing from the tree.
+            seen.add(name(description));
             skipped.put(name(description), "@Ignore");
         }
 
