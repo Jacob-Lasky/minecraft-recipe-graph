@@ -14,7 +14,14 @@ package io.github.jacoblasky.recipedump.plan;
  */
 final class RecipeScore implements Comparable<RecipeScore> {
 
-    /** 0 for a container fill/empty, 1 for real production. A transfer is never production. */
+    /**
+     * 0 when the entry is not production at all, 1 when it is.
+     *
+     * THREE THINGS SHARE THIS TERM: a container fill/empty, a random loot table and a JEI card
+     * explaining how to automate something. None of them turns its inputs into its outputs, so
+     * the claim is identical and a separate term per kind would be a silent ordering decision
+     * between statements that have no order. See {@link NonProduction} for the last two.
+     */
     private final int production;
     /**
      * Negated slots that consume something already on the path to this recipe.

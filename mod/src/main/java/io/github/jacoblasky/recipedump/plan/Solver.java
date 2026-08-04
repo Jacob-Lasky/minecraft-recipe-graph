@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import io.github.jacoblasky.recipedump.graph.Bits;
 import io.github.jacoblasky.recipedump.graph.Csr;
 import io.github.jacoblasky.recipedump.graph.IntArray;
 import io.github.jacoblasky.recipedump.graph.Keys;
@@ -114,6 +115,18 @@ public final class Solver {
     /** Scratch for `realProducers`, which appends into a caller-supplied buffer. */
     private final IntArray scratch = new IntArray();
 
+    /**
+     * The recipes {@link NonProduction} demoted: loot tables and JEI automation cards.
+     *
+     * COMPUTED HERE AS WELL AS IN {@link Cost#estimate}, and that is not a duplicated rule --
+     * the rule has exactly one implementation, in {@link NonProduction}, and this is a second
+     * CALL of it. Python's `Solver.__init__` calls `graph.mark_non_production` for the same
+     * reason: a Solver built with no cost table must still refuse to route through a loot
+     * table, and a table's copy is unavailable in that case. The two agree whenever they were
+     * given the same token map, which every caller resolves once and passes to both.
+     */
+    private final long[] notProduction;
+
     private Solver(Builder b) {
         this.g = b.graph;
         this.pool = b.have == null ? new KeyCounter() : b.have;
@@ -140,6 +153,7 @@ public final class Solver {
         this.workBudget = Math.max(50000, b.maxNodes * 20);
         this.machineStates = b.machineStates;
         this.costs = b.costs;
+        this.notProduction = NonProduction.recipes(b.graph, b.tokenKinds, null);
     }
 
     /**
@@ -467,10 +481,16 @@ public final class Solver {
         double simple = 1.0 / (1 + slots.size());
         double plain = Machines.isHandCrafting(g, store.categoryId(recipeId)) ? 0.1 : 0.0;
         int avail = availabilityRank(recipeId);
-        // Order matters. A container transfer is never production. After that, the ESTIMATED
-        // TOTAL COST dominates: it already accounts for machine availability and for how
-        // expensive the whole subtree is, which local signals cannot see.
-        // `satisfied`/`simple` only break ties between comparable routes. DO NOT promote
+        // ORDER MATTERS, AND THE FIRST TERM IS "IS THIS PRODUCTION AT ALL". A container
+        // fill/empty is not, and neither is a loot table or a JEI automation card, so all three
+        // lose to any real recipe regardless of how well stocked they look. They share one term
+        // rather than getting one each because the claim is identical -- whatever else is true
+        // of it, this entry is not a way to obtain the thing -- and two terms would be a silent
+        // ordering decision between statements that have no order.
+        //
+        // After that, the ESTIMATED TOTAL COST dominates: it already accounts for machine
+        // availability and for how expensive the whole subtree is, which local signals cannot
+        // see. `satisfied`/`simple` only break ties between comparable routes. DO NOT promote
         // `avail` above cost -- doing that is what made the solver prefer a million-bucket
         // chain through an owned machine.
         double cost = estimatedCost(recipeId);
@@ -481,7 +501,9 @@ public final class Solver {
         // Above `simple + plain`, because that is the term it has to beat: `plain` gives
         // hand-crafting +0.1 and so prefers unpacking a decorative block over smelting an
         // ore. Moved below it, this goes inert.
-        return new RecipeScore(store.isTransfer(recipeId) ? 0 : 1, -ancestorCyclic, cheap,
+        int production = (store.isTransfer(recipeId)
+                || Bits.get(notProduction, recipeId)) ? 0 : 1;
+        return new RecipeScore(production, -ancestorCyclic, cheap,
                 -ownCyclic, satisfied, oreBacked(slots), simple + plain, avail);
     }
 
@@ -939,7 +961,7 @@ public final class Solver {
             }
         }
         return parts + "|" + perRun + "|" + store.categoryId(recipeId) + "|"
-                + store.isTransfer(recipeId);
+                + store.isTransfer(recipeId) + "|" + Bits.get(notProduction, recipeId);
     }
 
     /**
@@ -1378,13 +1400,22 @@ public final class Solver {
 
     // -- helpers ------------------------------------------------------------------------
 
-    /** `graph.real_producers`, materialised. Order is the graph's and must stay so. */
+    /**
+     * `graph.real_producers`, materialised. Order is the graph's and must stay so.
+     *
+     * THE DEMOTED FILTER IS HERE AND NOT ON THE GRAPH, which is where python puts it, and the
+     * reason does not transfer: {@code GraphService} hands one graph to concurrent off-thread
+     * solves, so the verdict cannot live on shared state. Same split as {@link Unsourced}.
+     */
     private List<Integer> realProducers(int keyId) {
         scratch.clear();
         g.realProducers(keyId, scratch);
         List<Integer> out = new ArrayList<Integer>(scratch.size());
         for (int i = 0; i < scratch.size(); i++) {
-            out.add(scratch.get(i));
+            int recipe = scratch.get(i);
+            if (!Bits.get(notProduction, recipe)) {
+                out.add(Integer.valueOf(recipe));
+            }
         }
         return out;
     }
@@ -1397,7 +1428,13 @@ public final class Solver {
     private int realProducerCount(int keyId) {
         scratch.clear();
         g.realProducers(keyId, scratch);
-        return scratch.size();
+        int total = 0;
+        for (int i = 0; i < scratch.size(); i++) {
+            if (!Bits.get(notProduction, scratch.get(i))) {
+                total++;
+            }
+        }
+        return total;
     }
 
     // -- construction ---------------------------------------------------------------------
