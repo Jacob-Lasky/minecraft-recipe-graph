@@ -33,15 +33,15 @@ public final class FlowLayout {
      * Node box width, in GUI pixels.
      *
      * 209 IS NOT A ROUND NUMBER, IT IS A NAME LENGTH. The node draws its label on a line of its
-     * own beside a 16px icon, so a 209px node gives the item's name 190px -- 31 characters at
+     * own beside a 16px icon, so a 209px node gives the item's name 184px -- 30 characters at
      * `NodeRowText.CHAR_WIDTH`, which covers "Sodium Fluoride Solution" and the great majority
      * of this pack's names outright.
      *
-     * IT MUST ALSO CLEAR `FlowCanvas.NARROWEST_NODE`, which is 164: the icon, the quantity and
-     * a full badge on line one. Below that the node drops the badge rather than truncating it,
-     * which is right for a diagram and wrong for a default. The surplus over 164 is what the
-     * label gets, and the label is the thing there is never enough of -- so this number is
-     * chosen for it rather than derived from the minimum.
+     * IT MUST ALSO CLEAR `FlowCanvas.NARROWEST_NODE`, which is 170: the icon, the quantity and
+     * a full badge on line one, inside `NODE_PAD` either side. Below that the node drops the
+     * badge rather than truncating it, which is right for a diagram and wrong for a default.
+     * The surplus over 170 is what the label gets, and the label is the thing there is never
+     * enough of -- so this number is chosen for it rather than derived from the minimum.
      *
      * IT WAS 214 FOR ONE COMMIT, from a hand-added figure quoted in a message, and the pin
      * below caught it the first time it ran. That is the whole argument for the pin: five
@@ -55,18 +55,20 @@ public final class FlowLayout {
      */
     public static final int NODE_WIDTH = 209;
     /**
-     * Node box height. TWO TEXT LINES PLUS TWO PIXELS.
+     * Node box height. TWO TEXT LINES, PLUS `NODE_PAD` ABOVE AND BELOW.
      *
-     * 24 AND NOT 20, WHICH IS WHAT IT WAS WHILE THE NODE DREW ONE LINE AND WASTED THE OTHER
-     * HALF OF ITSELF. `PlannerWidgets.LINE` is 10, so 20 fits both lines exactly and flush --
-     * and the box is drawn as a nine-slice whose border eats the outer pixel, so the top line
-     * sat on the frame. Two pixels of slack put a pixel above and below the pair.
+     * 26 AND NOT 20, WHICH IS WHAT IT WAS WHILE THE NODE DREW ONE LINE AND WASTED THE OTHER
+     * HALF OF ITSELF. `PlannerWidgets.LINE` is 10 and `NODE_PAD` is 3, so two lines clear of
+     * the nine-slice's bevel need 26; at 20 they fit exactly and flush, and the first shot of
+     * the two-line node had every item name resting on the bottom border.
+     * `FlowCanvasTest.aNodeIsTallEnoughForItsTwoLines` pins it against `FlowCanvas.SHORTEST_NODE`.
      *
-     * THE DIAGRAM DID NOT GET TALLER FOR THIS in any way a reader notices: it is four pixels a
-     * row against a 6px row gap, so a 4,000 node plan grows by about 15%, and the culler draws
-     * what a viewport holds rather than what a plan contains.
+     * THE DIAGRAM GOT TALLER FOR THIS and it is worth saying by how much rather than waving at
+     * it: the row pitch goes from 26 to 32, so a 4,000 node plan is about 23% longer to scroll.
+     * The culler draws what a viewport holds rather than what a plan contains, so no frame costs
+     * more; what it costs is scrolling, and it buys an item name you can read.
      */
-    public static final int NODE_HEIGHT = 24;
+    public static final int NODE_HEIGHT = 26;
     /** Gap between a column and the next. The edge lines are drawn across this. */
     public static final int COLUMN_GAP = 40;
     /** Gap between two stacked nodes. */

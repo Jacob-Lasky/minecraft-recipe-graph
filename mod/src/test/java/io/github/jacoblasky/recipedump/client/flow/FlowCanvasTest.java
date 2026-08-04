@@ -50,7 +50,8 @@ public class FlowCanvasTest {
         // screenshots of this canvas read "Iron ..." and "Block..." -- a dependency diagram
         // whose boxes did not say what they were. On its own line the label gets the node
         // minus the icon column.
-        int labelRoom = FlowLayout.NODE_WIDTH - PlannerWidgets.NODE_ICON - PlannerWidgets.GAP;
+        int labelRoom = FlowLayout.NODE_WIDTH - PlannerWidgets.NODE_PAD * 2
+                - PlannerWidgets.NODE_ICON - PlannerWidgets.GAP;
         int characters = labelRoom / NodeRowText.CHAR_WIDTH;
         // 24 is "Sodium Fluoride Solution", the longest name in `plan-fluid-chain`'s upper
         // chain and a name the old node cut to "Sodium…". Asserted as a character count
@@ -62,13 +63,16 @@ public class FlowCanvasTest {
     }
 
     @Test
-    public void aNodeIsTallEnoughForItsTwoLinesAndDoesNotSitOnTheFrame() {
-        // 20 fitted both lines EXACTLY, and the box is a nine-slice whose border occupies the
-        // outer pixel, so the top line was drawn over the frame. Two pixels of slack is one
-        // above and one below the pair.
+    public void aNodeIsTallEnoughForItsTwoLines() {
+        // 20 fitted both lines EXACTLY, and the box is a nine-slice whose bevel occupies the
+        // outer two or three pixels, so `icons-flow.png` had every item name resting on the
+        // bottom border. `NODE_PAD` above and below is what clears it.
         assertTrue("NODE_HEIGHT " + FlowLayout.NODE_HEIGHT + " must hold two "
-                        + PlannerWidgets.LINE + "px lines with a pixel either side",
-                FlowLayout.NODE_HEIGHT >= PlannerWidgets.LINE * 2 + 2);
+                        + PlannerWidgets.LINE + "px lines inside NODE_PAD, which is "
+                        + FlowCanvas.SHORTEST_NODE,
+                FlowLayout.NODE_HEIGHT >= FlowCanvas.SHORTEST_NODE);
+        assertTrue("and the pad must be real, or this asserts nothing about the frame",
+                PlannerWidgets.NODE_PAD > 0);
     }
 
     /**

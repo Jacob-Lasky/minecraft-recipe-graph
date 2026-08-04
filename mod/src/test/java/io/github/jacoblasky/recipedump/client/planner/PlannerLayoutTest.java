@@ -1355,8 +1355,11 @@ public class PlannerLayoutTest {
     @Test
     public void aTallNodePutsItsLabelOnASecondLineWithRoomForAWholeName() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
+        // `FlowLayout.NODE_WIDTH` and `NODE_HEIGHT`, spelled rather than imported: `flow`
+        // depends on `planner` and not the reverse, and a test that inverted that would be the
+        // first thing in the package to do so. `FlowCanvasTest` pins the two numbers.
         int width = 209;
-        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, width, 24);
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, width, 26);
         HeadlessLayout.layOutPanel("two-line-node", PlannerWidgets.PANEL_WIDTH,
                                    PlannerWidgets.PANEL_HEIGHT, box);
 
@@ -1382,7 +1385,7 @@ public class PlannerLayoutTest {
             }
         }
         assertTrue("and everything stays inside the box",
-                   box.getArea().h() == 24 && box.getArea().w() == width);
+                   box.getArea().h() == 26 && box.getArea().w() == width);
     }
 
     /** A row-height node keeps the single-line columns, which is what the seam promised. */
@@ -1435,7 +1438,7 @@ public class PlannerLayoutTest {
     @Test
     public void hidingDetailKeepsTheQuantityAndTakesTheLabel() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 24);
+        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
         HeadlessLayout.layOutPanel("detail-node", PlannerWidgets.PANEL_WIDTH,
                                    PlannerWidgets.PANEL_HEIGHT, box);
 
@@ -1523,7 +1526,7 @@ public class PlannerLayoutTest {
     @Test
     public void aDiagramNodeHighlightsFromTheSameSelectionTheTreeReads() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 24);
+        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
         try {
             assertFalse(box.drawsAsSelected());
             PlanSelection.select(node);

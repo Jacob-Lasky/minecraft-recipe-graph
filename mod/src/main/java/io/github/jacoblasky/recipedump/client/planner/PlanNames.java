@@ -98,11 +98,6 @@ public final class PlanNames {
         }
     }
 
-    /** Nothing named. For a caller with no plan in hand; every key answers as itself. */
-    public static PlanNames none() {
-        return NONE;
-    }
-
     /**
      * Recursive for the reason `PlanJson.readNode` is: the deepest fixture is 634 nodes and
      * `solve.py` caps depth at 24, so the stack this uses is bounded by the format.
