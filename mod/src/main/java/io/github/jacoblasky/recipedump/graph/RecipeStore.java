@@ -45,6 +45,24 @@ public final class RecipeStore {
     private final int[] altKey;
     private final int[] slotQty;
     private final byte[] slotRole;
+    /**
+     * Per slot, the probability a run CONSUMES it: 1.0 for every slot in every graph built
+     * before #175, which is what an absent `p` means.
+     *
+     * `float[]` AND NOT A QUANTISED `byte[]`, WHICH WAS MEASURED RATHER THAN ASSUMED. A byte
+     * scaled by 1/255 cannot tell 0.001 from 0.0, and 0.001 is a real value: the reference
+     * pack's only fractional input slots are one deliberate 8-tier ladder in `Trinitas.zs`
+     * running 0.95, 0.8, 0.5, 0.3, 0.1, 0.05, 0.01, 0.001. Rounding its bottom rung to zero
+     * turns an input consumed one run in a thousand into a PERMANENT one, which the cost model
+     * then charges once instead of a thousand times. That is the expensive direction of the
+     * error, so the 1.34 MB over ~335k slots is bought deliberately. `slotQty` beside it is an
+     * `int[]` of the same length and nobody has minded.
+     *
+     * DO NOT make this a per-recipe flag. Consumption is a property of the SLOT: the same
+     * recipe can hold one item permanently and spend another, which is exactly the Forge of
+     * the Wyverns case #175 was filed about.
+     */
+    private final float[] slotConsume;
     private final int[] categoryId;
     private final int[] machineId;
     private final byte[] sourceId;
@@ -65,7 +83,8 @@ public final class RecipeStore {
 
     RecipeStore(int count, int[] outputOffsets, int[] outputKey, int[] outputQty,
                 int[] slotOffsets, int[] altOffsets, int[] altKey, int[] slotQty,
-                byte[] slotRole, int[] categoryId, int[] machineId, byte[] sourceId,
+                byte[] slotRole, float[] slotConsume,
+                int[] categoryId, int[] machineId, byte[] sourceId,
                 byte[] flags, StringTable rids) {
         this.count = count;
         this.outputOffsets = outputOffsets;
@@ -76,6 +95,7 @@ public final class RecipeStore {
         this.altKey = altKey;
         this.slotQty = slotQty;
         this.slotRole = slotRole;
+        this.slotConsume = slotConsume;
         this.categoryId = categoryId;
         this.machineId = machineId;
         this.sourceId = sourceId;
@@ -143,6 +163,16 @@ public final class RecipeStore {
         return slotRole[slot] & 0xff;
     }
 
+    /** The probability a run consumes `slot`. 1.0 unless the dump said otherwise (#175). */
+    public float slotConsumeChance(int slot) {
+        return slotConsume[slot];
+    }
+
+    /** True when a run never spends `slot`, so owning one is the whole requirement (#175). */
+    public boolean slotSurvivesRun(int slot) {
+        return slotConsume[slot] == 0.0f;
+    }
+
     // -- recipe attributes -------------------------------------------------------------
 
     public int categoryId(int recipe) {
@@ -178,7 +208,7 @@ public final class RecipeStore {
         return Sizes.object(14 * Sizes.REFERENCE + 4)
                 + Sizes.bytes(outputOffsets) + Sizes.bytes(outputKey) + Sizes.bytes(outputQty)
                 + Sizes.bytes(slotOffsets) + Sizes.bytes(altOffsets) + Sizes.bytes(altKey)
-                + Sizes.bytes(slotQty) + Sizes.bytes(slotRole)
+                + Sizes.bytes(slotQty) + Sizes.bytes(slotRole) + Sizes.bytes(slotConsume)
                 + Sizes.bytes(categoryId) + Sizes.bytes(machineId)
                 + Sizes.bytes(sourceId) + Sizes.bytes(flags)
                 + rids.retainedBytes();
@@ -202,6 +232,7 @@ public final class RecipeStore {
         private final IntArray altKey = new IntArray();
         private final IntArray slotQty = new IntArray();
         private final IntArray slotRole = new IntArray();
+        private final FloatArray slotConsume = new FloatArray();
         private final IntArray categoryId = new IntArray();
         private final IntArray machineId = new IntArray();
         private final IntArray sourceId = new IntArray();
@@ -243,6 +274,18 @@ public final class RecipeStore {
 
         /** Opens a slot. Its alternatives follow via {@link #addAlternative}. */
         public void beginSlot(int qty, int roleId) {
+            beginSlot(qty, roleId, 1.0f);
+        }
+
+        /**
+         * Opens a slot, saying how likely a run is to CONSUME it (#175).
+         *
+         * The two-argument form above is not a convenience, it is the DEFAULT SPELLED ONCE:
+         * every caller that has no consumption information means 1.0, and having them each
+         * write `1.0f` is four places for the default to drift. `GraphJsonReader` is the only
+         * caller that passes a chance, because `graph.json` is the only input that carries one.
+         */
+        public void beginSlot(int qty, int roleId, float consumeChance) {
             require();
             if (slotOpen) {
                 throw new IllegalStateException("beginSlot() without endSlot()");
@@ -250,6 +293,7 @@ public final class RecipeStore {
             slotOpen = true;
             slotQty.add(qty);
             slotRole.add(roleId);
+            slotConsume.add(consumeChance);
         }
 
         public void addAlternative(int keyId) {
@@ -302,6 +346,7 @@ public final class RecipeStore {
             return new RecipeStore(count, outputOffsets.trimmed(), outputKey.trimmed(),
                     outputQty.trimmed(), slotOffsets.trimmed(), altOffsets.trimmed(),
                     altKey.trimmed(), slotQty.trimmed(), slotRole.toBytes(),
+                    slotConsume.trimmed(),
                     categoryId.trimmed(), machineId.trimmed(), sourceId.toBytes(),
                     flags.toBytes(), rids.build());
         }

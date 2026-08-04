@@ -192,6 +192,10 @@ public final class GraphJsonReader {
         while (reader.hasNext()) {
             int qty = 1;
             String role = null;
+            // 1.0f, NOT 0.0f: absent `p` means fully consumed, and this default is the only
+            // reason a graph written before #175 reads identically. Getting it backwards would
+            // make every slot in every old graph a permanent requirement.
+            float consumeChance = 1.0f;
             IntArray alternatives = new IntArray(4);
             reader.beginObject();
             while (reader.hasNext()) {
@@ -217,12 +221,14 @@ public final class GraphJsonReader {
                     qty = reader.nextInt();
                 } else if (field.equals("role")) {
                     role = nextStringOrNull(reader);
+                } else if (field.equals("p")) {
+                    consumeChance = (float) reader.nextDouble();
                 } else {
                     reader.skipValue();
                 }
             }
             reader.endObject();
-            builder.beginSlot(qty, role);
+            builder.beginSlot(qty, role, consumeChance);
             for (int i = 0; i < alternatives.size(); i++) {
                 builder.alternative(alternatives.get(i));
             }

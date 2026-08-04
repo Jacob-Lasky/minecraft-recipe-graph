@@ -51,6 +51,10 @@ public final class Sizes {
         return array == null ? 0L : array(array.length, 8);
     }
 
+    public static long bytes(float[] array) {
+        return array == null ? 0L : array(array.length, 4);
+    }
+
     /** An object with `fieldBytes` of declared fields, header included. */
     public static long object(long fieldBytes) {
         return align(OBJECT_HEADER + fieldBytes);

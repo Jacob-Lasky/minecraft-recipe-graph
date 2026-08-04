@@ -170,7 +170,18 @@ public final class GraphBuilder {
     }
 
     public void beginSlot(int qty, String role) {
-        recipes.beginSlot(qty, roles.add(role == null ? "item" : role));
+        beginSlot(qty, role, 1.0f);
+    }
+
+    /**
+     * Opens a slot, saying how likely a run is to CONSUME it (#175).
+     *
+     * The three-argument form exists because `graph.json` carries a `p` per slot and the
+     * two-argument form must keep meaning "fully consumed", which is what every graph written
+     * before that field means. See `model.Ingredient.consume_chance` for the Python half.
+     */
+    public void beginSlot(int qty, String role, float consumeChance) {
+        recipes.beginSlot(qty, roles.add(role == null ? "item" : role), consumeChance);
     }
 
     public void alternative(int keyId) {

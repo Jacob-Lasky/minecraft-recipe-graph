@@ -807,6 +807,14 @@ public strictfp final class Cost {
                     base += TRANSFER_PENALTY;
                 }
                 double ingredients = 0.0;
+                // A RETAINED INPUT IS ECONOMICALLY A MACHINE, so it joins `base` and does NOT
+                // amortise. #175, and it mirrors `cost.py:_relax` line for line: a slot the run
+                // never spends is one you buy once and then run forever, so dividing it by the
+                // batch is the identical error the amortisation comment below was written about
+                // for machines. Not priced at zero either, or every route through one would be
+                // the cheapest in the model and the solver would prefer machines whose retained
+                // input the player cannot obtain.
+                double retained = 0.0;
                 boolean unreachable = false;
                 for (int slot = recipes.slotStart(recipe); slot < recipes.slotEnd(recipe);
                         slot++) {
@@ -818,7 +826,12 @@ public strictfp final class Cost {
                         break;
                     }
                     // Left to right over the slots, in CSR order, because a+b+c is not a+c+b.
-                    ingredients += c;
+                    if (recipes.slotSurvivesRun(slot)) {
+                        retained += c;
+                    } else {
+                        // A fractional chance genuinely amortises, at `p` of itself per run.
+                        ingredients += c * recipes.slotConsumeChance(slot);
+                    }
                 }
                 if (unreachable) {
                     continue;
@@ -838,7 +851,7 @@ public strictfp final class Cost {
                     // 60,466,176 fruit, so the 5,000 wall in front of an unavailable machine
                     // collapsed to 8e-5 and 126 items priced under 0.1. That is how "one iron
                     // ingot" came out as "smelt a Spawner Shard". See #29.
-                    double perUnit = base + ingredients
+                    double perUnit = base + retained + ingredients
                             / scaledQty(graph, key, recipes.outputQtyAt(p));
                     if (perUnit < cost[key] - 1e-9) {
                         cost[key] = perUnit;
