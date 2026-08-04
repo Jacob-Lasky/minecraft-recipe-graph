@@ -24,6 +24,14 @@ is not a thing to obtain at all, it is a note that any of a class of materials w
 The structural test in `candidates` OFFERS additions and never asserts them, the same split
 `generators.py` uses: a wrong entry here silently turns a real item into "go play the game"
 and hides a genuine crafting route, which is worse than the repetition this fixes.
+
+AND IT DECLARES LOOT-TABLE CATEGORIES TOO, which is a second subject in one module and is
+deliberate. `DEFAULT_TOKENS` and `LOOT_TABLE_CATEGORIES` are the same kind of statement about
+the same pack -- "JEI publishes this and it is not what it looks like" -- differing only in
+whether the subject is an ITEM or a CATEGORY. #211 asked for them in one declared place for
+exactly that reason: two curated lists of the same claim in two files drift, and the drift is
+silent because each file's tests only read its own. What is DONE with either declaration lives
+in `notproduction.py`, which is the one consumer of both.
 """
 
 import json
@@ -111,6 +119,47 @@ DEFAULT_TOKENS = {
     "contenttweaker:passive_packagedauto": METHOD,   # 6
     "contenttweaker:right_click_with_lots_of_infusionstones": METHOD,  # 8
 }
+
+
+# JEI category uids that publish a RANDOM LOOT TABLE: one entry per possible outcome, with
+# the container as the input of every one. #211.
+#
+# A scrapbox yields ONE uniformly random item from a table of hundreds. JEI has no way to say
+# that, so it files 343 separate entries each reading "Scrap Box -> this item", and a graph
+# that trusts them believes one scrapbox obtains any of 343 things. That is how planning a
+# vanilla Chest went through Chest Cart -> Scrap Box -> Matter Reprocessor and asked for four
+# machines and 576 bee princesses when the answer is eight planks.
+#
+# A CURATED LIST OF UIDS RATHER THAN A NAME PATTERN, and `index.NON_RECIPE_CATEGORY_PATTERNS`
+# is why: that list matches `loot` and `.drop` as SUBSTRINGS and it is the reason two of the
+# three names below never reach a built graph at all. `TechReborn.Scrapbox` contains neither
+# word, and no pattern that would catch it is safe -- "scrap" also names TechReborn's real
+# Recycler recipes, which turn items INTO scrap and are genuine production.
+#
+# THE DECLARATION OUTRANKS THE PATTERN LIST, see `index.is_non_recipe`, so all three go
+# through one mechanism. The pattern list DROPS a category and this one PRICES IT OUT, and
+# price-out is strictly more informative: the JEI card stays visible in `used_in`, and an
+# output whose only route is the loot table keeps that route instead of silently becoming a
+# `cost._seed` leaf at `BASE_RAW_COST`, level with dirt.
+#
+# WHAT IS PRESENT IN A BUILT GRAPH, measured, and the two zeroes are the point rather than a gap:
+#
+#   TechReborn.Scrapbox     343 entries in the reference graph, every one of them
+#   intestines_loot_table   0 in the reference graph -- the `loot` pattern drops them first
+#   aoa_extraction_loot     0, same
+#
+# #211 counted 34 and 19 raw DUMP entries for the last two. That is the issue's figure and not
+# one re-measured here: the pattern list has always removed them, so no graph on disk carries
+# either name and there is nothing to count. They are declared anyway, because they are the same
+# claim about the same pack and a list naming only the survivor teaches the next reader that the
+# pattern list is the whole answer. They take effect on the next redump, when `is_non_recipe`
+# defers to this list, and `tests/test_non_production.py` asserts that deferral directly rather
+# than waiting for a pack that exercises it.
+LOOT_TABLE_CATEGORIES = frozenset((
+    "TechReborn.Scrapbox",
+    "intestines_loot_table",
+    "aoa_extraction_loot",
+))
 
 
 def load_overrides(path):
