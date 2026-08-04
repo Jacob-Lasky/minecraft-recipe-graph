@@ -333,6 +333,46 @@ public class JeiNodeActionsTest {
         assertSame(f.stick, f.actions.iconFor(variant));
     }
 
+    /**
+     * `iconForKey` answers exactly what `iconFor` does for the same key.
+     *
+     * WHY IT MATTERS RATHER THAN BEING A TAUTOLOGY. The TODO panel draws from the plan BOOK,
+     * which holds keys and not nodes, and its shopping list sits in the same window as the
+     * tree. Two lookups that disagreed would draw one item with an icon in one panel and
+     * without in the other, and nothing would report it -- so the two share one private
+     * resolver and this asserts they still do.
+     *
+     * SWEPT OVER EVERY SHAPE THE INDEX ANSWERS DIFFERENTLY FOR, because a pair of methods can
+     * agree on the easy case and come apart on the weakenings: a plain item, an NBT variant
+     * that only the digest strip reaches, a fluid with no item form, an oredict group, and a
+     * key the graph never saw.
+     */
+    @Test
+    public void aBareKeyGetsTheSameIconItsNodeWouldGet() {
+        Fixture f = wired();
+        String[] keys = {DumpCommand.stackKey(f.stick), "minecraft:stick#deadbeef",
+                         "fluid:water", "ore:stickWood", "mod:never_dumped"};
+        for (String key : keys) {
+            assertSame("iconForKey disagreed with iconFor on " + key,
+                       f.actions.iconFor(node(key)), f.actions.iconForKey(key));
+        }
+        // AND THE SWEEP MUST CONTAIN BOTH ANSWERS, or it would pass against two methods that
+        // both returned EMPTY for everything.
+        assertSame(f.stick, f.actions.iconForKey(DumpCommand.stackKey(f.stick)));
+        assertSame(ItemStack.EMPTY, f.actions.iconForKey("fluid:water"));
+    }
+
+    @Test
+    public void aNullKeyIsAMissingIconRatherThanACrashInADrawCall() {
+        // `PlannerWidgets` calls `iconForKey(key).isEmpty()` with no null check of its own, and
+        // it runs once per TODO row per frame. `StringTable.idOf` hashes the string before it
+        // can answer -1, so an unguarded null arrives as an NPE inside a render pass.
+        Fixture f = wired();
+        assertSame(ItemStack.EMPTY, f.actions.iconForKey(null));
+        assertSame(ItemStack.EMPTY, new JeiNodeActions(JeiNodeActions.NO_GRAPH)
+                .iconForKey("minecraft:stick"));
+    }
+
     // -- state 3: an item, but no JEI runtime --------------------------------------------------
 
     @Test

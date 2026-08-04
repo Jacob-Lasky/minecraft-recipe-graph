@@ -45,6 +45,11 @@ public interface NodeActions {
         }
 
         @Override
+        public ItemStack iconForKey(String key) {
+            return ItemStack.EMPTY;
+        }
+
+        @Override
         public void showRecipes(PlanNode node) {
         }
 
@@ -70,6 +75,21 @@ public interface NodeActions {
      * {@link PlannerWidgets#ICON} is its width.
      */
     ItemStack iconFor(PlanNode node);
+
+    /**
+     * The stack a bare graph KEY names, or {@link ItemStack#EMPTY} for none.
+     *
+     * FOR THE SURFACES THAT HAVE NO PLAN NODE. The TODO list is `PlanBook`'s, and that book
+     * holds keys rather than nodes on purpose -- see its class note: 1,198 of this pack's
+     * fluids have no item at all, so storing stacks would make half the plannable things
+     * unstorable. {@link #iconFor} cannot serve those rows because there is nothing to hand it.
+     *
+     * SAME ANSWER AS {@link #iconFor} FOR THE SAME KEY, and that has to stay true: the shopping
+     * list and the tree draw the same item beside each other in one window, and two lookups
+     * that disagreed would show it with an icon in one place and without in the other.
+     * `JeiNodeActions` therefore resolves both through one private method rather than two.
+     */
+    ItemStack iconForKey(String key);
 
     /** Open the recipe viewer focused on what MAKES this node's key. */
     void showRecipes(PlanNode node);

@@ -49,7 +49,7 @@ public class PlannerShotTest {
 
     @Test
     public void armingTheSeamReplacesTheNoOpSoTheShotPhotographsTheRealMenu() {
-        PlannerShot.armNodeActions(PlanFixtureFiles.load(FIXTURE));
+        PlannerShot.armNodeActions(PlanFixtureFiles.load(FIXTURE).tree());
         assertNotSame(NodeActions.NONE, NodeActionsHolder.actions());
         assertTrue(NodeActionsHolder.actions() instanceof JeiNodeActions);
     }

@@ -167,6 +167,20 @@ public final class JeiNodeActions implements NodeActions {
         return stack == null ? ItemStack.EMPTY : stack;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>THROUGH THE SAME PRIVATE LOOKUP {@link #iconFor} USES, which is what makes the two
+     * agree by construction rather than by a comment asking them to. The tree and the shopping
+     * list sit in one window, and a key answered one way for a node and another way for a
+     * string would draw the same item with an icon in one panel and without in the other.
+     */
+    @Override
+    public ItemStack iconForKey(String key) {
+        ItemStack stack = stackForKey(key);
+        return stack == null ? ItemStack.EMPTY : stack;
+    }
+
     @Override
     public void showRecipes(PlanNode node) {
         // The boolean is dropped on purpose, per JeiBridge: by the time this runs the player
@@ -193,15 +207,27 @@ public final class JeiNodeActions implements NodeActions {
      * the other direction, which is where a missing NBT variant is handled.
      */
     private ItemStack stackFor(PlanNode node) {
-        RecipeGraph graph = graphs.graph();
         // `key` is "" and never null on both of PlanNode's construction paths, and the null
         // check is here anyway because the failure mode is asymmetric: `StringTable.idOf`
         // hashes the string before it can answer -1, so a null arrives as an NPE inside a
         // render pass rather than as a missing icon.
-        if (node == null || graph == null || node.key() == null) {
+        return node == null ? null : stackForKey(node.key());
+    }
+
+    /**
+     * {@link #stackFor}'s body, reached from a bare key as well as from a node.
+     *
+     * THE ONE LOOKUP BOTH PUBLIC METHODS RUN, so `iconFor(node)` and `iconForKey(node.key())`
+     * cannot come apart. A second copy would drift the way `NodeActions`'s own header says a
+     * second discriminator derivation drifts: a mis-keyed lookup returns a wrong item rather
+     * than an error, so nothing would report the disagreement.
+     */
+    private ItemStack stackForKey(String key) {
+        RecipeGraph graph = graphs.graph();
+        if (graph == null || key == null) {
             return null;
         }
-        int keyId = graph.keyId(node.key());
+        int keyId = graph.keyId(key);
         return keyId < 0 ? null : JeiBridge.stackFor(keyId, graph);
     }
 }
