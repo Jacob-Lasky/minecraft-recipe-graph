@@ -36,10 +36,17 @@ import net.minecraft.entity.player.EntityPlayer;
  * <li>whether you may look -- {@code ISecurityGrid.hasPermission(player, EXTRACT)}.</li>
  * </ul>
  *
- * IT IS ALSO WHAT THE CALCULATOR IS MADE OF. The recipe puts a Wireless Receiver in the item
- * for the stated reason that it reads your network at range; if the planner instead sniffed
- * any nearby grid, that component would be decoration. The lore and the capability agree
- * because they are the same mechanism.
+ * THE RECIPE AGREES WITH IT, AND USED TO AGREE MORE LITERALLY. The calculator's recipe once
+ * put an AE2 Wireless Receiver in the item for the stated reason that it reads your network at
+ * range. That ingredient is gone: requiring an AE2 part made the calculator uncraftable in any
+ * pack without AE2, so the recipe is now vanilla and the at-range component is an Ender Pearl.
+ * The agreement survives the swap because the item still claims to read your stock at range
+ * and this still does that by carrying a link rather than by proximity.
+ *
+ * DO NOT read the swap as permission to widen candidate 2. Its rejection never rested on the
+ * recipe: a radius is a number this mod would be inventing, and on a server it reads a network
+ * the player may have no access to. Those two reasons are above, they are unchanged, and
+ * AE2's security system exists precisely so that nobody else answers that question.
  *
  * <h2>Loading without AE2</h2>
  *

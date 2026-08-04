@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.common;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -26,8 +27,10 @@ import org.junit.Test;
  *
  * The recipe is a resource rather than code, so nothing else checks it: a typo in an item id
  * is discovered as an `Unknown item` line in a log nobody reads, and the item is simply
- * uncraftable. Since a craft cannot be attempted here, what CAN be checked is that the JSON
- * says what it is meant to say and that the ids in it are the ones the pack actually has.
+ * uncraftable. A craft still cannot be attempted here, but since every ingredient became
+ * vanilla the ids can be RESOLVED rather than only spelled: `Bootstrap.register` gives this
+ * test the real registries, so `everyIngredientResolvesToAnItemThatExists` catches a typo that
+ * string comparison against a remembered id never could.
  */
 public class CalculatorItemTest {
 
@@ -113,24 +116,44 @@ public class CalculatorItemTest {
     }
 
     /**
-     * The four components, by exact id and metadata.
+     * The four components, each doing in the recipe the job it does in the item.
      *
-     * These were read back from the running graph rather than guessed:
-     * `appliedenergistics2:material:23` is the Calculation Processor, `:35` the 1k ME Storage
-     * Component and `:41` the Wireless Receiver. A wrong metadata is a different AE2 material
-     * -- that item has dozens -- and the recipe would quietly want the wrong one.
+     * A Book is the TODO list that survives a relog. A Comparator is the vanilla block whose
+     * entire purpose is reading how much is in a container, which is what a plan is diffed
+     * against. A Crafting Table is the set of recipes being planned over. An Ender Pearl is
+     * reading that stock at range rather than standing at the chest.
      */
     @Test
     public void theRecipeAsksForTheFourComponentsThatJustifyTheItem() {
         JsonObject key = recipe.getAsJsonObject("key");
-        JsonObject calculator = key.getAsJsonObject("C");
-        assertEquals("jecalculation:item_calculator", calculator.get("item").getAsString());
-        // Meta 0 is the Crafting Calculator; meta 1 is JEC's Math Calculator, which is a
-        // different item wearing the same registry name.
-        assertEquals(0, calculator.get("data").getAsInt());
-        assertMaterial(key.getAsJsonObject("P"), 23);
-        assertMaterial(key.getAsJsonObject("S"), 35);
-        assertMaterial(key.getAsJsonObject("R"), 41);
+        assertEquals("minecraft:book", key.getAsJsonObject("B").get("item").getAsString());
+        assertEquals("minecraft:comparator", key.getAsJsonObject("Q").get("item").getAsString());
+        assertEquals("minecraft:crafting_table",
+                     key.getAsJsonObject("C").get("item").getAsString());
+        assertEquals("minecraft:ender_pearl", key.getAsJsonObject("E").get("item").getAsString());
+        assertEquals("the pattern uses exactly the four keys the lore names",
+                     4, key.entrySet().size());
+    }
+
+    /**
+     * Every id in the recipe resolves to an item that exists.
+     *
+     * THE POINT OF THE WHOLE FILE, and it only became possible once the ingredients were
+     * vanilla. The class comment says a craft cannot be attempted here so the ids can only be
+     * eyeballed; that was true while they came from AE2 and JEC, which are not on the test
+     * classpath. `Bootstrap.register` populates the real vanilla registries, so a typo now
+     * fails here instead of surfacing as an `Unknown item` line in a log nobody reads and an
+     * item that is silently uncraftable.
+     */
+    @Test
+    public void everyIngredientResolvesToAnItemThatExists() {
+        for (java.util.Map.Entry<String, JsonElement> slot
+                : recipe.getAsJsonObject("key").entrySet()) {
+            String id = slot.getValue().getAsJsonObject().get("item").getAsString();
+            assertNotNull("slot " + slot.getKey() + " names " + id
+                          + ", which is not a registered item",
+                          net.minecraft.item.Item.getByNameOrId(id));
+        }
     }
 
     /**
@@ -138,8 +161,13 @@ public class CalculatorItemTest {
      *
      * Forge does not treat `data` as optional for an item with subtypes: `getItemStackBasic`
      * throws `Missing data for item` and the whole recipe is dropped with an error in the log
-     * and no other symptom. It did exactly that on the first dev-client boot of this recipe,
-     * because JEC's calculator has two subtypes and the omitted `"data": 0` looked harmless.
+     * and no other symptom. It did exactly that on the first dev-client boot of an earlier
+     * version of this recipe, whose centre item had two subtypes and whose omitted `"data": 0`
+     * looked harmless.
+     *
+     * None of today's four ingredients has subtypes, so all four would survive the omission.
+     * The rule stays absolute anyway, because the next ingredient someone reaches for is the
+     * one that does, and a rule with an exception is a rule nobody applies.
      */
     @Test
     public void everyIngredientStatesItsMetadata() {
@@ -151,13 +179,8 @@ public class CalculatorItemTest {
         }
     }
 
-    private static void assertMaterial(JsonObject ingredient, int meta) {
-        assertEquals("appliedenergistics2:material", ingredient.get("item").getAsString());
-        assertEquals(meta, ingredient.get("data").getAsInt());
-    }
-
     /**
-     * The JEC calculator sits in the middle, which is the lore: this is an upgrade to it.
+     * The Crafting Table sits in the middle, which is the lore: this queries one.
      *
      * NO TRAILING BLANK ROW, and that is not an oversight. `ShapedRecipes.shrink` strips empty
      * rows and columns before the recipe is registered, so a written-out 3x3 with a blank
@@ -165,56 +188,49 @@ public class CalculatorItemTest {
      * claims a constraint the game does not apply.
      */
     @Test
-    public void thePatternPutsTheJecCalculatorInTheMiddle() {
+    public void thePatternPutsTheCraftingTableInTheMiddle() {
         JsonArray pattern = recipe.getAsJsonArray("pattern");
         List<String> rows = new ArrayList<String>();
         for (JsonElement row : pattern) {
             rows.add(row.getAsString());
         }
-        assertEquals(Arrays.asList(" P ", "SCR"), rows);
+        assertEquals(Arrays.asList(" B ", "QCE"), rows);
         assertEquals('C', rows.get(1).charAt(1));
     }
 
     /**
-     * The recipe is skipped cleanly in a pack without JEC or AE2, rather than erroring.
+     * EVERY ingredient is vanilla, so the item is craftable in any pack that loads this mod.
      *
-     * DELIBERATE, AND THERE IS NO FALLBACK RECIPE. This mod is built for MeatballCraft, which
-     * ships both; the condition is here so that a pack without them gets a clean skip instead
-     * of two `Unknown item` errors and an item that is uncraftable anyway. Inventing a vanilla
-     * recipe for a user who does not exist would cost a second recipe to keep in step and buy
-     * nothing. `forge:mod_loaded` is built into Forge 1.12.2 and needs no `_factories.json` --
-     * checked against `CraftingHelper.init`, not against a wiki.
+     * THIS REPLACES A DELIBERATE DECISION THAT WENT THE OTHER WAY, and the reasoning it
+     * replaces is recorded here rather than deleted. The first recipe was built around
+     * `jecalculation:item_calculator` with `forge:mod_loaded` conditions on JEC and AE2, on the
+     * argument that this mod targets MeatballCraft, which ships both, and that a vanilla
+     * fallback would be a second recipe to keep in step for a user who does not exist.
+     *
+     * The cost that argument missed is not the missing user. It is that requiring another
+     * mod's calculator declares this mod an ADD-ON to that mod, and a player who wants a plan
+     * has to build JEC's calculator first to get one. The conditions made it worse in a way
+     * that is invisible: in a pack without both mods the recipe is skipped cleanly and the item
+     * exists, in the creative tab, uncraftable, with nothing anywhere saying why.
+     *
+     * So the rule is now the strong one, asserted rather than intended: no ingredient may come
+     * from any mod, and there must be no `forge:mod_loaded` condition to need. Reaching for one
+     * mod's item is how the dependency comes back, and it comes back looking reasonable.
      */
     @Test
-    public void theRecipeIsConditionalOnBothModsItAsksFor() {
-        JsonArray conditions = recipe.getAsJsonArray("conditions");
-        assertNotNull("without conditions this recipe errors in a pack lacking JEC or AE2",
-                      conditions);
-        List<String> required = new ArrayList<String>();
-        for (JsonElement element : conditions) {
-            JsonObject condition = element.getAsJsonObject();
-            assertEquals("forge:mod_loaded", condition.get("type").getAsString());
-            required.add(condition.get("modid").getAsString());
-        }
-        assertEquals(Arrays.asList("jecalculation", "appliedenergistics2"), required);
-    }
-
-    /** Every ingredient's mod is one the recipe is conditional on. */
-    @Test
-    public void noIngredientComesFromAModTheConditionsDoNotCover() {
-        List<String> guarded = new ArrayList<String>();
-        for (JsonElement element : recipe.getAsJsonArray("conditions")) {
-            guarded.add(element.getAsJsonObject().get("modid").getAsString());
-        }
+    public void everyIngredientIsVanillaAndTheRecipeIsGatedOnNoMod() {
+        assertNull("a mod-gated recipe is skipped in packs without that mod, leaving an item"
+                   + " that exists and cannot be crafted, with no in-game explanation",
+                   recipe.get("conditions"));
         JsonObject key = recipe.getAsJsonObject("key");
         // `entrySet`, not `keySet`: gson 2.8.0 is what Minecraft 1.12.2 ships and build.gradle
         // pins, and `JsonObject.keySet` did not arrive until 2.8.1.
         for (java.util.Map.Entry<String, JsonElement> slot : key.entrySet()) {
             String item = slot.getValue().getAsJsonObject().get("item").getAsString();
             String modid = item.substring(0, item.indexOf(':'));
-            if (!guarded.contains(modid) && !"minecraft".equals(modid)) {
-                fail("slot " + slot.getKey() + " needs " + modid
-                     + ", which no forge:mod_loaded condition guards");
+            if (!"minecraft".equals(modid)) {
+                fail("slot " + slot.getKey() + " needs " + modid + ", so the calculator is"
+                     + " uncraftable without it; every ingredient must be vanilla");
             }
         }
     }
