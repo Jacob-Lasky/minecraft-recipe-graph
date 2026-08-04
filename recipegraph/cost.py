@@ -219,11 +219,24 @@ FLUID_SCALE = 1.0 / 1000.0
 #    plan moves for it. A one-hop cycle check saves neither, because the empty container is
 #    another VARIANT and not the bare key.
 #
-#    WHAT MAKES IT POSSIBLE IS `real_producers`, one module over: it drops container transfers
-#    only for a FLUID key, so for an ITEM key a Transposer fill or empty counts as production
-#    and a filled glass reads as a made thing. Restricting the rule to variants the key's own
-#    family does not make is what #170 proposes; the unrestricted rule is what this entry
-#    refuses.
+#    A FILLED CONTAINER READS AS A MADE THING FOR TWO INDEPENDENT REASONS, and it is worth
+#    knowing which one is load-bearing before reaching for `transfer` as the discriminator:
+#
+#      1. THE FILL DIRECTION CAN NEVER BE FLAGGED. Both of `index.mark_container_transfers`'
+#         signals skip any recipe with no FLUID output, and a fill outputs an ITEM -- the
+#         filled container. So no `transposer_fill` recipe is ever a transfer, by construction
+#         rather than by omission, which is what `real_producers` means by "filling a container
+#         IS real work and stays; only the fluid direction is fake".
+#      2. A FLAGGED EMPTY IS NOT FILTERED OUT FOR AN ITEM KEY. `real_producers` drops transfers
+#         only when the key is a fluid, so a marked `transposer_extract` still counts as a
+#         producer of the emptied container.
+#
+#    Reason 1 is the one that decides both cases above: `reachable_form` names the FILL variant
+#    in each, and that variant's producer was never a candidate for flagging. So a rule keying
+#    on `Recipe.transfer` cannot fix this -- measured on `extratrees:drink`, all 30 variants
+#    have a non-transfer producer and such a rule discriminates nothing at all. Restricting the
+#    rule to variants the key's own family does not make is what #170 proposes; the
+#    unrestricted rule is what this entry refuses.
 #
 #    Measured on graph-oracle.json by the agent on #170, and recorded here rather than on that
 #    branch because the branch is a draft and this list only works if it outlives the attempts.
