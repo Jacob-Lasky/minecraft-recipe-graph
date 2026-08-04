@@ -112,18 +112,20 @@ public class PlannerLayoutTest {
 
     @Test
     public void theBiggestTreeStillFitsInTheViewportAndOverflowsIt() {
-        // The hard case the scroll area exists for: 634 nodes in a 400x220 panel. 347 before
-        // #172 reordered the cycle term, 388 before #176 priced the unsourced set and the
-        // plan stopped dead-ending on 40 items the graph could not explain.
+        // The hard case the scroll area exists for: 152 nodes in a 400x220 panel. 347 before
+        // #172 reordered the cycle term, 388 before #176 priced the unsourced set, 634 before
+        // #193 made 553 keys finite and the search started spending its whole work budget.
         //
-        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved twice
-        // and the method was still called `aThreeHundredNodeTree` at 388. A test name that
-        // states a number goes stale silently -- the assertion below is the thing that must
-        // fail when the number moves, and it does.
+        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved three
+        // times and the method was still called `aThreeHundredNodeTree` at 388. A test name
+        // that states a number goes stale silently -- the assertion below is the thing that
+        // must fail when the number moves, and it does. STILL THE BIGGEST at 152: the next
+        // largest fixtures are `plan-truncated` at 52 and `plan-cycle` at 44, so the name is
+        // accurate and the panel is still being asked to scroll far more than it can show.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(634, tree.getChildren().size());
+        assertEquals(152, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",

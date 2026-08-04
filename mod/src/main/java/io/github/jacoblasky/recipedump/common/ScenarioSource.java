@@ -63,6 +63,18 @@ public enum ScenarioSource {
             + "costs everything as if you had to craft it from raw materials yourself"),
 
     /**
+     * The player's declared "stop here, I will get this myself". Beside {@link #CRAFTABLES}
+     * because the two are the pair of terminals a player DECLARES rather than a fact the world
+     * carries, and since #193 both of them price as well as terminating the walk.
+     *
+     * GENUINELY EMPTY RATHER THAN UNAVAILABLE, the same verdict {@link #MACHINE_OVERRIDES} and
+     * {@link #PINS} get and for the same reason: there is no UI to declare one, so "the player
+     * has declared none" is the truth and not a read this port has yet to implement. An
+     * unavailable reason here would claim a gap that does not exist.
+     */
+    RAW("raw", true, ""),
+
+    /**
      * Placed tile entities, which decide machine availability and infinite sources. A world
      * scan, and the offline tool does it by reading region files -- neither is a thing to do
      * on a render thread, so it needs its own design rather than a quick call.

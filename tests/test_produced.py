@@ -147,6 +147,26 @@ class TheCostModelStopsWhereThePlanStopsTest(unittest.TestCase):
         # And filling one is still real work that still prices the ITEM.
         self.assertTrue(math.isfinite(self.costs.get(FILLED, math.inf)))
 
+    def test_it_is_priced_even_when_NOTHING_CONSUMES_IT(self):
+        """The raise INSERTS as well as raising, which is a second effect rather than a detail.
+
+        The leaf rule walks recipe INPUTS, so a key nothing consumes is never offered to it and
+        would come out absent from the table. The raise sweeps the whole population and reads a
+        missing entry as `BASE_RAW_COST`, so it creates one. That is exactly the second effect
+        `unsourced_keys` has for its 39 never-consumed keys, and it is deliberate for the same
+        reason: these keys reach no plan and they DO reach `/api/sweep` and `/api/cost`, where
+        pricing a key one way in the table and another way in a report is the drift #178 removed.
+
+        Asserted because it is easy to lose. Restrict either loop to consumed keys and every
+        test above still passes, while a cost report goes back to showing these as unpriced.
+        """
+        g = canned_fluid_graph()
+        g.recipes = [r for r in g.recipes if r.rid != "enrich"]
+        g._invalidate()
+        self.assertNotIn(FLUID, g.by_input, "fixture broken: nothing may consume the fluid")
+        self.assertIn(FLUID, g.produced_in_name_only)
+        self.assertEqual(cost_mod.UNSOURCED_COST, cost_mod.estimate(g).get(FLUID))
+
     def test_a_fluid_with_an_honest_route_keeps_that_route_s_price(self):
         # NEITHER SEED MAY FIRE ON A KEY SOMETHING REALLY MAKES. One honest producer takes the
         # fluid out of `produced_in_name_only` and out of the leaf rule alike, so the price has

@@ -281,29 +281,30 @@ public class PlanJsonTest {
 
     @Test
     public void theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive() {
-        // 634 nodes in one viewport. 347 before #172, 388 before #176. Named here so a future
-        // change that makes the tree panel O(n^2) has something to fail against rather than
-        // just feeling slow in game -- so when this number MOVES UP it is the test getting
-        // harder, and the only wrong response is to stop asserting it.
+        // 152 nodes in one viewport. 347 before #172, 388 before #176, 634 before #193. Named
+        // here so a future change that makes the tree panel O(n^2) has something to fail
+        // against rather than just feeling slow in game.
         //
-        // WHY IT GREW, MEASURED RATHER THAN REASONED. All 42 of this plan's `unsourced` nodes
-        // were LEAVES before #176 -- dead ends resting on items the graph cannot explain.
-        // Pricing them at UNSOURCED_COST made those routes lose, so the search continues into
-        // routes it can account for: unsourced 42 -> 2, leaves 139 -> 243, `craft` 214 -> 347,
-        // `raw` 131 -> 228. A bigger tree that says true things is the trade #176 makes.
+        // THIS NUMBER WENT DOWN FOR THE FIRST TIME AT #193, and the previous version of this
+        // comment said "when this number MOVES UP it is the test getting harder, and the only
+        // wrong response is to stop asserting it". Both halves still hold, and the second is
+        // why the assertion is updated rather than dropped: what a moving count buys is a place
+        // for the change to be noticed, not a monotonic figure.
         //
-        // NOT A NODE-BUDGET EFFECT, and an earlier draft of this comment said it was. This
-        // fixture runs at `max_nodes` 4,000 with `truncated` and `exhausted` both false on
-        // BOTH sides, so no budget was ever binding and nothing is being reallocated -- the
-        // tree simply stopped terminating early. The budget argument belongs to
-        // `plan-truncated`, whose `max_nodes` is 40, and #176 does not move that one.
+        // WHY IT SHRANK, AND IT IS NOT THE TREE TERMINATING EARLY AGAIN. It is the opposite:
+        // the search now EXHAUSTS ITS WORK BUDGET and is cut off. #193 made 553 keys stop
+        // pricing at infinity, so the routes behind them stopped being pruned instantly and
+        // the walk spends itself exploring them -- `work` 28,012 -> 80,040 against a budget of
+        // 80,000, `exhausted` false -> true. So the 152 is where the budget ran out, not where
+        // the plan finished, and this fixture claims `truncated` now.
         //
-        // WATCH `work`, NOT JUST THE NODE COUNT: it went 400 -> 28,012 against a work_budget
-        // of 80,000, so this fixture now spends 35% of its search budget where it used to
-        // spend 0.5%. Still passing, with much less headroom. If a later change flips
-        // `exhausted` on any fixture, this is the one to look at first.
+        // THE PREVIOUS COMMENT PREDICTED EXACTLY THIS. It closed with "if a later change flips
+        // `exhausted` on any fixture, this is the one to look at first", because #176 had
+        // already taken `work` from 0.5% of the budget to 35%. #193 spent the rest.
+        // `tools/make-java-fixtures.py`'s `fluid-chain` target carries the search for a
+        // replacement deep fixture and why none exists on this graph.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(634, plan.flatten().size());
+        assertEquals(152, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {
