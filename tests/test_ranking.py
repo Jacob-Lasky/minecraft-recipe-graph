@@ -19,13 +19,14 @@ that cannot express the bug cannot prove the fix.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recipegraph import cost  # noqa: E402
+from recipegraph import cost, present, render, solve  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
 from recipegraph.solve import Solver  # noqa: E402
 
@@ -1244,3 +1245,182 @@ class ATieAmongIDENTICALOFFERSIsAdmittedTest(unittest.TestCase):
                           "the chosen recipe is its own shape, so nothing is interchangeable "
                           "with it -- reporting the largest OTHER group would be a true "
                           "number beside a false statement")
+
+
+class TheMarkIsStatedOncePerKeyTest(unittest.TestCase):
+    """A repeated key carries the same true finding at 24 nodes. #206
+
+    SPLIT OUT OF #181 SO THE TRIGGER IS NOT WEAKENED TO FIX SOMETHING IT CANNOT REACH.
+    Measured across the 21 plan fixtures once #181 landed: 462 craft nodes, 76 marked,
+    16.5%. That decomposes into 8 distinct keys, five of them bee drones accounting for 73 of
+    the 76, and every mark is true where it sits -- `bee_drone_ge#e1904b1a26ba` really does
+    have a 67-way interchangeable field at all of its nodes.
+
+    The tie-size distribution is bimodal with a gap: 19 keys at 3, 10 at 4, nothing between 5
+    and 13, then 14, 62 and 67. Raising `TIE_MIN` to 5 takes 16.5% to 10.2% while deleting
+    four genuinely tied keys and leaving the drone marked at every one of its nodes. The
+    trigger measures tie SIZE; the density comes from tie RECURRENCE. Different axis.
+
+    So the renderer states it once, the way a footnote does, and `_arbitrary_html` is where
+    the other occurrences remain findable. These tests pin both halves: a suppressed mark
+    that could not be found again would be a deletion wearing a footnote's clothes.
+    """
+
+    def _tree(self, occurrences=3, count=67):
+        """One key reached `occurrences` times down a chain, each node carrying the mark.
+
+        Built as a literal rather than solved, because what is under test is the RENDERER:
+        the solver's job is to write `interchangeable` on every node where it is true, which
+        `ATieAmongIDENTICALOFFERSIsAdmittedTest` above already pins, and it is true at every
+        one of these.
+        """
+        leaf = None
+        for _ in range(occurrences):
+            leaf = {"key": "mod:drone", "label": "Common Drone", "kind": "item", "need": 1,
+                    "status": solve.STATUS_CRAFT, "alternatives": count + 3,
+                    "interchangeable": count,
+                    "children": [leaf] if leaf else []}
+        return {"key": "mod:out", "label": "Out", "kind": "item", "need": 1,
+                "status": solve.STATUS_CRAFT, "children": [leaf]}
+
+    def _rendered(self, tree, name="Out"):
+        """`render_html` over a minimal result. ONE copy of the envelope, so a renderer that
+        grows a required key does not have to be chased through five near-identical dicts."""
+        return render.render_html({
+            "target": tree["key"], "target_name": name, "qty": 1,
+            "nodes": 0, "tree": tree, "shopping_list": [], "used_from_stock": [],
+            "from_sources": [], "machines_to_build": [], "truncated": False})
+
+    def _page(self, **kw):
+        return self._rendered(self._tree(**kw))
+
+    def _rows(self, page):
+        """The tree's meta bits, one string per row that has any.
+
+        Cut at the next card's heading, because the summary panel uses the same `.meta` span
+        for its own wording -- so a slice that ran to the end of the page would count the
+        footnote as one of the rows it is standing in for, and every count here would be one
+        too high while the suppression worked.
+        """
+        tree = page.split('class="tree', 1)[1].split("You still need", 1)[0]
+        return re.findall(r'<span class="meta">(.*?)</span>', tree)
+
+    def test_the_first_occurrence_says_it_and_the_rest_do_not(self):
+        rows = [r for r in self._rows(self._page()) if "interchangeable" in r]
+        self.assertEqual(len(rows), 1,
+                         "three nodes, one finding: the mark is a footnote, not a per-node "
+                         "badge. Got %r" % (rows,))
+
+    def test_the_suppressed_rows_keep_the_recipe_count_they_had_before(self):
+        """Not silence. Those rows showed a linked recipe count before #181 and the link is
+        the way into the picker, so suppressing the mark must not cost them it."""
+        rows = self._rows(self._page())
+        counts = [r for r in rows if "70 recipes" in r]
+        self.assertEqual(len(counts), 2, rows)
+
+    def test_the_mark_replaces_the_recipe_count_rather_than_joining_it(self):
+        """`present.INTERCHANGEABLE_NOTE`'s own argument, and `NodeRowText.meta`'s in Java:
+        "70 recipes, 67 interchangeable" leads with the flattering number."""
+        marked = [r for r in self._rows(self._page()) if "interchangeable" in r][0]
+        self.assertNotIn("recipes", marked)
+
+    def test_the_words_are_present_py_own(self):
+        page = self._page()
+        self.assertIn(present.INTERCHANGEABLE_NOTE % 67, page)
+
+    def test_the_panel_lists_the_key_once_and_says_how_many_steps_it_covers(self):
+        """Where a reader who met occurrence three finds the finding.
+
+        The step count is the load-bearing number: it is what says the tree is being quiet on
+        purpose rather than having lost something.
+        """
+        page = self._page(occurrences=3)
+        panel = page.split("Picked from equal recipes", 1)[1]
+        self.assertEqual(panel.count("Common Drone"), 1)
+        self.assertIn("3 steps", panel)
+        self.assertIn(present.INTERCHANGEABLE_NOTE % 67, panel)
+        # And it says WHY the tree is quiet elsewhere, rather than leaving the reader to
+        # notice that 2 of the 3 rows stopped mentioning it.
+        self.assertIn("FIRST appears", panel)
+        self.assertIn("3 separate steps", panel)
+
+    def test_a_key_reached_once_is_not_described_as_recurring(self):
+        panel = self._page(occurrences=1).split("Picked from equal recipes", 1)[1]
+        self.assertIn("1 step", panel)
+        self.assertNotIn("1 steps", panel)
+        self.assertNotIn("FIRST appears", panel,
+                         "nothing was suppressed here, so there is nothing to explain")
+
+    def test_a_plan_with_no_arbitrary_pick_has_no_panel(self):
+        page = self._rendered({"key": "mod:out", "label": "Out", "kind": "item", "need": 1,
+                               "status": solve.STATUS_CRAFT})
+        self.assertNotIn("Picked from equal recipes", page)
+
+    def test_suppression_does_not_leak_between_two_plans(self):
+        """The set is per render call. A module-level one would mark the first plan of a
+        server's life and no other, which is the worst possible bug shape: correct once."""
+        for _ in range(2):
+            rows = [r for r in self._rows(self._page()) if "interchangeable" in r]
+            self.assertEqual(len(rows), 1)
+
+    def test_the_panel_and_the_tree_are_counted_from_the_same_tree(self):
+        """Five nodes of one key at two tie sizes: the panel keeps the size the tree showed.
+
+        The two walk the tree independently, so this is the contract between them. A panel
+        reporting 14 beside a tree row saying 67 would be a footnote pointing at a different
+        finding, and `_is_arbitrary` is the shared predicate that keeps the SET of marked
+        nodes the same in both.
+        """
+        deep = self._tree(occurrences=2, count=14)
+        other = self._tree(occurrences=3, count=67)
+        other["children"][0]["children"].append(deep["children"][0])
+        page = self._rendered(other)
+        panel = page.split("Picked from equal recipes", 1)[1]
+        self.assertIn("5 steps", panel)
+        marks = [r for r in self._rows(page) if "interchangeable" in r]
+        self.assertEqual(len(marks), 1)
+        # The SAME number in both places, read out of each rather than assumed equal.
+        number = re.search(r"any of (\d+) interchangeable", marks[0]).group(1)
+        self.assertIn("any of %s interchangeable" % number, panel)
+        self.assertEqual(number, "67", "the tree reaches the 67-way node first")
+
+    def test_a_node_the_panel_counts_is_a_node_the_tree_marks(self):
+        """The predicate is shared, so a payload missing `alternatives` cannot split them.
+
+        The solver always writes both fields, and a renderer whose mark was reachable only
+        through the recipe count would drop the finding from the tree while the panel still
+        listed it -- a footnote with no anchor.
+        """
+        page = self._rendered(
+            {"key": "mod:drone", "label": "Common Drone", "kind": "item", "need": 1,
+             "status": solve.STATUS_CRAFT, "interchangeable": 67}, name="Common Drone")
+        self.assertEqual(len([r for r in self._rows(page) if "interchangeable" in r]), 1)
+        self.assertIn("Picked from equal recipes", page)
+
+
+class CrossLanguageWordingTest(unittest.TestCase):
+    """`NodeRowText.meta` and `present.INTERCHANGEABLE_NOTE` have to say the same thing.
+
+    The mirror of `NodeStatusTest`, which reads `present.py` out of Java for the status words.
+    #181 shipped this mark in Java only, so the browser and the client were already saying
+    two different things about one node -- one of them nothing at all. A comment asking for
+    parity is a rule with nothing enforcing it, which is this repository's recurring defect.
+    """
+
+    JAVA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "mod", "src", "main", "java", "io", "github", "jacoblasky",
+                        "recipedump", "client", "planner", "NodeRowText.java")
+
+    def test_the_java_row_builds_the_same_sentence(self):
+        if not os.path.exists(self.JAVA):
+            self.fail("NodeRowText.java is where the other copy of these words lives: %s"
+                      % self.JAVA)
+        with open(self.JAVA, encoding="utf-8") as fh:
+            source = fh.read()
+        # The Java builds it by concatenation, so compare the two literal halves either side
+        # of the number rather than the formatted string.
+        head, tail = present.INTERCHANGEABLE_NOTE.split("%d")
+        self.assertIn('"%s"' % head, source,
+                      "python says %r" % (present.INTERCHANGEABLE_NOTE,))
+        self.assertIn('"%s"' % tail, source,
+                      "python says %r" % (present.INTERCHANGEABLE_NOTE,))

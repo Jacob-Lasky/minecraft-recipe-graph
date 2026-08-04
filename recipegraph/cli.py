@@ -426,11 +426,20 @@ def cmd_plan(args):
         from . import iconset
         from .render import render_html
 
-        with open(args.html, "w") as fh:
+        with open(args.html, "w", encoding="utf-8") as fh:
             # `inline=True`: this file outlives the server and may be published as a
             # Claude Artifact, whose CSP blocks every off-host request. The atlas pages sit
             # beside the graph, which is where `build` copied them. See iconset.resolver.
-            fh.write(render_html(result, g, icon=iconset.resolver(
+            #
+            # `standalone=True` for the same reason one level up: a browser opens this file
+            # directly, so it is the caller that has to ask for the viewport meta the served
+            # page gets from `server._wrap_fragment`. Without it a phone lays the page out at
+            # 980px and shows the desktop layout zoomed out. See #138.
+            #
+            # `encoding="utf-8"` is what makes that document's `<meta charset>` true. The
+            # default is the process locale, so a container with LANG unset writes ASCII and
+            # dies on the ellipsis `graphview._shorten` puts in a truncated label.
+            fh.write(render_html(result, g, standalone=True, icon=iconset.resolver(
                 g, os.path.dirname(os.path.abspath(args.graph)), inline=True)))
         print("wrote %s" % args.html)
     return 0
@@ -485,9 +494,14 @@ def cmd_explore(args):
         if not any(r.source == "hei_dump" for r in g.recipes):
             note = ("This graph has no machine recipes yet: run /recipedump in game, "
                     "otherwise machine-made items show as having no recipe.")
-        with open(args.html, "w") as fh:
-            fh.write(render_explore_html(payload, note, icon=iconset.resolver(
-                g, os.path.dirname(os.path.abspath(args.graph)), inline=True)))
+        with open(args.html, "w", encoding="utf-8") as fh:
+            # `standalone=True` and `encoding="utf-8"` for the reasons `cmd_plan`'s writer
+            # records: this file is opened straight from disk, and both writers had the same
+            # defect. #138
+            fh.write(render_explore_html(payload, note, standalone=True,
+                                         icon=iconset.resolver(
+                                             g, os.path.dirname(os.path.abspath(args.graph)),
+                                             inline=True)))
         print("wrote %s" % args.html)
     return 0
 
@@ -589,8 +603,11 @@ def cmd_chart(args):
                  ("%+.1f/min" % m["per_min"])))
 
     if args.html:
-        with open(args.html, "w") as fh:
-            fh.write(render_chart_html(payload))
+        with open(args.html, "w", encoding="utf-8") as fh:
+            # `standalone=True` and `encoding="utf-8"`, for the reasons `cmd_plan`'s writer
+            # records. This page is written to a file and never served, so it had #138 with
+            # nobody reporting it.
+            fh.write(render_chart_html(payload, standalone=True))
         print("\nwrote %s" % args.html)
     if args.json:
         with open(args.json, "w") as fh:

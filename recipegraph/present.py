@@ -125,6 +125,17 @@ STATE_BADGE = {HAVE: "ok", BUILDABLE: "warn", UNKNOWN: "muted", UNAVAILABLE: "ne
 #: One definition, because the tree badge, the shopping-list row and the legend all show it.
 UNSOURCED_BADGE = "no known source"
 
+#: What a craft node says when the pick among its equally-scored recipes was arbitrary. #181
+#:
+#: REPLACES the recipe count rather than sitting beside it. `NodeRowText.meta` argues that at
+#: length in Java and the browser had never said it at all: "65 recipes, 62 interchangeable"
+#: leads with the flattering number, and 65 counts three routes priced at infinity.
+#:
+#: HERE RATHER THAN IN `render.py` because the same words are in `NodeRowText.java`, and
+#: `tests/test_ranking.CrossLanguageWordingTest` reads that file and pins the two together --
+#: the arrangement `NodeStatusTest` already uses in the other direction for the status words.
+INTERCHANGEABLE_NOTE = "any of %d interchangeable"
+
 #: What a search row says when the key is the pack's SECOND id for a rock that generates
 #: under another id -- `graph.shadow_ores`, computed once by `index.build`. #168 was reported
 #: as two identical "Sednanite Ore" rows with nothing on screen to tell them apart.

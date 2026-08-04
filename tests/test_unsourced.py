@@ -44,6 +44,7 @@ replaced that comparison; see it for why the assertion is structural rather than
 """
 
 import os
+import re
 import sys
 import unittest
 
@@ -455,10 +456,29 @@ class RenderedSurfacesTest(unittest.TestCase):
 
     def test_the_tree_and_the_shopping_list_both_carry_it(self):
         # Counted BEFORE the footer, which documents the badge and would otherwise inflate
-        # the count to 3 and make this pass for the wrong reason.
+        # the count and make this pass for the wrong reason.
         body = self._html().split('class="foot"')[0]
-        self.assertEqual(body.count(present.UNSOURCED_BADGE), 2,
+        # Split by surface rather than counted flat. The word reaches four places and only
+        # two of them are the ones this test is about; a bare total would go on passing if
+        # one moved into the other.
+        in_titles = sum(1 for t in re.findall(r"<title>([^<]*)</title>", body)
+                        if present.UNSOURCED_BADGE in t)
+        self.assertEqual(body.count(present.UNSOURCED_BADGE) - in_titles, 2,
                          "expected the badge on the tree node and on the shopping-list row")
+
+    def test_the_diagram_says_which_red_the_box_is(self):
+        """Both orientations, in the `<title>`. #174 carried `unsourced` into the record.
+
+        The diagram box has no room for a word, so the fill was the whole of what it said --
+        and `token` and `raw` deliberately share that fill, so a red box could not say which
+        red it was. `graphview.layout` dropped the field this needs.
+        """
+        body = self._html().split('class="foot"')[0]
+        titles = [t for t in re.findall(r"<title>([^<]*)</title>", body)
+                  if present.UNSOURCED_BADGE in t]
+        self.assertEqual(len(titles), 2,
+                         "expected the word in both orientations' hover titles, got %r"
+                         % (titles,))
 
     def test_the_note_explains_it_in_the_tree(self):
         self.assertIn("no recipe reaches this state", self._html())
