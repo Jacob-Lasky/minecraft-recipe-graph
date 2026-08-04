@@ -128,6 +128,7 @@ public final class ScenarioInputs {
     public static final class Resolved {
         final Map<Integer, Long> have = new LinkedHashMap<Integer, Long>();
         final Set<Integer> craftables = new LinkedHashSet<Integer>();
+        final Set<Integer> raw = new LinkedHashSet<Integer>();
         final Map<Integer, String> freeSources = new LinkedHashMap<Integer, String>();
         final Map<Integer, Integer> tokenKinds = new LinkedHashMap<Integer, Integer>();
         final Map<Integer, String> dimensionGates = new LinkedHashMap<Integer, String>();
@@ -144,11 +145,16 @@ public final class ScenarioInputs {
          * two scenarios share a table computed for one of them, and a non-pricing field left
          * in it prices the same table twice.
          *
-         * `craftables` and `pinned` are absent because neither reaches the cost model.
+         * `pinned` is absent because it does not reach the cost model. `craftables` WAS absent
+         * too and joined in #193, which is the case for keying on the arguments rather than on
+         * field names: the field changed side, and a hand-maintained partition would have gone
+         * on sharing the bare table with the stocked one -- one inventory's prices served to
+         * another, which is a silent wrong answer.
          */
         public String costSignature() {
             return have + "|" + freeSources.keySet() + "|" + tokenKinds + "|"
                     + dimensionGates.keySet() + "|" + emcAvailable + "|"
+                    + craftables + "|" + raw + "|"
                     + Arrays.toString(machineStates.summarise()) + "|"
                     + Arrays.toString(machineStates.describedCategories());
         }
@@ -169,6 +175,12 @@ public final class ScenarioInputs {
             int keyId = g.keyId(e.getAsString());
             if (keyId >= 0) {
                 out.craftables.add(keyId);
+            }
+        }
+        for (JsonElement e : array(scenario, "raw")) {
+            int keyId = g.keyId(e.getAsString());
+            if (keyId >= 0) {
+                out.raw.add(keyId);
             }
         }
 
@@ -397,6 +409,13 @@ public final class ScenarioInputs {
         for (Map.Entry<Integer, Integer> e : resolved.tokenKinds.entrySet()) {
             inputs.token(e.getKey(), e.getValue());
         }
+        // #193's two, per-inventory and on the same footing as the stock above.
+        for (int keyId : resolved.craftables) {
+            inputs.craftable(keyId);
+        }
+        for (int keyId : resolved.raw) {
+            inputs.raw(keyId);
+        }
         inputs.machineStates(resolved.machineStates);
         inputs.machineItemsFrom(resolved.machineStates);
         return Cost.estimate(g, inputs);
@@ -408,6 +427,7 @@ public final class ScenarioInputs {
         return new Solver.Builder(g)
                 .have(r.have)
                 .craftables(r.craftables)
+                .raw(r.raw)
                 .machineStates(r.machineStates)
                 .costs(costs)
                 .freeSources(r.freeSources)

@@ -7,8 +7,8 @@ import java.util.Map;
 /**
  * Everything {@link Cost#estimate} reads besides the graph itself.
  *
- * A parameter object because python's `estimate` takes eight optional arguments and a Java
- * signature with eight is a call site nobody can read or check. Every one is genuinely
+ * A parameter object because python's `estimate` takes ten optional arguments and a Java
+ * signature with ten is a call site nobody can read or check. Every one is genuinely
  * optional and every one means "this influence is off" when absent -- which is also why they
  * are set rather than defaulted: a caller that forgets to pass stock gets a plan that assumes
  * an empty base, not a crash.
@@ -23,6 +23,8 @@ public final class CostInputs {
     private final IntArray freeSources = new IntArray();
     private final IntArray emcAvailable = new IntArray();
     private final IntArray dimensionGated = new IntArray();
+    private final IntArray craftables = new IntArray();
+    private final IntArray raw = new IntArray();
     private final Map<Integer, Integer> tokenKinds = new LinkedHashMap<Integer, Integer>();
     private Map<Integer, int[]> machineItems;
     private MachineStates machineStates;
@@ -69,6 +71,35 @@ public final class CostInputs {
     public CostInputs dimensionGated(int keyId) {
         if (keyId >= 0) {
             dimensionGated.add(keyId);
+        }
+        return this;
+    }
+
+    /**
+     * An item the AE2 network can AUTOCRAFT. One request, not a subtree. #193.
+     *
+     * PER-INVENTORY, on the same footing as {@link #have}, which is why it is here rather than
+     * anything read off the graph. `Solver.expand` has terminated on these since the feature
+     * shipped and the cost model was never told, so every route through one was priced at its
+     * full subtree and lost to worse routes.
+     */
+    public CostInputs craftable(int keyId) {
+        if (keyId >= 0) {
+            craftables.add(keyId);
+        }
+        return this;
+    }
+
+    /**
+     * An item the user has declared they will obtain themselves. #193.
+     *
+     * A declared stop is an ordinary thing to go and get, so it prices at
+     * {@link Cost#BASE_RAW_COST} -- and it is allowed to LOWER a token, an unsourced mark or a
+     * dimension surcharge, because `expand` returns at this branch before reaching any of them.
+     */
+    public CostInputs raw(int keyId) {
+        if (keyId >= 0) {
+            raw.add(keyId);
         }
         return this;
     }
@@ -126,6 +157,14 @@ public final class CostInputs {
 
     int[] dimensionGatedKeys() {
         return dimensionGated.trimmed();
+    }
+
+    int[] craftableKeys() {
+        return craftables.trimmed();
+    }
+
+    int[] rawKeys() {
+        return raw.trimmed();
     }
 
     Map<Integer, Integer> tokens() {

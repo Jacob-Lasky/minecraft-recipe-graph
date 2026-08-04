@@ -829,6 +829,14 @@ class RenderedSurfacesTest(unittest.TestCase):
 class ThereIsOnlyOneSpellingOfThePredicateTest(unittest.TestCase):
     """The badge, the sweep and the shopping list must be one predicate, not three copies.
 
+    TWO PREDICATES ARE GUARDED HERE, and the second joined in #193 because it turned out to
+    be the same defect one module over: `reachable_form`, which decides whether a key has a
+    shape the graph CAN make, and `real_production`, which decides whether a recipe counts as
+    making a key at all. The latter had three spellings -- the authority on `Graph`, a
+    hand-rolled copy in `cost._relax` whose own comment admitted it was one, and a third in
+    `cost._seed` that excluded nothing. Behaviour for it lives in `tests/test_produced.py`;
+    what is asserted here is the structural half, that there is one definition.
+
     THIS TEST REPLACES ONE THAT PASSED WHILE THE THING IT GUARDED WAS BROKEN, which is worth
     stating because the replacement is a different KIND of assertion. `api` used to keep its
     own `_reachable_form` on the reasoning that a sweep must not import `solve` -- a true
@@ -859,6 +867,49 @@ class ThereIsOnlyOneSpellingOfThePredicateTest(unittest.TestCase):
         self.assertEqual(["model.py"], found,
                          "reachable_form must live on Graph and nowhere else; a second "
                          "spelling is how #136 and #170 drifted out of /api/sweep")
+
+    def test_the_production_predicate_is_defined_exactly_once_too(self):
+        """#193's half. `cost._relax` used to carry its own copy of this one."""
+        import glob
+        import os
+        import re
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        found = []
+        for path in sorted(glob.glob(os.path.join(root, "*.py"))):
+            with open(path) as fh:
+                for line in fh:
+                    if re.match(r"\s*def real_production\b", line):
+                        found.append(os.path.basename(path))
+        self.assertEqual(["model.py"], found,
+                         "real_production must live on Graph and nowhere else; a second "
+                         "spelling is what left 120 fluids priced at infinity while the "
+                         "plan shopping-listed them")
+
+    def test_nothing_outside_the_graph_hand_rolls_the_container_exclusion(self):
+        """The sharper assertion, and the one that would have caught `cost._relax` directly.
+
+        "Defined once" does not catch an INLINE copy, which is exactly what the mirror was: a
+        bare `if r.transfer and key.startswith(FLUID_PREFIX)` inside a loop, no `def` in
+        sight. So the structural claim is that combining a transfer test with a fluid test is
+        something only `Graph.real_production` does.
+        """
+        import glob
+        import os
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        offenders = []
+        for path in sorted(glob.glob(os.path.join(root, "*.py"))):
+            if os.path.basename(path) == "model.py":
+                continue
+            with open(path) as fh:
+                for number, line in enumerate(fh, 1):
+                    code = line.split("#", 1)[0]
+                    if "transfer" in code and "FLUID_PREFIX" in code:
+                        offenders.append("%s:%d" % (os.path.basename(path), number))
+        self.assertEqual([], offenders,
+                         "these lines spell the container exclusion themselves; call "
+                         "Graph.real_production instead")
 
     def test_the_solver_reads_the_graph_rather_than_carrying_its_own(self):
         # `Solver` deliberately has no `reachable_form` of its own. Asserted rather than

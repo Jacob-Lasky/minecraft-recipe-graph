@@ -334,6 +334,42 @@ public class RecipeGraphTest {
         assertEquals(recipeList(BOIL_BORIC_ACID), realProducers("fluid:boric_acid"));
     }
 
+    @Test
+    public void theTwoFormsOfRealProducersAgree() {
+        // #193. `realProducers` hands back the memoised row untouched for a non-fluid key,
+        // which is valid only while `realProduction` excludes nothing but fluids. Compared over
+        // EVERY key and EVERY recipe rather than reasoned about, because the reasoning is what
+        // goes stale: widen the predicate and this branch silently stops honouring it.
+        for (int keyId = 0; keyId < graph.keyCount(); keyId++) {
+            String key = graph.key(keyId);
+            List<Integer> filtered = new ArrayList<Integer>();
+            for (int recipe : producers(key)) {
+                if (graph.realProduction(recipe, keyId)) {
+                    filtered.add(Integer.valueOf(recipe));
+                }
+            }
+            assertEquals(key, filtered, realProducers(key));
+        }
+    }
+
+    @Test
+    public void realOutputIsWhatTheRelaxationCanReachAndNotWhatRealProducersFinds() {
+        // #193's second predicate, and the difference between the two is load-bearing:
+        // `Cost.relax` writes only keys a recipe LITERALLY outputs, so `realOutput` must NOT
+        // widen to the wildcard sibling the way `realProducers` does. Answering yes for a
+        // wildcard-only key would strand it at infinity with nothing able to price it -- 478
+        // input alternatives on the reference graph.
+        //
+        // `mod:thing:1` is made only through `mod:thing:*`, which is exactly that shape.
+        assertFalse(realProducers("mod:thing:1").isEmpty());
+        assertFalse(graph.realOutput(id("mod:thing:1")));
+        // And the fluid nothing but a can empty makes: in byOutput, and not a real output.
+        assertTrue(graph.byOutput().count(id("fluid:nethengeic_fluid")) > 0);
+        assertFalse(graph.realOutput(id("fluid:nethengeic_fluid")));
+        // While a real producer is a real output.
+        assertTrue(graph.realOutput(id("fluid:boric_acid")));
+    }
+
     // -- world ores --------------------------------------------------------------------
 
     @Test

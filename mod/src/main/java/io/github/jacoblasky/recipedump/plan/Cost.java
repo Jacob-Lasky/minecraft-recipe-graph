@@ -284,6 +284,36 @@ public strictfp final class Cost {
     public static final double EMC_COST = 0.5;
 
     /**
+     * What an item the AE2 network can AUTOCRAFT costs: one request. #193.
+     *
+     * `Solver.expand` has terminated on a craftable since the feature shipped -- status
+     * `have`, note "AE2 can autocraft", and deliberately no contribution to `usedFromStock` --
+     * and until #193 the cost model was never told. So the ranker priced a route through a
+     * craftable at its FULL SUBTREE COST while the solver was going to stop dead at it, and
+     * the error ran one way: such routes lost to worse ones.
+     *
+     * BETWEEN AN INFINITE SOURCE AND A RAW LEAF, and both bounds are the claim:
+     *
+     * <pre>
+     *   0.0 (stock) &lt; SOURCE_COST &lt; CRAFTABLE_COST &lt; EMC_COST &lt; BASE_RAW_COST
+     * </pre>
+     *
+     * Above SOURCE_COST because a generator you own is genuinely free and this is not: the
+     * network spends real materials to fill the request. Below BASE_RAW_COST because the
+     * alternative to typing one request is going and gathering the thing. Below EMC_COST
+     * because `expand` reports a craftable as `have`, the same status as a stack in the
+     * network, while a learned transmutation gets its own status and a note naming the balance
+     * it spends -- the display already treats one as nearer to owning the item. A DISTINCT
+     * figure from EMC_COST regardless, per #95.
+     *
+     * IT DOES NOT DECIDE WHICH TERMINAL WINS FOR A KEY THAT IS BOTH: {@link #seed} reproduces
+     * `expand`'s cascade by ORDER and by the under-a-raw-leaf guard, so a key that is learned
+     * AND autocraftable keeps EMC_COST whatever this number is. Mirrors `cost.CRAFTABLE_COST`
+     * in python; the golden gate holds them equal.
+     */
+    public static final double CRAFTABLE_COST = 0.25;
+
+    /**
      * What a key the graph has PROVEN it cannot explain costs. #176.
      *
      * {@link Unsourced#keys} is the set: nothing makes this exact key, and the graph
@@ -686,7 +716,7 @@ public strictfp final class Cost {
             Bits.set(gated, key);
         }
 
-        // Every leaf -- a key no recipe outputs -- is cheap-ish.
+        // Every leaf -- a key nothing REALLY produces -- is cheap-ish.
         //
         // A LEAF BEHIND A DIMENSION IS NOT CHEAP, AND THIS RUNS FIRST, so the surcharge has to
         // be applied here too rather than only in the world-ore loop below. "No recipe, so
@@ -694,12 +724,36 @@ public strictfp final class Cost {
         // you cannot go and get it, you have never been where it is. Left to the loop below,
         // `min` would already be holding BASE_RAW_COST from this pass and would keep it --
         // the gate would compute, appear in the plan's note, and change no price at all.
+        //
+        // LEAF-NESS COMES FROM `RecipeGraph.realOutput` AND NOT FROM `byOutput`, WHICH IS #193.
+        // This loop used to test `byOutput().count(alt) == 0`, which counts a container empty
+        // as production -- so a fluid whose only route is emptying a can was not a leaf here
+        // and got no seed, while `relax` below applied the exclusion and refused to price it
+        // from that recipe. Nothing seeded it and nothing relaxed it: 120 fluids on the
+        // reference graph held infinity while the plan called them raw and shopping-listed
+        // them. Mirrors `cost._seed` in python, whose comment carries the same measurement.
+        //
+        // THEY DO NOT END AT THE LEAF PRICE THIS LOOP GIVES THEM: the rule further down that
+        // raises `Unsourced.producedInNameOnly` to UNSOURCED_COST collects exactly this
+        // population. This loop makes them finite; that one says what finite number.
+        //
+        // RESOLVED ONCE INTO A BITSET RATHER THAN ASKED PER OCCURRENCE, as python resolves it
+        // into a set and for the same reason: the loop reaches a PRODUCED key every single time
+        // it appears as an ingredient, which is millions of visits on the reference graph
+        // against 51,486 distinct output keys. One pass over the key table costs nothing beside
+        // the relaxation that follows.
+        long[] produced = Bits.ofSize(graph.keyCount());
+        for (int key = 0; key < cost.length; key++) {
+            if (graph.realOutput(key)) {
+                Bits.set(produced, key);
+            }
+        }
         RecipeStore recipes = graph.recipes();
         for (int recipe = 0; recipe < recipes.count(); recipe++) {
             for (int slot = recipes.slotStart(recipe); slot < recipes.slotEnd(recipe); slot++) {
                 for (int p = recipes.altStart(slot); p < recipes.altEnd(slot); p++) {
                     int alt = recipes.altKeyAt(p);
-                    if (Double.isInfinite(cost[alt]) && graph.byOutput().count(alt) == 0) {
+                    if (Double.isInfinite(cost[alt]) && !Bits.get(produced, alt)) {
                         cost[alt] = BASE_RAW_COST
                                 + (Bits.get(gated, alt) ? DIMENSION_COST : 0.0);
                     }
@@ -769,9 +823,30 @@ public strictfp final class Cost {
         // infinity, so reading an infinite slot as BASE_RAW_COST is what reproduces that
         // exactly. Drop it and those 39 keys stay infinite here while python prices them, and
         // the golden gate fails on a table difference rather than on a plan.
+        // TWO SETS, ONE RULE, AND #193 IS THE SECOND OF THEM. A key every one of whose
+        // producers is a container empty is one the graph has proven it cannot explain, on
+        // exactly the positive evidence UNSOURCED_COST exists for. The two are disjoint by
+        // construction -- one needs byOutput empty, the other needs it non-empty -- so a single
+        // loop over both is the same as two loops, and `Unsourced.producedInNameOnly` carries
+        // the argument. Mirrors `cost._seed` in python.
+        //
+        // NOT BASE_RAW_COST, WHICH IS THE OTHER READING AND WAS MEASURED. A raw leaf agrees with
+        // `expand`'s `raw` verdict most literally and is the CHEAPEST value in the model, so it
+        // makes a route through a fluid the tool cannot source more attractive than any route it
+        // can account for -- verbatim #176's defect. What #193 reported is an INFINITY and
+        // finiteness is what fixes it; the cheapest finite number is not owed. The ORDERING is
+        // the claim: measured end to end, the two arms differ by 11 nodes and 2 shopping rows on
+        // the one target that could be checked.
+        //
+        // A SECOND SWEEP RATHER THAN THE COMPLEMENT OF `produced` ABOVE, and deliberately.
+        // `Unsourced.producedInNameOnly` is where that population is DEFINED, next to the set it
+        // shares a price with, and the complement identity is one a reader would have to hold in
+        // their head to see what this loop tests. One more CSR row walk per key against a
+        // twenty-second relaxation. Python reads it the same way in the same two places.
         long[] unsourced = Unsourced.keys(graph);
+        long[] inNameOnly = Unsourced.producedInNameOnly(graph);
         for (int key = 0; key < cost.length; key++) {
-            if (!Bits.get(unsourced, key)) {
+            if (!Bits.get(unsourced, key) && !Bits.get(inNameOnly, key)) {
                 continue;
             }
             double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];
@@ -795,6 +870,45 @@ public strictfp final class Cost {
                 continue;
             }
             cost[key] = tokenCost(token.getValue().intValue());
+        }
+
+        // AND LAST OF ALL, THE TWO TERMINALS THE PLAYER DECLARES. #193. Both stop
+        // `Solver.expand` dead and until now neither changed a price, so the cost model ranked
+        // routes over one set of terminals while the solver planned with another.
+        //
+        // AFTER EVERY OTHER RULE BECAUSE THAT IS WHERE `expand` CHECKS THEM: the raw/craftables
+        // branch sits above the cycle check, above the world-ore stop, above the token branch
+        // and above the unsourced mark, so each of those has to lose here. A declared stop that
+        // is also a gated world ore drops from 801 to a raw leaf, which is the right way round:
+        // the player saying "I will get this myself" is a statement about THIS world.
+        //
+        // THE GUARD IS THE TOKEN LOOP'S, and it is what keeps the three earlier branches of
+        // `expand` winning -- anything already under a raw leaf is stock, a generator or a
+        // learned EMC item, and `expand` returns at all three first. So the cascade is
+        // reproduced by structure rather than by the relative size of the constants. Mirrors
+        // `cost._seed` in python, loop for loop.
+        for (int key : in.rawKeys()) {
+            double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];
+            if (current < BASE_RAW_COST) {
+                continue;
+            }
+            // BASE_RAW_COST AND NOT A CONSTANT OF ITS OWN, which is not a #95 violation but
+            // the opposite: #95 forbids one figure carrying two unrelated STATEMENTS, and a
+            // declared stop and a key no recipe makes are the same statement -- "you go and get
+            // this yourself". `expand` backs that up by giving both PlanStatus RAW and adding
+            // both to the leaf totals.
+            //
+            // ASSIGNMENT RATHER THAN `min`, because this has to be able to LOWER a token, an
+            // unsourced mark or a dimension surcharge that a rule above already wrote.
+            cost[key] = BASE_RAW_COST;
+        }
+        // AFTER `raw`, because `expand` prefers the craftable reading when a key is in both.
+        for (int key : in.craftableKeys()) {
+            double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];
+            if (current < BASE_RAW_COST) {
+                continue;
+            }
+            cost[key] = CRAFTABLE_COST;
         }
         return cost;
     }
@@ -875,9 +989,12 @@ public strictfp final class Cost {
                 for (int p = recipes.outputStart(recipe); p < recipes.outputEnd(recipe); p++) {
                     int key = recipes.outputKeyAt(p);
                     // A container transfer never makes its fluid cheaper: emptying a can you
-                    // own is not production. Mirrors what the solver walks -- if these
-                    // disagree the ranker prices a route the solver cannot take.
-                    if (transfer && graph.isFluid(key)) {
+                    // own is not production. THROUGH `RecipeGraph.realProduction`, which is
+                    // what the solver walks -- if these disagree the ranker prices a route the
+                    // solver cannot take. This was a hand-rolled copy of it until #193,
+                    // correct on the day it was written, and a mirror that is currently
+                    // correct is still a mirror: the failure is at the next edit.
+                    if (!graph.realProduction(recipe, key)) {
                         continue;
                     }
                     // ONLY THE INGREDIENTS AMORTISE. `base` is what running this recipe costs

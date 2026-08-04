@@ -149,6 +149,12 @@ OVERWORLD_ONLY = {".": 1}
 BARE = {
     "have": {},
     "craftables": [],
+    # The user's declared "stop here, I will get this myself". A solver input on both sides
+    # since the feature shipped and a COST input since #193, so it is declared here for the
+    # reason `derive_inputs` gives: the argument list of `cost.estimate` is the checklist, and
+    # an input the generator does not resolve prices every fixture for a configuration nobody
+    # is running. Empty in every scenario -- see the note below `scenario` for why.
+    "raw": [],
     "placed": {},
     "machine_overrides": {},
     "no_machine": [],
@@ -180,7 +186,7 @@ def scenario(**kw):
     return out
 
 
-# ONE SCENARIO FIELD IS DELIBERATELY UNEXERCISED, and it is a decision rather than a hole.
+# TWO SCENARIO FIELDS ARE DELIBERATELY UNEXERCISED, and each is a decision rather than a hole.
 # `source_overrides` is a loader whose entire output is the `free_sources` dict, which the
 # `free-source` target below already drives end to end -- and the solver cannot tell whether
 # an entry in that dict came from `generators.DEFAULT_GENERATORS` or from the user's file, so
@@ -189,7 +195,14 @@ def scenario(**kw):
 # something it does not emit, and a golden fixture asserting a false claim about the pack is
 # worse than an unexercised field. `tests/test_sources.py` covers the loader itself.
 #
-# It stays DECLARED regardless, because a fixture's `scenario` block is the port's description
+# `raw` is unexercised for a different reason: A DECLARED STOP LEAVES NOTHING ON THE NODE TO
+# CLAIM. `expand` marks it `raw` with no note, which is indistinguishable by status from an
+# ordinary leaf, so the only observable is an ABSENT SUBTREE -- a claim about tree shape that
+# the `CHECKS` table cannot express and that would therefore have to be a comment, which is
+# the thing `CHECKS` exists to replace. What #193 added is a PRICE, and both implementations
+# pin it directly: `tests/test_produced.py` and `mod/.../plan/CostTest.java`.
+#
+# Both stay DECLARED regardless, because a fixture's `scenario` block is the port's description
 # of what a solver input IS, and an incomplete description is the worse failure.
 
 
@@ -211,6 +224,13 @@ def derive_inputs(graph, sc):
     return {
         "info": info,
         "have": have,
+        # PRICING INPUTS SINCE #193, which is why they are resolved here rather than in
+        # `resolve_scenario` with the pins. Both terminate a branch in `expand`, so a table
+        # computed without them ranks routes over a different set of terminals than the plan
+        # walks -- and because they are per-inventory, two scenarios differing only in these
+        # must not share one cost table. `cost_signature` picks them up from this dict.
+        "craftables": set(sc["craftables"]),
+        "raw": set(sc["raw"]),
         "states": {uid: (i["state"], i["why"]) for uid, i in info.items()},
         # The overrides DOCUMENT, not a path: `generators.resolve` takes either, and handing
         # it the dict is what keeps `vanilla_water` on its documented default of true. A
@@ -241,6 +261,13 @@ def cost_signature(derived):
     signature = dict((k, derived[k]) for k in
                      ("have", "states", "free", "tokens", "gates", "targets"))
     signature["emc_available"] = sorted(derived["emc_available"])
+    # #193's two, and the reason this function keys on what `estimate` is HANDED rather than on
+    # a list of scenario field names: `craftables` moved from a non-pricing input to a pricing
+    # one, and a hand-maintained partition would have gone on letting the bare scenario and the
+    # stocked one share a table. Sharing across two inventories is a cache hit serving the
+    # wrong answer, which is the same failure `cost.fingerprint` covers for the disk cache.
+    signature["craftables"] = sorted(derived["craftables"])
+    signature["raw"] = sorted(derived["raw"])
     return json.dumps(signature, sort_keys=True, default=list)
 
 
@@ -256,23 +283,35 @@ def priced_environment(graph, derived):
         graph, have=derived["have"], machine_states=derived["states"],
         free_sources=derived["free"], machine_items=derived["targets"],
         token_kinds=derived["tokens"], dimension_gates=derived["gates"],
-        emc_available=derived["emc_available"])
+        emc_available=derived["emc_available"], craftables=derived["craftables"],
+        raw=derived["raw"])
     return env
 
 
 def resolve_scenario(graph, sc, priced):
-    """A priced environment plus the two inputs that do not reach the cost model."""
+    """A priced environment plus the ONE input that does not reach the cost model.
+
+    That input is the pins. `craftables` was here too until #193, on the reasoning that it
+    was a solver-only input; it prices now, so it is resolved in `derive_inputs` where the
+    cost signature can see it.
+    """
     pinned, pin_notes = pins_mod.resolve(graph, sc["pins"])
     env = dict(priced)
-    env.update(pinned=pinned, pin_notes=pin_notes,
-               craftables=set(sc["craftables"]))
+    env.update(pinned=pinned, pin_notes=pin_notes)
     return env
 
 
 def solver_for(graph, env, max_nodes):
-    """The same Solver `server.State.solver` builds. Keep the argument list in step."""
+    """The same Solver `server.State.solver` builds. Keep the argument list in step.
+
+    ONE DELIBERATE DIFFERENCE: `raw` is passed here and not there, because the server has no
+    way for a user to declare a stop and so has no set to hand over. It is always EMPTY in
+    every scenario, so the two solvers are identical in behaviour as well as in effect; what
+    it buys is that the fixture's `scenario` block describes the whole input surface, which
+    is what the Java side reconstructs from.
+    """
     return Solver(graph, have=env["have"], craftables=env["craftables"],
-                  machine_states=env["states"], costs=env["costs"],
+                  raw=env["raw"], machine_states=env["states"], costs=env["costs"],
                   free_sources=env["free"], token_kinds=env["tokens"],
                   pinned=env["pinned"], max_nodes=max_nodes,
                   dimension_gates=env["gates"], emc_available=env["emc_available"])
@@ -976,7 +1015,8 @@ COST_PROBE_ITEMS = [key for key, _label in _cost_probe().PROBES]
 # EXEMPTIONS GO IN `NOT_PINNED` WITH A REASON, never by quietly leaving a name out of here.
 PINNED_CONSTANTS = (
     "BASE_RAW_COST", "BLOCKED_CEILING", "BLOCKED_FLOOR", "BUILD_KNEE", "BUILD_SCALE",
-    "BUILD_SLOPE", "BUILD_SPREAD", "DIMENSION_COST", "EMC_COST", "FLUID_SCALE",
+    "BUILD_SLOPE", "BUILD_SPREAD", "CRAFTABLE_COST", "DIMENSION_COST",
+    "EMC_COST", "FLUID_SCALE",
     "GATE_COST", "LOOT_COST", "NON_PRODUCTION_PENALTY", "PASSES", "PRICED_CEILING",
     "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
     "UNPRICED_MACHINE_COST", "UNSOURCED_COST",

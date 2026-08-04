@@ -615,6 +615,7 @@ class Graph:
         self._labels = None
         self._live_keys = None
         self._unsourced_keys = None
+        self._produced_in_name_only = None
         self._variant_index = None
         self._variant_subsumption = None
         self._reshaped_only = None
@@ -1079,6 +1080,51 @@ class Graph:
         return self._unsourced_keys
 
     @property
+    def produced_in_name_only(self):
+        """Keys some recipe OUTPUTS while `real_production` says none of them makes it.
+
+        120 on the reference graph, every one a fluid, `forestry.squeezer` in nearly all of
+        them: `fluid:sewage`, `fluid:liquid_uu_matter`, `fluid:fluidoil`. The graph lists
+        producers and every one of them is a container empty, which is circular -- see
+        `real_production` for the uranium-can edge that argument was paid for with.
+
+        THE SAME CLAIM AS `unsourced_keys` AND A DIFFERENT POPULATION, which is why it is a
+        second set rather than a widening of that one. Both mean "the graph has POSITIVE
+        EVIDENCE it cannot explain where this comes from", so `cost._seed` charges both
+        `UNSOURCED_COST`. They cannot be one set: `unsourced_keys` requires `by_output` EMPTY
+        and this requires it non-empty, so the intersection is zero by construction, and its
+        second clause needs `reachable_form` to name another form the graph CAN make. Measured:
+        `reachable_form` is None for all 120, because a fluid has no meta sibling, no NBT
+        variant and no `<form><Material>` group. There is nothing to name, so #139's badge
+        correctly stays off and these keys cannot enter that set.
+
+        WHY THE PRICE IS NOT `BASE_RAW_COST`. `Solver.expand` reports these raw and
+        shopping-lists them, so a raw leaf is the arithmetic that agrees with that verdict most
+        literally -- and it is also the CHEAPEST value in the model, so it makes a route through
+        a fluid the tool cannot source more attractive than any route it can account for. That
+        is verbatim #176's defect in the one population #176's set cannot reach. What agreement
+        with the plan requires is a FINITE price, which is the whole of the infinity #193
+        reported; it does not require the cheapest one.
+
+        THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, as for `UNSOURCED_COST` itself. Both arms
+        were built and solved end to end on the reference oracle and they differ by very
+        little: `fluid:nethengeic_fluid` plans 141 nodes and 41 shopping rows at `BASE_RAW_COST`
+        against 152 and 43 here, and both shopping-list `fluid:liquid_uu_matter` and
+        `fluid:meat`, because on that target there is no alternative to prefer.
+
+        WHAT DOES MOVE THAT PLAN IS THE INFINITY GOING AWAY, under either arm, and the fixture
+        set predicted it: `plan-fluid-chain`'s own note says #176 took its `work` from 400 to
+        28,012 of an 80,000 budget "because the search no longer stops at 40 unsourced dead ends
+        and instead explores the routes behind them", and warned that the headroom was thin. 553
+        more keys stop being infinite here, the search behind them is explored, and the budget
+        goes. See that target's `why` for how it was re-chosen.
+        """
+        if self._produced_in_name_only is None:
+            self._produced_in_name_only = frozenset(
+                key for key in self.by_output if not self.real_output(key))
+        return self._produced_in_name_only
+
+    @property
     def live_keys(self):
         """Keys some recipe or catalyst actually touches: 167,134 on the reference graph.
 
@@ -1422,20 +1468,37 @@ class Graph:
             return None
         return meta, max_damage
 
-    def real_producers(self, key):
-        """`producers`, minus the entries that are not production of `key`. TWO EXCLUSIONS.
+    @staticmethod
+    def real_production(recipe, key):
+        """Whether `recipe` counts as PRODUCING `key`, or is only moving it about.
 
-        A CONTAINER TRANSFER ASKED TO CREATE A FLUID. Emptying a container is not production
-        of its contents: to hold a water-filled can you must already have had the water, so
-        `Water Can -> 1,000 mB water` is circular. Left in, it is worse than circular, because
-        the dump drops the NBT that tells one filled can from another -- every filled Forestry
-        can collapses to `forestry:can:1`, so the graph believes squeezing a can of WATER
-        yields uranium fluoride. That exact edge put a Fluid Transposer and a bogus uranium
-        chain in a Borax plan.
+        THE ONE SPELLING OF THIS EXCLUSION. `real_producers` below, `cost._seed` and
+        `cost._relax` all read it, and until #193 all three spelled it themselves: the
+        relaxation carried a hand-rolled copy whose own comment said "mirrors
+        `Graph.real_producers`", and the seed carried a third version that did not exclude
+        anything at all. DO NOT re-inline it in a caller. That is the defect
+        `api._reachable_form` was, where a copy drifted for two releases while an agreement
+        test compared five keys that all exercised the one branch nobody had changed;
+        `tests/test_unsourced.py` now pins the single definition for both predicates.
+
+        A CONTAINER TRANSFER ASKED TO CREATE A FLUID is the whole of what it excludes. Emptying
+        a container is not production of its contents: to hold a water-filled can you must
+        already have had the water, so `Water Can -> 1,000 mB water` is circular. Left in, it is
+        worse than circular, because the dump drops the NBT that tells one filled can from
+        another -- every filled Forestry can collapses to `forestry:can:1`, so the graph
+        believes squeezing a can of WATER yields uranium fluoride. That exact edge put a Fluid
+        Transposer and a bogus uranium chain in a Borax plan.
 
         Filling a container IS real work and stays: only the fluid direction is fake, so a
         transfer may still produce an ITEM. A fluid whose only route is a container empty
         correctly comes out as NEED, which is the honest answer.
+        """
+        return not (recipe.transfer and key.startswith(FLUID_PREFIX))
+
+    def real_producers(self, key):
+        """`producers`, minus the entries that are not production of `key`. TWO EXCLUSIONS.
+
+        THE CONTAINER TRANSFER, through `real_production` above rather than spelled again here.
 
         AND A RECIPE `notproduction` DEMOTED: a random loot table, or a JEI card explaining
         how to automate something. #211 and #169. Same predicate as the first exclusion and
@@ -1467,10 +1530,53 @@ class Graph:
         marked" would be wrong for a caller that marked through `notproduction.mark` directly
         rather than through `mark_non_production` -- which is what the tests do. The filter is
         one comprehension over a list that is almost always shorter than five.
+
+        TWO RULES, AND ONLY ONE OF THEM IS `real_production`. The container exclusion is shared
+        with `cost._relax` and `real_output`, so it lives in one place and is called here. The
+        documentation-card exclusion is NOT shared: `_relax` prices a marked recipe at
+        `NON_PRODUCTION_PENALTY` rather than refusing it, deliberately, so folding
+        `not_production` into `real_production` would make the relaxation skip routes #211
+        wants ranked-but-priced. `AllThreeReadersAgreeTest` compares this composition against
+        the predicate over every recipe of every fixture graph rather than trusting that
+        sentence.
         """
-        fluid = key.startswith(FLUID_PREFIX)
         return [r for r in self.producers(key)
-                if not r.not_production and not (fluid and r.transfer)]
+                if not r.not_production and self.real_production(r, key)]
+
+    def real_output(self, key):
+        """Whether some recipe's OWN output list names `key` and counts as making it.
+
+        The question `cost._seed` asks: is there anything for the relaxation to price this
+        key FROM, or must the seed give it a price itself? Before #193 the seed asked
+        `key in by_output` and so answered yes for 120 fluids whose only routes are container
+        empties -- nothing seeded them and `cost._relax` then refused to price them, leaving
+        the cost model at infinity while the plan called them raw and shopping-listed them.
+        Cost said impossible, plan said go and buy it.
+
+        WHAT the seed then charges them is a separate question with its own answer: they are
+        keys the graph has proven it cannot explain, so they end at `UNSOURCED_COST` rather
+        than at the leaf price. See `produced_in_name_only` above.
+
+        DELIBERATELY NOT `real_producers(key)`, AND NOT WIDENED TO THE WILDCARD SIBLING.
+        `cost._relax` lowers `cost[k]` only for keys a recipe LITERALLY outputs, so a key
+        reachable only through a `mod:item:*` producer has nothing that will ever write it.
+        Measured on the reference graph: 478 input alternatives are absent from `by_output`
+        while `real_producers` finds a wildcard producer for them -- every damaged
+        Electroblob wand and Arcane Essentials sword -- and answering yes for those would
+        strand all 478 at infinity along with every route through them, which is the
+        finite-to-infinite failure `BASE_RAW_COST`'s comment in `cost.py` already measured
+        and rejected once. Fixing that gap means teaching the relaxation to write a damaged
+        sibling, which is a different change; this predicate must stay the exact complement
+        of what the relaxation can reach.
+
+        AND NOT WIDENED TO `not_production` EITHER, for that same reason rather than by
+        oversight. `real_producers` excludes a demoted loot table or JEI card because the solver
+        refuses to route through one, but `cost._relax` PRICES it at `NON_PRODUCTION_PENALTY`
+        instead of skipping it -- #211 measured that skipping strands 26 keys at infinity. So a
+        key whose only producer is demoted still has something that writes it, and calling it a
+        leaf here would seed a price the relaxation then immediately competes with.
+        """
+        return any(self.real_production(r, key) for r in self.by_output.get(key, ()))
 
     @staticmethod
     def kind(key):

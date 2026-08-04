@@ -41,15 +41,20 @@ INF = float("inf")
 
 
 def load_stock(path):
-    """`(have, placed)` from a `have` output, spelled the way `server.State` spells it.
+    """`(have, placed, craftables)` from a `have` output, spelled as `server.State` spells it.
 
     Through the same three namespaces the server uses (items, fluids, essentia). Reading only
     `items` would silently drop every fluid from the stock and reprice the chemistry chains,
     which is the sort of divergence that makes a tool's answer disagree with the running
     server for no visible reason.
+
+    `craftables` IS READ FOR EXACTLY THAT REASON, since #193 made it a pricing input. The
+    server passes it to `cost.estimate`; a census that dropped it would report entry costs the
+    running instance does not charge, which is the same argument the token map already carries
+    below.
     """
     if not path or not os.path.exists(path):
-        return {}, {}
+        return {}, {}, set()
     with open(path) as fh:
         doc = json.load(fh)
     have = dict(doc.get("items") or {})
@@ -57,7 +62,7 @@ def load_stock(path):
         have["fluid:%s" % name] = amount
     for aspect, amount in (doc.get("essentia") or {}).items():
         have["essentia:%s" % str(aspect).lower()] = amount
-    return have, doc.get("placed") or {}
+    return have, doc.get("placed") or {}, set(doc.get("craftables") or ())
 
 
 # Re-exported, not redefined. The boundaries are derived from `MACHINE_COST["buildable"]`
@@ -69,7 +74,8 @@ regions = cost_mod.regions
 region_of = cost_mod.region_of
 
 
-def census(graph, have, placed, machines_path, sources_path, tokens_path=None):
+def census(graph, have, placed, machines_path, sources_path, tokens_path=None,
+           craftables=None):
     info = machines_mod.describe(
         graph, placed, have, overrides=machines_mod.load_overrides(machines_path),
         no_machine=machines_mod.load_no_machine(machines_path))
@@ -81,7 +87,8 @@ def census(graph, have, placed, machines_path, sources_path, tokens_path=None):
     # a warm .cost-cache.json would answer for whichever ones were current when it was written.
     costs = cost_mod.estimate(graph, have=have, machine_states=states,
                               free_sources=free, machine_items=targets,
-                              token_kinds=tokens_mod.for_path(tokens_path))
+                              token_kinds=tokens_mod.for_path(tokens_path),
+                              craftables=craftables)
     return states, targets, costs, dict(getattr(costs, "machine_entry", None) or {})
 
 
@@ -101,9 +108,9 @@ def main():
     args = ap.parse_args()
 
     graph = Graph.load(args.graph)
-    have, placed = load_stock(args.have)
+    have, placed, craftables = load_stock(args.have)
     states, targets, costs, entry = census(graph, have, placed, args.machines,
-                                           args.sources, args.tokens)
+                                           args.sources, args.tokens, craftables)
 
     by_state = collections.Counter(s[0] for s in states.values())
     print("machine states: %s" % dict(by_state.most_common()))

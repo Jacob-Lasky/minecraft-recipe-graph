@@ -411,12 +411,17 @@ class ThePureHelpersBehaveTest(unittest.TestCase):
             maker.scenario(hav={"mod:ingot": 1})
 
     def test_the_cost_signature_ignores_what_cost_never_sees(self):
-        # `pins` and `craftables` do not reach `cost.estimate`, so two scenarios differing
-        # only in them must share one cost table -- otherwise `pin-lapsed` pays for a second
-        # two-minute relaxation identical to the first.
+        # `pins` do not reach `cost.estimate`, so two scenarios differing only in them must
+        # share one cost table -- otherwise `pin-lapsed` pays for a second two-minute
+        # relaxation identical to the first.
+        #
+        # `craftables` USED TO BE NAMED HERE and moved to the test below in #193, which is the
+        # whole reason `cost_signature` keys on what `estimate` is handed rather than on a list
+        # of field names: the field changed side, and a hand-maintained partition would have
+        # gone on quietly sharing the bare table with the stocked one.
         base = maker.derive_inputs(self.graph, maker.BARE)
         pinned = maker.derive_inputs(self.graph, maker.scenario(
-            craftables=[self.key], pins={self.key: {"fingerprint": "0" * 16}}))
+            pins={self.key: {"fingerprint": "0" * 16}}))
         self.assertEqual(maker.cost_signature(base), maker.cost_signature(pinned))
 
     def test_the_cost_signature_separates_what_cost_does_see(self):
@@ -425,10 +430,23 @@ class ThePureHelpersBehaveTest(unittest.TestCase):
         # it looks perfectly reasonable.
         base = maker.derive_inputs(self.graph, maker.BARE)
         for sc in (maker.scenario(have={self.key: 1}),
-                   maker.scenario(machine_overrides={self.category: "have"})):
+                   maker.scenario(machine_overrides={self.category: "have"}),
+                   # #193's two. Both are per-inventory terminals that now set a price, so a
+                   # scenario differing only in one of them is a different table.
+                   maker.scenario(craftables=[self.key]),
+                   maker.scenario(raw=[self.key])):
             self.assertNotEqual(maker.cost_signature(base),
                                 maker.cost_signature(maker.derive_inputs(self.graph, sc)),
                                 sc)
+
+    def test_the_two_declared_terminals_do_not_share_a_signature(self):
+        # `craftables` and `raw` price DIFFERENTLY -- one request against a thing to go and
+        # gather -- so a key moving from one set to the other has to move the signature. A
+        # single merged set of "declared terminals" would collapse them and serve the
+        # craftable table to a scenario that declared a stop.
+        craftable = maker.derive_inputs(self.graph, maker.scenario(craftables=[self.key]))
+        stopped = maker.derive_inputs(self.graph, maker.scenario(raw=[self.key]))
+        self.assertNotEqual(maker.cost_signature(craftable), maker.cost_signature(stopped))
 
     def test_a_scenario_field_that_resolves_to_nothing_shares_the_table(self):
         # `visited_dimensions` is a PRICING field in general, and on this graph it prices
