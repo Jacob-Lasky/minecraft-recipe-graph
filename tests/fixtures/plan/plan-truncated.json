@@ -235,7 +235,7 @@
        "category": "botania.runicAltar",
        "children": [
         {
-         "alternatives": 19,
+         "alternatives": 18,
          "category": "botania.runicAltar",
          "children": [
           {
@@ -267,7 +267,7 @@
                          "category": "crafting_shapeless",
                          "children": [
                           {
-                           "alternatives": 35,
+                           "alternatives": 34,
                            "category": "crafting_shaped",
                            "children": [
                             {

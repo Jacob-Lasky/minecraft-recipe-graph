@@ -28,12 +28,6 @@
   "from_sources": [],
   "machines_to_build": [
    {
-    "category": "chisel.chiseling",
-    "machine": "Chiseling",
-    "state": "buildable",
-    "why": "craftable: chisel:chisel_iron"
-   },
-   {
     "category": "tconstruct.casting_table",
     "machine": "Casting",
     "state": "buildable",

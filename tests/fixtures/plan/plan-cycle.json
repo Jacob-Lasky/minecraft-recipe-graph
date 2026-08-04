@@ -36,24 +36,6 @@
   ],
   "machines_to_build": [
    {
-    "category": "forestry.squeezer",
-    "machine": "Squeezer",
-    "state": "buildable",
-    "why": "craftable: forestry:squeezer"
-   },
-   {
-    "category": "ie.blastfurnace",
-    "machine": "Blast Furnace",
-    "state": "buildable",
-    "why": "craftable: immersiveengineering:stone_device:1"
-   },
-   {
-    "category": "modularmachinery.recipes.hypergrowth_insolator",
-    "machine": "Hypergrowth Insolator",
-    "state": "buildable",
-    "why": "craftable: modularmachinery:hypergrowth_insolator_controller"
-   },
-   {
     "category": "thermalexpansion.charger",
     "machine": "Energetic Infuser",
     "state": "buildable",
@@ -196,7 +178,7 @@
             },
             {
              "alt_count": 2,
-             "alternatives": 79,
+             "alternatives": 78,
              "category": "minecraft.crafting",
              "children": [
               {
@@ -251,7 +233,7 @@
                  "status": "oredict"
                 },
                 {
-                 "alternatives": 134,
+                 "alternatives": 133,
                  "category": "bdew.jeibees.produce.rootBees",
                  "children": [
                   {
