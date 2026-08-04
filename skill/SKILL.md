@@ -114,10 +114,23 @@ Worked examples:
 
 ```
 BLOCKED: nobody. pocket-dev can compile this. Unblocks when: nothing, doing it now.
-BLOCKED: pocket-dev cannot run the game. desktop can. Unblocks when: Jake runs /recipedump.
+BLOCKED: nobody. pocket-dev can dump the pack headlessly. Unblocks when: #210 merges.
 BLOCKED: pocket-dev cannot compile the mod (<exact error>). desktop can. Unblocks when:
          desktop builds it, or that error is fixed here.
 ```
+
+**THE SECOND EXAMPLE USED TO READ "pocket-dev cannot run the game. desktop can. Unblocks when:
+Jake runs /recipedump", AND IT IS THE MOST EXPENSIVE SENTENCE THIS FILE HAS EVER CARRIED.** It
+was true when written and false from the moment #210 measured a full-pack `/recipedump` on
+pocket-dev. Because it sat here as the WORKED EXAMPLE of the form, it did not merely go stale, it
+got copied: on 2026-08-04 it was pasted verbatim into five separate task briefs in one session,
+each of which then told an agent that provable work needed Jake's hands. A false claim in a
+template propagates at the rate people reach for the template.
+
+So the replacement is deliberately a `BLOCKED: nobody` line naming a MERGE. If the thing standing
+in your way is a pull request, say the pull request; "blocked on Jake" for anything mechanical is
+what this section exists to stop, and the loaded skill in `~/.claude/skills/` says so in those
+words.
 
 **"Blocked" is legal for a build you genuinely cannot do.** It is NOT legal for work you
 have not started. Before writing the word:
@@ -144,7 +157,31 @@ Verify a row before relying on it; that is the whole lesson above. Commands are 
 | Get the pack jars `checkPackJars` demands | yes, from the AMP server instance | yes |
 | Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
 | `recipegraph build` into a graph | yes, at a measured **0-key** jar gap (see below) | yes, authoritative |
-| **Run the game and `/recipedump`** | **"no, and never" IS IN DOUBT** -- the command object can be driven with a null server, proven on a 5-jar dev set; the full-pack boot is untested | **yes, and today the only proven way** |
+| **Boot the pack and render its GUIs** | **yes**, measured 2026-08-04, `harness/prodclient/` | yes |
+| **Run the game and `/recipedump`** | **yes**, measured 2026-08-04 on the full pack (see below) | yes |
+
+**THERE IS NO LONGER A PERMANENT ASYMMETRY IN THIS TABLE, AND THE LAST ROW IS WHERE IT USED TO
+BE.** That row read `no, and never` for pocket-dev, then `"no, and never" IS IN DOUBT -- the
+full-pack boot is untested`, and six issues named it as their unblock condition. It is now
+measured, on the whole pack, through the path a keyboard drives:
+
+```
+prodshot.sh dump     OK in 1826s, exit 0
+schema 5   mod_version 0.9.11   recipes 335,359   categories 676   threw 0
+icons 35,620 across 3 pages, 57 blank, 0 threw     recipes.ndjson 183 MB
+`recipegraph build` succeeds on the result
+```
+
+**Through `ClientCommandHandler.instance.executeCommand(player, "/recipedump")` and NOT
+`DumpCommand.execute`**, which is the whole reason the number means anything: same handler, same
+permission check, same `CommandEvent` on the bus, same sender type. Calling `execute` directly
+would prove a method runs, which nobody doubted.
+
+Two things this does NOT make true. `harness/shot.sh` still cannot do it, because RFG's
+`runClient` is a DEOBFUSCATED workspace and 75 of this pack's coremods look up hardcoded SRG
+names, so it is `harness/prodclient/` or nothing. And what remains Jake's alone is ACCEPTANCE,
+whether the thing feels right to play with, which is a different claim from capability. Do not
+write "blocked on Jake" for anything mechanical.
 
 **THE JAR-PARITY GAP IS ZERO KEYS, AND THE "1.2% / 539 / ~46 CLIENT-ONLY JARS" FIGURES THIS
 FILE USED TO CARRY WERE ALL WRONG.** They were the named unblock condition for six issues.
