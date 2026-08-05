@@ -620,18 +620,39 @@ class CatalystVariantTest(unittest.TestCase):
         rec = machines.describe(g)["mod.arc_furnace"]
         self.assertEqual(rec["state"], machines.UNAVAILABLE)
 
-    def test_the_solver_is_not_widened(self):
+    def test_producers_is_not_widened(self):
         """`producers` must keep answering the narrow question.
 
         The solver asks "give me exactly this stack". A machine with different augments
         is not a substitute for the one a recipe called for, so widening `producers`
         itself would let any plan satisfy an NBT-bearing ingredient with the wrong
         variant. Only the catalyst question is widened.
+
+        THE PLAN STATUS USED TO BE ASSERTED HERE AND IS NOT ANY MORE, and the reason is the
+        whole of #170. This test read `Solver(g).solve(MACHINE_BASE, 1)["tree"]["status"] ==
+        "raw"` as evidence that `producers` was narrow, which conflated two claims: that a
+        demand for `X#d` is not satisfied by `X` or a sibling, which is #28's refusal and is
+        still in force, and that a demand for BARE `X` is not satisfied by a produced variant,
+        which #170 measured as a defect over 99 keys and fixed. The bare key here is exactly
+        that shape -- a JEI catalyst naming `mod:machine:1` while the only recipe makes
+        `mod:machine:1#f56885268ad5` -- so the plan now routes it and says which variant it
+        took. `test_unsourced.ProducedOnlyAsAVariantTest` owns both directions; what belongs
+        here is the relation this file is about, which is the catalyst widening.
         """
         g = fixtures.discriminated_graph()
         self.assertEqual(g.producers(fixtures.MACHINE_BASE), [])
-        result = Solver(g).solve(fixtures.MACHINE_BASE, 1)
-        self.assertEqual(result["tree"]["status"], "raw")
+        self.assertEqual(g.producers(fixtures.MACHINE_VARIANT),
+                         g.by_output[fixtures.MACHINE_VARIANT])
+
+    def test_the_bare_catalyst_key_is_planned_through_its_variant(self):
+        # #170, and #28's own example is one of the 99: the machines page has always said the
+        # Pulverizer is craftable while a plan for the same key said NEED, because
+        # `producers_any_variant` answered the page's question and nothing answered the
+        # solver's. The two surfaces now agree, and the plan names the stack it planned.
+        g = fixtures.discriminated_graph()
+        tree = Solver(g).solve(fixtures.MACHINE_BASE, 1)["tree"]
+        self.assertEqual(tree["status"], "craft")
+        self.assertEqual(tree["resolved_to"], fixtures.MACHINE_VARIANT)
 
     def test_a_discriminated_key_does_not_widen_to_its_siblings(self):
         # Asking for one variant must not pick up another variant's recipes.

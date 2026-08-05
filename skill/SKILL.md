@@ -805,6 +805,14 @@ UNNAMED: without that gate it fired on four and two were false, asserting a Ritu
 They answer "does this block exist in the pack", and the solver asks "give me exactly this
 stack", where `tconstruct:ingots:0` standing in for `:3` melts the wrong ingot.
 
+**#170 did not break that, and the difference is worth being precise about** because it is the
+first thing anyone will cite against it. The solver reaches for
+`Graph.satisfying_variants`, which is narrower than all three: it answers only for a BARE key
+with no producer of its own, only through variants the bare key's own family does not make, and
+only in the direction where the demanding slot named no NBT at all. `producers`,
+`producers_any_variant` and `meta_sibling_made` are all untouched, and a demand for
+`tconstruct:ingots:3` is still satisfied by nothing but `tconstruct:ingots:3`.
+
 Machine state feeds the **cost estimate**, which is what actually picks recipes. Local
 scoring alone fails badly: it once preferred 100,000 items through a machine already owned
 over 2 items through one that needed building.
@@ -1309,9 +1317,9 @@ name-match disambiguation), `--depth`, `--max-nodes`, `--json`, `--html`.
 Node badges: `in stock` (covered by AE2) · `part stock` · `craft` · `NEED` (raw leaf,
 goes on the shopping list) · `no known source` · `loop` (cycle) · `cut off` (hit the node cap).
 
-**`no known source` is a NEED the tool cannot back, and it is display-only.** It fires when
-nothing makes the exact key asked for AND the graph demonstrably makes another form of it,
-so there is somewhere specific to point the reader. Three shapes, and the note says which:
+**`no known source` is a NEED the tool cannot back.** It fires when nothing makes the exact
+key asked for AND the graph demonstrably makes another form of it, so there is somewhere
+specific to point the reader. Three shapes, and the note says which:
 
 * an NBT STATE of a producible item -- "Blaze Data Model (Superior)" against a craftable
   "Data Model Blaze". Usually a MECHANIC rather than a recipe (levelling in a Simulation
@@ -1323,10 +1331,22 @@ so there is somewhere specific to point the reader. Three shapes, and the note s
 
 The SECOND clause is what keeps it worth reading: it does NOT fire on a plain key nothing
 produces and nothing resembles, because cobblestone is that too and marking it would badge
-most of a shopping list. The price is untouched -- `cost._seed` still seeds these at
-`BASE_RAW_COST`, which is what makes them win routes they should lose, and that is #176.
-One predicate answers all three shapes, `Graph.reachable_form`; `/api/sweep` exposes it as
-the `unsourced` field.
+most of a shopping list. One predicate answers all three shapes, `Graph.reachable_form`;
+`/api/sweep` exposes it as the `unsourced` field.
+
+**The first two shapes are display-only; the third is routed.** #176 stopped all three being
+the cheapest thing in the model -- they seed at `UNSOURCED_COST`, 2,000, above a quest gate --
+and #170 went further for the NBT-digest shape only, because there the graph holds a real
+recipe and merely filed it under a key nothing asked for. A plan for `animus:kama_bound` now
+crafts it through the Alchemy Array and the node says `nothing makes this exact item; planned
+as animus:kama_bound#fd1adc426e12`, naming the stack rather than swapping it silently: the
+premise, that a slot naming the bare item accepts any NBT variant, is provable for a vanilla
+crafting grid and unfalsifiable for a mod machine, so pin another recipe if it is wrong.
+88 of the 99 such keys route; the other 11 are refused because every variant of them is made
+FROM the bare key or from a sibling variant, which prices "get one" at what "get one and
+change it" costs. Those keep the badge. `Graph.variant_subsumption` is the relation and the
+argument; `Graph.producers` is untouched, so the reverse -- a demand for `X#digest` satisfied
+by bare `X` -- is still refused (#28).
 
 The `you still need` list is the answer to most questions. `drawn from your AE2 stock` is
 the audit trail showing what it assumed you have.

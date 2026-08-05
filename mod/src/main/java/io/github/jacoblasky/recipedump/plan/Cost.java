@@ -893,6 +893,19 @@ public strictfp final class Cost {
                         cost[key] = perUnit;
                         changed++;
                     }
+                    // AND THE BARE KEY THIS VARIANT SATISFIES A DEMAND FOR. #170: the Alchemy
+                    // Array makes `animus:kama_bound#fd1adc426e12` while four recipes ask for
+                    // `animus:kama_bound`, so the seed found no producer for the bare key and
+                    // #176 priced it UNSOURCED_COST -- a 60.0 route reported as a 2,000 wall.
+                    // 88 keys on the reference graph. Mirrors `cost._relax` in python, which
+                    // carries the argument for reading a RECIPE rather than taking `min` over
+                    // variant COSTS: stock enters the table through the seed and never through
+                    // `perUnit`, so recipe attribution cannot price a bare key as owned.
+                    int bare = graph.subsumedBareKey(key);
+                    if (bare >= 0 && perUnit < cost[bare] - 1e-9) {
+                        cost[bare] = perUnit;
+                        changed++;
+                    }
                 }
             }
             if (changed < settled) {

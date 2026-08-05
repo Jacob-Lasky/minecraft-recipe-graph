@@ -30,7 +30,7 @@
     "kind": "fluid",
     "label": "Water",
     "name": "[fluid] Water",
-    "qty": 25,
+    "qty": 1000,
     "why": "vanilla infinite water (two source blocks and a bucket)"
    }
   ],
@@ -42,10 +42,10 @@
     "why": "craftable: chisel:chisel_iron"
    },
    {
-    "category": "hydrator",
-    "machine": "Hydrator",
+    "category": "thermalexpansion.transposer_fill",
+    "machine": "Fluid Transposer - Fill",
     "state": "buildable",
-    "why": "craftable: cyclicmagic:block_hydrator"
+    "why": "craftable: thermalexpansion:machine:8 (as thermalexpansion:machine:8#f56885268ad5)"
    }
   ],
   "max_nodes": 4000,
@@ -78,7 +78,7 @@
     {
      "alt_count": 33,
      "alternatives": 4,
-     "category": "hydrator",
+     "category": "thermalexpansion.transposer_fill",
      "children": [
       {
        "alternatives": 3,
@@ -249,7 +249,7 @@
        "kind": "fluid",
        "label": "Water",
        "name": "[fluid] Water",
-       "need": 25,
+       "need": 1000,
        "note": "vanilla infinite water (two source blocks and a bucket)",
        "status": "source"
       }
@@ -257,13 +257,13 @@
      "key": "minecraft:concrete:12",
      "kind": "item",
      "label": "Brown Concrete",
-     "machine": "Hydrator",
+     "machine": "Fluid Transposer - Fill",
      "machine_state": "buildable",
-     "machine_why": "craftable: cyclicmagic:block_hydrator",
+     "machine_why": "craftable: thermalexpansion:machine:8 (as thermalexpansion:machine:8#f56885268ad5)",
      "name": "Brown Concrete",
      "need": 1,
      "per_run": 1,
-     "recipe": "hei:hydrator:249020",
+     "recipe": "hei:thermalexpansion.transposer_fill:150634",
      "runs": 1,
      "status": "craft"
     }
@@ -300,5 +300,5 @@
    ".": 1
   }
  },
- "why": "#110. Chisel publishes one entry per material listing all 37 variants in BOTH columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so all 341 tables were dropped and 6,856 variant keys were left with no producer at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` are both build-time and both invisible except in a plan like this one.\n\nIT USED TO CARRY A #139 `unsourced` MARK AND #176 PRICED IT AWAY, which is why the claim is now negated rather than deleted. The plan rested on a chicken spawn egg -- an NBT state the graph has no route to -- and `UNSOURCED_COST` made that route lose to one the graph can account for, taking the plan from 10 nodes to 15. The generator REFUSED to write this fixture until the claim was corrected, which is the coverage check doing its job: a fixture that no longer reaches the path it names passes forever while asserting nothing.\n\n`!unsourced` rather than dropping the claim, because the absence is now the interesting fact about this plan. `plan-unsourced-variant` is the sole fixture carrying a live mark, and `plan-unsourced-price` is the one asserting that a mark the price removed stays removed."
+ "why": "#110. Chisel publishes one entry per material listing all 37 variants in BOTH columns, which flattens to 'all 37 in, all 37 out' and scored as a no-op, so all 341 tables were dropped and 6,856 variant keys were left with no producer at `BASE_RAW_COST` -- `chisel:lapis:1` priced BELOW the lapis block it is chiselled from. `index.expand_interconversion` and `cost._settle_reshaped` are both build-time and both invisible except in a plan like this one.\n\nIT USED TO CARRY A #139 `unsourced` MARK AND #176 PRICED IT AWAY, which is why the claim is now negated rather than deleted. The plan rested on a chicken spawn egg -- an NBT state the graph has no route to -- and `UNSOURCED_COST` made that route lose to one the graph can account for, taking the plan from 10 nodes to 15. The generator REFUSED to write this fixture until the claim was corrected, which is the coverage check doing its job: a fixture that no longer reaches the path it names passes forever while asserting nothing.\n\n`!unsourced` rather than dropping the claim, because the absence is now the interesting fact about this plan. `plan-fluid-chain` is the fixture carrying a live mark since #170 routed `plan-unsourced-variant`'s key, and `plan-unsourced-price` is the one asserting that a mark the price removed stays removed."
 }

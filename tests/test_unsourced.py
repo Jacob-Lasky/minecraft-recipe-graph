@@ -41,12 +41,21 @@ FOUR WAYS A KEY CAN BE THE WRONG SHAPE, and all four are covered, one class each
 The second clause -- that there is a specific other form to NAME -- is what every one of
 them refuses to badge without, and `ScopeTest` is where that refusal is pinned.
 
+THE FOURTH SHAPE IS NOW MOSTLY ROUTED RATHER THAN BADGED, which is why its class carries
+twice as many tests as the others. The graph holds a real recipe for those keys and had merely
+filed it under a key nothing asked for, so #170 plans through it and prices it; the badge
+survives for the 11 of 99 where every variant is made FROM the bare key or from a sibling of
+it, and for the 6 whose variants are all unreachable. `ProducedOnlyAsAVariantTest` holds both
+halves and `Graph.variant_subsumption` carries the argument.
+
 ONE PREDICATE ANSWERS ALL FOUR, and it lives on `Graph`. It used to live on `Solver` with a
 hand-kept copy in `api._reachable_form`, and the processed-form shape and the produced-variant
 shape were each added to one spelling and not the other, so `/api/sweep` under-reported for
 both while a test comparing the two copies passed. `ThereIsOnlyOneSpellingOfThePredicateTest`
 is what replaced that comparison; see it for why the assertion is structural rather than
 behavioural.
+`ThereIsOnlyOneSpellingOfTheSubsumptionRelationTest` is the same structural guard over #170's
+own relation, which has the same two-caller shape that made `reachable_form` drift.
 """
 
 import os
@@ -500,28 +509,95 @@ class TheFormListIsTheSameInBothLanguagesTest(unittest.TestCase):
         self.assertIsNone(storage_form_material("block"))
 
 
+class TheWordingsAreTheSameInBothLanguagesTest(unittest.TestCase):
+    """The four sentences a reader acts on, pinned across the seam as TEXT.
+
+    WHY A SOURCE-TEXT TEST AND NOT A FIXTURE. Three of these were gated by
+    `PlanFixtureTest` comparing plan trees node for node, which worked only while some fixture
+    happened to contain each wording. #170 routed `plan-unsourced-variant`'s key, so the plan
+    set no longer reaches the VARIANT wording at all -- the two languages could disagree about
+    it with every test green, discovered by whoever next met one of the 11 refused keys in
+    game. A regex over both sources answers it without a JVM, which is what `test_nbt_digest`
+    does for the digest constants and `NodeStatusTest` does for the badge words.
+
+    THE SUBSTITUTION NOTE IS HERE FOR THE OPPOSITE REASON: it IS in a fixture today, and it is
+    one string in two languages, which is the pair that drifts when someone rewords one side.
+    """
+
+    JAVA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "mod", "src", "main", "java", "io", "github", "jacoblasky",
+                        "recipedump", "plan", "Solver.java")
+
+    def _java(self):
+        with open(self.JAVA) as fh:
+            return fh.read()
+
+    def _python(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph", "solve.py")
+        with open(path) as fh:
+            return fh.read()
+
+    def test_the_three_unsourced_wordings_match(self):
+        for wording in ("no recipe reaches this state; the graph can only make ",
+                        "nothing makes this exact item; the graph makes ",
+                        "nothing makes this form; the graph can only make "):
+            self.assertIn(wording, self._java(),
+                          "Java's unsourcedNote no longer says %r" % wording)
+            # Python interpolates the name, so the sentence is the prefix up to the `%s`.
+            self.assertIn(wording.rstrip(), self._python(),
+                          "python's _unsourced_note no longer says %r" % wording)
+
+    def test_the_substitution_note_matches(self):
+        wording = "nothing makes this exact item; planned as "
+        self.assertIn(wording, self._java())
+        self.assertIn(wording.rstrip() + " %s", self._python())
+
+    def test_the_two_exact_item_sentences_stay_distinguishable(self):
+        # They share a prefix and make DIFFERENT claims: the graph makes it and cannot get you
+        # one, against the graph made it and this is which stack. A reader acts on the
+        # difference, so the reporting path must not emit the routing sentence. Asserted
+        # through the solver rather than by comparing two literals, which would be a test that
+        # cannot fail.
+        marked = ProducedOnlyAsAVariantTest._leaf(
+            ProducedOnlyAsAVariantTest._graph(variant_from_bare=True))
+        self.assertIn("nothing makes this exact item; the graph makes", marked["note"])
+        self.assertNotIn("planned as", marked["note"])
+        routed = ProducedOnlyAsAVariantTest._leaf(
+            ProducedOnlyAsAVariantTest._graph())
+        self.assertIn("nothing makes this exact item; planned as", routed["note"])
+        self.assertNotIn("the graph makes", routed["note"])
+
+
 class ProducedOnlyAsAVariantTest(unittest.TestCase):
-    """The bare key nothing makes, while an NBT variant of it IS made. #170's half.
+    """The bare key nothing makes, while an NBT variant of it IS made. #170.
 
     Reported as "`animus:kama_bound` just says need, but the way it is made is via the
     alchemy array". The recipe is in the dump and the graph has it -- filed under
     `animus:kama_bound#fd1adc426e12`, while four recipes ask for the bare key. So the graph
-    knows a 53.35 route and prices the bare key at `BASE_RAW_COST`, which reads to a player
-    as "you already have this". 96 bare keys are in that state on the reference graph with
-    4,193 produced variants behind them, the worst underpriced by a factor of 7,277.
+    knows a 60.0 route, `cost._seed` found no producer, and the plan reported an item the
+    graph can make as one it cannot. 99 bare keys are in that state on the reference graph.
 
-    REPORTED, NOT REPRICED. Whether the solver should ROUTE a bare demand through a produced
-    variant is contested and stays open: #28 rejected exactly that widening in `producers`
-    and `test_machines.CatalystVariantTest.test_the_solver_is_not_widened` pins the refusal.
-    Nothing here touches `producers`, so that test still passes and this file makes no claim
-    about it.
+    REPORTED BY #178, ROUTED AND REPRICED BY #170, and those are two behaviours in one class
+    because the second is only correct where the first stops being enough. `expand` now
+    offers the variant's recipes as candidates and `cost._relax` prices the bare key at what
+    making the variant costs; where that route cannot be taken -- the variant is made from the
+    bare key, or from a sibling variant, or is unreachable -- the mark is still all there is
+    to say, and the tests below hold both halves.
+
+    THE #28 CONSTRAINT IS NOT RELAXED BY ANY OF THIS, and
+    `test_the_reverse_direction_is_still_refused` is where that is pinned. #28 refused to let
+    a demand for `X#d` be satisfied by producing bare `X` or a sibling variant, on the
+    grounds that "the solver asks for exactly this stack". That direction is still refused
+    and `Graph.producers` is untouched. What shipped is the opposite direction, where the
+    demanding slot named no NBT at all.
     """
 
     BARE = "mod:kama_bound"
     MADE = "mod:kama_bound#fd1adc426e12"
 
     @staticmethod
-    def _graph(variant_producible=True):
+    def _graph(variant_producible=True, variant_from_bare=False):
         g = Graph()
         g.names = {ProducedOnlyAsAVariantTest.BARE: "Bound Khopesh",
                    ProducedOnlyAsAVariantTest.MADE: "Bound Khopesh",
@@ -530,46 +606,131 @@ class ProducedOnlyAsAVariantTest(unittest.TestCase):
         g.add(Recipe("use", "test", [("mod:out", 1)],
                      [Ingredient([ProducedOnlyAsAVariantTest.BARE], 1)]))
         if variant_producible:
+            reagent = (ProducedOnlyAsAVariantTest.BARE if variant_from_bare
+                       else "mod:reagent")
             g.add(Recipe("array", "bloodmagic:alchemyArray",
                          [(ProducedOnlyAsAVariantTest.MADE, 1)],
-                         [Ingredient(["mod:reagent"], 1)]))
+                         [Ingredient([reagent], 1)]))
         return g
 
-    def _leaf(self, g):
-        return Solver(g).solve("mod:out", 1)["tree"]["children"][0]
+    @staticmethod
+    def _leaf(g, **kwargs):
+        return Solver(g, **kwargs).solve("mod:out", 1)["tree"]["children"][0]
 
-    def test_the_bare_key_is_marked(self):
+    def test_the_bare_demand_is_routed_through_the_variants_recipe(self):
         leaf = self._leaf(self._graph())
         self.assertEqual(leaf["key"], self.BARE)
-        self.assertTrue(leaf.get("unsourced"))
+        self.assertEqual(leaf["status"], "craft")
+        self.assertEqual(leaf["recipe"], "array")
+        # The plan reaches the reagent the array actually consumes, which is the whole of
+        # what the report asked for.
+        self.assertEqual([c["key"] for c in leaf["children"]], ["mod:reagent"])
 
-    def test_the_note_says_the_item_IS_made_rather_than_that_a_shape_is_missing(self):
-        # The player's next move here is to go and look at the variant, not to substitute a
-        # different form. Reusing the FORM wording would send them looking for another item.
-        note = self._leaf(self._graph())["note"]
-        self.assertIn("nothing makes this exact item", note)
-        self.assertIn("Bound Khopesh", note)
-        self.assertNotIn("this form", note)
+    def test_the_substitution_is_named_rather_than_silent(self):
+        # The premise -- that a slot naming the bare item accepts any variant -- cannot be
+        # proved from the dump for a mod machine category, so a reader has to be able to see
+        # the swap and pin something else. `Graph.variant_subsumption` carries the argument.
+        leaf = self._leaf(self._graph())
+        self.assertEqual(leaf["resolved_to"], self.MADE)
+        self.assertIn("nothing makes this exact item", leaf["note"])
+        # THE KEY, NOT THE LABEL. Both keys here are named "Bound Khopesh", which is the
+        # common case on the reference graph -- 68 of the 99 -- so a note quoting the label
+        # would name nothing.
+        self.assertIn(self.MADE, leaf["note"])
 
-    def test_with_no_producible_variant_it_is_NOT_marked(self):
-        # Same refusal as the other two faces: nothing to name, so the mark would collapse
-        # to "no recipe", which the NEED badge already says.
-        self.assertFalse(self._leaf(self._graph(variant_producible=False)).get("unsourced"))
+    def test_the_runs_are_counted_off_the_variants_own_yield(self):
+        # `_build` reads `per_run` out of the recipe's outputs, and a substituted recipe does
+        # not output the bare key at all: read against the bare key it falls back to 1 and
+        # plans four runs of a recipe that makes four.
+        g = self._graph(variant_producible=False)
+        g.add(Recipe("array", "bloodmagic:alchemyArray", [(self.MADE, 4)],
+                     [Ingredient(["mod:reagent"], 1)]))
+        leaf = Solver(g).solve(self.BARE, 8)["tree"]
+        self.assertEqual(leaf["per_run"], 4)
+        self.assertEqual(leaf["runs"], 2)
 
-    def test_the_solver_is_still_not_widened(self):
-        # THE #28 CONSTRAINT, asserted here too rather than only in test_machines, because
-        # this is the file that would be tempted to relax it. Marking must not reprice: the
-        # bare key still has no producers and the plan still says NEED.
-        g = self._graph()
-        self.assertEqual(g.real_producers(self.BARE), [])
+    def test_with_no_producible_variant_it_is_a_marked_leaf(self):
+        # Nothing to route through and nothing to name, so the NEED badge is the answer and
+        # the mark does not fire either -- the same refusal as the other two faces.
+        leaf = self._leaf(self._graph(variant_producible=False))
+        self.assertEqual(leaf["status"], "raw")
+        self.assertFalse(leaf.get("unsourced"))
+
+    def test_a_variant_made_FROM_the_bare_key_is_refused_and_still_marked(self):
+        # `X -> X#d -> X`: the Ender IO Soul Binder shape, 9 keys on the reference graph.
+        # Routing through it would price "get one" at what "get one and upgrade it" costs, so
+        # the route is refused and the report is what is left.
+        g = self._graph(variant_from_bare=True)
         leaf = self._leaf(g)
         self.assertEqual(leaf["status"], "raw")
+        self.assertTrue(leaf.get("unsourced"))
+        self.assertEqual(g.satisfying_variants(self.BARE), [])
+        # And the report still names the variant, because the graph does make it.
+        self.assertIn("nothing makes this exact item", leaf["note"])
+        self.assertNotIn("this form", leaf["note"])
+
+    def test_a_variant_made_from_a_SIBLING_variant_is_refused(self):
+        # The container gate, one hop longer than the clause above.
+        # `thermalexpansion:reservoir:32000` is the measured case: one recipe demands the bare
+        # key directly and both produced variants are Fluid Transposer output made from the
+        # family, so without this half it prices 521.0 against the 2,000 floor. The shape is
+        # clearest on `extratrees:drink`, a Beer Mug whose 30 variants are all filled mugs made
+        # from an EMPTY mug variant, but that key has no direct consumer and no plan moves for
+        # it -- see `Graph.variant_subsumption`, which keeps the two apart because an earlier
+        # version of this comment conflated them.
+        empty = "mod:kama_bound#eeeeeeeeeeee"
+        g = self._graph(variant_producible=False)
+        g.add(Recipe("fill", "mod.transposer", [(self.MADE, 1)],
+                     [Ingredient([empty], 1)]))
+        g.add(Recipe("empty", "mod.transposer", [(empty, 1)],
+                     [Ingredient([self.BARE], 1)]))
+        self.assertEqual(g.satisfying_variants(self.BARE), [])
+        self.assertEqual(self._leaf(g)["status"], "raw")
+
+    def test_an_unreachable_variant_is_not_offered_as_a_route(self):
+        # 6 of the 99 have no variant the cost table can reach. Offering one trades a
+        # one-line "no known source" for a subtree bottoming out on the same dead end, while
+        # the price stays at UNSOURCED_COST because `_relax` cannot lower through infinity --
+        # a route the price does not reflect, which is #176's defect at a lower magnitude.
+        g = self._graph()
+        costs = {self.MADE: float("inf")}
+        leaf = self._leaf(g, costs=costs)
+        self.assertEqual(leaf["status"], "raw")
+        self.assertTrue(leaf.get("unsourced"))
+
+    def test_the_reverse_direction_is_still_refused(self):
+        # THE #28 CONSTRAINT. A slot naming a specific variant is matched by that stack and
+        # not by the bare item, so producing the bare key must not satisfy a demand for
+        # `X#d`, and neither must producing a sibling variant. `producers` is untouched;
+        # `satisfying_variants` only ever answers for a bare key.
+        g = self._graph(variant_producible=False)
+        g.add(Recipe("plain", "test", [(self.BARE, 1)],
+                     [Ingredient(["mod:reagent"], 1)]))
+        g.add(Recipe("sibling", "test", [("mod:kama_bound#aaaaaaaaaaaa", 1)],
+                     [Ingredient(["mod:reagent"], 1)]))
+        self.assertEqual(g.satisfying_variants(self.MADE), [])
+        self.assertEqual(g.producers(self.MADE), [])
+        self.assertEqual(Solver(g).solve(self.MADE, 1)["tree"]["status"], "raw")
+
+    def test_a_bare_key_with_its_own_route_keeps_its_own_price(self):
+        # THE CONTROL, and it is twenty times the size of the defect: 2,117 bare keys on the
+        # reference graph carry this relation with an honest route of their own, and 82 have a
+        # produced variant CHEAPER than themselves -- `simplyjetpacks:itemjetpack:14` at
+        # 1,491.72 against a 2.5 variant. A rule keyed on the relation rather than on the
+        # absence of a route cheapens that by 597x.
+        g = self._graph()
+        g.add(Recipe("plain", "test", [(self.BARE, 1)],
+                     [Ingredient(["mod:expensive"], 9)]))
+        self.assertEqual(g.satisfying_variants(self.BARE), [])
+        self.assertEqual({}, {v: b for v, b in g.variant_subsumption.items()
+                              if b == self.BARE})
 
     def test_the_choice_of_variant_is_deterministic(self):
         # It reaches a plan tree and the fixtures freeze those for the Java port, so with two
-        # producible variants the answer cannot depend on dict order. `variant_index` is
-        # insertion-ordered off `by_output`, so the first the dump saw wins -- the same
-        # invariant `RecipeGraphOrderTest` pins for producer lists.
+        # equally priced producible variants the answer cannot depend on dict order.
+        # `variant_index` is insertion-ordered off `by_output` and `scored.sort` is stable, so
+        # the first the dump saw wins -- the same invariant `RecipeGraphOrderTest` pins for
+        # producer lists.
         def built():
             g = self._graph()
             g.names["mod:kama_bound#aaaaaaaaaaaa"] = "Bound Khopesh"
@@ -578,9 +739,10 @@ class ProducedOnlyAsAVariantTest(unittest.TestCase):
                          [Ingredient(["mod:reagent"], 1)]))
             return g
 
-        first = self._leaf(built())["note"]
+        first = self._leaf(built())["resolved_to"]
+        self.assertEqual(first, self.MADE)
         for _ in range(20):
-            self.assertEqual(first, self._leaf(built())["note"])
+            self.assertEqual(first, self._leaf(built())["resolved_to"])
         self.assertEqual(self.MADE, built().reachable_form(self.BARE))
 
 
@@ -737,6 +899,93 @@ class ThereIsOnlyOneSpellingOfThePredicateTest(unittest.TestCase):
         # #170's produced variant: a bare key nothing makes, made under an NBT digest.
         self.assertTrue(sweep(ProducedOnlyAsAVariantTest._graph(),
                               ProducedOnlyAsAVariantTest.BARE))
+
+
+class ThereIsOnlyOneSpellingOfTheSubsumptionRelationTest(unittest.TestCase):
+    """`variant_subsumption` is defined once, and both consumers read that one definition.
+
+    THE SAME ASSERTION AS THE CLASS ABOVE, FOR THE SAME REASON, AND IT IS NOT A COPY OF IT:
+    that one guards `reachable_form`, this one guards the relation #170 added beside it. The
+    relation has two consumers -- `cost._relax`, which lets a variant's production price the
+    bare key, and `Solver.expand`, which routes a bare demand through the variant's recipe --
+    which is exactly the shape that drifted before: two callers, one hand-kept copy, and a
+    comparison test that passed for two releases because it only compared the branch nobody
+    had changed.
+
+    STRUCTURAL RATHER THAN COMPARATIVE, again deliberately. Pricing a route the solver cannot
+    take is #176's defect and pricing one it takes DIFFERENTLY is worse, so what has to be
+    true is that there is nothing to compare.
+    """
+
+    def _sources(self):
+        import glob
+        import os
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "recipegraph")
+        return sorted(glob.glob(os.path.join(root, "*.py")))
+
+    def test_the_relation_is_defined_exactly_once_in_the_package(self):
+        import os
+        import re
+        found = []
+        for path in self._sources():
+            with open(path) as fh:
+                for line in fh:
+                    if re.match(r"\s*def _?(variant_subsumption|satisfying_variants)\b", line):
+                        found.append(os.path.basename(path))
+        self.assertEqual(["model.py", "model.py"], found,
+                         "the bare-to-variant relation and its view must live on Graph and "
+                         "nowhere else; a second spelling is how #136 and #170 drifted out "
+                         "of /api/sweep")
+
+    def test_no_module_reimplements_the_clauses(self):
+        # The cheap way to write a second copy is to inline the two clauses that matter --
+        # "the bare key has no producer" and "a variant of it does" -- next to the caller
+        # that needs them. `cost` and `solve` are the two callers and neither may.
+        import os
+        import re
+        clause = re.compile(r"variants_of\(|variant_index")
+        for path in self._sources():
+            if os.path.basename(path) in ("model.py", "machines.py"):
+                continue   # `machines` predates this and uses `producers_any_variant`; see #28
+            with open(path) as fh:
+                for number, line in enumerate(fh, 1):
+                    if clause.search(line) and not line.lstrip().startswith("#"):
+                        self.fail("%s:%d reaches into the variant index directly; call "
+                                  "`Graph.satisfying_variants` instead: %s"
+                                  % (os.path.basename(path), number, line.strip()))
+
+    def test_the_solver_carries_no_relation_of_its_own(self):
+        # A source scan would miss an alias, which is how the previous version of this guard
+        # was defeated: `Solver.reachable_form = Graph.reachable_form` is one line and no
+        # `def`. Neither name may exist on the solver.
+        solver = Solver(_graph())
+        self.assertFalse(hasattr(solver, "variant_subsumption"))
+        self.assertFalse(hasattr(solver, "satisfying_variants"))
+
+    def test_the_price_and_the_route_are_computed_from_the_same_pairs(self):
+        """Every recipe the solver would substitute prices the key the cost model priced.
+
+        The one behavioural claim worth making here, because the two consumers use the
+        relation differently -- one reads the dict by output key, the other by bare key -- and
+        agreeing on the DICT is not the same as agreeing on the pairs.
+        """
+        from recipegraph import cost as cost_mod
+
+        g = ProducedOnlyAsAVariantTest._graph()
+        solver = Solver(g)
+        recipes, variant_of = solver._variant_candidates(
+            ProducedOnlyAsAVariantTest.BARE)
+        self.assertTrue(recipes)
+        for recipe in recipes:
+            variant = variant_of[recipe.rid]
+            self.assertEqual(g.variant_subsumption[variant],
+                             ProducedOnlyAsAVariantTest.BARE)
+        # And the price the relaxation lands on is the recipe's own per-unit cost, not the
+        # leaf floor and not the variant's stock.
+        costs = cost_mod.estimate(g)
+        self.assertEqual(costs[ProducedOnlyAsAVariantTest.BARE],
+                         costs[ProducedOnlyAsAVariantTest.MADE])
 
 
 class TheTreeRowDoesNotCrushItsIconTest(unittest.TestCase):

@@ -405,11 +405,19 @@ public class PlanJsonTest {
      * the solver reject more attempts before it settles, so it does more searching and keeps
      * less of it: 641 nodes to 519 for 172 more units of work. Still 35% of an unchanged budget,
      * and {@code exhausted} is false, so the headroom warning above is unaffected.
+     *
+     * 28,196 -> 28,232 FOR #170, AND THE TREE DID NOT MOVE AT ALL, which is the opposite shape
+     * to the entry above and for the opposite reason. Routing a bare key through a produced NBT
+     * variant gives the solver candidate recipes where it previously had none, so it attempts
+     * routes it used to reject outright -- 36 more units of searching. None of them survives
+     * into THIS plan: {@code theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive} still reads
+     * 519. So the two counters coming apart in both directions across two changes is the reason
+     * they are asserted separately rather than one being taken as a proxy for the other.
      */
     @Test
     public void theWorkCounterAndItsBudgetBothArrive() {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(28196, plan.work());
+        assertEquals(28232, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());

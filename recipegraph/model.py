@@ -616,6 +616,7 @@ class Graph:
         self._live_keys = None
         self._unsourced_keys = None
         self._variant_index = None
+        self._variant_subsumption = None
         self._reshaped_only = None
         self._material_forms = None
         self._meta_index = None
@@ -908,8 +909,22 @@ class Graph:
         or on dropping the seed; #176 priced THIS set -- the one with positive evidence the
         graph cannot explain the route -- at `UNSOURCED_COST`, measured clean, and it is what
         made the reported plan stop asking for a nugget. So a key arriving here both gets the
-        badge and gets that price. What is still open is `Solver`'s refusal to ROUTE a bare
-        demand through a produced variant; see the #170 branch below.
+        badge and gets that price.
+
+        AND #170 CLOSED THE ROUTING QUESTION THIS USED TO LEAVE OPEN. The sentence that stood
+        here said `Solver`'s refusal to route a bare demand through a produced variant was still
+        open; it is not, and leaving that would send the next reader to look for a refusal that
+        no longer exists. `variant_subsumption` routes it, one direction only and behind four
+        clauses, and `cost._relax` prices the bare key at what making the variant costs.
+
+        SO THIS IS A REPORT AND A PRICE FLOOR, WHICH IS TWO JOBS AND THE SECOND IS EASY TO
+        BREAK. `unsourced_keys` seeds every key this names at `UNSOURCED_COST`, and #170 lowers
+        only the variant face of it. The floor is therefore what stands underneath every key
+        #170 cannot route -- a bare key whose only variant is unreachable, and the processed
+        forms and storage blocks above, which nothing routes at all. DO NOT narrow this
+        predicate to exclude keys the solver can now route: they would stop being seeded, fall
+        back through `_seed`'s leaf rule to `BASE_RAW_COST`, and any the relaxation failed to
+        reach would be priced 1.0 again, which is the whole of #170's original report.
         """
         if self.real_producers(key):
             return None
@@ -944,19 +959,19 @@ class Graph:
         # A BARE key nothing makes, while a VARIANT of it IS made: #170's half, and the
         # third face of one subsumption rule. `animus:kama_bound` is consumed by four
         # recipes and produced by none, while the Alchemy Array makes
-        # `animus:kama_bound#fd1adc426e12` -- so the graph knows a 53.35 route and
-        # `cost._seed` still prices the bare key at BASE_RAW_COST and tells the player they
-        # already have it. 96 keys on the reference graph, 4,193 produced variants behind
-        # them, the worst underpriced by a factor of 7,277.
+        # `animus:kama_bound#fd1adc426e12`. When this branch was written `cost._seed` priced
+        # the bare key at BASE_RAW_COST and the plan told the player they already had it,
+        # 99 keys on the reference graph and the worst underpriced by a factor of 7,277.
         #
-        # REPORTED, NOT REPRICED, and that is the whole of what is settled. Whether the
-        # SOLVER should route a bare demand through a produced variant is contested: #28
-        # rejected exactly that in `producers` -- "the solver asks for exactly this stack"
-        # -- and `test_the_solver_is_not_widened` pins the refusal. #170 argues the
-        # opposite from 1.12 ingredient matching. The dump cannot settle it, because
-        # `stackKey` writes a digest whenever the REPRESENTATIVE stack carries NBT and
-        # never records whether the slot would have accepted one. So the routing question
-        # goes to Jake with #171's `raw` split; saying what the tool knows does not need it.
+        # IT IS ALSO ROUTED NOW, AND THIS IS STILL WIDER THAN THE ROUTE. #170 shipped
+        # `variant_subsumption`, so `Solver.expand` plans a bare demand through the variant's
+        # recipe and `cost._relax` prices the bare key at what making the variant costs. What
+        # reaches here is therefore either a key the route could not be taken for -- every
+        # variant made FROM the bare key, or none of them reachable -- or a caller that is not
+        # the planner, `/api/sweep` and `/api/cost` being the two. Both still need the answer,
+        # and `unsourced_keys` above records why the floor must not be narrowed to match the
+        # route. `producers` itself remains un-widened: the direction #28 refused, a demand
+        # for `X#d` satisfied by bare `X`, is the reverse of the one that shipped.
         made = [v for v in self.variant_index.get(key, ())
                 if self.real_producers(v)]
         if made:
@@ -1177,6 +1192,119 @@ class Graph:
             for variant in self.variants_of(key):
                 out.extend(self.producers(variant))
         return out
+
+    @property
+    def variant_subsumption(self):
+        """`{produced variant key: the bare key a demand for it may be satisfied by}`. #170.
+
+        THE ONE SPELLING OF THE BARE-TO-VARIANT RELATION, and `satisfying_variants` below is
+        a view of this dict rather than a second implementation of its clauses. Two callers
+        need it -- `cost._relax`, which lets a variant's production price the bare key, and
+        `Solver.expand`, which routes a bare demand through the variant's recipe -- and this
+        repository has already paid for that pair being written twice: `reachable_form` lived
+        on `Solver` with a hand-kept copy in `api._reachable_form`, the two drifted by 210
+        keys, and a test comparing them passed the whole time because it only ever compared
+        the branch nobody had changed. See `reachable_form` and #178. DO NOT write a second
+        copy of the clauses below, in this module or any other.
+
+        THE RELATION IS DIRECTIONAL, AND THE DIRECTION IS THE WHOLE CLAIM. A recipe slot
+        naming the BARE item carries no NBT to match on, so producing `animus:kama_bound#fd1a`
+        satisfies a demand for `animus:kama_bound`; that is ordinary 1.12 ingredient matching.
+        The REVERSE is false and stays refused: a slot naming `X#d` is matched by that stack
+        and not by bare `X`, which is why `producers` is not widened (#28) and why the keys of
+        this dict are variants while its values are bare. `reachable_form`'s first branch,
+        #139's "no recipe reaches this state", is the same asymmetry seen from the other end.
+
+        FOUR CLAUSES, AND THE MIDDLE TWO ARE WHAT KEEP IT NARROW:
+
+          1. the key is a produced variant of a bare key, which `variant_index` already is;
+          2. the BARE key has no producer of its own. This is the clause that excludes the
+             control class, and the class is twenty times larger than the defect: 2,117 bare
+             keys on the reference graph carry this relation with an honest route and an
+             honest price of their own, and 82 of them have a produced variant CHEAPER than
+             themselves -- `simplyjetpacks:itemjetpack:14` at 1,491.72 against a 2.5 variant.
+             A rule keyed on the relation alone rather than on the absence of a route
+             cheapens that by 597x and hands the solver a fake route to an endgame item;
+          3. the VARIANT is produced, because an ingredient nobody makes cannot satisfy
+             anything;
+          4. no recipe producing the variant consumes the bare key OR ANY OTHER VARIANT OF
+             IT. That is the `X -> X#d -> X` shape and its one-hop-longer form, and both are
+             live: an Ender IO Soul Binder turns a Broken Spawner into a Broken Spawner with
+             a mob in its NBT, and a Fluid Transposer fills a Creative Reservoir variant from
+             another variant which was itself filled from the bare key. Attributing either to
+             the bare key prices "get one" at what "get one and upgrade it" costs, which is a
+             number about nothing. Those keys keep `reachable_form`'s report and its
+             `UNSOURCED_COST` price, which is the honest answer for them.
+
+        THE FAMILY HALF OF CLAUSE 4 IS THE CONTAINER GATE. `thermalexpansion:reservoir:32000`
+        is the case that shows the harm: one recipe demands the bare key directly, and both of
+        its produced variants are made by Fluid Transposer recipes that consume the family, so
+        without this half it prices at 521.0 against the 2,000 floor -- a 4x understatement of a
+        Creative Reservoir, delivered to a slot that really does ask for one. That is the shape
+        `real_producers`' docstring records paying for once already, where the dump dropped the
+        NBT telling one filled can from another and the graph believed squeezing a can of water
+        yielded uranium fluoride. Excluding a variant made from its own family costs nothing,
+        because the sibling it was made FROM is either subsumable itself and cheaper, or
+        excluded for the same reason.
+
+        `extratrees:drink` IS THE CLEAREST SHAPE AND THE WEAKEST HARM, and the distinction is
+        worth keeping because an earlier version of this comment got it wrong. A Beer Mug,
+        nothing makes the bare key, and all 30 produced variants are FILLED mugs and glasses a
+        Transposer makes from an EMPTY mug variant -- so it teaches the rule better than the
+        reservoir does. But it has ZERO direct consumers: its 4 are reached only through
+        `ore:listAllFood`, a 564-member group, and even priced through its variants at 27.15 it
+        is the 319th cheapest member, so `resolve_ore` would never pick it and no plan changes.
+        The harm there is a wrong price on a key `/api/sweep` and `/api/cost` report and nothing
+        demands, which is real and is not a routing failure. 10 of the 11 keys clause 4 refuses
+        DO have a direct demand; this is the one that does not.
+
+        MEASURED, NOT ASSUMED, on the reference graph: 2,631 bare keys carry the relation,
+        514 have no producer, and 99 of those are consumed by some recipe -- the issue's 96.
+        The clauses admit 88 of the 99: 9 are refused by the one-hop half of clause 4 and 2 by
+        the family half.
+
+        WHAT NO MEASUREMENT CAN SETTLE, so the design has to survive being wrong about it:
+        whether a bare slot in a MOD MACHINE really accepts any variant. The dump reads
+        recipes through JEI's `IIngredients`, which carries `ItemStack`s only, so the
+        `Ingredient` object that IS the matcher never crosses the dump boundary, and exactly
+        6 of 654,678 ingredient slots list both a bare key and a variant of it. For a vanilla
+        crafting grid the answer is provable -- an NBT-sensitive slot is a Forge
+        `NBTIngredient`, whose matching stack carries a tag and would therefore have dumped as
+        `X#d`, so a bare demand there implies NBT-insensitivity -- which covers 167 of the 242
+        sole-alternative demands. The other 75 are unfalsifiable. That is why `Solver.expand`
+        offers these as ranked candidates a pin can overrule and names the variant it took,
+        rather than treating the two keys as one item.
+        """
+        if self._variant_subsumption is None:
+            out = {}
+            for bare, variants in self.variant_index.items():
+                if self.real_producers(bare):
+                    continue
+                family = {bare}
+                family.update(variants)
+                for variant in variants:
+                    made = self.real_producers(variant)
+                    if not made:
+                        continue
+                    if any(alt in family for r in made for ing in r.inputs
+                           for alt in ing.alternatives):
+                        continue
+                    out[variant] = bare
+            self._variant_subsumption = out
+        return self._variant_subsumption
+
+    def satisfying_variants(self, key):
+        """The produced variants a demand for bare `key` may be satisfied by; [] normally.
+
+        A VIEW OF `variant_subsumption` AND NOT A SECOND SPELLING OF ITS CLAUSES -- see the
+        DO NOT there. Ordered as `variant_index` is, which is insertion order off `by_output`
+        and therefore the order the dump saw, so a caller that ranks these by price gets a
+        deterministic answer even when the prices tie. `tests/fixtures/plan/*.json` freeze
+        whole solver results for the Java port, so an order that varied between processes
+        would make those fixtures flip between runs.
+        """
+        subsumption = self.variant_subsumption
+        return [v for v in self.variants_of(key) if subsumption.get(v) == key]
 
     @property
     def meta_index(self):
