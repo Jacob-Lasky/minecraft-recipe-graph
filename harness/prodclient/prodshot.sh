@@ -89,6 +89,21 @@ mkdir -p "$LOCAL_BUILD/shots"
 # here: this image supplies the JVM the game runs on, so a stale one can be the wrong Java.
 docker build -q -t "$IMAGE" "$(dirname "$0")" >/dev/null
 
+# AND ALWAYS REINSTALL THE MOD, for the identical reason one layer up. The image was rebuilt
+# every run and the JAR UNDER TEST was not, so a shot silently measured whatever was staged the
+# last time anybody ran `stage-instance.sh` -- which, on a branch that changes Java, is the one
+# thing in the container that must not be stale. It presents as a screenshot of the old
+# behaviour, taken 22 minutes after the change that was supposed to alter it, and there is
+# nothing in the log to say so.
+#
+# UNDER ITS OWN GATE, SEQUENTIALLY, NOT NESTED INSIDE THE RUN'S. The copy has to be excluded
+# from `mod/tools/build-jar.sh`, which holds the gate while gradle rewrites the very file being
+# copied -- a `cp` landing mid-`reobfJar` puts a truncated jar in the instance, and Forge
+# reports that as a mod that will not load rather than as a bad copy. Two SEQUENTIAL
+# acquisitions are fine and a nested one is not: `tools/gate.sh` warns that `flock` is not
+# recursive, so taking this inside the `gated docker run` below would deadlock.
+gated "$(dirname "$0")/stage-instance.sh" --mod-only
+
 SHOT_ARGS=""
 OUT_PNG=""
 if [ -n "$SCREEN" ]; then
