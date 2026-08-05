@@ -342,8 +342,21 @@ class TheChangeMovesNoPriceOnAGraphWithoutPTest(unittest.TestCase):
     """
 
     # Recorded by running `cost.estimate` over `_graph()` on master (FORMULA_VERSION 10, before
-    # the retained-input term existed) and again with the term in place. Both produced this.
-    UNCHANGED_DIGEST = "d89f2eb4489588ada0991c620b24baa065a6ce93204bb01f4a232bce89a2eae9"
+    # the retained-input term existed) and again with the term in place. Both produced
+    # d89f2eb4 over 40 keys.
+    #
+    # REBASELINED AT #193, AND #175's CLAIM IS UNTOUCHED BY IT. The graph above ends with a
+    # container `fill` transfer as the only producer of `fluid:goo`, which is exactly the shape
+    # #193 is about: nothing seeded that key and `_relax` refused to price it from a transfer,
+    # so it and everything downstream of it came out unreachable. It is now
+    # `produced_in_name_only` and seeded at `UNSOURCED_COST`, which takes `fluid:goo`, `mod:mid`
+    # and `mod:top` from absent to priced -- 40 keys to 43.
+    #
+    # WHAT DID NOT HAPPEN IS THE THING THIS CLASS GUARDS: of the 40 keys both runs price, ZERO
+    # moved. So the retained-input term still moves no default-chance price, the digest still
+    # fails on any edit that changes one, and the count is asserted beside it so a rebaseline
+    # that quietly stopped pricing something cannot hide inside a new hash.
+    UNCHANGED_DIGEST = "7f99e21fc1a3afaae98cadfd65405aa273d71ad01a0294807f4885f0d79cb32e"
 
     @staticmethod
     def _graph():
@@ -383,7 +396,7 @@ class TheChangeMovesNoPriceOnAGraphWithoutPTest(unittest.TestCase):
         h = hashlib.sha256()
         for key in sorted(prices):
             h.update(("%s=%.17g\n" % (key, prices[key])).encode())
-        self.assertEqual(len(prices), 40, "the fixture graph stopped pricing what it priced")
+        self.assertEqual(len(prices), 43, "the fixture graph stopped pricing what it priced")
         self.assertEqual(
             h.hexdigest(), self.UNCHANGED_DIGEST,
             "a default-chance price moved. Either that is a bug, or the arithmetic genuinely "

@@ -218,6 +218,23 @@ def _container_graphs():
             "the Borax edge, with a consumer": canned_fluid_graph()}
 
 
+def _demoted_graph():
+    """A JEI documentation card beside a real route, marked the way `notproduction` marks.
+
+    Marked through `notproduction.mark` directly rather than `Graph.mark_non_production`,
+    which is what the rest of the suite does and what `real_producers`' NO FAST PATH note
+    names as the caller that must keep working.
+    """
+    g = Graph()
+    g.add(Recipe("real", "t", [("mod:widget", 1)],
+                 [Ingredient(["mod:plate"], 4)], category="minecraft.crafting"))
+    card = Recipe("jei_card", "t", [("mod:widget", 1)],
+                  [Ingredient(["mod:plate"], 1)], category="mod.documentation")
+    g.add(card)
+    card.not_production = "annotation"
+    return g
+
+
 def _relax_writes(graph, recipe, key):
     """Whether `cost._relax` will ever price `key` from `recipe`. OBSERVED, not restated.
 
@@ -256,15 +273,23 @@ class AllThreeReadersAgreeTest(unittest.TestCase):
             # has nothing to say about this graph.
             self.assertTrue(any(not graph.real_output(k) for k in graph.by_output), label)
 
-    def test_real_producers_is_exactly_the_filter_over_producers(self):
-        """The non-fluid short circuit must not drift away from the predicate.
+    def test_real_producers_is_exactly_its_two_documented_exclusions(self):
+        """`real_producers` composes the shared predicate with #211's demotion, and no more.
 
-        `real_producers` hands back the memoised list untouched for a non-fluid key, which
-        is an optimisation valid only while `real_production` excludes nothing but fluids.
-        Compared over every key rather than reasoned about, because the reasoning is what
-        goes stale.
+        TWO RULES AND ONLY ONE OF THEM IS SHARED. The container exclusion is `real_production`,
+        which `cost._relax` and `real_output` also read; the demotion is `not_production`, which
+        `_relax` deliberately does NOT skip -- it charges `NON_PRODUCTION_PENALTY` instead,
+        because #211 measured that skipping strands 26 keys. Fold the second into the first and
+        the relaxation silently stops pricing routes #211 wants ranked, so the composition is
+        compared here over every key rather than left to the docstring.
+
+        A MARKED GRAPH IS IN THE CASE SET, and it has to be: with nothing demoted the two
+        expressions agree whatever `real_producers` does with `not_production`, which is how
+        this assertion passed for the wrong reason when #193 was written before #211 landed.
         """
-        for label, graph in _container_graphs().items():
+        graphs = dict(_container_graphs())
+        graphs["a demoted JEI card beside a real route"] = _demoted_graph()
+        for label, graph in graphs.items():
             keys = set(graph.by_output)
             for r in graph.recipes:
                 for ing in r.inputs:
@@ -273,9 +298,21 @@ class AllThreeReadersAgreeTest(unittest.TestCase):
             for key in sorted(keys):
                 self.assertEqual(
                     [r.rid for r in graph.producers(key)
-                     if graph.real_production(r, key)],
+                     if not r.not_production and graph.real_production(r, key)],
                     [r.rid for r in graph.real_producers(key)],
                     "%s: %s" % (label, key))
+
+    def test_the_demotion_is_not_folded_into_the_shared_predicate(self):
+        # The other direction, and the one that keeps `_relax` able to price a demoted route.
+        # `real_production` answers about the CONTAINER rule only, so a demoted recipe is still
+        # "real production" to it while `real_producers` drops it.
+        g = _demoted_graph()
+        demoted = [r for r in g.recipes if r.not_production]
+        self.assertTrue(demoted, "fixture broken: nothing is demoted")
+        for r in demoted:
+            for key, _qty in r.outputs:
+                self.assertTrue(g.real_production(r, key), r.rid)
+                self.assertNotIn(r, g.real_producers(key))
 
     def test_the_relaxation_prices_exactly_what_the_predicate_allows(self):
         """`_relax`'s reader against the authority, over every recipe and output there is.
