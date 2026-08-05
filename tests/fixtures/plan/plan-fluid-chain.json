@@ -10,7 +10,8 @@
   "raw",
   "source",
   "token",
-  "tokens_needed"
+  "tokens_needed",
+  "unsourced"
  ],
  "graph": {
   "bytes": 121448519,
@@ -36,7 +37,7 @@
     "kind": "fluid",
     "label": "Water",
     "name": "[fluid] Water",
-    "qty": 55200,
+    "qty": 55700,
     "why": "vanilla infinite water (two source blocks and a bucket)"
    }
   ],
@@ -100,6 +101,12 @@
     "machine": "Crop Produce",
     "state": "buildable",
     "why": "craftable: agricraft:crop_sticks"
+   },
+   {
+    "category": "botania.pureDaisy",
+    "machine": "Pure Daisy",
+    "state": "buildable",
+    "why": "craftable: botania:specialflower (as botania:specialflower#cf734f9c96f6)"
    },
    {
     "category": "botania.runicAltar",
@@ -234,10 +241,10 @@
     "why": "craftable: thermalexpansion:machine:4 (as thermalexpansion:machine:4#f56885268ad5)"
    },
    {
-    "category": "thermalexpansion.precipitator",
-    "machine": "Glacial Precipitator",
+    "category": "thermalexpansion.smelter",
+    "machine": "Induction Smelter",
     "state": "buildable",
-    "why": "craftable: thermalexpansion:machine:14 (as thermalexpansion:machine:14#baa7f6d95be3)"
+    "why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)"
    },
    {
     "category": "xu2_machine_extrautils2:furnace",
@@ -2046,7 +2053,7 @@
          "children": [
           {
            "alternatives": 5,
-           "category": "nuclearcraft_alloy_furnace",
+           "category": "thermalexpansion.smelter",
            "children": [
             {
              "alternatives": 25,
@@ -2184,13 +2191,13 @@
            "key": "contenttweaker:material_part:40",
            "kind": "item",
            "label": "Dreadite Ingot",
-           "machine": "Alloy Furnace",
+           "machine": "Induction Smelter",
            "machine_state": "buildable",
-           "machine_why": "craftable: nuclearcraft:alloy_furnace_idle",
+           "machine_why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)",
            "name": "Dreadite Ingot",
            "need": 1,
            "per_run": 2,
-           "recipe": "hei:nuclearcraft_alloy_furnace:331725",
+           "recipe": "hei:thermalexpansion.smelter:148845",
            "runs": 1,
            "status": "craft"
           },
@@ -7081,14 +7088,14 @@
                    "children": [
                     {
                      "alternatives": 7,
-                     "category": "thermalexpansion.precipitator",
+                     "category": "botania.pureDaisy",
                      "children": [
                       {
                        "key": "fluid:water",
                        "kind": "fluid",
                        "label": "Water",
                        "name": "[fluid] Water",
-                       "need": 500,
+                       "need": 1000,
                        "note": "vanilla infinite water (two source blocks and a bucket)",
                        "status": "source"
                       }
@@ -7096,13 +7103,13 @@
                      "key": "minecraft:snow",
                      "kind": "item",
                      "label": "Snow",
-                     "machine": "Glacial Precipitator",
+                     "machine": "Pure Daisy",
                      "machine_state": "buildable",
-                     "machine_why": "craftable: thermalexpansion:machine:14 (as thermalexpansion:machine:14#baa7f6d95be3)",
+                     "machine_why": "craftable: botania:specialflower (as botania:specialflower#cf734f9c96f6)",
                      "name": "Snow",
                      "need": 1,
                      "per_run": 1,
-                     "recipe": "hei:thermalexpansion.precipitator:152226",
+                     "recipe": "hei:botania.pureDaisy:125007",
                      "runs": 1,
                      "status": "craft"
                     }
@@ -8006,7 +8013,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 28196,
+  "work": 28232,
   "work_budget": 80000
  },
  "scenario": {
@@ -8023,5 +8030,5 @@
    ".": 1
   }
  },
- "why": "Strong Mythic Essence, and this is BOTH the fluid fixture and the deep one. A fluid is not a small variation on an item: `cost.FLUID_SCALE` divides both sides of every recipe it touches, and scaling one side alone makes every fluid-to-fluid hop 1000x cheaper while the table still looks populated (see cost.py). It is also 634 nodes finishing inside the default budget, which is the only fixture here that pins the whole walk rather than the first few hops: recipe choice at every level, the ancestor set, 44 oredict nodes, 7 token leaves reported apart from the shopping list, machines and free sources. A port that gets one scoring term wrong diverges somewhere in here even when every small fixture agrees.\n\nIt took over the deep-chain role from `extendedcrafting:singularity_custom:1012`, which completed on the schema-3 oracle and EXHAUSTS ITS WORK BUDGET on the schema-5 one after 135 seconds. A 135-second fixture on a tool that reruns whenever a cost constant moves is a fixture that stops being regenerated.\n\nWATCH THE WORK BUDGET HERE, for exactly the reason the previous paragraph retired its predecessor. #176 took this plan from 347 to 388 to 634 nodes and its `work` from 400 to 28,012 against a budget of 80,000 -- 0.5% of the budget to 35% in one change, because the search no longer stops at 40 unsourced dead ends and instead explores the routes behind them. `truncated` and `exhausted` are both still false, so the claims above still hold, but the headroom that made this a SAFE deep fixture is much thinner than when it was chosen. If a later change flips `exhausted` anywhere in this set, look here first."
+ "why": "Strong Mythic Essence, and this is BOTH the fluid fixture and the deep one. A fluid is not a small variation on an item: `cost.FLUID_SCALE` divides both sides of every recipe it touches, and scaling one side alone makes every fluid-to-fluid hop 1000x cheaper while the table still looks populated (see cost.py). It is also 634 nodes finishing inside the default budget, which is the only fixture here that pins the whole walk rather than the first few hops: recipe choice at every level, the ancestor set, 44 oredict nodes, 7 token leaves reported apart from the shopping list, machines and free sources. A port that gets one scoring term wrong diverges somewhere in here even when every small fixture agrees.\n\nIt took over the deep-chain role from `extendedcrafting:singularity_custom:1012`, which completed on the schema-3 oracle and EXHAUSTS ITS WORK BUDGET on the schema-5 one after 135 seconds. A 135-second fixture on a tool that reruns whenever a cost constant moves is a fixture that stops being regenerated.\n\nWATCH THE WORK BUDGET HERE, for exactly the reason the previous paragraph retired its predecessor. #176 took this plan from 347 to 388 to 634 nodes and its `work` from 400 to 28,012 against a budget of 80,000 -- 0.5% of the budget to 35% in one change, because the search no longer stops at 40 unsourced dead ends and instead explores the routes behind them. `truncated` and `exhausted` are both still false, so the claims above still hold, but the headroom that made this a SAFE deep fixture is much thinner than when it was chosen. If a later change flips `exhausted` anywhere in this set, look here first.\n\nIT CARRIES THE `unsourced` CLAIM SINCE #170, AND THAT IS NOT INCIDENTAL COVERAGE. The mark used to be pinned by `plan-unsourced-variant` alone, and #170 routed that fixture's key so its plan carries no mark any more -- which would have left the field with no golden gate in either language while every claim still passed. Two of these 634 nodes are marked, measured rather than hoped for, and the claim is positive so a port that drops the field fails here."
 }
