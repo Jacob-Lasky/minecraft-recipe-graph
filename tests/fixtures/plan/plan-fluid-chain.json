@@ -37,7 +37,7 @@
     "kind": "fluid",
     "label": "Water",
     "name": "[fluid] Water",
-    "qty": 55700,
+    "qty": 55600,
     "why": "vanilla infinite water (two source blocks and a bucket)"
    }
   ],
@@ -47,6 +47,30 @@
     "machine": "Alloy Smelter",
     "state": "buildable",
     "why": "craftable: enderio:block_simple_alloy_smelter"
+   },
+   {
+    "category": "DraconicEvolution.Fusion",
+    "machine": "Fusion Crafting",
+    "state": "buildable",
+    "why": "craftable: draconicevolution:fusion_crafting_core"
+   },
+   {
+    "category": "ORE_FERMENTER",
+    "machine": "Fermentation Station",
+    "state": "buildable",
+    "why": "craftable: industrialforegoing:ore_fermenter"
+   },
+   {
+    "category": "ORE_SIEVE",
+    "machine": "Fluid Sieving Machine",
+    "state": "buildable",
+    "why": "craftable: industrialforegoing:ore_sieve"
+   },
+   {
+    "category": "ORE_WASHER",
+    "machine": "Washing Factory",
+    "state": "buildable",
+    "why": "craftable: industrialforegoing:ore_washer"
    },
    {
     "category": "SagMill",
@@ -85,6 +109,12 @@
     "why": "craftable: techreborn:extractor"
    },
    {
+    "category": "TechReborn.IndustrialElectrolyzer",
+    "machine": "Industrial Electrolyzer",
+    "state": "buildable",
+    "why": "craftable: techreborn:industrial_electrolyzer"
+   },
+   {
     "category": "TechReborn.RollingMachine",
     "machine": "Rolling Machine",
     "state": "buildable",
@@ -115,6 +145,18 @@
     "why": "craftable: botania:runealtar"
    },
    {
+    "category": "deepmoblearning.extraction_chamber",
+    "machine": "Loot Fabricator",
+    "state": "buildable",
+    "why": "craftable: deepmoblearning:extraction_chamber"
+   },
+   {
+    "category": "deepmoblearning.simulation_chamber",
+    "machine": "Simulation Chamber",
+    "state": "buildable",
+    "why": "craftable: deepmoblearning:simulation_chamber"
+   },
+   {
     "category": "deepmoblearningbm.digital_agonizer",
     "machine": "Digital Mob Agonizer",
     "state": "buildable",
@@ -125,6 +167,12 @@
     "machine": "Hydrator",
     "state": "buildable",
     "why": "craftable: cyclicmagic:block_hydrator"
+   },
+   {
+    "category": "ie.arcFurnace",
+    "machine": "Arc Furnace",
+    "state": "buildable",
+    "why": "craftable: immersiveengineering:metal_multiblock:13"
    },
    {
     "category": "integrateddynamicscompat:squeezer",
@@ -145,18 +193,6 @@
     "why": "craftable: modularmachinery:bloodmaster_crucible_controller"
    },
    {
-    "category": "modularmachinery.recipes.dragonfire_crucible",
-    "machine": "Dragonfire Crucible",
-    "state": "buildable",
-    "why": "craftable: modularmachinery:dragonfire_crucible_controller"
-   },
-   {
-    "category": "modularmachinery.recipes.dragonfire_forge",
-    "machine": "Dragonfire Forge",
-    "state": "buildable",
-    "why": "craftable: modularmachinery:dragonfire_forge_controller"
-   },
-   {
     "category": "modularmachinery.recipes.essentia_crystallizer",
     "machine": "Essentia Crystallizer",
     "state": "buildable",
@@ -169,10 +205,34 @@
     "why": "craftable: modularmachinery:hostile_computing_unit_controller"
    },
    {
+    "category": "modularmachinery.recipes.mythical_resource_crucible",
+    "machine": "Mythical Resource Crucible",
+    "state": "buildable",
+    "why": "craftable: modularmachinery:mythical_resource_crucible_controller"
+   },
+   {
+    "category": "modularmachinery.recipes.mythical_resource_miner_tier11",
+    "machine": "Deeplands Mythical Void Resource Miner",
+    "state": "buildable",
+    "why": "craftable: modularmachinery:mythical_resource_miner_tier11_controller"
+   },
+   {
     "category": "modularmachinery.recipes.mythical_resource_miner_tier5",
     "machine": "Nethengeic Mythical Void Resource Miner",
     "state": "buildable",
     "why": "craftable: modularmachinery:mythical_resource_miner_tier5_controller"
+   },
+   {
+    "category": "modularmachinery.recipes.spatial_crucible",
+    "machine": "Spatial Crucible",
+    "state": "buildable",
+    "why": "craftable: modularmachinery:spatial_crucible_controller"
+   },
+   {
+    "category": "modularmachinery.recipes.stellar_diviner",
+    "machine": "Stellar Diviner",
+    "state": "buildable",
+    "why": "craftable: modularmachinery:stellar_diviner_controller"
    },
    {
     "category": "nuclearcraft_alloy_furnace",
@@ -187,16 +247,28 @@
     "why": "craftable: nuclearcraft:centrifuge_idle"
    },
    {
-    "category": "nuclearcraft_infuser",
-    "machine": "Fluid Infuser",
+    "category": "nuclearcraft_chemical_reactor",
+    "machine": "Chemical Reactor",
     "state": "buildable",
-    "why": "craftable: nuclearcraft:infuser_idle"
+    "why": "craftable: nuclearcraft:chemical_reactor_idle"
+   },
+   {
+    "category": "nuclearcraft_melter",
+    "machine": "Melter",
+    "state": "buildable",
+    "why": "craftable: nuclearcraft:melter_idle"
    },
    {
     "category": "nuclearcraft_rock_crusher",
     "machine": "Rock Crusher",
     "state": "buildable",
     "why": "craftable: nuclearcraft:rock_crusher_idle"
+   },
+   {
+    "category": "solidifier",
+    "machine": "Solidifier",
+    "state": "buildable",
+    "why": "craftable: cyclicmagic:solidifier"
    },
    {
     "category": "tconstruct.alloy",
@@ -241,41 +313,44 @@
     "why": "craftable: thermalexpansion:machine:4 (as thermalexpansion:machine:4#f56885268ad5)"
    },
    {
-    "category": "thermalexpansion.smelter",
-    "machine": "Induction Smelter",
-    "state": "buildable",
-    "why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)"
-   },
-   {
-    "category": "xu2_machine_extrautils2:furnace",
-    "machine": "Furnace",
-    "state": "buildable",
-    "why": "craftable: extrautils2:machine"
-   },
-   {
     "category": "zmaster587.AR.chemicalReactor",
     "machine": "Chemical Reactor",
     "state": "buildable",
     "why": "craftable: advancedrocketry:chemicalreactor"
-   },
-   {
-    "category": "zmaster587.AR.electrolyzer",
-    "machine": "Electrolyser",
-    "state": "buildable",
-    "why": "craftable: advancedrocketry:electrolyser"
    }
   ],
   "max_nodes": 4000,
-  "nodes": 519,
+  "nodes": 576,
   "pins_overruled": {},
   "qty": 1,
   "shopping_list": [
+   {
+    "key": "fluid:crystal",
+    "kind": "fluid",
+    "label": "Crystallized Obsidian",
+    "name": "[fluid] Crystallized Obsidian",
+    "qty": 1000
+   },
+   {
+    "key": "fluid:meat",
+    "kind": "fluid",
+    "label": "Liquid Meat",
+    "name": "[fluid] Liquid Meat",
+    "qty": 400
+   },
+   {
+    "key": "fluid:liquid_uu_matter",
+    "kind": "fluid",
+    "label": "Liquid UU Matter",
+    "name": "[fluid] Liquid UU Matter",
+    "qty": 300
+   },
    {
     "key": "forestry:bee_princess_ge#6f16eda873ae",
     "kind": "item",
     "label": "Forest Princess",
     "name": "Forest Princess",
-    "qty": 311
+    "qty": 269
    },
    {
     "key": "biomesoplenty:mudball",
@@ -289,35 +364,35 @@
     "kind": "item",
     "label": "Modest Princess",
     "name": "Modest Princess",
-    "qty": 174
+    "qty": 141
    },
    {
     "key": "forestry:bee_princess_ge#00c16aad704a",
     "kind": "item",
     "label": "Meadows Princess",
     "name": "Meadows Princess",
-    "qty": 156
+    "qty": 135
    },
    {
     "key": "forestry:bee_princess_ge#fe694d7cc286",
     "kind": "item",
     "label": "Mystical Princess",
     "name": "Mystical Princess",
-    "qty": 117
+    "qty": 120
    },
    {
     "key": "forestry:bee_princess_ge#49265408b3e4",
     "kind": "item",
     "label": "Tropical Princess",
     "name": "Tropical Princess",
-    "qty": 116
+    "qty": 119
    },
    {
     "key": "thermalfoundation:ore:6",
     "kind": "item",
     "label": "Platinum Ore",
     "name": "Platinum Ore",
-    "qty": 72
+    "qty": 74
    },
    {
     "key": "mysticalagriculture:void_metal_seeds#852d339dde2e",
@@ -363,11 +438,25 @@
     "qty": 24
    },
    {
+    "key": "minecraft:iron_ore",
+    "kind": "item",
+    "label": "Iron Ore",
+    "name": "Iron Ore",
+    "qty": 20
+   },
+   {
     "key": "libvulpes:productingot:9",
     "kind": "item",
     "label": "Aluminum Ingot",
     "name": "Aluminum Ingot",
     "qty": 18
+   },
+   {
+    "key": "iceandfire:frozen_gravel",
+    "kind": "item",
+    "label": "Frozen Gravel",
+    "name": "Frozen Gravel",
+    "qty": 16
    },
    {
     "key": "mod_lavacow:imp_horn",
@@ -377,38 +466,24 @@
     "qty": 14
    },
    {
-    "key": "erebus:materials:11",
-    "kind": "item",
-    "label": "Redgem",
-    "name": "Redgem",
-    "qty": 14
-   },
-   {
-    "key": "minecraft:iron_ore",
-    "kind": "item",
-    "label": "Iron Ore",
-    "name": "Iron Ore",
-    "qty": 13
-   },
-   {
-    "key": "abyssalcraft:dreadiumboots:*",
-    "kind": "item",
-    "label": "Dreadium Boots (*)",
-    "name": "Dreadium Boots (*)",
-    "qty": 9
-   },
-   {
-    "key": "nuclearcraft:ingot:4",
-    "kind": "item",
-    "label": "Uranium Ingot",
-    "name": "Uranium Ingot",
-    "qty": 9
-   },
-   {
     "key": "natura:sticks:*",
     "kind": "item",
     "label": "Maple Sticks (*)",
     "name": "Maple Sticks (*)",
+    "qty": 14
+   },
+   {
+    "key": "forestry:bee_princess_ge#438f0076b188",
+    "kind": "item",
+    "label": "Radiant Princess",
+    "name": "Radiant Princess",
+    "qty": 12
+   },
+   {
+    "key": "erebus:materials:11",
+    "kind": "item",
+    "label": "Redgem",
+    "name": "Redgem",
     "qty": 8
    },
    {
@@ -419,24 +494,31 @@
     "qty": 8
    },
    {
-    "key": "minecraft:gold_ore",
+    "key": "aoa3:toxic_stone",
     "kind": "item",
-    "label": "Gold Ore",
-    "name": "Gold Ore",
-    "qty": 7
-   },
-   {
-    "key": "forestry:bee_princess_ge#438f0076b188",
-    "kind": "item",
-    "label": "Radiant Princess",
-    "name": "Radiant Princess",
-    "qty": 5
+    "label": "Toxic Stone",
+    "name": "Toxic Stone",
+    "qty": 6
    },
    {
     "key": "contenttweaker:fiery_pyrite",
     "kind": "item",
     "label": "Fiery Pyrite",
     "name": "Fiery Pyrite",
+    "qty": 5
+   },
+   {
+    "key": "itemblacklist:blacklisted#15e6d3819d2e",
+    "kind": "item",
+    "label": "Ender Pearl",
+    "name": "Ender Pearl",
+    "qty": 5
+   },
+   {
+    "key": "minecraft:lapis_ore",
+    "kind": "item",
+    "label": "Lapis Lazuli Ore",
+    "name": "Lapis Lazuli Ore",
     "qty": 5
    },
    {
@@ -461,24 +543,17 @@
     "qty": 4
    },
    {
-    "key": "contenttweaker:sednanite_ore",
+    "key": "minecraft:gold_ore",
     "kind": "item",
-    "label": "Sednanite Ore",
-    "name": "Sednanite Ore",
+    "label": "Gold Ore",
+    "name": "Gold Ore",
     "qty": 4
    },
    {
-    "key": "erebus:ore_encrusted_diamond",
+    "key": "techreborn:ore",
     "kind": "item",
-    "label": "Volcanic Diamond Ore",
-    "name": "Volcanic Diamond Ore",
-    "qty": 4
-   },
-   {
-    "key": "contenttweaker:alchemical_ore",
-    "kind": "item",
-    "label": "Alchemical Ore",
-    "name": "Alchemical Ore",
+    "label": "Galena Ore",
+    "name": "Galena Ore",
     "qty": 4
    },
    {
@@ -503,31 +578,17 @@
     "qty": 4
    },
    {
-    "key": "minecraft:lapis_ore",
+    "key": "erebus:ore_encrusted_diamond",
     "kind": "item",
-    "label": "Lapis Lazuli Ore",
-    "name": "Lapis Lazuli Ore",
-    "qty": 4
-   },
-   {
-    "key": "itemblacklist:blacklisted#15e6d3819d2e",
-    "kind": "item",
-    "label": "Ender Pearl",
-    "name": "Ender Pearl",
-    "qty": 4
-   },
-   {
-    "key": "aoa3:varsium_ore",
-    "kind": "item",
-    "label": "Varsium Ore",
-    "name": "Varsium Ore",
+    "label": "Volcanic Diamond Ore",
+    "name": "Volcanic Diamond Ore",
     "qty": 3
    },
    {
-    "key": "aoa3:blazium_ore",
+    "key": "thermalfoundation:ore:1",
     "kind": "item",
-    "label": "Blazium Ore",
-    "name": "Blazium Ore",
+    "label": "Tin Ore",
+    "name": "Tin Ore",
     "qty": 3
    },
    {
@@ -536,6 +597,27 @@
     "label": "Valiant Princess",
     "name": "Valiant Princess",
     "qty": 3
+   },
+   {
+    "key": "divinerpg:frozen_stone",
+    "kind": "item",
+    "label": "Frozen Stone",
+    "name": "Frozen Stone",
+    "qty": 2
+   },
+   {
+    "key": "thaumcraft:phial:1#569402430b2f",
+    "kind": "item",
+    "label": "Phial of Aer Essentia",
+    "name": "Phial of Aer Essentia",
+    "qty": 2
+   },
+   {
+    "key": "actuallyadditions:block_misc:3",
+    "kind": "item",
+    "label": "Black Quartz Ore",
+    "name": "Black Quartz Ore",
+    "qty": 2
    },
    {
     "key": "twilightforest:twilight_plant:8",
@@ -587,13 +669,6 @@
     "qty": 1
    },
    {
-    "key": "divinerpg:frozen_stone",
-    "kind": "item",
-    "label": "Frozen Stone",
-    "name": "Frozen Stone",
-    "qty": 1
-   },
-   {
     "key": "botania:manasteelboots:*",
     "kind": "item",
     "label": "Manasteelboots (*)",
@@ -622,10 +697,39 @@
     "qty": 1
    },
    {
-    "key": "aoa3:lyon_ore",
+    "key": "contenttweaker:alchemical_ore",
     "kind": "item",
-    "label": "Lyon Ore",
-    "name": "Lyon Ore",
+    "label": "Alchemical Ore",
+    "name": "Alchemical Ore",
+    "qty": 1
+   },
+   {
+    "key": "deepmoblearning:data_model_guardian#c7bccd46ac55",
+    "kind": "item",
+    "label": "Guardian Data Model (Basic)",
+    "name": "Guardian Data Model (Basic)",
+    "qty": 1,
+    "unsourced": true
+   },
+   {
+    "key": "forestry:bee_princess_ge#73cbbfbf5774",
+    "kind": "item",
+    "label": "Apothecary Princess",
+    "name": "Apothecary Princess",
+    "qty": 1
+   },
+   {
+    "key": "forestry:bee_princess_ge#32e2cccf4258",
+    "kind": "item",
+    "label": "Universal Constellation Princess",
+    "name": "Universal Constellation Princess",
+    "qty": 1
+   },
+   {
+    "key": "railcraft:ore_metal_poor",
+    "kind": "item",
+    "label": "Poor Iron Ore",
+    "name": "Poor Iron Ore",
     "qty": 1
    },
    {
@@ -1398,268 +1502,169 @@
                  "children": [
                   {
                    "alternatives": 24,
-                   "category": "minecraft.crafting",
+                   "category": "ORE_SIEVE",
                    "children": [
                     {
-                     "alt_count": 2,
-                     "dimension": "Sedna",
-                     "key": "contenttweaker:sednanite_ore",
-                     "kind": "item",
-                     "label": "Sednanite Ore",
-                     "name": "Sednanite Ore",
-                     "need": 2,
-                     "note": "mined on Sedna, and you have not been there",
-                     "status": "raw"
-                    },
-                    {
-                     "alternatives": 2,
-                     "category": "crafting_shaped",
+                     "alternatives": 109,
+                     "category": "minecraft.crafting",
                      "children": [
                       {
+                       "alternatives": 25,
+                       "category": "crafting_shapeless",
                        "children": [
                         {
-                         "alternatives": 172,
-                         "category": "minecraft.smelting",
                          "children": [
                           {
-                           "alt_count": 14,
-                           "key": "minecraft:iron_ore",
-                           "kind": "item",
-                           "label": "Iron Ore",
-                           "name": "Iron Ore",
-                           "need": 4,
-                           "note": "mined, not crafted",
-                           "status": "raw"
-                          }
-                         ],
-                         "key": "minecraft:iron_ingot",
-                         "kind": "item",
-                         "label": "Iron Ingot",
-                         "machine": "Smelting",
-                         "machine_state": "have",
-                         "name": "Iron Ingot",
-                         "need": 4,
-                         "per_run": 1,
-                         "recipe": "hei:minecraft.smelting:31344",
-                         "runs": 4,
-                         "status": "craft"
-                        }
-                       ],
-                       "key": "ore:ingotIron",
-                       "kind": "ore",
-                       "label": "ingotIron",
-                       "name": "[oredict] ingotIron",
-                       "need": 4,
-                       "resolved_to": "minecraft:iron_ingot",
-                       "status": "oredict"
-                      },
-                      {
-                       "alternatives": 133,
-                       "category": "bdew.jeibees.produce.rootBees",
-                       "children": [
-                        {
-                         "alt_count": 4,
-                         "alternatives": 3,
-                         "category": "bdew.jeibees.mutation.rootBees",
-                         "children": [
-                          {
-                           "alt_count": 4,
-                           "key": "forestry:bee_princess_ge#49265408b3e4",
-                           "kind": "item",
-                           "label": "Tropical Princess",
-                           "name": "Tropical Princess",
-                           "need": 2,
-                           "status": "raw"
-                          },
-                          {
-                           "alt_count": 4,
-                           "alternatives": 3,
-                           "category": "bdew.jeibees.mutation.rootBees",
+                           "alternatives": 62,
+                           "category": "minecraft.smelting",
                            "children": [
                             {
-                             "alt_count": 4,
-                             "key": "forestry:bee_princess_ge#c3e057183678",
+                             "key": "iceandfire:frozen_gravel",
                              "kind": "item",
-                             "label": "Modest Princess",
-                             "name": "Modest Princess",
-                             "need": 2,
+                             "label": "Frozen Gravel",
+                             "name": "Frozen Gravel",
+                             "need": 6,
                              "status": "raw"
-                            },
-                            {
-                             "alt_count": 4,
-                             "alternatives": 12,
-                             "category": "bdew.jeibees.mutation.rootBees",
-                             "children": [
-                              {
-                               "alt_count": 4,
-                               "key": "forestry:bee_princess_ge#fe694d7cc286",
-                               "kind": "item",
-                               "label": "Mystical Princess",
-                               "name": "Mystical Princess",
-                               "need": 2,
-                               "status": "raw"
-                              },
-                              {
-                               "alt_count": 4,
-                               "alternatives": 42,
-                               "category": "bdew.jeibees.mutation.rootBees",
-                               "children": [
-                                {
-                                 "alt_count": 4,
-                                 "alternatives": 201,
-                                 "category": "bdew.jeibees.mutation.rootBees",
-                                 "children": [
-                                  {
-                                   "alt_count": 4,
-                                   "key": "forestry:bee_princess_ge#6f16eda873ae",
-                                   "kind": "item",
-                                   "label": "Forest Princess",
-                                   "name": "Forest Princess",
-                                   "need": 2,
-                                   "status": "raw"
-                                  },
-                                  {
-                                   "alt_count": 4,
-                                   "key": "forestry:bee_princess_ge#00c16aad704a",
-                                   "kind": "item",
-                                   "label": "Meadows Princess",
-                                   "name": "Meadows Princess",
-                                   "need": 2,
-                                   "status": "raw"
-                                  }
-                                 ],
-                                 "interchangeable": 67,
-                                 "key": "forestry:bee_drone_ge#e1904b1a26ba",
-                                 "kind": "item",
-                                 "label": "Common Drone",
-                                 "machine": "Bee Breeding",
-                                 "machine_state": "have",
-                                 "name": "Common Drone",
-                                 "need": 2,
-                                 "per_run": 1,
-                                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
-                                 "runs": 2,
-                                 "status": "craft"
-                                },
-                                {
-                                 "alt_count": 4,
-                                 "key": "forestry:bee_princess_ge#6f16eda873ae",
-                                 "kind": "item",
-                                 "label": "Forest Princess",
-                                 "name": "Forest Princess",
-                                 "need": 2,
-                                 "status": "raw"
-                                }
-                               ],
-                               "interchangeable": 14,
-                               "key": "forestry:bee_drone_ge#9cd0196d9f2a",
-                               "kind": "item",
-                               "label": "Cultivated Drone",
-                               "machine": "Bee Breeding",
-                               "machine_state": "have",
-                               "name": "Cultivated Drone",
-                               "need": 2,
-                               "per_run": 1,
-                               "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
-                               "runs": 2,
-                               "status": "craft"
-                              }
-                             ],
-                             "interchangeable": 4,
-                             "key": "forestry:bee_drone_ge#e870ae142070",
-                             "kind": "item",
-                             "label": "Eldritch Drone",
-                             "machine": "Bee Breeding",
-                             "machine_state": "have",
-                             "name": "Eldritch Drone",
-                             "need": 2,
-                             "per_run": 1,
-                             "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
-                             "runs": 2,
-                             "status": "craft"
                             }
                            ],
-                           "key": "forestry:bee_drone_ge#dd8d21c62d2e",
+                           "key": "minecraft:gravel",
                            "kind": "item",
-                           "label": "Skulking Drone",
-                           "machine": "Bee Breeding",
+                           "label": "Gravel",
+                           "machine": "Smelting",
                            "machine_state": "have",
-                           "name": "Skulking Drone",
-                           "need": 2,
+                           "name": "Gravel",
+                           "need": 6,
                            "per_run": 1,
-                           "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
-                           "runs": 2,
+                           "recipe": "hei:minecraft.smelting:31620",
+                           "runs": 6,
                            "status": "craft"
                           }
                          ],
-                         "key": "forestry:bee_drone_ge#c59795af440a",
-                         "kind": "item",
-                         "label": "Spidery Drone",
-                         "machine": "Bee Breeding",
-                         "machine_state": "have",
-                         "name": "Spidery Drone",
-                         "need": 2,
-                         "per_run": 1,
-                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
-                         "runs": 2,
-                         "status": "craft"
+                         "key": "ore:gravel",
+                         "kind": "ore",
+                         "label": "gravel",
+                         "name": "[oredict] gravel",
+                         "need": 6,
+                         "resolved_to": "minecraft:gravel",
+                         "status": "oredict"
                         }
                        ],
-                       "key": "minecraft:string",
+                       "key": "minecraft:flint",
                        "kind": "item",
-                       "label": "String",
-                       "machine": "Bee Produce",
+                       "label": "Flint",
+                       "machine": "Crafting (shapeless)",
                        "machine_state": "have",
-                       "name": "String",
+                       "name": "Flint",
                        "need": 2,
                        "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+                       "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/common/flint.json",
                        "runs": 2,
                        "status": "craft"
                       },
                       {
-                       "alt_count": 2,
+                       "alternatives": 62,
+                       "category": "minecraft.smelting",
                        "children": [
                         {
-                         "key": "natura:sticks:*",
+                         "key": "iceandfire:frozen_gravel",
                          "kind": "item",
-                         "label": "Maple Sticks (*)",
-                         "name": "Maple Sticks (*)",
-                         "need": 4,
+                         "label": "Frozen Gravel",
+                         "name": "Frozen Gravel",
+                         "need": 2,
                          "status": "raw"
                         }
                        ],
-                       "key": "ore:stickWood",
-                       "kind": "ore",
-                       "label": "stickWood",
-                       "name": "[oredict] stickWood",
-                       "need": 4,
-                       "resolved_to": "natura:sticks:*",
-                       "status": "oredict"
+                       "key": "minecraft:gravel",
+                       "kind": "item",
+                       "label": "Gravel",
+                       "machine": "Smelting",
+                       "machine_state": "have",
+                       "name": "Gravel",
+                       "need": 2,
+                       "per_run": 1,
+                       "recipe": "hei:minecraft.smelting:31620",
+                       "runs": 2,
+                       "status": "craft"
                       }
                      ],
-                     "key": "immersiveengineering:tool",
+                     "key": "minecraft:sand",
                      "kind": "item",
-                     "label": "Engineer's Hammer",
-                     "machine": "Crafting (shaped)",
+                     "label": "Sand",
+                     "machine": "Crafting",
                      "machine_state": "have",
-                     "name": "Engineer's Hammer",
+                     "name": "Sand",
                      "need": 2,
                      "per_run": 1,
-                     "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/tool/hammer.json",
+                     "recipe": "hei:minecraft.crafting:31219",
                      "runs": 2,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 64,
+                     "category": "ORE_FERMENTER",
+                     "children": [
+                      {
+                       "alternatives": 64,
+                       "category": "ORE_WASHER",
+                       "children": [
+                        {
+                         "key": "thermalfoundation:ore:6",
+                         "kind": "item",
+                         "label": "Platinum Ore",
+                         "name": "Platinum Ore",
+                         "need": 1,
+                         "note": "mined, not crafted",
+                         "status": "raw"
+                        },
+                        {
+                         "key": "fluid:meat",
+                         "kind": "fluid",
+                         "label": "Liquid Meat",
+                         "name": "[fluid] Liquid Meat",
+                         "need": 200,
+                         "status": "raw"
+                        }
+                       ],
+                       "interchangeable": 34,
+                       "key": "fluid:if.ore_fluid_raw",
+                       "kind": "fluid",
+                       "label": "Raw Ore Meat",
+                       "machine": "Washing Factory",
+                       "machine_state": "buildable",
+                       "machine_why": "craftable: industrialforegoing:ore_washer",
+                       "name": "[fluid] Raw Ore Meat",
+                       "need": 100,
+                       "per_run": 150,
+                       "recipe": "hei:ORE_WASHER:110856",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "interchangeable": 64,
+                     "key": "fluid:if.ore_fluid_fermented",
+                     "kind": "fluid",
+                     "label": "Fermented Ore Meat",
+                     "machine": "Fermentation Station",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: industrialforegoing:ore_fermenter",
+                     "name": "[fluid] Fermented Ore Meat",
+                     "need": 200,
+                     "per_run": 2,
+                     "recipe": "hei:ORE_FERMENTER:110906",
+                     "runs": 100,
                      "status": "craft"
                     }
                    ],
                    "key": "contenttweaker:material_part:55",
                    "kind": "item",
                    "label": "Sednanite Dust",
-                   "machine": "Crafting",
-                   "machine_state": "have",
+                   "machine": "Fluid Sieving Machine",
+                   "machine_state": "buildable",
+                   "machine_why": "craftable: industrialforegoing:ore_sieve",
                    "name": "Sednanite Dust",
                    "need": 2,
                    "per_run": 1,
-                   "recipe": "hei:minecraft.crafting:25179",
+                   "recipe": "hei:ORE_SIEVE:111028",
                    "runs": 2,
                    "status": "craft"
                   },
@@ -2049,706 +2054,1720 @@
         },
         {
          "alternatives": 8,
-         "category": "modularmachinery.recipes.dragonfire_crucible",
+         "category": "modularmachinery.recipes.mythical_resource_miner_tier11",
          "children": [
           {
-           "alternatives": 5,
-           "category": "thermalexpansion.smelter",
+           "alternatives": 3,
+           "category": "modularmachinery.recipes.spatial_crucible",
            "children": [
             {
-             "alternatives": 25,
-             "category": "crafting_shaped",
+             "alternatives": 5,
+             "category": "modularmachinery.recipes.stellar_diviner",
              "children": [
               {
-               "alternatives": 22,
-               "category": "xu2_machine_extrautils2:furnace",
-               "children": [
-                {
-                 "key": "abyssalcraft:dreadiumboots:*",
-                 "kind": "item",
-                 "label": "Dreadium Boots (*)",
-                 "name": "Dreadium Boots (*)",
-                 "need": 9,
-                 "status": "raw"
-                }
-               ],
-               "interchangeable": 4,
-               "key": "abyssalcraft:ingotnugget:2",
+               "key": "aoa3:toxic_stone",
                "kind": "item",
-               "label": "Dreadium Nugget",
-               "machine": "Furnace",
-               "machine_state": "buildable",
-               "machine_why": "craftable: extrautils2:machine",
-               "name": "Dreadium Nugget",
-               "need": 9,
-               "per_run": 1,
-               "recipe": "hei:xu2_machine_extrautils2:furnace:329970",
-               "runs": 9,
-               "status": "craft"
-              }
-             ],
-             "key": "abyssalcraft:dreadiumingot",
-             "kind": "item",
-             "label": "Dreadium Ingot",
-             "machine": "Crafting (shaped)",
-             "machine_state": "have",
-             "name": "Dreadium Ingot",
-             "need": 1,
-             "per_run": 1,
-             "recipe": "AbyssalCraft-1.12.2-1.11.2.jar!assets/abyssalcraft/recipes/dreadiumingot_alt.json",
-             "runs": 1,
-             "status": "craft"
-            },
-            {
-             "alternatives": 9,
-             "category": "nuclearcraft_infuser",
-             "children": [
+               "label": "Toxic Stone",
+               "name": "Toxic Stone",
+               "need": 6,
+               "status": "raw"
+              },
               {
-               "alt_count": 3,
-               "alternatives": 48,
-               "category": "crafting_shapeless",
+               "alternatives": 18,
+               "category": "thermalexpansion.centrifuge",
                "children": [
                 {
-                 "alternatives": 8,
-                 "category": "minecraft.crafting",
+                 "alternatives": 5,
+                 "category": "bdew.jeibees.produce.rootBees",
                  "children": [
                   {
-                   "key": "nuclearcraft:ingot:4",
+                   "alt_count": 4,
+                   "key": "forestry:bee_princess_ge#438f0076b188",
                    "kind": "item",
-                   "label": "Uranium Ingot",
-                   "name": "Uranium Ingot",
-                   "need": 9,
+                   "label": "Radiant Princess",
+                   "name": "Radiant Princess",
+                   "need": 1,
                    "status": "raw"
                   }
                  ],
-                 "key": "immersiveengineering:storage:5",
+                 "key": "gendustry:honey_comb:13369",
                  "kind": "item",
-                 "label": "Block of Uranium",
-                 "machine": "Crafting",
+                 "label": "Beecon Comb",
+                 "machine": "Bee Produce",
                  "machine_state": "have",
-                 "name": "Block of Uranium",
+                 "name": "Beecon Comb",
                  "need": 1,
                  "per_run": 1,
-                 "recipe": "hei:minecraft.crafting:25167",
+                 "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
                  "runs": 1,
                  "status": "craft"
                 }
                ],
-               "key": "immersiveengineering:metal:5",
+               "key": "minecraft:nether_star",
                "kind": "item",
-               "label": "Uranium Ingot",
-               "machine": "Crafting (shapeless)",
-               "machine_state": "have",
-               "name": "Uranium Ingot",
-               "need": 1,
-               "per_run": 9,
-               "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/metal_storage/uranium_block_uncraft.json",
+               "label": "Nether Star",
+               "machine": "Centrifugal Separator",
+               "machine_state": "buildable",
+               "machine_why": "craftable: thermalexpansion:machine:10 (as thermalexpansion:machine:10#f56885268ad5)",
+               "name": "Nether Star",
+               "need": 2,
+               "per_run": 32,
+               "recipe": "hei:thermalexpansion.centrifuge:151349",
                "runs": 1,
                "status": "craft"
               },
               {
-               "alternatives": 24,
-               "category": "zmaster587.AR.electrolyzer",
+               "alternatives": 27,
+               "category": "modularmachinery.recipes.mythical_resource_crucible",
                "children": [
                 {
-                 "key": "fluid:water",
-                 "kind": "fluid",
-                 "label": "Water",
-                 "name": "[fluid] Water",
-                 "need": 100,
-                 "note": "vanilla infinite water (two source blocks and a bucket)",
-                 "status": "source"
-                }
-               ],
-               "key": "fluid:oxygen",
-               "kind": "fluid",
-               "label": "Oxygen",
-               "machine": "Electrolyser",
-               "machine_state": "buildable",
-               "machine_why": "craftable: advancedrocketry:electrolyser",
-               "name": "[fluid] Oxygen",
-               "need": 1000,
-               "per_run": 100,
-               "recipe": "hei:zmaster587.AR.electrolyzer:114198",
-               "runs": 10,
-               "status": "craft"
-              }
-             ],
-             "key": "nuclearcraft:ingot_oxide:1",
-             "kind": "item",
-             "label": "Uranium Oxide Ingot",
-             "machine": "Fluid Infuser",
-             "machine_state": "buildable",
-             "machine_why": "craftable: nuclearcraft:infuser_idle",
-             "name": "Uranium Oxide Ingot",
-             "need": 1,
-             "per_run": 1,
-             "recipe": "hei:nuclearcraft_infuser:331756",
-             "runs": 1,
-             "status": "craft"
-            }
-           ],
-           "key": "contenttweaker:material_part:40",
-           "kind": "item",
-           "label": "Dreadite Ingot",
-           "machine": "Induction Smelter",
-           "machine_state": "buildable",
-           "machine_why": "craftable: thermalexpansion:machine:3 (as thermalexpansion:machine:3#f56885268ad5)",
-           "name": "Dreadite Ingot",
-           "need": 1,
-           "per_run": 2,
-           "recipe": "hei:thermalexpansion.smelter:148845",
-           "runs": 1,
-           "status": "craft"
-          },
-          {
-           "alternatives": 22,
-           "category": "minecraft.smelting",
-           "children": [
-            {
-             "key": "aoa3:varsium_ore",
-             "kind": "item",
-             "label": "Varsium Ore",
-             "name": "Varsium Ore",
-             "need": 1,
-             "note": "mined, not crafted",
-             "status": "raw"
-            }
-           ],
-           "key": "aoa3:varsium_ingot",
-           "kind": "item",
-           "label": "Varsium Ingot",
-           "machine": "Smelting",
-           "machine_state": "have",
-           "name": "Varsium Ingot",
-           "need": 1,
-           "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31839",
-           "runs": 1,
-           "status": "craft"
-          },
-          {
-           "alternatives": 21,
-           "category": "minecraft.smelting",
-           "children": [
-            {
-             "key": "aoa3:blazium_ore",
-             "kind": "item",
-             "label": "Blazium Ore",
-             "name": "Blazium Ore",
-             "need": 1,
-             "note": "mined, not crafted",
-             "status": "raw"
-            }
-           ],
-           "key": "aoa3:blazium_ingot",
-           "kind": "item",
-           "label": "Blazium Ingot",
-           "machine": "Smelting",
-           "machine_state": "have",
-           "name": "Blazium Ingot",
-           "need": 1,
-           "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31831",
-           "runs": 1,
-           "status": "craft"
-          },
-          {
-           "alternatives": 22,
-           "category": "minecraft.smelting",
-           "children": [
-            {
-             "key": "aoa3:lyon_ore",
-             "kind": "item",
-             "label": "Lyon Ore",
-             "name": "Lyon Ore",
-             "need": 1,
-             "note": "mined, not crafted",
-             "status": "raw"
-            }
-           ],
-           "key": "aoa3:lyon_ingot",
-           "kind": "item",
-           "label": "Lyon Ingot",
-           "machine": "Smelting",
-           "machine_state": "have",
-           "name": "Lyon Ingot",
-           "need": 1,
-           "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31345",
-           "runs": 1,
-           "status": "craft"
-          },
-          {
-           "alternatives": 132,
-           "category": "minecraft.smelting",
-           "children": [
-            {
-             "alt_count": 15,
-             "key": "minecraft:gold_ore",
-             "kind": "item",
-             "label": "Gold Ore",
-             "name": "Gold Ore",
-             "need": 4,
-             "note": "mined, not crafted",
-             "status": "raw"
-            }
-           ],
-           "key": "minecraft:gold_ingot",
-           "kind": "item",
-           "label": "Gold Ingot",
-           "machine": "Smelting",
-           "machine_state": "have",
-           "name": "Gold Ingot",
-           "need": 4,
-           "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31637",
-           "runs": 4,
-           "status": "craft"
-          },
-          {
-           "alternatives": 10,
-           "category": "modularmachinery.recipes.dragonfire_forge",
-           "children": [
-            {
-             "alternatives": 21,
-             "category": "minecraft.smelting",
-             "children": [
-              {
-               "key": "aoa3:blazium_ore",
-               "kind": "item",
-               "label": "Blazium Ore",
-               "name": "Blazium Ore",
-               "need": 2,
-               "note": "mined, not crafted",
-               "status": "raw"
-              }
-             ],
-             "key": "aoa3:blazium_ingot",
-             "kind": "item",
-             "label": "Blazium Ingot",
-             "machine": "Smelting",
-             "machine_state": "have",
-             "name": "Blazium Ingot",
-             "need": 2,
-             "per_run": 1,
-             "recipe": "hei:minecraft.smelting:31831",
-             "runs": 2,
-             "status": "craft"
-            },
-            {
-             "alternatives": 22,
-             "category": "minecraft.smelting",
-             "children": [
-              {
-               "key": "aoa3:varsium_ore",
-               "kind": "item",
-               "label": "Varsium Ore",
-               "name": "Varsium Ore",
-               "need": 2,
-               "note": "mined, not crafted",
-               "status": "raw"
-              }
-             ],
-             "key": "aoa3:varsium_ingot",
-             "kind": "item",
-             "label": "Varsium Ingot",
-             "machine": "Smelting",
-             "machine_state": "have",
-             "name": "Varsium Ingot",
-             "need": 2,
-             "per_run": 1,
-             "recipe": "hei:minecraft.smelting:31839",
-             "runs": 2,
-             "status": "craft"
-            },
-            {
-             "alternatives": 39,
-             "category": "minecraft.crafting",
-             "children": [
-              {
-               "alternatives": 3,
-               "category": "crafting_shaped",
-               "children": [
-                {
+                 "alternatives": 6,
+                 "category": "DraconicEvolution.Fusion",
                  "children": [
                   {
-                   "alternatives": 87,
-                   "category": "crafting_shapeless",
+                   "alternatives": 2,
+                   "category": "minecraft.crafting",
                    "children": [
                     {
-                     "key": "erebus:materials:11",
-                     "kind": "item",
-                     "label": "Redgem",
-                     "name": "Redgem",
-                     "need": 8,
-                     "status": "raw"
-                    }
-                   ],
-                   "key": "minecraft:redstone",
-                   "kind": "item",
-                   "label": "Redstone",
-                   "machine": "Crafting (shapeless)",
-                   "machine_state": "have",
-                   "name": "Redstone",
-                   "need": 16,
-                   "per_run": 2,
-                   "recipe": "Erebus-1.0.32.jar!assets/erebus/recipes/redstone.json",
-                   "runs": 8,
-                   "status": "craft"
-                  }
-                 ],
-                 "key": "ore:dustRedstone",
-                 "kind": "ore",
-                 "label": "dustRedstone",
-                 "name": "[oredict] dustRedstone",
-                 "need": 16,
-                 "resolved_to": "minecraft:redstone",
-                 "status": "oredict"
-                },
-                {
-                 "children": [
-                  {
-                   "alternatives": 47,
-                   "category": "bdew.jeibees.produce.rootBees",
-                   "children": [
-                    {
-                     "alt_count": 4,
-                     "alternatives": 3,
-                     "category": "bdew.jeibees.mutation.rootBees",
+                     "alternatives": 39,
+                     "category": "minecraft.crafting",
                      "children": [
                       {
-                       "alt_count": 4,
-                       "alternatives": 9,
-                       "category": "bdew.jeibees.mutation.rootBees",
+                       "alternatives": 3,
+                       "category": "crafting_shaped",
                        "children": [
                         {
-                         "alt_count": 4,
-                         "alternatives": 42,
-                         "category": "bdew.jeibees.mutation.rootBees",
                          "children": [
                           {
-                           "alt_count": 4,
-                           "alternatives": 201,
-                           "category": "bdew.jeibees.mutation.rootBees",
+                           "alternatives": 87,
+                           "category": "crafting_shapeless",
                            "children": [
                             {
-                             "alt_count": 4,
-                             "key": "forestry:bee_princess_ge#6f16eda873ae",
+                             "key": "erebus:materials:11",
                              "kind": "item",
-                             "label": "Forest Princess",
-                             "name": "Forest Princess",
-                             "need": 16,
-                             "status": "raw"
-                            },
-                            {
-                             "alt_count": 4,
-                             "key": "forestry:bee_princess_ge#00c16aad704a",
-                             "kind": "item",
-                             "label": "Meadows Princess",
-                             "name": "Meadows Princess",
-                             "need": 16,
+                             "label": "Redgem",
+                             "name": "Redgem",
+                             "need": 2,
                              "status": "raw"
                             }
                            ],
-                           "interchangeable": 67,
-                           "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                           "key": "minecraft:redstone",
                            "kind": "item",
-                           "label": "Common Drone",
-                           "machine": "Bee Breeding",
+                           "label": "Redstone",
+                           "machine": "Crafting (shapeless)",
                            "machine_state": "have",
-                           "name": "Common Drone",
-                           "need": 16,
-                           "per_run": 1,
-                           "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
-                           "runs": 16,
+                           "name": "Redstone",
+                           "need": 4,
+                           "per_run": 2,
+                           "recipe": "Erebus-1.0.32.jar!assets/erebus/recipes/redstone.json",
+                           "runs": 2,
                            "status": "craft"
-                          },
-                          {
-                           "alt_count": 4,
-                           "key": "forestry:bee_princess_ge#6f16eda873ae",
-                           "kind": "item",
-                           "label": "Forest Princess",
-                           "name": "Forest Princess",
-                           "need": 16,
-                           "status": "raw"
                           }
                          ],
-                         "interchangeable": 14,
-                         "key": "forestry:bee_drone_ge#9cd0196d9f2a",
-                         "kind": "item",
-                         "label": "Cultivated Drone",
-                         "machine": "Bee Breeding",
-                         "machine_state": "have",
-                         "name": "Cultivated Drone",
-                         "need": 16,
-                         "per_run": 1,
-                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
-                         "runs": 16,
-                         "status": "craft"
+                         "key": "ore:dustRedstone",
+                         "kind": "ore",
+                         "label": "dustRedstone",
+                         "name": "[oredict] dustRedstone",
+                         "need": 4,
+                         "resolved_to": "minecraft:redstone",
+                         "status": "oredict"
                         },
                         {
-                         "alt_count": 4,
-                         "key": "forestry:bee_princess_ge#c3e057183678",
-                         "kind": "item",
-                         "label": "Modest Princess",
-                         "name": "Modest Princess",
-                         "need": 16,
-                         "status": "raw"
-                        }
-                       ],
-                       "interchangeable": 3,
-                       "key": "forestry:bee_drone_ge#79c0ce707f9c",
-                       "kind": "item",
-                       "label": "Sinister Drone",
-                       "machine": "Bee Breeding",
-                       "machine_state": "have",
-                       "name": "Sinister Drone",
-                       "need": 16,
-                       "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.mutation.rootBees:144498",
-                       "runs": 16,
-                       "status": "craft"
-                      },
-                      {
-                       "alt_count": 4,
-                       "alternatives": 12,
-                       "category": "bdew.jeibees.mutation.rootBees",
-                       "children": [
-                        {
-                         "alt_count": 4,
-                         "alternatives": 9,
-                         "category": "bdew.jeibees.mutation.rootBees",
                          "children": [
                           {
-                           "alt_count": 4,
-                           "alternatives": 42,
-                           "category": "bdew.jeibees.mutation.rootBees",
+                           "alternatives": 47,
+                           "category": "bdew.jeibees.produce.rootBees",
                            "children": [
                             {
                              "alt_count": 4,
-                             "alternatives": 201,
+                             "alternatives": 3,
                              "category": "bdew.jeibees.mutation.rootBees",
                              "children": [
                               {
                                "alt_count": 4,
-                               "key": "forestry:bee_princess_ge#6f16eda873ae",
+                               "alternatives": 9,
+                               "category": "bdew.jeibees.mutation.rootBees",
+                               "children": [
+                                {
+                                 "alt_count": 4,
+                                 "alternatives": 42,
+                                 "category": "bdew.jeibees.mutation.rootBees",
+                                 "children": [
+                                  {
+                                   "alt_count": 4,
+                                   "alternatives": 201,
+                                   "category": "bdew.jeibees.mutation.rootBees",
+                                   "children": [
+                                    {
+                                     "alt_count": 4,
+                                     "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                     "kind": "item",
+                                     "label": "Forest Princess",
+                                     "name": "Forest Princess",
+                                     "need": 4,
+                                     "status": "raw"
+                                    },
+                                    {
+                                     "alt_count": 4,
+                                     "key": "forestry:bee_princess_ge#00c16aad704a",
+                                     "kind": "item",
+                                     "label": "Meadows Princess",
+                                     "name": "Meadows Princess",
+                                     "need": 4,
+                                     "status": "raw"
+                                    }
+                                   ],
+                                   "interchangeable": 67,
+                                   "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                                   "kind": "item",
+                                   "label": "Common Drone",
+                                   "machine": "Bee Breeding",
+                                   "machine_state": "have",
+                                   "name": "Common Drone",
+                                   "need": 4,
+                                   "per_run": 1,
+                                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                                   "runs": 4,
+                                   "status": "craft"
+                                  },
+                                  {
+                                   "alt_count": 4,
+                                   "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                   "kind": "item",
+                                   "label": "Forest Princess",
+                                   "name": "Forest Princess",
+                                   "need": 4,
+                                   "status": "raw"
+                                  }
+                                 ],
+                                 "interchangeable": 14,
+                                 "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                                 "kind": "item",
+                                 "label": "Cultivated Drone",
+                                 "machine": "Bee Breeding",
+                                 "machine_state": "have",
+                                 "name": "Cultivated Drone",
+                                 "need": 4,
+                                 "per_run": 1,
+                                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                                 "runs": 4,
+                                 "status": "craft"
+                                },
+                                {
+                                 "alt_count": 4,
+                                 "key": "forestry:bee_princess_ge#c3e057183678",
+                                 "kind": "item",
+                                 "label": "Modest Princess",
+                                 "name": "Modest Princess",
+                                 "need": 4,
+                                 "status": "raw"
+                                }
+                               ],
+                               "interchangeable": 3,
+                               "key": "forestry:bee_drone_ge#79c0ce707f9c",
                                "kind": "item",
-                               "label": "Forest Princess",
-                               "name": "Forest Princess",
-                               "need": 16,
+                               "label": "Sinister Drone",
+                               "machine": "Bee Breeding",
+                               "machine_state": "have",
+                               "name": "Sinister Drone",
+                               "need": 4,
+                               "per_run": 1,
+                               "recipe": "hei:bdew.jeibees.mutation.rootBees:144498",
+                               "runs": 4,
+                               "status": "craft"
+                              },
+                              {
+                               "alt_count": 4,
+                               "alternatives": 12,
+                               "category": "bdew.jeibees.mutation.rootBees",
+                               "children": [
+                                {
+                                 "alt_count": 4,
+                                 "alternatives": 9,
+                                 "category": "bdew.jeibees.mutation.rootBees",
+                                 "children": [
+                                  {
+                                   "alt_count": 4,
+                                   "alternatives": 42,
+                                   "category": "bdew.jeibees.mutation.rootBees",
+                                   "children": [
+                                    {
+                                     "alt_count": 4,
+                                     "alternatives": 201,
+                                     "category": "bdew.jeibees.mutation.rootBees",
+                                     "children": [
+                                      {
+                                       "alt_count": 4,
+                                       "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                       "kind": "item",
+                                       "label": "Forest Princess",
+                                       "name": "Forest Princess",
+                                       "need": 4,
+                                       "status": "raw"
+                                      },
+                                      {
+                                       "alt_count": 4,
+                                       "key": "forestry:bee_princess_ge#00c16aad704a",
+                                       "kind": "item",
+                                       "label": "Meadows Princess",
+                                       "name": "Meadows Princess",
+                                       "need": 4,
+                                       "status": "raw"
+                                      }
+                                     ],
+                                     "interchangeable": 67,
+                                     "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                                     "kind": "item",
+                                     "label": "Common Drone",
+                                     "machine": "Bee Breeding",
+                                     "machine_state": "have",
+                                     "name": "Common Drone",
+                                     "need": 4,
+                                     "per_run": 1,
+                                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                                     "runs": 4,
+                                     "status": "craft"
+                                    },
+                                    {
+                                     "alt_count": 4,
+                                     "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                     "kind": "item",
+                                     "label": "Forest Princess",
+                                     "name": "Forest Princess",
+                                     "need": 4,
+                                     "status": "raw"
+                                    }
+                                   ],
+                                   "interchangeable": 14,
+                                   "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                                   "kind": "item",
+                                   "label": "Cultivated Drone",
+                                   "machine": "Bee Breeding",
+                                   "machine_state": "have",
+                                   "name": "Cultivated Drone",
+                                   "need": 4,
+                                   "per_run": 1,
+                                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                                   "runs": 4,
+                                   "status": "craft"
+                                  },
+                                  {
+                                   "alt_count": 4,
+                                   "key": "forestry:bee_princess_ge#c3e057183678",
+                                   "kind": "item",
+                                   "label": "Modest Princess",
+                                   "name": "Modest Princess",
+                                   "need": 4,
+                                   "status": "raw"
+                                  }
+                                 ],
+                                 "interchangeable": 3,
+                                 "key": "forestry:bee_drone_ge#79c0ce707f9c",
+                                 "kind": "item",
+                                 "label": "Sinister Drone",
+                                 "machine": "Bee Breeding",
+                                 "machine_state": "have",
+                                 "name": "Sinister Drone",
+                                 "need": 4,
+                                 "per_run": 1,
+                                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144498",
+                                 "runs": 4,
+                                 "status": "craft"
+                                },
+                                {
+                                 "alt_count": 4,
+                                 "key": "forestry:bee_princess_ge#c3e057183678",
+                                 "kind": "item",
+                                 "label": "Modest Princess",
+                                 "name": "Modest Princess",
+                                 "need": 4,
+                                 "status": "raw"
+                                }
+                               ],
+                               "interchangeable": 3,
+                               "key": "forestry:bee_drone_ge#15553d722f1a",
+                               "kind": "item",
+                               "label": "Fiendish Drone",
+                               "machine": "Bee Breeding",
+                               "machine_state": "have",
+                               "name": "Fiendish Drone",
+                               "need": 4,
+                               "per_run": 1,
+                               "recipe": "hei:bdew.jeibees.mutation.rootBees:144501",
+                               "runs": 4,
+                               "status": "craft"
+                              }
+                             ],
+                             "key": "forestry:bee_drone_ge#3c6a1a608c14",
+                             "kind": "item",
+                             "label": "Demonic Drone",
+                             "machine": "Bee Breeding",
+                             "machine_state": "have",
+                             "name": "Demonic Drone",
+                             "need": 4,
+                             "per_run": 1,
+                             "recipe": "hei:bdew.jeibees.mutation.rootBees:144503",
+                             "runs": 4,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "minecraft:glowstone_dust",
+                           "kind": "item",
+                           "label": "Glowstone Dust",
+                           "machine": "Bee Produce",
+                           "machine_state": "have",
+                           "name": "Glowstone Dust",
+                           "need": 4,
+                           "per_run": 1,
+                           "recipe": "hei:bdew.jeibees.produce.rootBees:144922",
+                           "runs": 4,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "ore:dustGlowstone",
+                         "kind": "ore",
+                         "label": "dustGlowstone",
+                         "name": "[oredict] dustGlowstone",
+                         "need": 4,
+                         "resolved_to": "minecraft:glowstone_dust",
+                         "status": "oredict"
+                        },
+                        {
+                         "children": [
+                          {
+                           "alternatives": 103,
+                           "category": "minecraft.smelting",
+                           "children": [
+                            {
+                             "key": "erebus:ore_encrusted_diamond",
+                             "kind": "item",
+                             "label": "Volcanic Diamond Ore",
+                             "name": "Volcanic Diamond Ore",
+                             "need": 1,
+                             "note": "mined, not crafted",
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "minecraft:diamond",
+                           "kind": "item",
+                           "label": "Diamond",
+                           "machine": "Smelting",
+                           "machine_state": "have",
+                           "name": "Diamond",
+                           "need": 1,
+                           "per_run": 2,
+                           "recipe": "hei:minecraft.smelting:31337",
+                           "runs": 1,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "ore:gemDiamond",
+                         "kind": "ore",
+                         "label": "gemDiamond",
+                         "name": "[oredict] gemDiamond",
+                         "need": 1,
+                         "resolved_to": "minecraft:diamond",
+                         "status": "oredict"
+                        }
+                       ],
+                       "key": "projecte:item.pe_philosophers_stone",
+                       "kind": "item",
+                       "label": "Philosopher's Stone",
+                       "machine": "Crafting (shaped)",
+                       "machine_state": "have",
+                       "name": "Philosopher's Stone",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "ProjectE-1.12.2-PE1.4.1.jar!assets/projecte/recipes/philosophers_stone.json",
+                       "runs": 1,
+                       "status": "craft"
+                      },
+                      {
+                       "key": "contenttweaker:alchemical_ore",
+                       "kind": "item",
+                       "label": "Alchemical Ore",
+                       "name": "Alchemical Ore",
+                       "need": 1,
+                       "note": "mined, not crafted",
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "projecte:item.pe_fuel:2",
+                     "kind": "item",
+                     "label": "Aeternalis Fuel",
+                     "machine": "Crafting",
+                     "machine_state": "have",
+                     "name": "Aeternalis Fuel",
+                     "need": 1,
+                     "per_run": 1,
+                     "recipe": "hei:minecraft.crafting:26254",
+                     "runs": 1,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 55,
+                     "category": "minecraft.crafting",
+                     "children": [
+                      {
+                       "key": "itemblacklist:blacklisted#15e6d3819d2e",
+                       "kind": "item",
+                       "label": "Ender Pearl",
+                       "name": "Ender Pearl",
+                       "need": 1,
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "minecraft:ender_pearl",
+                     "kind": "item",
+                     "label": "Ender Pearl",
+                     "machine": "Crafting",
+                     "machine_state": "have",
+                     "name": "Ender Pearl",
+                     "need": 1,
+                     "per_run": 1,
+                     "recipe": "hei:minecraft.crafting:28082",
+                     "runs": 1,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "minecraft:ender_eye",
+                   "kind": "item",
+                   "label": "Eye of Ender",
+                   "machine": "Crafting",
+                   "machine_state": "have",
+                   "name": "Eye of Ender",
+                   "need": 1,
+                   "per_run": 1,
+                   "recipe": "hei:minecraft.crafting:27168",
+                   "runs": 1,
+                   "status": "craft"
+                  },
+                  {
+                   "alternatives": 1,
+                   "category": "minecraft.crafting",
+                   "children": [
+                    {
+                     "alternatives": 18,
+                     "category": "thermalexpansion.centrifuge",
+                     "children": [
+                      {
+                       "alternatives": 5,
+                       "category": "bdew.jeibees.produce.rootBees",
+                       "children": [
+                        {
+                         "alt_count": 4,
+                         "key": "forestry:bee_princess_ge#438f0076b188",
+                         "kind": "item",
+                         "label": "Radiant Princess",
+                         "name": "Radiant Princess",
+                         "need": 1,
+                         "status": "raw"
+                        }
+                       ],
+                       "key": "gendustry:honey_comb:13369",
+                       "kind": "item",
+                       "label": "Beecon Comb",
+                       "machine": "Bee Produce",
+                       "machine_state": "have",
+                       "name": "Beecon Comb",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "minecraft:nether_star",
+                     "kind": "item",
+                     "label": "Nether Star",
+                     "machine": "Centrifugal Separator",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: thermalexpansion:machine:10 (as thermalexpansion:machine:10#f56885268ad5)",
+                     "name": "Nether Star",
+                     "need": 2,
+                     "per_run": 32,
+                     "recipe": "hei:thermalexpansion.centrifuge:151349",
+                     "runs": 1,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 3,
+                     "category": "THAUMCRAFT_CRUCIBLE",
+                     "children": [
+                      {
+                       "key": "thaumcraft:phial:1#569402430b2f",
+                       "kind": "item",
+                       "label": "Phial of Aer Essentia",
+                       "name": "Phial of Aer Essentia",
+                       "need": 2,
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "minecraft:dragon_breath",
+                     "kind": "item",
+                     "label": "Dragon's Breath",
+                     "machine": "Crucible",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: thaumcraft:crucible",
+                     "name": "Dragon's Breath",
+                     "need": 2,
+                     "per_run": 1,
+                     "recipe": "hei:THAUMCRAFT_CRUCIBLE:160855",
+                     "runs": 2,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 19,
+                     "category": "minecraft.smelting",
+                     "children": [
+                      {
+                       "alt_count": 2,
+                       "key": "actuallyadditions:block_misc:3",
+                       "kind": "item",
+                       "label": "Black Quartz Ore",
+                       "name": "Black Quartz Ore",
+                       "need": 2,
+                       "note": "mined, not crafted",
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "actuallyadditions:item_misc:5",
+                     "kind": "item",
+                     "label": "Black Quartz",
+                     "machine": "Smelting",
+                     "machine_state": "have",
+                     "name": "Black Quartz",
+                     "need": 2,
+                     "per_run": 1,
+                     "recipe": "hei:minecraft.smelting:31753",
+                     "runs": 2,
+                     "status": "craft"
+                    },
+                    {
+                     "alternatives": 22,
+                     "category": "crafting_shapeless",
+                     "children": [
+                      {
+                       "alternatives": 3,
+                       "category": "deepmoblearning.extraction_chamber",
+                       "children": [
+                        {
+                         "alternatives": 2,
+                         "category": "deepmoblearning.simulation_chamber",
+                         "children": [
+                          {
+                           "key": "deepmoblearning:data_model_guardian#c7bccd46ac55",
+                           "kind": "item",
+                           "label": "Guardian Data Model (Basic)",
+                           "name": "Guardian Data Model (Basic)",
+                           "need": 1,
+                           "note": "no recipe reaches this state; the graph can only make Data Model Guardian",
+                           "status": "raw",
+                           "unsourced": true
+                          },
+                          {
+                           "alternatives": 2,
+                           "category": "crafting_shaped",
+                           "children": [
+                            {
+                             "alternatives": 132,
+                             "category": "minecraft.smelting",
+                             "children": [
+                              {
+                               "alt_count": 15,
+                               "key": "minecraft:gold_ore",
+                               "kind": "item",
+                               "label": "Gold Ore",
+                               "name": "Gold Ore",
+                               "need": 1,
+                               "note": "mined, not crafted",
+                               "status": "raw"
+                              }
+                             ],
+                             "key": "minecraft:gold_ingot",
+                             "kind": "item",
+                             "label": "Gold Ingot",
+                             "machine": "Smelting",
+                             "machine_state": "have",
+                             "name": "Gold Ingot",
+                             "need": 1,
+                             "per_run": 1,
+                             "recipe": "hei:minecraft.smelting:31637",
+                             "runs": 1,
+                             "status": "craft"
+                            },
+                            {
+                             "alternatives": 43,
+                             "category": "bdew.jeibees.produce.rootBees",
+                             "children": [
+                              {
+                               "alt_count": 4,
+                               "key": "forestry:bee_princess_ge#438f0076b188",
+                               "kind": "item",
+                               "label": "Radiant Princess",
+                               "name": "Radiant Princess",
+                               "need": 4,
+                               "status": "raw"
+                              }
+                             ],
+                             "key": "minecraft:clay_ball",
+                             "kind": "item",
+                             "label": "Clay",
+                             "machine": "Bee Produce",
+                             "machine_state": "have",
+                             "name": "Clay",
+                             "need": 4,
+                             "per_run": 1,
+                             "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
+                             "runs": 4,
+                             "status": "craft"
+                            },
+                            {
+                             "children": [
+                              {
+                               "alternatives": 54,
+                               "category": "minecraft.smelting",
+                               "children": [
+                                {
+                                 "alt_count": 5,
+                                 "key": "minecraft:lapis_ore",
+                                 "kind": "item",
+                                 "label": "Lapis Lazuli Ore",
+                                 "name": "Lapis Lazuli Ore",
+                                 "need": 1,
+                                 "note": "mined, not crafted",
+                                 "status": "raw"
+                                }
+                               ],
+                               "key": "minecraft:dye:4",
+                               "kind": "item",
+                               "label": "Lapis Lazuli",
+                               "machine": "Smelting",
+                               "machine_state": "have",
+                               "name": "Lapis Lazuli",
+                               "need": 1,
+                               "per_run": 1,
+                               "recipe": "hei:minecraft.smelting:31564",
+                               "runs": 1,
+                               "status": "craft"
+                              }
+                             ],
+                             "key": "ore:gemLapis",
+                             "kind": "ore",
+                             "label": "gemLapis",
+                             "name": "[oredict] gemLapis",
+                             "need": 1,
+                             "resolved_to": "minecraft:dye:4",
+                             "status": "oredict"
+                            },
+                            {
+                             "alternatives": 172,
+                             "category": "minecraft.smelting",
+                             "children": [
+                              {
+                               "alt_count": 14,
+                               "key": "minecraft:iron_ore",
+                               "kind": "item",
+                               "label": "Iron Ore",
+                               "name": "Iron Ore",
+                               "need": 1,
+                               "note": "mined, not crafted",
+                               "status": "raw"
+                              }
+                             ],
+                             "key": "minecraft:iron_ingot",
+                             "kind": "item",
+                             "label": "Iron Ingot",
+                             "machine": "Smelting",
+                             "machine_state": "have",
+                             "name": "Iron Ingot",
+                             "need": 1,
+                             "per_run": 1,
+                             "recipe": "hei:minecraft.smelting:31344",
+                             "runs": 1,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "deepmoblearning:polymer_clay",
+                           "kind": "item",
+                           "label": "Polymer Clay",
+                           "machine": "Crafting (shaped)",
+                           "machine_state": "have",
+                           "name": "Polymer Clay",
+                           "need": 1,
+                           "per_run": 16,
+                           "recipe": "DeepMobEvolution-1.12.2-1.2.3.jar!assets/deepmoblearning/recipes/misc/polymer_clay.json",
+                           "runs": 1,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "deepmoblearning:pristine_matter_guardian",
+                         "kind": "item",
+                         "label": "Pristine Matter Guardian",
+                         "machine": "Simulation Chamber",
+                         "machine_state": "buildable",
+                         "machine_why": "craftable: deepmoblearning:simulation_chamber",
+                         "name": "Pristine Matter Guardian",
+                         "need": 1,
+                         "per_run": 1,
+                         "recipe": "hei:deepmoblearning.simulation_chamber:171464",
+                         "runs": 1,
+                         "status": "craft"
+                        }
+                       ],
+                       "key": "xreliquary:mob_ingredient:16",
+                       "kind": "item",
+                       "label": "Guardian Spike",
+                       "machine": "Loot Fabricator",
+                       "machine_state": "buildable",
+                       "machine_why": "craftable: deepmoblearning:extraction_chamber",
+                       "name": "Guardian Spike",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "hei:deepmoblearning.extraction_chamber:171607",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "minecraft:prismarine_shard",
+                     "kind": "item",
+                     "label": "Prismarine Shard",
+                     "machine": "Crafting (shapeless)",
+                     "machine_state": "have",
+                     "name": "Prismarine Shard",
+                     "need": 2,
+                     "per_run": 5,
+                     "recipe": "Reliquary-1.12.2-1.3.4.796.jar!assets/xreliquary/recipes/items/uncrafting/prismarine_shard.json",
+                     "runs": 1,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "actuallyadditions:item_misc:19",
+                   "kind": "item",
+                   "label": "Ender Star",
+                   "machine": "Crafting",
+                   "machine_state": "have",
+                   "name": "Ender Star",
+                   "need": 2,
+                   "per_run": 1,
+                   "recipe": "hei:minecraft.crafting:13450",
+                   "runs": 2,
+                   "status": "craft"
+                  },
+                  {
+                   "alternatives": 18,
+                   "category": "thermalexpansion.centrifuge",
+                   "children": [
+                    {
+                     "alternatives": 5,
+                     "category": "bdew.jeibees.produce.rootBees",
+                     "children": [
+                      {
+                       "alt_count": 4,
+                       "key": "forestry:bee_princess_ge#438f0076b188",
+                       "kind": "item",
+                       "label": "Radiant Princess",
+                       "name": "Radiant Princess",
+                       "need": 1,
+                       "status": "raw"
+                      }
+                     ],
+                     "key": "gendustry:honey_comb:13369",
+                     "kind": "item",
+                     "label": "Beecon Comb",
+                     "machine": "Bee Produce",
+                     "machine_state": "have",
+                     "name": "Beecon Comb",
+                     "need": 1,
+                     "per_run": 1,
+                     "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
+                     "runs": 1,
+                     "status": "craft"
+                    }
+                   ],
+                   "key": "minecraft:nether_star",
+                   "kind": "item",
+                   "label": "Nether Star",
+                   "machine": "Centrifugal Separator",
+                   "machine_state": "buildable",
+                   "machine_why": "craftable: thermalexpansion:machine:10 (as thermalexpansion:machine:10#f56885268ad5)",
+                   "name": "Nether Star",
+                   "need": 4,
+                   "per_run": 32,
+                   "recipe": "hei:thermalexpansion.centrifuge:151349",
+                   "runs": 1,
+                   "status": "craft"
+                  }
+                 ],
+                 "key": "contenttweaker:divination_catalyst",
+                 "kind": "item",
+                 "label": "Divination Catalyst",
+                 "machine": "Fusion Crafting",
+                 "machine_state": "buildable",
+                 "machine_why": "craftable: draconicevolution:fusion_crafting_core",
+                 "name": "Divination Catalyst",
+                 "need": 1,
+                 "per_run": 1,
+                 "recipe": "hei:DraconicEvolution.Fusion:116824",
+                 "runs": 1,
+                 "status": "craft"
+                },
+                {
+                 "key": "divinerpg:frozen_stone",
+                 "kind": "item",
+                 "label": "Frozen Stone",
+                 "name": "Frozen Stone",
+                 "need": 1,
+                 "status": "raw"
+                }
+               ],
+               "interchangeable": 3,
+               "key": "fluid:divination_catalyst",
+               "kind": "fluid",
+               "label": "Divination Catalyst",
+               "machine": "Mythical Resource Crucible",
+               "machine_state": "buildable",
+               "machine_why": "craftable: modularmachinery:mythical_resource_crucible_controller",
+               "name": "[fluid] Divination Catalyst",
+               "need": 10,
+               "per_run": 30,
+               "recipe": "hei:modularmachinery.recipes.mythical_resource_crucible:159488",
+               "runs": 1,
+               "status": "craft"
+              }
+             ],
+             "key": "contenttweaker:divine_star",
+             "kind": "item",
+             "label": "Divine Star",
+             "machine": "Stellar Diviner",
+             "machine_state": "buildable",
+             "machine_why": "craftable: modularmachinery:stellar_diviner_controller",
+             "name": "Divine Star",
+             "need": 1,
+             "per_run": 2,
+             "recipe": "hei:modularmachinery.recipes.stellar_diviner:158238",
+             "runs": 1,
+             "status": "craft"
+            },
+            {
+             "alternatives": 12,
+             "category": "bdew.jeibees.produce.rootBees",
+             "children": [
+              {
+               "alt_count": 4,
+               "alternatives": 3,
+               "category": "bdew.jeibees.mutation.rootBees",
+               "children": [
+                {
+                 "alt_count": 4,
+                 "key": "forestry:bee_princess_ge#73cbbfbf5774",
+                 "kind": "item",
+                 "label": "Apothecary Princess",
+                 "name": "Apothecary Princess",
+                 "need": 1,
+                 "status": "raw"
+                },
+                {
+                 "alt_count": 4,
+                 "key": "forestry:bee_princess_ge#32e2cccf4258",
+                 "kind": "item",
+                 "label": "Universal Constellation Princess",
+                 "name": "Universal Constellation Princess",
+                 "need": 1,
+                 "status": "raw"
+                }
+               ],
+               "key": "forestry:bee_drone_ge#56ff8dc1b5b0",
+               "kind": "item",
+               "label": "Ascendant Drone",
+               "machine": "Bee Breeding",
+               "machine_state": "have",
+               "name": "Ascendant Drone",
+               "need": 1,
+               "per_run": 1,
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:144730",
+               "runs": 1,
+               "status": "craft"
+              }
+             ],
+             "interchangeable": 6,
+             "key": "contenttweaker:opalescent_matter",
+             "kind": "item",
+             "label": "Opalescent Matter",
+             "machine": "Bee Produce",
+             "machine_state": "have",
+             "name": "Opalescent Matter",
+             "need": 1,
+             "per_run": 1,
+             "recipe": "hei:bdew.jeibees.produce.rootBees:145300",
+             "runs": 1,
+             "status": "craft"
+            },
+            {
+             "key": "fluid:liquid_uu_matter",
+             "kind": "fluid",
+             "label": "Liquid UU Matter",
+             "name": "[fluid] Liquid UU Matter",
+             "need": 300,
+             "status": "raw"
+            }
+           ],
+           "key": "fluid:spatial_matter",
+           "kind": "fluid",
+           "label": "Weak Recursive Essence",
+           "machine": "Spatial Crucible",
+           "machine_state": "buildable",
+           "machine_why": "craftable: modularmachinery:spatial_crucible_controller",
+           "name": "[fluid] Weak Recursive Essence",
+           "need": 25,
+           "per_run": 120000,
+           "recipe": "hei:modularmachinery.recipes.spatial_crucible:157557",
+           "runs": 1,
+           "status": "craft"
+          },
+          {
+           "alternatives": 4,
+           "category": "nuclearcraft_chemical_reactor",
+           "children": [
+            {
+             "alternatives": 2,
+             "category": "nuclearcraft_melter",
+             "children": [
+              {
+               "alternatives": 6,
+               "category": "solidifier",
+               "children": [
+                {
+                 "alternatives": 93,
+                 "category": "minecraft.smelting",
+                 "children": [
+                  {
+                   "key": "railcraft:ore_metal_poor",
+                   "kind": "item",
+                   "label": "Poor Iron Ore",
+                   "name": "Poor Iron Ore",
+                   "need": 1,
+                   "note": "mined, not crafted",
+                   "status": "raw"
+                  }
+                 ],
+                 "key": "minecraft:iron_nugget",
+                 "kind": "item",
+                 "label": "Iron Nugget",
+                 "machine": "Smelting",
+                 "machine_state": "have",
+                 "name": "Iron Nugget",
+                 "need": 1,
+                 "per_run": 3,
+                 "recipe": "hei:minecraft.smelting:31399",
+                 "runs": 1,
+                 "status": "craft"
+                },
+                {
+                 "key": "fluid:crystal",
+                 "kind": "fluid",
+                 "label": "Crystallized Obsidian",
+                 "name": "[fluid] Crystallized Obsidian",
+                 "need": 1000,
+                 "status": "raw"
+                }
+               ],
+               "key": "cyclicmagic:crystallized_obsidian",
+               "kind": "item",
+               "label": "Crystallized Obsidian",
+               "machine": "Solidifier",
+               "machine_state": "buildable",
+               "machine_why": "craftable: cyclicmagic:solidifier",
+               "name": "Crystallized Obsidian",
+               "need": 1,
+               "per_run": 1,
+               "recipe": "hei:solidifier:249123",
+               "runs": 1,
+               "status": "craft"
+              }
+             ],
+             "key": "fluid:crystallized_obsidian",
+             "kind": "fluid",
+             "label": "Crystallized Obsidian",
+             "machine": "Melter",
+             "machine_state": "buildable",
+             "machine_why": "craftable: nuclearcraft:melter_idle",
+             "name": "[fluid] Crystallized Obsidian",
+             "need": 500,
+             "per_run": 1000,
+             "recipe": "hei:nuclearcraft_melter:332649",
+             "runs": 1,
+             "status": "craft"
+            },
+            {
+             "alternatives": 21,
+             "category": "tconstruct.smeltery",
+             "children": [
+              {
+               "alternatives": 3,
+               "category": "minecraft.crafting",
+               "children": [
+                {
+                 "alternatives": 15,
+                 "category": "ie.arcFurnace",
+                 "children": [
+                  {
+                   "alternatives": 9,
+                   "category": "crafting_shapeless",
+                   "children": [
+                    {
+                     "children": [
+                      {
+                       "alternatives": 68,
+                       "category": "minecraft.crafting",
+                       "children": [
+                        {
+                         "alt_count": 9,
+                         "key": "thermalfoundation:ore:1",
+                         "kind": "item",
+                         "label": "Tin Ore",
+                         "name": "Tin Ore",
+                         "need": 3,
+                         "note": "mined, not crafted",
+                         "status": "raw"
+                        },
+                        {
+                         "alternatives": 2,
+                         "category": "crafting_shaped",
+                         "children": [
+                          {
+                           "children": [
+                            {
+                             "alternatives": 172,
+                             "category": "minecraft.smelting",
+                             "children": [
+                              {
+                               "alt_count": 14,
+                               "key": "minecraft:iron_ore",
+                               "kind": "item",
+                               "label": "Iron Ore",
+                               "name": "Iron Ore",
+                               "need": 6,
+                               "note": "mined, not crafted",
+                               "status": "raw"
+                              }
+                             ],
+                             "key": "minecraft:iron_ingot",
+                             "kind": "item",
+                             "label": "Iron Ingot",
+                             "machine": "Smelting",
+                             "machine_state": "have",
+                             "name": "Iron Ingot",
+                             "need": 6,
+                             "per_run": 1,
+                             "recipe": "hei:minecraft.smelting:31344",
+                             "runs": 6,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "ore:ingotIron",
+                           "kind": "ore",
+                           "label": "ingotIron",
+                           "name": "[oredict] ingotIron",
+                           "need": 6,
+                           "resolved_to": "minecraft:iron_ingot",
+                           "status": "oredict"
+                          },
+                          {
+                           "alternatives": 133,
+                           "category": "bdew.jeibees.produce.rootBees",
+                           "children": [
+                            {
+                             "alt_count": 4,
+                             "alternatives": 3,
+                             "category": "bdew.jeibees.mutation.rootBees",
+                             "children": [
+                              {
+                               "alt_count": 4,
+                               "key": "forestry:bee_princess_ge#49265408b3e4",
+                               "kind": "item",
+                               "label": "Tropical Princess",
+                               "name": "Tropical Princess",
+                               "need": 3,
                                "status": "raw"
                               },
                               {
                                "alt_count": 4,
-                               "key": "forestry:bee_princess_ge#00c16aad704a",
+                               "alternatives": 3,
+                               "category": "bdew.jeibees.mutation.rootBees",
+                               "children": [
+                                {
+                                 "alt_count": 4,
+                                 "key": "forestry:bee_princess_ge#c3e057183678",
+                                 "kind": "item",
+                                 "label": "Modest Princess",
+                                 "name": "Modest Princess",
+                                 "need": 3,
+                                 "status": "raw"
+                                },
+                                {
+                                 "alt_count": 4,
+                                 "alternatives": 12,
+                                 "category": "bdew.jeibees.mutation.rootBees",
+                                 "children": [
+                                  {
+                                   "alt_count": 4,
+                                   "key": "forestry:bee_princess_ge#fe694d7cc286",
+                                   "kind": "item",
+                                   "label": "Mystical Princess",
+                                   "name": "Mystical Princess",
+                                   "need": 3,
+                                   "status": "raw"
+                                  },
+                                  {
+                                   "alt_count": 4,
+                                   "alternatives": 42,
+                                   "category": "bdew.jeibees.mutation.rootBees",
+                                   "children": [
+                                    {
+                                     "alt_count": 4,
+                                     "alternatives": 201,
+                                     "category": "bdew.jeibees.mutation.rootBees",
+                                     "children": [
+                                      {
+                                       "alt_count": 4,
+                                       "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                       "kind": "item",
+                                       "label": "Forest Princess",
+                                       "name": "Forest Princess",
+                                       "need": 3,
+                                       "status": "raw"
+                                      },
+                                      {
+                                       "alt_count": 4,
+                                       "key": "forestry:bee_princess_ge#00c16aad704a",
+                                       "kind": "item",
+                                       "label": "Meadows Princess",
+                                       "name": "Meadows Princess",
+                                       "need": 3,
+                                       "status": "raw"
+                                      }
+                                     ],
+                                     "interchangeable": 67,
+                                     "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                                     "kind": "item",
+                                     "label": "Common Drone",
+                                     "machine": "Bee Breeding",
+                                     "machine_state": "have",
+                                     "name": "Common Drone",
+                                     "need": 3,
+                                     "per_run": 1,
+                                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                                     "runs": 3,
+                                     "status": "craft"
+                                    },
+                                    {
+                                     "alt_count": 4,
+                                     "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                     "kind": "item",
+                                     "label": "Forest Princess",
+                                     "name": "Forest Princess",
+                                     "need": 3,
+                                     "status": "raw"
+                                    }
+                                   ],
+                                   "interchangeable": 14,
+                                   "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                                   "kind": "item",
+                                   "label": "Cultivated Drone",
+                                   "machine": "Bee Breeding",
+                                   "machine_state": "have",
+                                   "name": "Cultivated Drone",
+                                   "need": 3,
+                                   "per_run": 1,
+                                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                                   "runs": 3,
+                                   "status": "craft"
+                                  }
+                                 ],
+                                 "interchangeable": 4,
+                                 "key": "forestry:bee_drone_ge#e870ae142070",
+                                 "kind": "item",
+                                 "label": "Eldritch Drone",
+                                 "machine": "Bee Breeding",
+                                 "machine_state": "have",
+                                 "name": "Eldritch Drone",
+                                 "need": 3,
+                                 "per_run": 1,
+                                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
+                                 "runs": 3,
+                                 "status": "craft"
+                                }
+                               ],
+                               "key": "forestry:bee_drone_ge#dd8d21c62d2e",
                                "kind": "item",
-                               "label": "Meadows Princess",
-                               "name": "Meadows Princess",
-                               "need": 16,
-                               "status": "raw"
+                               "label": "Skulking Drone",
+                               "machine": "Bee Breeding",
+                               "machine_state": "have",
+                               "name": "Skulking Drone",
+                               "need": 3,
+                               "per_run": 1,
+                               "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
+                               "runs": 3,
+                               "status": "craft"
                               }
                              ],
-                             "interchangeable": 67,
-                             "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                             "key": "forestry:bee_drone_ge#c59795af440a",
                              "kind": "item",
-                             "label": "Common Drone",
+                             "label": "Spidery Drone",
                              "machine": "Bee Breeding",
                              "machine_state": "have",
-                             "name": "Common Drone",
-                             "need": 16,
+                             "name": "Spidery Drone",
+                             "need": 3,
                              "per_run": 1,
-                             "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
-                             "runs": 16,
+                             "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
+                             "runs": 3,
                              "status": "craft"
-                            },
-                            {
-                             "alt_count": 4,
-                             "key": "forestry:bee_princess_ge#6f16eda873ae",
-                             "kind": "item",
-                             "label": "Forest Princess",
-                             "name": "Forest Princess",
-                             "need": 16,
-                             "status": "raw"
                             }
                            ],
-                           "interchangeable": 14,
-                           "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                           "key": "minecraft:string",
                            "kind": "item",
-                           "label": "Cultivated Drone",
-                           "machine": "Bee Breeding",
+                           "label": "String",
+                           "machine": "Bee Produce",
                            "machine_state": "have",
-                           "name": "Cultivated Drone",
-                           "need": 16,
+                           "name": "String",
+                           "need": 3,
                            "per_run": 1,
-                           "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
-                           "runs": 16,
+                           "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+                           "runs": 3,
                            "status": "craft"
                           },
                           {
-                           "alt_count": 4,
-                           "key": "forestry:bee_princess_ge#c3e057183678",
-                           "kind": "item",
-                           "label": "Modest Princess",
-                           "name": "Modest Princess",
-                           "need": 16,
-                           "status": "raw"
+                           "alt_count": 2,
+                           "children": [
+                            {
+                             "key": "natura:sticks:*",
+                             "kind": "item",
+                             "label": "Maple Sticks (*)",
+                             "name": "Maple Sticks (*)",
+                             "need": 6,
+                             "status": "raw"
+                            }
+                           ],
+                           "key": "ore:stickWood",
+                           "kind": "ore",
+                           "label": "stickWood",
+                           "name": "[oredict] stickWood",
+                           "need": 6,
+                           "resolved_to": "natura:sticks:*",
+                           "status": "oredict"
                           }
                          ],
-                         "interchangeable": 3,
-                         "key": "forestry:bee_drone_ge#79c0ce707f9c",
+                         "key": "immersiveengineering:tool",
                          "kind": "item",
-                         "label": "Sinister Drone",
-                         "machine": "Bee Breeding",
+                         "label": "Engineer's Hammer",
+                         "machine": "Crafting (shaped)",
                          "machine_state": "have",
-                         "name": "Sinister Drone",
-                         "need": 16,
+                         "name": "Engineer's Hammer",
+                         "need": 3,
                          "per_run": 1,
-                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144498",
-                         "runs": 16,
+                         "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/tool/hammer.json",
+                         "runs": 3,
                          "status": "craft"
-                        },
-                        {
-                         "alt_count": 4,
-                         "key": "forestry:bee_princess_ge#c3e057183678",
-                         "kind": "item",
-                         "label": "Modest Princess",
-                         "name": "Modest Princess",
-                         "need": 16,
-                         "status": "raw"
                         }
                        ],
-                       "interchangeable": 3,
-                       "key": "forestry:bee_drone_ge#15553d722f1a",
+                       "key": "thermalfoundation:material:65",
                        "kind": "item",
-                       "label": "Fiendish Drone",
-                       "machine": "Bee Breeding",
+                       "label": "Pulverized Tin",
+                       "machine": "Crafting",
                        "machine_state": "have",
-                       "name": "Fiendish Drone",
-                       "need": 16,
+                       "name": "Pulverized Tin",
+                       "need": 3,
                        "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.mutation.rootBees:144501",
-                       "runs": 16,
+                       "recipe": "hei:minecraft.crafting:25249",
+                       "runs": 3,
                        "status": "craft"
                       }
                      ],
-                     "key": "forestry:bee_drone_ge#3c6a1a608c14",
-                     "kind": "item",
-                     "label": "Demonic Drone",
-                     "machine": "Bee Breeding",
-                     "machine_state": "have",
-                     "name": "Demonic Drone",
-                     "need": 16,
-                     "per_run": 1,
-                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144503",
-                     "runs": 16,
-                     "status": "craft"
-                    }
-                   ],
-                   "key": "minecraft:glowstone_dust",
-                   "kind": "item",
-                   "label": "Glowstone Dust",
-                   "machine": "Bee Produce",
-                   "machine_state": "have",
-                   "name": "Glowstone Dust",
-                   "need": 16,
-                   "per_run": 1,
-                   "recipe": "hei:bdew.jeibees.produce.rootBees:144922",
-                   "runs": 16,
-                   "status": "craft"
-                  }
-                 ],
-                 "key": "ore:dustGlowstone",
-                 "kind": "ore",
-                 "label": "dustGlowstone",
-                 "name": "[oredict] dustGlowstone",
-                 "need": 16,
-                 "resolved_to": "minecraft:glowstone_dust",
-                 "status": "oredict"
-                },
-                {
-                 "children": [
-                  {
-                   "alternatives": 103,
-                   "category": "minecraft.smelting",
-                   "children": [
+                     "key": "ore:dustTin",
+                     "kind": "ore",
+                     "label": "dustTin",
+                     "name": "[oredict] dustTin",
+                     "need": 3,
+                     "resolved_to": "thermalfoundation:material:65",
+                     "status": "oredict"
+                    },
                     {
-                     "key": "erebus:ore_encrusted_diamond",
-                     "kind": "item",
-                     "label": "Volcanic Diamond Ore",
-                     "name": "Volcanic Diamond Ore",
-                     "need": 2,
-                     "note": "mined, not crafted",
-                     "status": "raw"
+                     "children": [
+                      {
+                       "alternatives": 66,
+                       "category": "minecraft.crafting",
+                       "children": [
+                        {
+                         "alternatives": 3,
+                         "category": "TechReborn.IndustrialElectrolyzer",
+                         "children": [
+                          {
+                           "alternatives": 15,
+                           "category": "minecraft.crafting",
+                           "children": [
+                            {
+                             "key": "techreborn:ore",
+                             "kind": "item",
+                             "label": "Galena Ore",
+                             "name": "Galena Ore",
+                             "need": 4,
+                             "note": "mined, not crafted",
+                             "status": "raw"
+                            },
+                            {
+                             "alternatives": 2,
+                             "category": "crafting_shaped",
+                             "children": [
+                              {
+                               "children": [
+                                {
+                                 "alternatives": 172,
+                                 "category": "minecraft.smelting",
+                                 "children": [
+                                  {
+                                   "alt_count": 14,
+                                   "key": "minecraft:iron_ore",
+                                   "kind": "item",
+                                   "label": "Iron Ore",
+                                   "name": "Iron Ore",
+                                   "need": 8,
+                                   "note": "mined, not crafted",
+                                   "status": "raw"
+                                  }
+                                 ],
+                                 "key": "minecraft:iron_ingot",
+                                 "kind": "item",
+                                 "label": "Iron Ingot",
+                                 "machine": "Smelting",
+                                 "machine_state": "have",
+                                 "name": "Iron Ingot",
+                                 "need": 8,
+                                 "per_run": 1,
+                                 "recipe": "hei:minecraft.smelting:31344",
+                                 "runs": 8,
+                                 "status": "craft"
+                                }
+                               ],
+                               "key": "ore:ingotIron",
+                               "kind": "ore",
+                               "label": "ingotIron",
+                               "name": "[oredict] ingotIron",
+                               "need": 8,
+                               "resolved_to": "minecraft:iron_ingot",
+                               "status": "oredict"
+                              },
+                              {
+                               "alternatives": 133,
+                               "category": "bdew.jeibees.produce.rootBees",
+                               "children": [
+                                {
+                                 "alt_count": 4,
+                                 "alternatives": 3,
+                                 "category": "bdew.jeibees.mutation.rootBees",
+                                 "children": [
+                                  {
+                                   "alt_count": 4,
+                                   "key": "forestry:bee_princess_ge#49265408b3e4",
+                                   "kind": "item",
+                                   "label": "Tropical Princess",
+                                   "name": "Tropical Princess",
+                                   "need": 4,
+                                   "status": "raw"
+                                  },
+                                  {
+                                   "alt_count": 4,
+                                   "alternatives": 3,
+                                   "category": "bdew.jeibees.mutation.rootBees",
+                                   "children": [
+                                    {
+                                     "alt_count": 4,
+                                     "key": "forestry:bee_princess_ge#c3e057183678",
+                                     "kind": "item",
+                                     "label": "Modest Princess",
+                                     "name": "Modest Princess",
+                                     "need": 4,
+                                     "status": "raw"
+                                    },
+                                    {
+                                     "alt_count": 4,
+                                     "alternatives": 12,
+                                     "category": "bdew.jeibees.mutation.rootBees",
+                                     "children": [
+                                      {
+                                       "alt_count": 4,
+                                       "key": "forestry:bee_princess_ge#fe694d7cc286",
+                                       "kind": "item",
+                                       "label": "Mystical Princess",
+                                       "name": "Mystical Princess",
+                                       "need": 4,
+                                       "status": "raw"
+                                      },
+                                      {
+                                       "alt_count": 4,
+                                       "alternatives": 42,
+                                       "category": "bdew.jeibees.mutation.rootBees",
+                                       "children": [
+                                        {
+                                         "alt_count": 4,
+                                         "alternatives": 201,
+                                         "category": "bdew.jeibees.mutation.rootBees",
+                                         "children": [
+                                          {
+                                           "alt_count": 4,
+                                           "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                           "kind": "item",
+                                           "label": "Forest Princess",
+                                           "name": "Forest Princess",
+                                           "need": 4,
+                                           "status": "raw"
+                                          },
+                                          {
+                                           "alt_count": 4,
+                                           "key": "forestry:bee_princess_ge#00c16aad704a",
+                                           "kind": "item",
+                                           "label": "Meadows Princess",
+                                           "name": "Meadows Princess",
+                                           "need": 4,
+                                           "status": "raw"
+                                          }
+                                         ],
+                                         "interchangeable": 67,
+                                         "key": "forestry:bee_drone_ge#e1904b1a26ba",
+                                         "kind": "item",
+                                         "label": "Common Drone",
+                                         "machine": "Bee Breeding",
+                                         "machine_state": "have",
+                                         "name": "Common Drone",
+                                         "need": 4,
+                                         "per_run": 1,
+                                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                                         "runs": 4,
+                                         "status": "craft"
+                                        },
+                                        {
+                                         "alt_count": 4,
+                                         "key": "forestry:bee_princess_ge#6f16eda873ae",
+                                         "kind": "item",
+                                         "label": "Forest Princess",
+                                         "name": "Forest Princess",
+                                         "need": 4,
+                                         "status": "raw"
+                                        }
+                                       ],
+                                       "interchangeable": 14,
+                                       "key": "forestry:bee_drone_ge#9cd0196d9f2a",
+                                       "kind": "item",
+                                       "label": "Cultivated Drone",
+                                       "machine": "Bee Breeding",
+                                       "machine_state": "have",
+                                       "name": "Cultivated Drone",
+                                       "need": 4,
+                                       "per_run": 1,
+                                       "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+                                       "runs": 4,
+                                       "status": "craft"
+                                      }
+                                     ],
+                                     "interchangeable": 4,
+                                     "key": "forestry:bee_drone_ge#e870ae142070",
+                                     "kind": "item",
+                                     "label": "Eldritch Drone",
+                                     "machine": "Bee Breeding",
+                                     "machine_state": "have",
+                                     "name": "Eldritch Drone",
+                                     "need": 4,
+                                     "per_run": 1,
+                                     "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
+                                     "runs": 4,
+                                     "status": "craft"
+                                    }
+                                   ],
+                                   "key": "forestry:bee_drone_ge#dd8d21c62d2e",
+                                   "kind": "item",
+                                   "label": "Skulking Drone",
+                                   "machine": "Bee Breeding",
+                                   "machine_state": "have",
+                                   "name": "Skulking Drone",
+                                   "need": 4,
+                                   "per_run": 1,
+                                   "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
+                                   "runs": 4,
+                                   "status": "craft"
+                                  }
+                                 ],
+                                 "key": "forestry:bee_drone_ge#c59795af440a",
+                                 "kind": "item",
+                                 "label": "Spidery Drone",
+                                 "machine": "Bee Breeding",
+                                 "machine_state": "have",
+                                 "name": "Spidery Drone",
+                                 "need": 4,
+                                 "per_run": 1,
+                                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
+                                 "runs": 4,
+                                 "status": "craft"
+                                }
+                               ],
+                               "key": "minecraft:string",
+                               "kind": "item",
+                               "label": "String",
+                               "machine": "Bee Produce",
+                               "machine_state": "have",
+                               "name": "String",
+                               "need": 4,
+                               "per_run": 1,
+                               "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+                               "runs": 4,
+                               "status": "craft"
+                              },
+                              {
+                               "alt_count": 2,
+                               "children": [
+                                {
+                                 "key": "natura:sticks:*",
+                                 "kind": "item",
+                                 "label": "Maple Sticks (*)",
+                                 "name": "Maple Sticks (*)",
+                                 "need": 8,
+                                 "status": "raw"
+                                }
+                               ],
+                               "key": "ore:stickWood",
+                               "kind": "ore",
+                               "label": "stickWood",
+                               "name": "[oredict] stickWood",
+                               "need": 8,
+                               "resolved_to": "natura:sticks:*",
+                               "status": "oredict"
+                              }
+                             ],
+                             "key": "immersiveengineering:tool",
+                             "kind": "item",
+                             "label": "Engineer's Hammer",
+                             "machine": "Crafting (shaped)",
+                             "machine_state": "have",
+                             "name": "Engineer's Hammer",
+                             "need": 4,
+                             "per_run": 1,
+                             "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/tool/hammer.json",
+                             "runs": 4,
+                             "status": "craft"
+                            }
+                           ],
+                           "key": "techreborn:dust:23",
+                           "kind": "item",
+                           "label": "Galena Dust",
+                           "machine": "Crafting",
+                           "machine_state": "have",
+                           "name": "Galena Dust",
+                           "need": 4,
+                           "per_run": 1,
+                           "recipe": "hei:minecraft.crafting:10348",
+                           "runs": 4,
+                           "status": "craft"
+                          }
+                         ],
+                         "key": "techreborn:smalldust:47",
+                         "kind": "item",
+                         "label": "Small Pile of Silver Dust",
+                         "machine": "Industrial Electrolyzer",
+                         "machine_state": "buildable",
+                         "machine_why": "craftable: techreborn:industrial_electrolyzer",
+                         "name": "Small Pile of Silver Dust",
+                         "need": 4,
+                         "per_run": 3,
+                         "recipe": "hei:TechReborn.IndustrialElectrolyzer:249776",
+                         "runs": 2,
+                         "status": "craft"
+                        }
+                       ],
+                       "key": "thermalfoundation:material:66",
+                       "kind": "item",
+                       "label": "Pulverized Silver",
+                       "machine": "Crafting",
+                       "machine_state": "have",
+                       "name": "Pulverized Silver",
+                       "need": 1,
+                       "per_run": 1,
+                       "recipe": "hei:minecraft.crafting:25057",
+                       "runs": 1,
+                       "status": "craft"
+                      }
+                     ],
+                     "key": "ore:dustSilver",
+                     "kind": "ore",
+                     "label": "dustSilver",
+                     "name": "[oredict] dustSilver",
+                     "need": 1,
+                     "resolved_to": "thermalfoundation:material:66",
+                     "status": "oredict"
                     }
                    ],
-                   "key": "minecraft:diamond",
+                   "key": "thermalfoundation:material:102",
                    "kind": "item",
-                   "label": "Diamond",
-                   "machine": "Smelting",
+                   "label": "Lumium Blend",
+                   "machine": "Crafting (shapeless)",
                    "machine_state": "have",
-                   "name": "Diamond",
+                   "name": "Lumium Blend",
                    "need": 4,
-                   "per_run": 2,
-                   "recipe": "hei:minecraft.smelting:31337",
-                   "runs": 2,
+                   "per_run": 4,
+                   "recipe": "ThermalFoundation-1.12.2-2.6.7.1-universal.jar!assets/thermalfoundation/recipes/dust_lumium.json",
+                   "runs": 1,
                    "status": "craft"
                   }
                  ],
-                 "key": "ore:gemDiamond",
-                 "kind": "ore",
-                 "label": "gemDiamond",
-                 "name": "[oredict] gemDiamond",
+                 "key": "thermalfoundation:material:166",
+                 "kind": "item",
+                 "label": "Lumium Ingot",
+                 "machine": "Arc Furnace",
+                 "machine_state": "buildable",
+                 "machine_why": "craftable: immersiveengineering:metal_multiblock:13",
+                 "name": "Lumium Ingot",
                  "need": 4,
-                 "resolved_to": "minecraft:diamond",
-                 "status": "oredict"
+                 "per_run": 1,
+                 "recipe": "hei:ie.arcFurnace:171033",
+                 "runs": 4,
+                 "status": "craft"
                 }
                ],
-               "key": "projecte:item.pe_philosophers_stone",
+               "key": "thermalfoundation:material:230",
                "kind": "item",
-               "label": "Philosopher's Stone",
-               "machine": "Crafting (shaped)",
+               "label": "Lumium Nugget",
+               "machine": "Crafting",
                "machine_state": "have",
-               "name": "Philosopher's Stone",
-               "need": 4,
-               "per_run": 1,
-               "recipe": "ProjectE-1.12.2-PE1.4.1.jar!assets/projecte/recipes/philosophers_stone.json",
+               "name": "Lumium Nugget",
+               "need": 32,
+               "per_run": 9,
+               "recipe": "hei:minecraft.crafting:12587",
                "runs": 4,
                "status": "craft"
-              },
-              {
-               "key": "contenttweaker:alchemical_ore",
-               "kind": "item",
-               "label": "Alchemical Ore",
-               "name": "Alchemical Ore",
-               "need": 4,
-               "note": "mined, not crafted",
-               "status": "raw"
               }
              ],
-             "key": "projecte:item.pe_fuel:2",
-             "kind": "item",
-             "label": "Aeternalis Fuel",
-             "machine": "Crafting",
-             "machine_state": "have",
-             "name": "Aeternalis Fuel",
-             "need": 4,
-             "per_run": 1,
-             "recipe": "hei:minecraft.crafting:26254",
-             "runs": 4,
+             "key": "fluid:lumium",
+             "kind": "fluid",
+             "label": "Molten Lumium",
+             "machine": "Smelting",
+             "machine_state": "buildable",
+             "machine_why": "craftable: tconstruct:smeltery_controller",
+             "name": "[fluid] Molten Lumium",
+             "need": 500,
+             "per_run": 16,
+             "recipe": "hei:tconstruct.smeltery:132273",
+             "runs": 32,
              "status": "craft"
             }
            ],
-           "key": "fluid:eternal_dragon_fire",
+           "key": "fluid:luminous_lava",
            "kind": "fluid",
-           "label": "Eternal Dragon Fire",
-           "machine": "Dragonfire Forge",
+           "label": "Luminous Lava",
+           "machine": "Chemical Reactor",
            "machine_state": "buildable",
-           "machine_why": "craftable: modularmachinery:dragonfire_forge_controller",
-           "name": "[fluid] Eternal Dragon Fire",
-           "need": 250,
+           "machine_why": "craftable: nuclearcraft:chemical_reactor_idle",
+           "name": "[fluid] Luminous Lava",
+           "need": 25,
            "per_run": 400,
-           "recipe": "hei:modularmachinery.recipes.dragonfire_forge:154604",
+           "recipe": "hei:nuclearcraft_chemical_reactor:333172",
            "runs": 1,
            "status": "craft"
           }
@@ -2756,13 +3775,13 @@
          "key": "contenttweaker:material_part:48",
          "kind": "item",
          "label": "Dreaded Steel Ingot",
-         "machine": "Dragonfire Crucible",
+         "machine": "Deeplands Mythical Void Resource Miner",
          "machine_state": "buildable",
-         "machine_why": "craftable: modularmachinery:dragonfire_crucible_controller",
+         "machine_why": "craftable: modularmachinery:mythical_resource_miner_tier11_controller",
          "name": "Dreaded Steel Ingot",
          "need": 1,
-         "per_run": 8,
-         "recipe": "hei:modularmachinery.recipes.dragonfire_crucible:153897",
+         "per_run": 2,
+         "recipe": "hei:modularmachinery.recipes.mythical_resource_miner_tier11:154019",
          "runs": 1,
          "status": "craft"
         },
@@ -7414,268 +8433,169 @@
                "children": [
                 {
                  "alternatives": 24,
-                 "category": "minecraft.crafting",
+                 "category": "ORE_SIEVE",
                  "children": [
                   {
-                   "alt_count": 2,
-                   "dimension": "Sedna",
-                   "key": "contenttweaker:sednanite_ore",
-                   "kind": "item",
-                   "label": "Sednanite Ore",
-                   "name": "Sednanite Ore",
-                   "need": 2,
-                   "note": "mined on Sedna, and you have not been there",
-                   "status": "raw"
-                  },
-                  {
-                   "alternatives": 2,
-                   "category": "crafting_shaped",
+                   "alternatives": 109,
+                   "category": "minecraft.crafting",
                    "children": [
                     {
+                     "alternatives": 25,
+                     "category": "crafting_shapeless",
                      "children": [
                       {
-                       "alternatives": 172,
-                       "category": "minecraft.smelting",
                        "children": [
                         {
-                         "alt_count": 14,
-                         "key": "minecraft:iron_ore",
-                         "kind": "item",
-                         "label": "Iron Ore",
-                         "name": "Iron Ore",
-                         "need": 4,
-                         "note": "mined, not crafted",
-                         "status": "raw"
-                        }
-                       ],
-                       "key": "minecraft:iron_ingot",
-                       "kind": "item",
-                       "label": "Iron Ingot",
-                       "machine": "Smelting",
-                       "machine_state": "have",
-                       "name": "Iron Ingot",
-                       "need": 4,
-                       "per_run": 1,
-                       "recipe": "hei:minecraft.smelting:31344",
-                       "runs": 4,
-                       "status": "craft"
-                      }
-                     ],
-                     "key": "ore:ingotIron",
-                     "kind": "ore",
-                     "label": "ingotIron",
-                     "name": "[oredict] ingotIron",
-                     "need": 4,
-                     "resolved_to": "minecraft:iron_ingot",
-                     "status": "oredict"
-                    },
-                    {
-                     "alternatives": 133,
-                     "category": "bdew.jeibees.produce.rootBees",
-                     "children": [
-                      {
-                       "alt_count": 4,
-                       "alternatives": 3,
-                       "category": "bdew.jeibees.mutation.rootBees",
-                       "children": [
-                        {
-                         "alt_count": 4,
-                         "key": "forestry:bee_princess_ge#49265408b3e4",
-                         "kind": "item",
-                         "label": "Tropical Princess",
-                         "name": "Tropical Princess",
-                         "need": 2,
-                         "status": "raw"
-                        },
-                        {
-                         "alt_count": 4,
-                         "alternatives": 3,
-                         "category": "bdew.jeibees.mutation.rootBees",
+                         "alternatives": 62,
+                         "category": "minecraft.smelting",
                          "children": [
                           {
-                           "alt_count": 4,
-                           "key": "forestry:bee_princess_ge#c3e057183678",
+                           "key": "iceandfire:frozen_gravel",
                            "kind": "item",
-                           "label": "Modest Princess",
-                           "name": "Modest Princess",
-                           "need": 2,
+                           "label": "Frozen Gravel",
+                           "name": "Frozen Gravel",
+                           "need": 6,
                            "status": "raw"
-                          },
-                          {
-                           "alt_count": 4,
-                           "alternatives": 12,
-                           "category": "bdew.jeibees.mutation.rootBees",
-                           "children": [
-                            {
-                             "alt_count": 4,
-                             "key": "forestry:bee_princess_ge#fe694d7cc286",
-                             "kind": "item",
-                             "label": "Mystical Princess",
-                             "name": "Mystical Princess",
-                             "need": 2,
-                             "status": "raw"
-                            },
-                            {
-                             "alt_count": 4,
-                             "alternatives": 42,
-                             "category": "bdew.jeibees.mutation.rootBees",
-                             "children": [
-                              {
-                               "alt_count": 4,
-                               "alternatives": 201,
-                               "category": "bdew.jeibees.mutation.rootBees",
-                               "children": [
-                                {
-                                 "alt_count": 4,
-                                 "key": "forestry:bee_princess_ge#6f16eda873ae",
-                                 "kind": "item",
-                                 "label": "Forest Princess",
-                                 "name": "Forest Princess",
-                                 "need": 2,
-                                 "status": "raw"
-                                },
-                                {
-                                 "alt_count": 4,
-                                 "key": "forestry:bee_princess_ge#00c16aad704a",
-                                 "kind": "item",
-                                 "label": "Meadows Princess",
-                                 "name": "Meadows Princess",
-                                 "need": 2,
-                                 "status": "raw"
-                                }
-                               ],
-                               "interchangeable": 67,
-                               "key": "forestry:bee_drone_ge#e1904b1a26ba",
-                               "kind": "item",
-                               "label": "Common Drone",
-                               "machine": "Bee Breeding",
-                               "machine_state": "have",
-                               "name": "Common Drone",
-                               "need": 2,
-                               "per_run": 1,
-                               "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
-                               "runs": 2,
-                               "status": "craft"
-                              },
-                              {
-                               "alt_count": 4,
-                               "key": "forestry:bee_princess_ge#6f16eda873ae",
-                               "kind": "item",
-                               "label": "Forest Princess",
-                               "name": "Forest Princess",
-                               "need": 2,
-                               "status": "raw"
-                              }
-                             ],
-                             "interchangeable": 14,
-                             "key": "forestry:bee_drone_ge#9cd0196d9f2a",
-                             "kind": "item",
-                             "label": "Cultivated Drone",
-                             "machine": "Bee Breeding",
-                             "machine_state": "have",
-                             "name": "Cultivated Drone",
-                             "need": 2,
-                             "per_run": 1,
-                             "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
-                             "runs": 2,
-                             "status": "craft"
-                            }
-                           ],
-                           "interchangeable": 4,
-                           "key": "forestry:bee_drone_ge#e870ae142070",
-                           "kind": "item",
-                           "label": "Eldritch Drone",
-                           "machine": "Bee Breeding",
-                           "machine_state": "have",
-                           "name": "Eldritch Drone",
-                           "need": 2,
-                           "per_run": 1,
-                           "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
-                           "runs": 2,
-                           "status": "craft"
                           }
                          ],
-                         "key": "forestry:bee_drone_ge#dd8d21c62d2e",
+                         "key": "minecraft:gravel",
                          "kind": "item",
-                         "label": "Skulking Drone",
-                         "machine": "Bee Breeding",
+                         "label": "Gravel",
+                         "machine": "Smelting",
                          "machine_state": "have",
-                         "name": "Skulking Drone",
-                         "need": 2,
+                         "name": "Gravel",
+                         "need": 6,
                          "per_run": 1,
-                         "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
-                         "runs": 2,
+                         "recipe": "hei:minecraft.smelting:31620",
+                         "runs": 6,
                          "status": "craft"
                         }
                        ],
-                       "key": "forestry:bee_drone_ge#c59795af440a",
-                       "kind": "item",
-                       "label": "Spidery Drone",
-                       "machine": "Bee Breeding",
-                       "machine_state": "have",
-                       "name": "Spidery Drone",
-                       "need": 2,
-                       "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
-                       "runs": 2,
-                       "status": "craft"
+                       "key": "ore:gravel",
+                       "kind": "ore",
+                       "label": "gravel",
+                       "name": "[oredict] gravel",
+                       "need": 6,
+                       "resolved_to": "minecraft:gravel",
+                       "status": "oredict"
                       }
                      ],
-                     "key": "minecraft:string",
+                     "key": "minecraft:flint",
                      "kind": "item",
-                     "label": "String",
-                     "machine": "Bee Produce",
+                     "label": "Flint",
+                     "machine": "Crafting (shapeless)",
                      "machine_state": "have",
-                     "name": "String",
+                     "name": "Flint",
                      "need": 2,
                      "per_run": 1,
-                     "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+                     "recipe": "TinkersAntique-1.12.2-2.13.0.205.jar!assets/tconstruct/recipes/common/flint.json",
                      "runs": 2,
                      "status": "craft"
                     },
                     {
-                     "alt_count": 2,
+                     "alternatives": 62,
+                     "category": "minecraft.smelting",
                      "children": [
                       {
-                       "key": "natura:sticks:*",
+                       "key": "iceandfire:frozen_gravel",
                        "kind": "item",
-                       "label": "Maple Sticks (*)",
-                       "name": "Maple Sticks (*)",
-                       "need": 4,
+                       "label": "Frozen Gravel",
+                       "name": "Frozen Gravel",
+                       "need": 2,
                        "status": "raw"
                       }
                      ],
-                     "key": "ore:stickWood",
-                     "kind": "ore",
-                     "label": "stickWood",
-                     "name": "[oredict] stickWood",
-                     "need": 4,
-                     "resolved_to": "natura:sticks:*",
-                     "status": "oredict"
+                     "key": "minecraft:gravel",
+                     "kind": "item",
+                     "label": "Gravel",
+                     "machine": "Smelting",
+                     "machine_state": "have",
+                     "name": "Gravel",
+                     "need": 2,
+                     "per_run": 1,
+                     "recipe": "hei:minecraft.smelting:31620",
+                     "runs": 2,
+                     "status": "craft"
                     }
                    ],
-                   "key": "immersiveengineering:tool",
+                   "key": "minecraft:sand",
                    "kind": "item",
-                   "label": "Engineer's Hammer",
-                   "machine": "Crafting (shaped)",
+                   "label": "Sand",
+                   "machine": "Crafting",
                    "machine_state": "have",
-                   "name": "Engineer's Hammer",
+                   "name": "Sand",
                    "need": 2,
                    "per_run": 1,
-                   "recipe": "ImmersiveEngineering-0.12-98.jar!assets/immersiveengineering/recipes/tool/hammer.json",
+                   "recipe": "hei:minecraft.crafting:31219",
                    "runs": 2,
+                   "status": "craft"
+                  },
+                  {
+                   "alternatives": 64,
+                   "category": "ORE_FERMENTER",
+                   "children": [
+                    {
+                     "alternatives": 64,
+                     "category": "ORE_WASHER",
+                     "children": [
+                      {
+                       "key": "thermalfoundation:ore:6",
+                       "kind": "item",
+                       "label": "Platinum Ore",
+                       "name": "Platinum Ore",
+                       "need": 1,
+                       "note": "mined, not crafted",
+                       "status": "raw"
+                      },
+                      {
+                       "key": "fluid:meat",
+                       "kind": "fluid",
+                       "label": "Liquid Meat",
+                       "name": "[fluid] Liquid Meat",
+                       "need": 200,
+                       "status": "raw"
+                      }
+                     ],
+                     "interchangeable": 34,
+                     "key": "fluid:if.ore_fluid_raw",
+                     "kind": "fluid",
+                     "label": "Raw Ore Meat",
+                     "machine": "Washing Factory",
+                     "machine_state": "buildable",
+                     "machine_why": "craftable: industrialforegoing:ore_washer",
+                     "name": "[fluid] Raw Ore Meat",
+                     "need": 100,
+                     "per_run": 150,
+                     "recipe": "hei:ORE_WASHER:110856",
+                     "runs": 1,
+                     "status": "craft"
+                    }
+                   ],
+                   "interchangeable": 64,
+                   "key": "fluid:if.ore_fluid_fermented",
+                   "kind": "fluid",
+                   "label": "Fermented Ore Meat",
+                   "machine": "Fermentation Station",
+                   "machine_state": "buildable",
+                   "machine_why": "craftable: industrialforegoing:ore_fermenter",
+                   "name": "[fluid] Fermented Ore Meat",
+                   "need": 200,
+                   "per_run": 2,
+                   "recipe": "hei:ORE_FERMENTER:110906",
+                   "runs": 100,
                    "status": "craft"
                   }
                  ],
                  "key": "contenttweaker:material_part:55",
                  "kind": "item",
                  "label": "Sednanite Dust",
-                 "machine": "Crafting",
-                 "machine_state": "have",
+                 "machine": "Fluid Sieving Machine",
+                 "machine_state": "buildable",
+                 "machine_why": "craftable: industrialforegoing:ore_sieve",
                  "name": "Sednanite Dust",
                  "need": 2,
                  "per_run": 1,
-                 "recipe": "hei:minecraft.crafting:25179",
+                 "recipe": "hei:ORE_SIEVE:111028",
                  "runs": 2,
                  "status": "craft"
                 },
@@ -8013,7 +8933,7 @@
   },
   "truncated": false,
   "used_from_stock": [],
-  "work": 28232,
+  "work": 3054,
   "work_budget": 80000
  },
  "scenario": {
@@ -8024,6 +8944,7 @@
   "no_machine": [],
   "pins": {},
   "placed": {},
+  "raw": [],
   "source_overrides": {},
   "token_overrides": {},
   "visited_dimensions": {

@@ -332,10 +332,16 @@ def cmd_plan(args):
     costs = None
     if not args.no_cost:
         from . import cost as cost_mod
+        # `craftables` goes to the cost table as well as to the Solver below, and the two
+        # must be the same set: an item AE2 can autocraft terminates a branch, so pricing it
+        # at its full subtree makes the ranker avoid a route the plan would have stopped at
+        # immediately (#193). `--ignore-craftable` has already emptied the set by here, so
+        # the flag turns it off for both at once.
         costs = cost_mod.estimate_cached(g, args.graph, have=have, machine_states=states,
                                          free_sources=free, machine_items=machine_items,
                                          token_kinds=token_kinds, dimension_gates=gates,
-                                         emc_available=emc_available)
+                                         emc_available=emc_available,
+                                         craftables=craftables)
     # Pins outrank the ranking, and a pin that has lapsed says so on stderr rather than
     # quietly reverting: "i'm fine with suggestions", not with silent overwrites (#30).
     pinned, pin_notes = ({}, {})

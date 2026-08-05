@@ -366,7 +366,12 @@ public class NodeRowTextTest {
                            + row.label(), all.contains(row.label()));
             }
         }
-        assertEquals("the fixture must still hold two unsourced rows", 2, marked);
+        // THREE SINCE #193, not two. The count is asserted rather than left to the loop above
+        // because a loop over zero rows passes every assertion inside it, so this line is what
+        // makes the body mean anything. It moved because #193 took 553 keys from infinity to a
+        // finite price, so this plan now reaches subtrees it could not before and one more of
+        // them bottoms out on a leaf nothing sources. See `PlanJsonTest`'s sibling assertion.
+        assertEquals("the fixture must still hold three unsourced rows", 3, marked);
         // COUNTED, so a mark that appears on every row would fail here rather than pass. The
         // badge is only believable while it is rare.
         assertEquals("the mark must appear exactly as often as the flag does",

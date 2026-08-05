@@ -1,8 +1,10 @@
 package io.github.jacoblasky.recipedump.plan;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import io.github.jacoblasky.recipedump.graph.Bits;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import org.junit.Test;
@@ -104,10 +106,8 @@ public class CostTest {
 
     // -- container transfers -------------------------------------------------------------------
 
-    @Test
-    public void aContainerEmptyNeverMakesItsFluidCheaperButStillMakesTheItem() {
-        // Emptying a can you own is not production of its contents. Left in, the ranker
-        // prices a route the solver cannot take, because the solver walks real producers.
+    /** The can shape: emptying it yields a fluid and the tin it was made of. */
+    private static GraphBuilder cannedFluid() {
         GraphBuilder b = new GraphBuilder();
         b.beginRecipe();
         b.beginSlot(1, "item");
@@ -116,14 +116,136 @@ public class CostTest {
         b.output(b.key("fluid:water"), 1000);
         b.output(b.key("mod:tin"), 1);
         b.endRecipe("empty", "squeezer", null, "test", true, false);
+        return b;
+    }
+
+    @Test
+    public void aContainerEmptyNeverMakesItsFluidCheaperButStillMakesTheItem() {
+        // Emptying a can you own is not production of its contents. Left in, the ranker
+        // prices a route the solver cannot take, because the solver walks real producers.
+        GraphBuilder b = cannedFluid();
         RecipeGraph graph = b.build();
         CostTable table = Cost.estimate(graph, new CostInputs());
 
-        assertTrue(Double.isInfinite(priceOf(graph, table, "fluid:water")));
+        // UNSOURCED_COST EVEN THOUGH NOTHING CONSUMES THIS FLUID, and the "even though" is the
+        // part worth knowing. The LEAF rule walks recipe INPUTS, so an unconsumed key is never
+        // offered to it -- but the rule that raises `Unsourced.producedInNameOnly` sweeps every
+        // key and reads an infinite slot as BASE_RAW_COST, so it INSERTS rather than only
+        // raising. That is the same second effect `Unsourced.keys` has for 39 keys and is
+        // deliberate in both: these keys reach no plan and they DO reach a cost report.
+        //
+        // WHAT THIS ASSERTS is still the thing the test is named for: the price is not one the
+        // squeezer computed. Drop the exclusion and `relax` writes 521.0 through it.
+        assertEquals(Cost.UNSOURCED_COST, priceOf(graph, table, "fluid:water"), 0.0);
         // The item direction is real work and stays -- with the transfer penalty on top, so
         // it can never be preferred to a genuine route.
         assertEquals(Cost.UNGATED_MACHINE_COST + Cost.TRANSFER_PENALTY + Cost.BASE_RAW_COST,
                 priceOf(graph, table, "mod:tin"), 0.0);
+    }
+
+    @Test
+    public void aFluidOnlyAContainerEmptyMakesIsPricedRatherThanUnreachable() {
+        // #193. `seed` used to ask `byOutput().count(key) == 0`, the one reader that counted a
+        // container empty as production, so this fluid was not a leaf and got no seed -- and
+        // then `relax` applied the exclusion and refused to price it from the only recipe there
+        // is. Nothing seeded it and nothing relaxed it, while `Solver.expand` reported it raw
+        // and shopping-listed it. 120 fluids on the reference graph.
+        //
+        // UNSOURCED_COST, NOT BASE_RAW_COST, and that was measured: the cheapest value in the
+        // model steers the solver INTO fluids the tool cannot source, which is #176's defect in
+        // the one population #176's set cannot reach. See `Unsourced.producedInNameOnly`.
+        GraphBuilder b = cannedFluid();
+        recipe(b, "enrich", "crafting", "mod:enriched", 1, "fluid:water", 1000);
+        RecipeGraph graph = b.build();
+        CostTable table = Cost.estimate(graph, new CostInputs());
+
+        assertEquals(Cost.UNSOURCED_COST, priceOf(graph, table, "fluid:water"), 0.0);
+        // And the consumer prices at all, which is what the ranker needed: one infinite
+        // ingredient made every route through this fluid invisible.
+        assertTrue(Double.isFinite(priceOf(graph, table, "mod:enriched")));
+    }
+
+    @Test
+    public void theTwoUnexplainedPopulationsAreDisjoint() {
+        // `seed` walks both in one loop, which is only equivalent to two loops because they
+        // cannot overlap: `Unsourced.keys` needs byOutput EMPTY and `producedInNameOnly` needs
+        // it non-empty. Pinned rather than reasoned about, so a widening of either has to
+        // confront the claim. Mirrors `TheTwoUnexplainedPopulationsAreDisjointTest` in python.
+        GraphBuilder b = cannedFluid();
+        recipe(b, "enrich", "crafting", "mod:enriched", 1, "fluid:water", 1000);
+        RecipeGraph graph = b.build();
+        long[] unsourced = Unsourced.keys(graph);
+        long[] inNameOnly = Unsourced.producedInNameOnly(graph);
+
+        int both = 0;
+        for (int key = 0; key < graph.keyCount(); key++) {
+            if (Bits.get(unsourced, key) && Bits.get(inNameOnly, key)) {
+                both++;
+            }
+        }
+        assertEquals(0, both);
+        assertTrue(Bits.get(inNameOnly, graph.keyId("fluid:water")));
+        // And an ordinary leaf is in NEITHER, which is what keeps the set narrow: pricing every
+        // key with no producer at UNSOURCED_COST would put most of a shopping list behind it.
+        assertFalse(Bits.get(inNameOnly, graph.keyId("mod:full_can")));
+    }
+
+    // -- the two terminals the player declares, which is #193 ------------------------------
+
+    @Test
+    public void anAutocraftableItemPricesAsOneRequest() {
+        // `Solver.expand` has stopped at these since the feature shipped and the cost model was
+        // never told, so a route through one was priced at its full subtree while the real cost
+        // is one request -- and so it lost to worse routes.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "deep", "crafting", "mod:part", 1, "mod:grit", 64);
+        recipe(b, "assemble", "crafting", "mod:widget", 1, "mod:part", 1);
+        RecipeGraph graph = b.build();
+        int part = graph.keyId("mod:part");
+
+        CostTable blind = Cost.estimate(graph, new CostInputs());
+        CostTable told = Cost.estimate(graph, new CostInputs().craftable(part));
+        assertEquals(Cost.CRAFTABLE_COST, told.cost(part), 0.0);
+        // The consequence, which is why the price matters: the parent sees the request rather
+        // than the 64 grit.
+        assertTrue(priceOf(graph, told, "mod:widget") < priceOf(graph, blind, "mod:widget"));
+    }
+
+    @Test
+    public void aDeclaredStopPricesAsSomethingToGoAndGet() {
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "deep", "crafting", "mod:part", 1, "mod:grit", 64);
+        RecipeGraph graph = b.build();
+        int part = graph.keyId("mod:part");
+        assertEquals(Cost.BASE_RAW_COST,
+                Cost.estimate(graph, new CostInputs().raw(part)).cost(part), 0.0);
+    }
+
+    @Test
+    public void stockAndEmcStillWinOverBothDeclaredTerminals() {
+        // `expand` returns at the stock, source and EMC branches before it reaches
+        // raw/craftables, so the price has to as well. It is the under-a-raw-leaf guard doing
+        // that rather than the relative size of the constants.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "deep", "crafting", "mod:part", 1, "mod:grit", 64);
+        RecipeGraph graph = b.build();
+        int part = graph.keyId("mod:part");
+
+        assertEquals(0.0, Cost.estimate(graph,
+                new CostInputs().have(part).craftable(part).raw(part)).cost(part), 0.0);
+        assertEquals(Cost.EMC_COST, Cost.estimate(graph,
+                new CostInputs().emcAvailable(part).craftable(part)).cost(part), 0.0);
+    }
+
+    @Test
+    public void aCraftableOutranksADeclaredStopForTheSameKey() {
+        // `expand` reports `have` with the autocraft note rather than shopping-listing it.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "deep", "crafting", "mod:part", 1, "mod:grit", 64);
+        RecipeGraph graph = b.build();
+        int part = graph.keyId("mod:part");
+        assertEquals(Cost.CRAFTABLE_COST, Cost.estimate(graph,
+                new CostInputs().raw(part).craftable(part)).cost(part), 0.0);
     }
 
     // -- world ores, which is #106 ---------------------------------------------------------------

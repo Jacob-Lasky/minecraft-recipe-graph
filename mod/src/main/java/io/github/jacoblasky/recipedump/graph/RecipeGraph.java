@@ -534,7 +534,13 @@ public final class RecipeGraph {
     }
 
     /**
-     * {@link #producers}, minus container transfers asked to CREATE a fluid.
+     * Whether `recipeId` counts as PRODUCING `keyId`, or is only moving it about.
+     *
+     * THE ONE SPELLING OF THIS EXCLUSION, mirroring `Graph.real_production`. {@link
+     * #realProducers} and {@link #realOutput} below read it, and so does {@link
+     * Cost#relax}, which carried a hand-rolled copy of it until #193 -- as did python's, and
+     * a third spelling in the seed excluded nothing at all, which left 120 fluids priced at
+     * infinity while the plan shopping-listed them. DO NOT re-inline it in a caller.
      *
      * Emptying a container is not production of its contents: to hold a water-filled can you
      * must already have had the water. Left in, it is worse than circular, because the dump
@@ -546,23 +552,65 @@ public final class RecipeGraph {
      * a transfer may still produce an ITEM, and a fluid whose only route is emptying a
      * container correctly comes out as NEED, which is the honest answer.
      */
+    public boolean realProduction(int recipeId, int keyId) {
+        return !(recipes.isTransfer(recipeId) && kindOf[keyId] == Keys.KIND_FLUID);
+    }
+
+    /**
+     * {@link #producers}, minus the recipes {@link #realProduction} says are not making it.
+     *
+     * THE NON-FLUID SHORT CIRCUIT IS AN OPTIMISATION THAT DEPENDS ON {@link #realProduction}
+     * EXCLUDING FLUIDS AND NOTHING ELSE, exactly as in python. Widen the predicate past the
+     * fluid case and this branch silently stops honouring it, which is why
+     * `RecipeGraphTest.theTwoFormsOfRealProducersAgree` compares the two forms over every
+     * recipe rather than trusting the reasoning here.
+     */
     public int realProducers(int keyId, IntArray out) {
         if (kindOf[keyId] != Keys.KIND_FLUID) {
             return producers(keyId, out);
         }
-        int appended = appendNonTransfers(byOutput, keyId, out);
+        int appended = appendRealProducers(byOutput, keyId, keyId, out);
         int wild = wildcardSibling(keyId);
         if (wild >= 0) {
-            appended += appendNonTransfers(byOutput, wild, out);
+            // JUDGED ON `keyId`, NOT ON `wild`: the question is whether the recipe makes the
+            // key the caller asked for. Passing `wild` would ask about a different key's kind
+            // and would silently diverge from python, which filters one flat list.
+            appended += appendRealProducers(byOutput, wild, keyId, out);
         }
         return appended;
     }
 
-    private int appendNonTransfers(Csr index, int keyId, IntArray out) {
+    /**
+     * Whether some recipe's OWN output list names `keyId` and counts as making it.
+     *
+     * The question `Cost.seed` asks: is there anything for the relaxation to price this
+     * key FROM, or is it a leaf at `BASE_RAW_COST`? Before #193 the seed asked
+     * `byOutput().count(key) == 0` and so answered "produced" for keys whose only routes are
+     * container empties, which nothing then priced.
+     *
+     * DELIBERATELY NOT {@link #realProducers}, AND NOT WIDENED TO THE WILDCARD SIBLING.
+     * `Cost.relax` lowers a cost only for keys a recipe LITERALLY outputs, so a key
+     * reachable only through a `mod:item:*` producer has nothing that will ever write it.
+     * Measured on the reference graph: 478 input alternatives are in that position, every
+     * damaged Electroblob wand and Arcane Essentials sword among them, and answering yes for
+     * those would strand all 478 at infinity along with every route through them. This
+     * predicate has to stay the exact complement of what the relaxation can reach. Mirrors
+     * `Graph.real_output`, whose docstring carries the same measurement.
+     */
+    public boolean realOutput(int keyId) {
+        for (int p = byOutput.start(keyId); p < byOutput.end(keyId); p++) {
+            if (realProduction(byOutput.at(p), keyId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int appendRealProducers(Csr index, int rowKeyId, int judgedKeyId, IntArray out) {
         int appended = 0;
-        for (int p = index.start(keyId); p < index.end(keyId); p++) {
+        for (int p = index.start(rowKeyId); p < index.end(rowKeyId); p++) {
             int recipe = index.at(p);
-            if (!recipes.isTransfer(recipe)) {
+            if (realProduction(recipe, judgedKeyId)) {
                 out.add(recipe);
                 appended++;
             }
