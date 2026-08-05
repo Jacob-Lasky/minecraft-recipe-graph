@@ -1551,6 +1551,7 @@ public final class Solver {
         return variant == null ? keyId : variant.intValue();
     }
 
+    /**
      * `graph.real_producers`, materialised. Order is the graph's and must stay so.
      *
      * THE DEMOTED FILTER IS HERE AND NOT ON THE GRAPH, which is where python puts it, and the
