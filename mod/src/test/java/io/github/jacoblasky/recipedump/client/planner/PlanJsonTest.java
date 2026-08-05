@@ -382,8 +382,14 @@ public class PlanJsonTest {
                 marked++;
             }
         }
+        // 2 -> 3 FOR #193. The arrival is real rather than the mark spreading: taking 553 keys
+        // from infinity to a finite price puts subtrees into this plan that were unreachable
+        // before, and one of them bottoms out on a leaf the graph still cannot source. A key
+        // the tool cannot source is exactly what this flag is for, so a plan that reaches more
+        // of the graph should carry more of them. 3 of 66 shopping rows, so it stays rare,
+        // which is the property the count below is guarding.
         assertEquals("the unsourced mark is lost on the surface a player gathers from",
-                     2, marked);
+                     3, marked);
     }
 
     /**
@@ -409,15 +415,29 @@ public class PlanJsonTest {
      * 28,196 -> 28,232 FOR #170, AND THE TREE DID NOT MOVE AT ALL, which is the opposite shape
      * to the entry above and for the opposite reason. Routing a bare key through a produced NBT
      * variant gives the solver candidate recipes where it previously had none, so it attempts
-     * routes it used to reject outright -- 36 more units of searching. None of them survives
-     * into THIS plan: {@code theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive} still reads
-     * 519. So the two counters coming apart in both directions across two changes is the reason
-     * they are asserted separately rather than one being taken as a proxy for the other.
+     * routes it used to reject outright -- 36 more units of searching. None of them survived
+     * into that plan, so the two counters coming apart in both directions across two changes is
+     * the reason they are asserted separately rather than one being taken as a proxy for the
+     * other.
+     *
+     * 28,232 -> 3,054 FOR #193, A NINE-FOLD DROP, AND THE TREE GREW 519 -> 576 AT THE SAME
+     * TIME. Both directions at once, which is the sharpest version of why these are two
+     * assertions. `work` counts every `expand` including the discarded; the tree counts
+     * survivors. Feeding `craftables` and `raw` into `estimate` tells the COST MODEL about the
+     * two terminals `Solver.expand` was already stopping at, so routes through them stop being
+     * priced at their full subtree and start winning, and the search stops at a terminal
+     * instead of exploring behind it. Meanwhile 553 keys stop pricing at infinity, so more of
+     * the graph is reachable and more survives into the plan.
+     *
+     * A DROP THIS LARGE IS THE DIRECTION THAT NEEDS JUSTIFYING, because the easy way to make a
+     * work assertion fall is to search less by planning less, and the tree growing at the same
+     * time is what rules that out here. `exhausted` and `truncated` are both still false, and
+     * the budget is unchanged at 80,000, so this is now 3.8% of it against 35% before.
      */
     @Test
     public void theWorkCounterAndItsBudgetBothArrive() {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(28232, plan.work());
+        assertEquals(3054, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
@@ -465,8 +485,21 @@ public class PlanJsonTest {
         // both sides so nothing was cut for want of budget. Measured against master twice, once
         // before this branch was rebased onto #136/#175/#194 and once after, and the delta was
         // -122 nodes and -5 shopping rows both times.
+        //
+        // 519 -> 576 FOR #193, AND THE NUMBER GOING BACK UP IS THE FIX WORKING RATHER THAN THE
+        // DEMOTION UNWINDING. Nothing that #211 and #169 removed has returned: those were
+        // FABRICATED routes and they are still gone. What arrived is real. #193 makes `_seed`
+        // agree with `Graph.real_producers` and feeds `craftables` and `raw` into `estimate`,
+        // which takes 553 keys from infinity to a finite price, so subtrees the solver could
+        // not previously account for are now reachable and survive into the plan.
+        //
+        // The corroboration is that `work` fell 28,232 -> 3,054 in the same change, which is
+        // the opposite direction. A bigger tree from a cheaper search is what you get when the
+        // ranker stops disagreeing with the solver about where a branch ends; a bigger tree
+        // from a MORE expensive search would be the shape of the demotion unwinding, and it is
+        // not what happened. See `theWorkCounterAndItsBudgetBothArrive`.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(519, plan.flatten().size());
+        assertEquals(576, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

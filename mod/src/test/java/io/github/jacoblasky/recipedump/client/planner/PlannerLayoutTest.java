@@ -122,14 +122,19 @@ public class PlannerLayoutTest {
         // `PlanJsonTest.theBiggestFixtureIsTheOneTheScrollPanelHasToSurvive`, which carries the
         // corroboration that the plan got more honest rather than merely smaller.
         //
-        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved four
+        // NAMED FOR "BIGGEST" RATHER THAN FOR A COUNT, because the count has now moved five
         // times and the method was still called `aThreeHundredNodeTree` at 388. A test name
         // that states a number goes stale silently -- the assertion below is the thing that
-        // must fail when the number moves, and it does.
+        // must fail when the number moves, and it does. It did, on all five.
+        //
+        // 519 -> 576 FOR #193, which is an INCREASE and therefore not the suspicious direction
+        // this comment warns about. The corroboration is in `PlanJsonTest`'s sibling: `work`
+        // fell nine-fold in the same change, so the tree grew out of a cheaper search rather
+        // than a longer one.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(519, tree.getChildren().size());
+        assertEquals(576, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
