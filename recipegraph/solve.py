@@ -771,6 +771,23 @@ class Solver:
                 # though levelling were involved. `_unsourced_note` holds the set; this said
                 # TWO before #170 added the produced-variant sentence, and there are three.
                 node["note"] = self._unsourced_note(key, other)
+            elif key in self.g.pack_authored_unsourced:
+                # THE THIRD POPULATION, AND THE BADGE HAS TO FOLLOW THE PRICE HERE OR THE
+                # COMMENT ABOVE STOPS BEING TRUE. #171/#242. `cost._seed` charges these
+                # `UNSOURCED_COST` exactly as it charges `unsourced_keys`, so leaving the mark
+                # on `reachable_form` alone would put a 2,000-priced JEI tooltip on the
+                # shopping list rendered as an ordinary raw material -- the tool steering away
+                # from a route while telling the reader to go and gather it. #171 asks for a
+                # distinct cost AND a distinct badge in one breath for this reason.
+                #
+                # NO `other` TO NAME, WHICH IS WHY IT CANNOT REUSE `_unsourced_note`. All three
+                # of those wordings end by pointing at a form the graph CAN make, and the
+                # defining property of this set is that `reachable_form` found nothing to
+                # point at. The sentence therefore says what IS known -- the pack made the
+                # item, nothing makes it -- rather than inventing an alternative.
+                node["unsourced"] = True
+                node["note"] = ("the pack defines this item and nothing in the dump makes "
+                                "it; it comes from a mechanic no recipe can describe")
             self.leaf_totals[key] += remainder
             return node
 
@@ -1126,12 +1143,19 @@ class Solver:
         item -- and on infinite-source and token rows, each of which already carries its own
         and contradictory answer to "how do I get this".
 
-        Recomputed from `Graph.reachable_form` rather than copied off the tree node, so the
-        list and the tree cannot disagree about the same key. The tree is the diagnosis; this
-        is what gets acted on while gathering.
+        Recomputed from the graph rather than copied off the tree node, so the list and the
+        tree cannot disagree about the same key. The tree is the diagnosis; this is what gets
+        acted on while gathering.
+
+        BOTH PREDICATES, MATCHING `expand`. #171 added `Graph.pack_authored_unsourced` -- the
+        SECOND population this mark fires on, and the THIRD that `cost._seed` charges
+        `UNSOURCED_COST`, since `produced_in_name_only` is priced without ever being badged.
+        A shopping row is exactly where the mark earns its keep: this is the list a player
+        takes into the world, and a JEI tooltip sitting on it unmarked is the row they will
+        spend an evening failing to find.
         """
         row = self._entry(key, qty)
-        if self.g.reachable_form(key):
+        if self.g.reachable_form(key) or key in self.g.pack_authored_unsourced:
             row["unsourced"] = True
         return row
 

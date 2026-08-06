@@ -165,6 +165,94 @@ final class Unsourced {
     }
 
     /**
+     * Pack-authored keys nothing makes and {@link #reachableForm} can name no other form for.
+     *
+     * A THIRD POPULATION UNDER THE CLAIM THE OTHER TWO SHARE. #171 and #242. All three mean
+     * "the graph has POSITIVE EVIDENCE it cannot explain where this comes from", so
+     * {@link Cost#seed} charges all three {@code UNSOURCED_COST}, and all three intersections
+     * are empty by construction: {@link #keys} needs byOutput empty AND a reachable form,
+     * {@link #producedInNameOnly} needs byOutput non-empty, this needs byOutput empty and NO
+     * reachable form. Measured 0 and 0 against the other two on the reference graph.
+     *
+     * WHAT MAKES THE EVIDENCE POSITIVE, since "nothing produces it" is the rule
+     * {@link #reachableForm} refuses by name: the PACK authored the item, in its CraftTweaker
+     * namespace, then wrote no way to obtain it while writing recipes that consume it. A mod
+     * shipping an ore does that because the ore is in the ground. 46 recipes routed through a
+     * JEI tooltip priced at {@code BASE_RAW_COST}, the cheapest value in the model.
+     *
+     * THE TWO EXCLUSIONS ARE PACK-DECLARED DATA, read back rather than guessed from the shape
+     * of a key, and both are load-bearing. Measured over the `contenttweaker` keys with no
+     * producer and at least one consumer, 1,120 in all:
+     *
+     * <ul>
+     * <li>{@code damageBase(key) != key} drops 837 (75%), armour durability variants whose
+     *     UNDAMAGED key is produced perfectly well.</li>
+     * <li>Any oredict membership drops a further 47, and it has to be ANY group rather than
+     *     {@link RecipeGraph#isWorldOre}: only 11 of the 47 are ores, the other 36 being 21
+     *     nuggets, 13 storage blocks and 5 foods. Among the nuggets is
+     *     `contenttweaker:material_part:53`, the Sednanite Nugget #136 was filed about, so an
+     *     ore-only rule demotes the material the earlier bug was about.</li>
+     * </ul>
+     *
+     * Mirrors `Graph.pack_authored_unsourced` in python, whose docstring carries the same
+     * measurements; the golden fixtures hold the two implementations equal.
+     */
+    static long[] packAuthored(RecipeGraph g) {
+        long[] out = Bits.ofSize(g.keyCount());
+        IntArray scratch = new IntArray();
+        for (int keyId = 0; keyId < g.keyCount(); keyId++) {
+            if (isPackAuthoredUnsourced(g, keyId, scratch)) {
+                Bits.set(out, keyId);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The membership test for {@link #packAuthored}, for ONE key.
+     *
+     * A PREDICATE AS WELL AS A BITSET BECAUSE TWO CALLERS NEED DIFFERENT SHAPES, and one
+     * spelling of the rule is the point. {@link Cost#seed} wants the whole set once per cost
+     * table and walks the bitset; {@link Solver} wants "is THIS leaf one of them" for the
+     * badge, once per plan node, and building a 171,000-key bitset per solve to answer that
+     * would be absurd. Python has the same split -- a cached `frozenset` on the graph that
+     * `cost._seed` iterates and `solve.expand` does an `in` against -- and both languages get
+     * the same answer because the rule lives in exactly one function on each side.
+     *
+     * DO NOT INLINE THIS INTO EITHER CALLER. `reachable_form` is in this file at all because
+     * a second spelling of it drifted through two issues while a test that compared the two
+     * kept passing; that is the mistake this shape exists to not repeat.
+     */
+    static boolean isPackAuthoredUnsourced(RecipeGraph g, int keyId, IntArray scratch) {
+        if (!g.isLive(keyId) || g.hasProducers(keyId)) {
+            return false;
+        }
+        String key = g.key(keyId);
+        if (!inPackNamespace(key)) {
+            return false;
+        }
+        if (g.oresOf().count(keyId) > 0) {
+            return false;
+        }
+        if (!key.equals(g.damageBase(key))) {
+            return false;
+        }
+        return reachableForm(g, keyId, scratch) < 0;
+    }
+
+    /**
+     * Whether a key lives in a namespace the PACK writes script items into.
+     *
+     * ONE SPELLING OF THE NAMESPACE LIST PER LANGUAGE, mirroring `tokens.TOKEN_NAMESPACES`,
+     * which python's `Graph.pack_authored_unsourced` imports rather than restating for the
+     * same reason. If the pack ever adds a second scripting namespace, both languages change
+     * here and the golden fixtures catch a miss on either side.
+     */
+    private static boolean inPackNamespace(String key) {
+        return key.startsWith("contenttweaker:");
+    }
+
+    /**
      * Another form of this key's material that the graph CAN make, or -1.
      *
      * THE #136 HALF. `nuggetSednanite` and `ingotSednanite` are one material by Forge's own

@@ -317,8 +317,15 @@ public class NodeRowTextTest {
      * are being asked to gather, not which item it is.
      *
      * AND THE ROWS THAT DO NOT COLLIDE STAY CLEAN, which is the second half of the rule and the
-     * reason this takes the whole list. A registry key on all 63 rows would push the name out
-     * of the panel to serve two of them.
+     * reason this takes the whole list. A registry key on all 67 rows would push the name out
+     * of the panel to serve four of them.
+     *
+     * TWO COLLIDING GROUPS SINCE #171, NOT ONE, AND THE SECOND IS THE BETTER EXAMPLE. Pricing
+     * the pack's marker items grew this plan's shopping list 63 -> 67 rows, and one of the
+     * arrivals collides: `minecraft:iron_ore` and `erebus:ore_iron` are both drawn "Iron Ore".
+     * That is two ores in two different worlds sharing a label, where the Soul Vials are two
+     * NBT states of one item -- so the rule is now demonstrated on both shapes of collision
+     * rather than only the NBT one, which is a strictly better fixture than it was.
      *
      * SEARCHED RATHER THAN INDEXED, because a row may wrap over two lines and the indices then
      * stop lining up. An index-aligned version of this passed while asserting nothing about
@@ -336,14 +343,14 @@ public class NodeRowTextTest {
             if (hasKey) {
                 keyed++;
             }
-            if ("Soul Vial".equals(row.label())) {
-                assertTrue("two rows both called Soul Vial and neither says which: " + all,
-                           hasKey);
+            if ("Soul Vial".equals(row.label()) || "Iron Ore".equals(row.label())) {
+                assertTrue("two rows share the label " + row.label()
+                           + " and neither says which: " + all, hasKey);
                 colliding++;
             }
         }
-        assertEquals("the fixture must still hold the two colliding rows", 2, colliding);
-        assertEquals("only the colliding rows pay for the key", 2, keyed);
+        assertEquals("the fixture must still hold both colliding pairs", 4, colliding);
+        assertEquals("only the colliding rows pay for the key", 4, keyed);
     }
 
     /**

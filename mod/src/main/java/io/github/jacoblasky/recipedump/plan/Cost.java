@@ -843,10 +843,17 @@ public strictfp final class Cost {
         // shares a price with, and the complement identity is one a reader would have to hold in
         // their head to see what this loop tests. One more CSR row walk per key against a
         // twenty-second relaxation. Python reads it the same way in the same two places.
+        // A THIRD SWEEP, AND #171/#242 IS ITS SUBJECT. A key the PACK authored that nothing
+        // outputs and no reachable form can be named for is one more population under the same
+        // claim -- see `Unsourced.packAuthored`, which carries the measurement and the
+        // two exclusions that keep it off 884 real items. Disjoint from both siblings by
+        // construction, so the order of the three tests below cannot matter.
         long[] unsourced = Unsourced.keys(graph);
         long[] inNameOnly = Unsourced.producedInNameOnly(graph);
+        long[] packAuthored = Unsourced.packAuthored(graph);
         for (int key = 0; key < cost.length; key++) {
-            if (!Bits.get(unsourced, key) && !Bits.get(inNameOnly, key)) {
+            if (!Bits.get(unsourced, key) && !Bits.get(inNameOnly, key)
+                    && !Bits.get(packAuthored, key)) {
                 continue;
             }
             double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];

@@ -15,6 +15,15 @@ Design notes that are load-bearing:
 import json
 import re
 
+# The ONLY package import this module has, and it is one constant rather than a layering
+# mistake. `pack_authored_unsourced` needs to know which namespaces a pack writes its script
+# items into, and `tokens.TOKEN_NAMESPACES` is the declared home of that answer. Restating
+# the tuple here would be a second spelling of one fact, which is the drift `reachable_form`
+# spent a PR removing -- so importing it is the cheaper of the two mistakes available.
+# SAFE BECAUSE `tokens` IMPORTS NOTHING FROM THIS PACKAGE (json and os only); if that ever
+# stops being true this becomes a cycle, so check before adding an import there.
+from . import tokens
+
 WILDCARD_META = 32767
 
 
@@ -615,6 +624,7 @@ class Graph:
         self._labels = None
         self._live_keys = None
         self._unsourced_keys = None
+        self._pack_authored_unsourced = None
         self._produced_in_name_only = None
         self._variant_index = None
         self._variant_subsumption = None
@@ -1078,6 +1088,77 @@ class Graph:
                 key for key in self.live_keys
                 if not self.by_output.get(key) and self.reachable_form(key))
         return self._unsourced_keys
+
+    @property
+    def pack_authored_unsourced(self):
+        """Pack-authored keys nothing makes and `reachable_form` can name no other form for.
+
+        A THIRD POPULATION UNDER THE CLAIM THE OTHER TWO SHARE, and a third set for the
+        reason `produced_in_name_only` is a second one: the claim is "the graph has POSITIVE
+        EVIDENCE it cannot explain where this comes from", and the three cannot merge because
+        their clauses contradict. `unsourced_keys` needs `by_output` EMPTY and
+        `reachable_form` NON-None; `produced_in_name_only` needs `by_output` NON-empty; this
+        needs `by_output` empty and `reachable_form` None. All three intersections are empty
+        by construction, so `cost._seed` can walk them in any order.
+
+        WHAT MAKES THE EVIDENCE POSITIVE HERE, since "nothing produces it" is the rule
+        `reachable_form` refuses by name. Cobblestone has no producer either, and marking
+        every producerless leaf carries no information. The evidence is that the PACK ITSELF
+        authored the item, in its CraftTweaker namespace, and then wrote no way to obtain it
+        while writing recipes that consume it. A mod shipping an ore does that because the ore
+        is in the ground; a pack script doing it has written an annotation, a quest gate or a
+        reward it hands out by some mechanic the dump cannot see. `#171` is the umbrella and
+        this is its failure mode 1: 46 recipes routed through a JEI tooltip priced at
+        `BASE_RAW_COST`, the cheapest value in the model.
+
+        THE TWO EXCLUSIONS ARE THE WHOLE DIFFICULTY, and both are pack-declared data read
+        back rather than guesses at the shape of a key. Measured on the reference graph over
+        the `contenttweaker` keys with no producer and at least one consumer:
+
+          * `damage_base(key) != key` drops 837 of 1,120 (75%). They are armour durability
+            variants -- `bloodmaster_metal_chest:28400` and its siblings -- whose UNDAMAGED
+            key is produced perfectly well. Nothing about them is unsourced.
+          * `ores_of(key)` non-empty drops a further 47, and this is the exclusion that has
+            to be ANY oredict group rather than `world_ores`. Only 11 of the 47 are ores.
+            The other 36 are 21 nuggets, 13 storage blocks and 5 foods, and among the nuggets
+            is `contenttweaker:material_part:53`, the Sednanite Nugget -- the item #136 was
+            filed about. A rule keyed on `world_ores` demotes it and 35 other real materials
+            to fix the markers, which is the #117/#168 lesson repeating: an over-broad rule
+            costs more real items than it fixes fake ones.
+
+        WHAT SURVIVES BOTH IS 283 KEYS, and the retention test is what makes the filter
+        trustworthy rather than merely narrow: all 37 hand-verified `DEFAULT_TOKENS` are
+        inside it and none of the controls are. It is still not a marker DETECTOR -- 246 of
+        the 283 are uncurated and some are genuine puzzle rewards -- which is exactly why
+        the price is `UNSOURCED_COST` and not a token kind. "The tool cannot explain how you
+        get this" is true of every one of them; "this is a loot drop" is not.
+
+        SO CURATION STILL DECIDES, AND DETECTION ONLY NARROWS. `tokens.candidates` offers
+        this same population for a human to classify, and a curated token overrides this
+        price with its more specific kind -- see `cost._seed`, where the token seed runs last
+        precisely so it wins.
+        """
+        if self._pack_authored_unsourced is None:
+            packs = tuple("%s:" % ns for ns in tokens.TOKEN_NAMESPACES)
+            self._pack_authored_unsourced = frozenset(
+                key for key in self.live_keys
+                if str(key).startswith(packs)
+                # `producers`, NOT `by_output`, AND THE INVERTED CLAUSE BELOW IS WHY.
+                # `unsourced_keys` tests `not by_output.get(key)` and gets away with it
+                # because its SECOND clause calls `reachable_form`, which widens through
+                # `real_producers`, finds a wildcard-meta producer and returns None -- so a
+                # key made only by a `mod:name:*` output is excluded there anyway. This set
+                # requires `reachable_form` to be None, so that rescue runs backwards: such a
+                # key would satisfy every clause and be called unsourced while a recipe
+                # plainly makes it. `producers` widens, and `not producers(key)` implies
+                # `not by_output.get(key)`, so this is the strictly safer spelling.
+                # Java's `hasProducers` already widens, so this is also what keeps the two
+                # ports agreeing rather than relying on the fixtures to notice.
+                and not self.producers(key)
+                and not self.reachable_form(key)
+                and not self.ores_of(key)
+                and self.damage_base(key) == key)
+        return self._pack_authored_unsourced
 
     @property
     def produced_in_name_only(self):

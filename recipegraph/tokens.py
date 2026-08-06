@@ -242,15 +242,31 @@ def candidates(graph, known=None, limit=40):
     for, which is why the result is a list for a human to read rather than an input to the
     solver.
 
+    IT DEFERS TO `Graph.pack_authored_unsourced` FOR THE POPULATION rather than restating
+    the rule, because it used to restate a WEAKER one and the difference was 884 keys of
+    noise in a list whose whole value is being short enough to read. On the reference graph
+    the bare "pack namespace, consumed, unproduced" signal returns 1,120 keys, and 884 of
+    them are things nobody would ever curate:
+
+      * 837 armour durability variants, `bloodmaster_metal_chest:28400` and its siblings,
+        whose undamaged key is produced perfectly well.
+      * 47 keys carrying oredict membership -- 11 world ores, 21 nuggets, 13 storage blocks
+        and 5 foods, including the Sednanite Nugget that #136 was filed about.
+
+    Sorted by recipe count, enough of that noise outranks real placeholders to push them off
+    a `limit=40` page, so the filter is what makes the offer readable rather than merely
+    shorter. The retention check that says it is not TOO narrow: all 37 curated
+    `DEFAULT_TOKENS` survive it, asserted against the real graph by
+    `tests/test_pack_provenance.py` when `$RECIPEGRAPH_ORACLE` names one, and skipped rather
+    than faked when it does not.
+
     Returns `[(key, display name, recipes needing it)]`.
     """
     known = resolve() if known is None else known
-    prefixes = tuple("%s:" % ns for ns in TOKEN_NAMESPACES)
+    eligible = graph.pack_authored_unsourced
     out = []
     for key, recipes in graph.by_input.items():
-        if key in known or not str(key).startswith(prefixes):
-            continue
-        if graph.producers(key):
+        if key in known or key not in eligible:
             continue
         out.append((key, graph.bare_name(key), len(recipes)))
     out.sort(key=lambda row: (-row[2], row[0]))

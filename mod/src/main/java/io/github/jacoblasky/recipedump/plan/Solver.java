@@ -835,6 +835,22 @@ public final class Solver {
                 // thing left to say about it.
                 node.unsourced = Boolean.TRUE;
                 node.note = unsourcedNote(keyId, other) + g.bareName(other);
+            } else if (packAuthoredUnsourced(keyId)) {
+                // THE THIRD POPULATION, AND THE BADGE FOLLOWS THE PRICE. #171/#242.
+                // `Cost.seed` charges these `UNSOURCED_COST` exactly as it charges
+                // `Unsourced.keys`, so marking only the `reachableForm` half would put a
+                // 2,000-priced JEI tooltip on the shopping list drawn as an ordinary raw
+                // material -- steering away from a route while telling the reader to go and
+                // gather it.
+                //
+                // NO `other` TO NAME, WHICH IS WHY IT CANNOT REUSE `unsourcedNote`. All
+                // three of those wordings end by pointing at a form the graph CAN make, and
+                // the defining property of this set is that `reachableForm` found nothing to
+                // point at. Mirrors the same branch in `solve.expand`, and the fixtures hold
+                // the two sentences byte-equal.
+                node.unsourced = Boolean.TRUE;
+                node.note = "the pack defines this item and nothing in the dump makes it; "
+                        + "it comes from a mechanic no recipe can describe";
             }
             leafTotals.add(keyId, remainder);
             return node;
@@ -1118,6 +1134,18 @@ public final class Solver {
      */
     int reachableForm(int keyId) {
         return Unsourced.reachableForm(g, keyId, scratch);
+    }
+
+    /**
+     * Whether this key is one the PACK authored and nothing makes. See {@link Unsourced}.
+     *
+     * A DELEGATE FOR THE SAME REASON AS {@link #reachableForm}, and to the same file. #171
+     * charges this population `UNSOURCED_COST` in {@link Cost#seed}, so the badge has to read
+     * the same rule or the plan prices a route away and then tells the reader to go and
+     * gather it.
+     */
+    boolean packAuthoredUnsourced(int keyId) {
+        return Unsourced.isPackAuthoredUnsourced(g, keyId, scratch);
     }
 
     /**
@@ -1439,11 +1467,17 @@ public final class Solver {
         // holding the item -- and on infinite-source and token rows, each of which already
         // carries its own and contradictory answer to "how do I get this".
         //
-        // Recomputed from `reachableForm` rather than copied off the tree node, so the list
-        // and the tree cannot disagree about the same key. The tree is the diagnosis; this is
-        // what gets acted on while gathering.
+        // Recomputed from the graph rather than copied off the tree node, so the list and the
+        // tree cannot disagree about the same key. The tree is the diagnosis; this is what
+        // gets acted on while gathering.
+        //
+        // BOTH PREDICATES, MATCHING `expand` ABOVE. #171 added a second population that
+        // `Cost.seed` charges the same `UNSOURCED_COST`, and a shopping row is where the
+        // mark earns its keep: this is the list a player takes into the world, and a JEI
+        // tooltip sitting on it unmarked is the row they will spend an evening failing to find.
         for (PlanEntry row : result.shoppingList) {
-            if (reachableForm(g.keyId(row.key)) >= 0) {
+            int rowKey = g.keyId(row.key);
+            if (reachableForm(rowKey) >= 0 || packAuthoredUnsourced(rowKey)) {
                 row.unsourced = Boolean.TRUE;
             }
         }
