@@ -183,11 +183,19 @@ class WhatAPlaceholderCostsTest(unittest.TestCase):
         table = costs_for(g, token_kinds={key: tokens_mod.METHOD})
         self.assertEqual(table[key], cost_mod.BASE_RAW_COST)
 
-    def test_no_token_map_leaves_every_price_exactly_where_it_was(self):
+    def test_no_token_map_applies_no_token_price(self):
         # The parameter is optional everywhere, and a caller that does not pass it must get
-        # the old table rather than a half-applied one.
+        # an unapplied table rather than a half-applied one.
+        #
+        # THIS ASSERTED `BASE_RAW_COST` UNTIL #171, and the constant moved rather than the
+        # claim. `contenttweaker:chapter_1` is pack-authored and nothing produces it, so
+        # `Graph.pack_authored_unsourced` now prices it at `UNSOURCED_COST` through a rule
+        # that knows nothing about tokens. What this test is for is that the TOKEN seed
+        # stayed out of it, so it asserts the absence of `GATE_COST` -- the old spelling
+        # would now fail for a reason that has nothing to do with what it guards.
         table = cost_mod.estimate(two_routes())
-        self.assertEqual(table[GATED], cost_mod.BASE_RAW_COST)
+        self.assertNotEqual(table[GATED], cost_mod.GATE_COST)
+        self.assertEqual(table[GATED], cost_mod.UNSOURCED_COST)
 
     def test_stock_still_outranks_a_placeholder(self):
         # The token seed is the one that RAISES a price, so it needs a guard: something you
@@ -229,12 +237,26 @@ class WhichRouteGetsPickedTest(unittest.TestCase):
         self.assertEqual(leaf["status"], STATUS_TOKEN)
         self.assertEqual(leaf["token_kind"], tokens_mod.GATE)
 
-    def test_before_the_fix_the_gate_and_the_rock_were_indistinguishable(self):
-        # States the defect rather than describing it: with no token map, the three routes
-        # price identically, which is why the choice fell to dump order.
+    def test_a_second_rule_now_separates_them_even_with_no_token_map(self):
+        # This stated #105's defect as an equality -- with no token map the three routes
+        # priced identically, so the choice fell to dump order -- and #171 made the equality
+        # false without touching tokens at all. Both placeholders are pack-authored keys
+        # nothing produces, so they are repriced as "the tool cannot explain where this comes
+        # from" whether or not anybody curated them.
+        #
+        # KEPT AS A SEPARATION TEST RATHER THAN DELETED, because the defect it recorded is
+        # exactly what would come back if either rule were removed, and now two independent
+        # rules have to fail for the routes to tie again. The token map is still what makes
+        # the price SPECIFIC: `UNSOURCED_COST` says only that the graph cannot account for
+        # the key, where `GATE_COST` says the player has a chapter to unlock.
         table = cost_mod.estimate(two_routes())
-        self.assertEqual(table[GATED], table[PLAIN])
-        self.assertEqual(table[LOOTED], table[PLAIN])
+        self.assertNotEqual(table[GATED], table[PLAIN])
+        self.assertNotEqual(table[LOOTED], table[PLAIN])
+        self.assertEqual(cost_mod.BASE_RAW_COST, table[PLAIN])
+
+        gated = costs_for(two_routes())
+        self.assertEqual(cost_mod.GATE_COST, gated[GATED])
+        self.assertEqual(cost_mod.LOOT_COST, gated[LOOTED])
 
 
 class TheCacheNoticesTest(unittest.TestCase):

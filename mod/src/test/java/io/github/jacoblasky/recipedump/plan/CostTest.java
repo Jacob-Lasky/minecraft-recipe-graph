@@ -190,6 +190,64 @@ public class CostTest {
         assertFalse(Bits.get(inNameOnly, graph.keyId("mod:full_can")));
     }
 
+    @Test
+    public void aPackAuthoredMarkerIsUnexplainedAndItsLookalikesAreNot() {
+        // #171/#242, and the THIRD population `seed` walks in that same loop. Directly rather
+        // than only through the golden fixtures, because its two siblings above are tested
+        // directly and because a set that quietly caught the wrong keys would show up in the
+        // fixtures as a diff nobody could attribute.
+        //
+        // FOUR KEYS, ONE PER POPULATION THE RULE HAS TO TELL APART. All four are consumed and
+        // none is produced, which is the structural signal; what separates them is only the
+        // pack-declared data attached below, exactly as in python's `test_pack_provenance`.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "via_marker", "crafting", "mod:widget", 1,
+               "contenttweaker:multiblock_preview", 1);
+        recipe(b, "via_ore", "crafting", "mod:widget", 1, "contenttweaker:candyte_ore", 1);
+        recipe(b, "via_worn", "crafting", "mod:widget", 1, "contenttweaker:plate:28400", 1);
+        recipe(b, "via_outsider", "crafting", "mod:widget", 1, "somemod:gravel", 1);
+        // The undamaged plate IS produced, which is what makes its worn variant ordinary.
+        recipe(b, "make_plate", "crafting", "contenttweaker:plate", 1, "mod:ingot", 4);
+        b.beginOreGroup("oreCandyte");
+        b.oreMember(b.key("contenttweaker:candyte_ore"));
+        b.endOreGroup();
+        b.damageable(b.key("contenttweaker:plate"), 32767);
+        RecipeGraph graph = b.build();
+
+        long[] pack = Unsourced.packAuthored(graph);
+        assertTrue("a pack marker nothing makes is the population",
+                   Bits.get(pack, graph.keyId("contenttweaker:multiblock_preview")));
+        // Worldgen is not a recipe, so zero producers is CORRECT here. 47 such keys on the
+        // reference graph and only 11 are ores; the rest are nuggets, blocks and foods.
+        assertFalse("an oredict member is a real material",
+                    Bits.get(pack, graph.keyId("contenttweaker:candyte_ore")));
+        // 837 of the reference pool's 1,120, and the undamaged key is made on a bench.
+        assertFalse("a durability variant is not unsourced",
+                    Bits.get(pack, graph.keyId("contenttweaker:plate:28400")));
+        // The clause that keeps this off 117,350 keys: a MOD shipping gravel with no recipe is
+        // the ordinary case BASE_RAW_COST exists for; a pack script doing it is not.
+        assertFalse("a mod's own raw leaf is not pack-authored",
+                    Bits.get(pack, graph.keyId("somemod:gravel")));
+
+        // And it is disjoint from both siblings, which is what lets `seed` walk all three in
+        // one loop. Mirrors `theTwoUnexplainedPopulationsAreDisjoint` above.
+        long[] unsourced = Unsourced.keys(graph);
+        long[] inNameOnly = Unsourced.producedInNameOnly(graph);
+        for (int key = 0; key < graph.keyCount(); key++) {
+            assertFalse("packAuthored overlaps Unsourced.keys at " + graph.key(key),
+                        Bits.get(pack, key) && Bits.get(unsourced, key));
+            assertFalse("packAuthored overlaps producedInNameOnly at " + graph.key(key),
+                        Bits.get(pack, key) && Bits.get(inNameOnly, key));
+        }
+
+        CostTable table = Cost.estimate(graph, new CostInputs());
+        assertEquals(Cost.UNSOURCED_COST,
+                     priceOf(graph, table, "contenttweaker:multiblock_preview"), 0.0);
+        assertEquals(Cost.BASE_RAW_COST,
+                     priceOf(graph, table, "contenttweaker:candyte_ore"), 0.0);
+        assertEquals(Cost.BASE_RAW_COST, priceOf(graph, table, "somemod:gravel"), 0.0);
+    }
+
     // -- the two terminals the player declares, which is #193 ------------------------------
 
     @Test

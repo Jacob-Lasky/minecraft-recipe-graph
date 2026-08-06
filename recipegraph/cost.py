@@ -197,8 +197,10 @@ FLUID_SCALE = 1.0 / 1000.0
 # number: `Graph.reachable_form` is the set with positive evidence the graph cannot explain
 # the route, and `_seed` prices exactly that set at `UNSOURCED_COST`.
 #
-# FOUR WAYS OF REPRICING IT HAVE BEEN BUILT OR MEASURED AND REJECTED, none of them that one.
-# Do not re-propose one without new evidence, and add to this list rather than rediscovering it:
+# SIX WAYS OF REPRICING IT HAVE BEEN BUILT OR MEASURED AND REJECTED, none of them that one.
+# Do not re-propose one without new evidence, and add to this list rather than rediscovering it.
+# The first four ask WHAT NUMBER; the last two ask WHICH KEYS, which is the axis #171 and #242
+# are on and the one `Graph.pack_authored_unsourced` finally answers:
 #
 #  * NO SEED AT ALL for an unobtainable processed form ("infinity is the honest reading").
 #    243 keys go finite -> infinity on the reference graph, `abyssalcraft:nitre` and
@@ -254,6 +256,22 @@ FLUID_SCALE = 1.0 / 1000.0
 #    nuggets with no ore floor at all, and the reported plan routes through the ore. The rule
 #    stays rejected, because it is now redundant AND it keys on the wrong thing -- an ore
 #    tells you nothing about a material that has none.
+#  * SELECT THE POPULATION BY ABSENCE OF OREDICT MEMBERSHIP AND EMC VALUE. This is #242's own
+#    suggested shape and it does not survive contact with the whole graph: `all_producers == 0
+#    and consumers > 0 and ores == "" and emc == 0` matches 117,350 keys, 69% of the live
+#    graph, which is essentially the entire population resting on `BASE_RAW_COST` in the first
+#    place. Having neither is the DEFAULT STATE of nearly every key, not a signal. It reads
+#    clean in #242 only because the sweep there was already narrowed to `contenttweaker` and
+#    `consumers > 9`, so the namespace was doing all the work and the two clauses none of it.
+#    They earn their place as EXCLUSIONS inside a pack-scoped rule, which is what
+#    `Graph.pack_authored_unsourced` does with `ores_of`; they cannot select the population.
+#  * SELECT IT BY LABEL SHAPE, "a marker is a sentence and an item is a name". #242 offers this
+#    as the tell that separates its 16 from its 8, and it fails on the two largest markers in
+#    the pack: `boss_drop` "Boss Drop" (224 recipes) and `dungeon_drop` "Dungeon Drop" (206)
+#    are both perfectly ordinary item names, and both are curated `LOOT` tokens precisely
+#    because they are not items. Measured over the 283 structural candidates, 170 are
+#    name-shaped, so the rule discards the majority of the population including its two worst
+#    offenders. A pack author names a placeholder whatever reads well in JEI.
 #
 # A FIFTH FINDING, AND IT CONSTRAINS ANY REPLACEMENT RATHER THAN REJECTING ONE CANDIDATE:
 # A FLOOR CANNOT BE PATCHED INTO A SETTLED TABLE. `_relax` only ever LOWERS, which `estimate`
@@ -542,7 +560,31 @@ CRAFTABLE_COST = 0.25
 # AND IT DECLINES #211'S ACCIDENT EXPLICITLY. `CRAFTABLE_COST` is new and lands in the hashed
 # tuple, so a warm cache written before #193 is invalidated by that alone -- which is exactly the
 # reasoning the paragraph above refuses. The bump rests on the measured price movement instead.
-FORMULA_VERSION = 15
+#
+# #171/#242 IS A THIRD INSTANCE OF #136'S RULE, and the clearest one yet: it adds NO constant at
+# all. `Graph.pack_authored_unsourced` is a new set derived off the graph, seeded at the existing
+# `UNSOURCED_COST`, and every hashed input is bit-identical before and after -- so a warm
+# `.cost-cache.json` would be served against different arithmetic unless this number moves. That
+# is precisely the "output, not mechanism" test above, and precisely the accident #211 got away
+# with and #193 declined to rely on.
+#
+# MEASURED ON THE ORACLE, BOTH ARMS IN ONE PROCESS per `tools/cost-probe.py`'s warning about FUSE
+# mtime granularity serving a stale `.pyc` to the second arm:
+#
+#   * 285 keys enter the new set. 0 overlap with `unsourced_keys`, 0 with
+#     `produced_in_name_only`, so the three really are disjoint on real data and not only by
+#     construction. All 37 curated `DEFAULT_TOKENS` are retained.
+#   * 28,672 of 162,469 prices move. NOTHING is stranded: 0 keys go finite -> infinity, which is
+#     the property the fifth finding above demands of any raise.
+#   * 3 keys go the other way, infinity -> `UNSOURCED_COST`: `use_item`, `mark_fallen_tower` and
+#     `obtained_from_a_puzzle`. The last is #171's failure mode 1 wearing its own name.
+#   * 165 prices come out LOWER, WHICH THE SEED CANNOT DO DIRECTLY and is worth stating rather
+#     than rounding off. 3 are the infinities above. The other 162 are second-order: `_relax`
+#     runs the same 2 passes in both arms, so this is not the early exit moving, it is the
+#     fixpoint being approached along a slightly different path once some inputs cost more. The
+#     LARGEST of them is `fluix_microcontroller`, 595.3726 -> 594.9575, a 0.07% relative move,
+#     and the rest are smaller -- `rhenia_artifact` moves in the 8th decimal. No route changes.
+FORMULA_VERSION = 16
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -1050,7 +1092,15 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # and 43 at UNSOURCED_COST, and BOTH shopping-list `fluid:liquid_uu_matter` and `fluid:meat`
     # because on that target there is no alternative to prefer. The ordering is what matters
     # where there IS one.
-    for population in (graph.unsourced_keys, graph.produced_in_name_only):
+    # THREE SETS NOW, AND #171/#242 IS THE THIRD. A key the PACK authored, that nothing
+    # outputs and `reachable_form` can name no other form for, is one more population under
+    # the same claim -- see `Graph.pack_authored_unsourced`, whose docstring carries the
+    # measurement, the two exclusions that keep it off 884 real items, and the reason it is
+    # priced here rather than given a token kind. Disjoint from both siblings by construction:
+    # it needs `by_output` empty (so no overlap with `produced_in_name_only`) and
+    # `reachable_form` None (so no overlap with `unsourced_keys`).
+    for population in (graph.unsourced_keys, graph.produced_in_name_only,
+                       graph.pack_authored_unsourced):
         for key in population:
             if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
                 continue

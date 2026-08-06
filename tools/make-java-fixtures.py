@@ -551,16 +551,33 @@ TARGETS = [
             "field and the note beside it. Without this the oracle cannot show a port "
             "that the trip is priced and named."),
     Target(
-        "dimension-in-chain", "contenttweaker:material_part:77",
+        "dimension-in-chain", "fluid:moltenabyssalnite",
         expect=("craft", "raw", "dimension", "oredict", "alternatives", "machine",
                 "not_truncated"),
-        why="Rhenium Dust, which is #112 reached BELOW the root rather than at it. The "
-            "fixture above plans the gated ore directly, so a port could pass it while "
-            "gating only the item asked for; here the trip to Rhenia is discovered part "
-            "way down a chain, through an oredict slot and a machine, which is how a "
-            "player actually meets one. `cost` has already priced the trip and this is "
-            "what lets the plan say WHICH -- a route that got dearer without saying why "
-            "is worse than one that never mentioned the trip."),
+        why="Molten Abyssalnite, which is #112 reached BELOW the root rather than at it. "
+            "The fixture above plans the gated ore directly, so a port could pass it while "
+            "gating only the item asked for; here the trip to Diamerisma is discovered four "
+            "levels down -- smeltery, ingot, smelting, dust, ore -- through an oredict slot "
+            "and a machine, which is how a player actually meets one. `cost` has already "
+            "priced the trip and this is what lets the plan say WHICH -- a route that got "
+            "dearer without saying why is worse than one that never mentioned the trip.\n"
+            "\n"
+            "THIS TARGET WAS RHENIUM DUST (`contenttweaker:material_part:77`) UNTIL #171, "
+            "AND THE SWAP IS THE FIX WORKING RATHER THAN A CONCESSION TO IT. Rhenium Ore "
+            "has a 'producer' whose only input is `contenttweaker:custom_dimensions`, a "
+            "marker item nothing makes. At `BASE_RAW_COST` that fake recipe priced the ore "
+            "at 2.0 and undercut mining it on Rhenia at 801, so the cost model believed a "
+            "route the solver then refused to take -- it stopped at the ore and badged the "
+            "trip anyway. Pricing the marker at `UNSOURCED_COST` puts the ore back at 801 "
+            "and the planner now prefers a route needing no unvisited dimension, so this "
+            "target stopped reaching a gate at all. The generator refused to write rather "
+            "than let the fixture pass forever asserting nothing, which is exactly what "
+            "that check is for.\n"
+            "\n"
+            "REJECTED ALTERNATIVE, so nobody re-derives it: `nuclearcraft:dust:4` (Uranium "
+            "Dust) also satisfies all seven claims, and its gate sits at depth 1 -- which "
+            "is what `dimension-at-root` above already covers -- across 170 nodes against "
+            "this one's 23."),
     Target(
         "dimension-shadow", "contenttweaker:sub_block_holder_1:2",
         expect=("raw", "dimension", "not_truncated"),

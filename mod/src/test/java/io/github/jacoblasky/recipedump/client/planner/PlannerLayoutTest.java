@@ -131,10 +131,16 @@ public class PlannerLayoutTest {
         // this comment warns about. The corroboration is in `PlanJsonTest`'s sibling: `work`
         // fell nine-fold in the same change, so the tree grew out of a cheaper search rather
         // than a longer one.
+        //
+        // 576 -> 769 FOR #171/#242, an INCREASE again and again not the suspicious direction.
+        // Pricing the pack's marker items stopped routes terminating on a free tooltip, so the
+        // search continues into ones the graph can account for. The corroboration is the same
+        // sibling: `work` rose only 3,054 -> 3,249 for a 34% bigger tree, so this grew out of a
+        // barely-more-expensive search rather than a much longer one.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(576, tree.getChildren().size());
+        assertEquals(769, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",

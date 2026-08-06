@@ -436,8 +436,14 @@ public class PlanJsonTest {
      */
     @Test
     public void theWorkCounterAndItsBudgetBothArrive() {
+        // 3,054 -> 3,249 FOR #171/#242, AND THE HEADROOM IS STILL NOT THE STORY. Pricing the
+        // pack's marker items at UNSOURCED_COST costs 195 more units of searching, because
+        // routes that used to terminate on a free tooltip now lose and the solver carries on
+        // into ones it can account for. 4.1% of an unchanged budget, against the 35% #176 left
+        // and the paragraph above warns about, so the thin headroom got thicker rather than
+        // thinner. `exhausted` is false on both sides.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(3054, plan.work());
+        assertEquals(3249, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
@@ -498,8 +504,28 @@ public class PlanJsonTest {
         // ranker stops disagreeing with the solver about where a branch ends; a bigger tree
         // from a MORE expensive search would be the shape of the demotion unwinding, and it is
         // not what happened. See `theWorkCounterAndItsBudgetBothArrive`.
+        //
+        // 576 -> 769 FOR #171/#242, AND IT IS THE #193 SHAPE A SECOND TIME RATHER THAN THE
+        // DEMOTION UNWINDING. Nothing #211 and #169 removed has come back; those were
+        // FABRICATED routes and they are still gone. What changed is that the pack's marker
+        // items stopped costing what cobblestone costs, so routes that used to terminate on a
+        // free tooltip lose and the search continues into ones the graph can account for.
+        //
+        // The corroboration is the same pair as #193's and it points the same way: `work` went
+        // 3,054 -> 3,249, a 6% rise, for a 34% bigger tree. A bigger tree from a barely-more
+        // expensive search is the ranker and the solver agreeing about where a branch ends. The
+        // shape that would worry is a bigger tree from a much MORE expensive search, and 195
+        // extra units of work is not that.
+        //
+        // A GREEN `tools/ci-java.sh` SAYS NOTHING ABOUT THIS FILE, recorded here because the
+        // number above was moved by a change whose author had only that signal in hand. That
+        // script's CORE_TEST is `graph/` and `plan/`, so the MAIN sources under `client/planner`
+        // are compiled as dependencies while this test and its siblings are neither compiled
+        // nor run -- its own header says so, under "what this job does not cover". The full
+        // gradle suite is the only thing that reaches here, and `ModularUiLayoutTest` next door
+        // is why: these need ModularUI, which ci-java deliberately does not fetch.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(576, plan.flatten().size());
+        assertEquals(769, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

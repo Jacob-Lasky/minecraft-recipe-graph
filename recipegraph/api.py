@@ -137,8 +137,15 @@ FIELDS = {
     # remedy. #136 and #170 each added a branch to the solver's spelling and neither touched
     # this one, so the sweep silently under-reported `unsourced` on the processed-form and
     # produced-variant shapes. It lives on `Graph` now; see `Graph.reachable_form`.
-    "unsourced": (lambda c, k: bool(c.graph.reachable_form(k)),
-                  "nothing makes this key, and there is another form the graph does make"),
+    # BOTH POPULATIONS THE PLAN BADGES, which is the warning above being obeyed rather than
+    # repeated. #171 added `pack_authored_unsourced` and charged it the same `UNSOURCED_COST`
+    # in `cost._seed` and the same badge in `solve.expand`; reading only `reachable_form` here
+    # would under-report the field by 285 keys on the reference graph and reproduce exactly
+    # the sweep-versus-solver drift described two lines up.
+    "unsourced": (lambda c, k: bool(c.graph.reachable_form(k))
+                  or k in c.graph.pack_authored_unsourced,
+                  "nothing makes this key: either another form exists that the graph does "
+                  "make, or the pack authored it and no recipe produces it at all"),
 }
 
 
