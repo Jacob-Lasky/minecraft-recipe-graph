@@ -49,24 +49,37 @@ def _dump(root, summary, names=None):
     return root
 
 
-class SchemaStampTest(unittest.TestCase):
-    """The literal, and it is a tripwire rather than a restatement.
+class SchemaSixIsNoLongerTheCurrentSchemaTest(unittest.TestCase):
+    """THE LITERAL MOVED TO `test_schema_seven.py`, WHICH IS THE CONVENTION HERE.
 
-    Moving `dump_meta.SCHEMA` has to be a decision: the number tells a reader whether their
-    own recomputation still agrees with the dump, so a bump that arrives as a side effect of
-    an unrelated edit is a lie told to every downstream consumer. `tests/test_catalysts.py`
-    pins it against `DumpCommand.java`; this pins that either moving alone was intentional.
+    The newest schema's file owns the tripwire, exactly as this file took it from
+    `test_schema_five.py`. What stays here is schema 6's own FIELDS -- `names`,
+    `names_failed`, `mod_count`, `mod_digest` -- which did not go anywhere at 7 and are still
+    read the same way. Those fixtures now say `dump_meta.SCHEMA` rather than a literal 6,
+    because what they were always testing is "a dump this reader considers current carries
+    the jar count", not "the number is six".
     """
 
-    def test_the_python_side_expects_six(self):
-        self.assertEqual(dump_meta.SCHEMA, 6)
+    def test_six_is_now_read_as_an_older_dump(self):
+        said = dump_meta.describe({"present": True, "mod_version": "0.10.0", "schema": 6,
+                                   "mod_count": 367})
+        self.assertIn("newer fields", said,
+                      "a schema-6 dump is now behind the reader and should be invited to "
+                      "re-dump, not reported as current")
+
+    def test_and_it_is_not_the_loud_digest_warning(self):
+        # 7 did not move DIGEST_FORMAT_SCHEMA, so a schema-6 dump's discriminated keys are
+        # still this reader's keys and its stock still matches. Crying wolf here is what
+        # trains the warning away before the one time it matters.
+        said = dump_meta.describe({"present": True, "mod_version": "0.10.0", "schema": 6})
+        self.assertNotIn("OLDER THAN THE DIGEST FORMAT", said)
 
 
 class CountsAreReadAsDeclaredTest(unittest.TestCase):
 
     def test_a_schema_six_dump_reports_both_counts(self):
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "mod_version": "0.9.11",
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11",
                                                "names": 41, "names_failed": 3}))
         self.assertEqual(meta["names"], 41)
         self.assertEqual(meta["names_failed"], 3)
@@ -74,7 +87,7 @@ class CountsAreReadAsDeclaredTest(unittest.TestCase):
     def test_a_clean_schema_six_dump_reports_zero_not_none(self):
         """Zero is a measurement. It is the whole difference from a schema-5 dump."""
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "names": 41,
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "names": 41,
                                                "names_failed": 0}))
         self.assertEqual(meta["names_failed"], 0)
         self.assertIsNotNone(meta["names_failed"])
@@ -97,12 +110,12 @@ class CountsAreReadAsDeclaredTest(unittest.TestCase):
         int check turns a malformed field into a count of one.
         """
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "names": "lots",
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "names": "lots",
                                                "names_failed": True}))
         self.assertIsNone(meta["names"])
         self.assertIsNone(meta["names_failed"])
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "names_failed": -1}))
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "names_failed": -1}))
         self.assertIsNone(meta["names_failed"])
 
 
@@ -110,20 +123,20 @@ class LostNamesRideInTheProvenanceLineTest(unittest.TestCase):
 
     def test_the_line_says_how_many_names_were_lost(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.9.11",
-                                   "schema": 6, "names_failed": 3})
+                                   "schema": dump_meta.SCHEMA, "names_failed": 3})
         self.assertIn("could NOT be named", said)
         self.assertIn("3 items in it", said)
 
     def test_a_clean_dump_says_nothing_about_lost_names(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.9.11",
-                                   "schema": 6, "names_failed": 0,
+                                   "schema": dump_meta.SCHEMA, "names_failed": 0,
                                    "mod_count": FULL_PACK})
-        self.assertEqual(said, "dump: written by mod 0.9.11, schema 6, from %d mods"
-                         % FULL_PACK)
+        self.assertEqual(said, "dump: written by mod 0.9.11, schema %d, from %d mods"
+                         % (dump_meta.SCHEMA, FULL_PACK))
 
     def test_one_lost_name_is_not_pluralised(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.9.11",
-                                   "schema": 6, "names_failed": 1})
+                                   "schema": dump_meta.SCHEMA, "names_failed": 1})
         self.assertIn("1 item in it could NOT be named", said)
         self.assertIn("shows as raw ids", said)
 
@@ -134,16 +147,17 @@ class LostNamesRideInTheProvenanceLineTest(unittest.TestCase):
         the build that noticed it may have been weeks ago on another machine.
         """
         g = Graph()
-        g.dump_schema = 6
+        g.dump_schema = dump_meta.SCHEMA
         g.dump_version = "0.9.11"
         g.dump_names_failed = 12
         self.assertIn("could NOT be named", dump_meta.describe(dump_meta.of_graph(g)))
 
     def test_a_schema_six_dump_with_no_usable_failure_count_claims_nothing(self):
         """A malformed `names_failed` must not become a claim in either direction."""
-        said = dump_meta.describe({"present": True, "mod_version": "0.10.0", "schema": 6,
+        said = dump_meta.describe({"present": True, "mod_version": "0.10.0", "schema": dump_meta.SCHEMA,
                                    "names_failed": None, "mod_count": 7})
-        self.assertEqual(said, "dump: written by mod 0.10.0, schema 6, from 7 mods")
+        self.assertEqual(said, "dump: written by mod 0.10.0, schema %d, from 7 mods"
+                         % dump_meta.SCHEMA)
 
     def test_a_pre_194_graph_claims_nothing(self):
         g = Graph()
@@ -220,7 +234,7 @@ class TheRawCountIsNotTheCleanedCountTest(unittest.TestCase):
 class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
 
     def test_a_short_names_file_raises(self):
-        meta = {"schema": 6, "names": 41, "names_failed": 0}
+        meta = {"schema": dump_meta.SCHEMA, "names": 41, "names_failed": 0}
         with self.assertRaises(dump_meta.DamagedDump) as caught:
             dump_meta.check_names(meta, 12)
         said = str(caught.exception)
@@ -230,10 +244,10 @@ class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
     def test_a_long_names_file_raises_too(self):
         """More entries than declared is the same evidence: not the file the dump wrote."""
         with self.assertRaises(dump_meta.DamagedDump):
-            dump_meta.check_names({"schema": 6, "names": 41}, 900)
+            dump_meta.check_names({"schema": dump_meta.SCHEMA, "names": 41}, 900)
 
     def test_a_matching_count_passes(self):
-        self.assertIsNone(dump_meta.check_names({"schema": 6, "names": 41}, 41))
+        self.assertIsNone(dump_meta.check_names({"schema": dump_meta.SCHEMA, "names": 41}, 41))
 
     def test_a_schema_five_dump_is_not_accused(self):
         """Nothing to compare is not evidence of damage, and every dump on disk is here."""
@@ -241,7 +255,7 @@ class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
 
     def test_a_missing_names_file_is_not_accused(self):
         """Deleting names.json is the documented way to build without a damaged one."""
-        self.assertIsNone(dump_meta.check_names({"schema": 6, "names": 41}, None))
+        self.assertIsNone(dump_meta.check_names({"schema": dump_meta.SCHEMA, "names": 41}, None))
 
     def test_the_build_refuses_rather_than_reporting(self):
         """End to end through `index.build`, because the guard's value is where it sits.
@@ -252,7 +266,7 @@ class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"),
-                  {"schema": 6, "mod_version": "0.9.11", "names": 41, "names_failed": 0},
+                  {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11", "names": 41, "names_failed": 0},
                   names={"mod:a": "Anvil"})
             with self.assertRaises(dump_meta.DamagedDump):
                 index.build(inst, quiet=True)
@@ -260,7 +274,7 @@ class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
     def test_an_intact_dump_builds(self):
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"),
-                  {"schema": 6, "mod_version": "0.9.11", "names": 1, "names_failed": 2},
+                  {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11", "names": 1, "names_failed": 2},
                   names={"mod:a": "Anvil"})
             g = index.build(inst, quiet=True)
         self.assertEqual(g.names.get("mod:a"), "Anvil")
@@ -276,7 +290,7 @@ class ATruncatedNamesFileIsRefusedTest(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"),
-                  {"schema": 6, "mod_version": "0.9.11", "names": 99, "names_failed": 0},
+                  {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11", "names": 99, "names_failed": 0},
                   names={"mod:a": "Anvil"})
             said = io.StringIO()
             with contextlib.redirect_stderr(said):
@@ -290,7 +304,7 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
 
     def test_the_counts_are_read(self):
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "mod_count": FULL_PACK,
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "mod_count": FULL_PACK,
                                                "mod_digest": "a1b2c3d4e5f6"}))
         self.assertEqual(meta["mod_count"], FULL_PACK)
         self.assertEqual(meta["mod_digest"], "a1b2c3d4e5f6")
@@ -304,7 +318,7 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
     def test_an_empty_digest_is_no_digest(self):
         """`""` would compare equal to nothing and unequal to everything real."""
         with tempfile.TemporaryDirectory() as root:
-            meta = dump_meta.read(_dump(root, {"schema": 6, "mod_digest": ""}))
+            meta = dump_meta.read(_dump(root, {"schema": dump_meta.SCHEMA, "mod_digest": ""}))
         self.assertIsNone(meta["mod_digest"])
 
     def test_the_provenance_line_names_the_jar_count(self):
@@ -314,9 +328,9 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
         the whole pack produced the dump, and the contents could not settle it either. This
         is the word that separates them, and it is in the line every surface already prints.
         """
-        small = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": 6,
+        small = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": dump_meta.SCHEMA,
                                     "mod_count": 6, "names_failed": 0})
-        big = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": 6,
+        big = dump_meta.describe({"present": True, "mod_version": "0.9.11", "schema": dump_meta.SCHEMA,
                                   "mod_count": FULL_PACK, "names_failed": 0})
         self.assertIn("from 6 mods", small)
         self.assertIn("from %d mods" % FULL_PACK, big)
@@ -324,7 +338,7 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
 
     def test_a_graph_still_names_its_pack_after_the_dump_is_gone(self):
         g = Graph()
-        g.dump_schema = 6
+        g.dump_schema = dump_meta.SCHEMA
         g.dump_version = "0.9.11"
         g.dump_mod_count = FULL_PACK
         g.dump_mod_digest = "a1b2c3d4e5f6"
@@ -372,8 +386,8 @@ class TheDumpSaysWhichJarsItSawTest(unittest.TestCase):
 
 class AWrongPackIsRefusedTest(unittest.TestCase):
 
-    SMALL = {"schema": 6, "mod_version": "0.9.11", "mod_count": 6, "mod_digest": "aaaa"}
-    BIG = {"schema": 6, "mod_version": "0.9.11", "mod_count": FULL_PACK,
+    SMALL = {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11", "mod_count": 6, "mod_digest": "aaaa"}
+    BIG = {"schema": dump_meta.SCHEMA, "mod_version": "0.9.11", "mod_count": FULL_PACK,
            "mod_digest": "bbbb"}
 
     def _graph(self, root, summary):
@@ -461,7 +475,7 @@ class OneNameForSummaryJsonTest(unittest.TestCase):
 
     def test_gaps_reads_the_summary_the_reader_names(self):
         with tempfile.TemporaryDirectory() as root:
-            _dump(root, {"schema": 6, "recipes": 1663, "names_failed": 3})
+            _dump(root, {"schema": dump_meta.SCHEMA, "recipes": 1663, "names_failed": 3})
             with open(os.path.join(root, "skipped.ndjson"), "w") as fh:
                 fh.write('{"uid":"minecraft.crafting","why":"threw"}\n\n')
             summary, skips = gaps.load(root)
@@ -470,9 +484,9 @@ class OneNameForSummaryJsonTest(unittest.TestCase):
 
     def test_gaps_and_dump_meta_open_the_same_path(self):
         with tempfile.TemporaryDirectory() as root:
-            _dump(root, {"schema": 6, "recipes": 7})
+            _dump(root, {"schema": dump_meta.SCHEMA, "recipes": 7})
             self.assertEqual(gaps.load(root)[0]["recipes"], 7)
-            self.assertEqual(dump_meta.read(root)["schema"], 6)
+            self.assertEqual(dump_meta.read(root)["schema"], dump_meta.SCHEMA)
 
     def test_an_empty_directory_reads_as_an_old_dump_rather_than_raising(self):
         with tempfile.TemporaryDirectory() as root:
@@ -582,7 +596,7 @@ class ASkippedCheckDoesNotLookLikeAPassedOneTest(unittest.TestCase):
                 self.built = index.build(inst, out_path=out)
             return said.getvalue().replace(out, "<out>")
 
-    SIX = {"schema": 6, "mod_version": "0.10.0", "mod_count": 6, "mod_digest": "aaaa"}
+    SIX = {"schema": dump_meta.SCHEMA, "mod_version": "0.10.0", "mod_count": 6, "mod_digest": "aaaa"}
     FIVE = {"schema": 5, "mod_version": "0.9.11"}
 
     def test_a_matching_jar_set_says_it_checked(self):
@@ -673,7 +687,7 @@ class TheOverrideFlagIsSpelledOnceTest(unittest.TestCase):
     def test_the_parser_accepts_the_flag_the_refusal_names(self):
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"),
-                  {"schema": 6, "mod_version": "0.10.0", "mod_count": 6,
+                  {"schema": dump_meta.SCHEMA, "mod_version": "0.10.0", "mod_count": 6,
                    "mod_digest": "aaaa"})
             out = os.path.join(inst, "graph.json")
             g = Graph()
@@ -706,7 +720,7 @@ class BothRefusalsReachTheExitCodeTest(unittest.TestCase):
     def test_a_damaged_names_file_also_exits_two(self):
         with tempfile.TemporaryDirectory() as inst:
             _dump(os.path.join(inst, "mc-recipe-dump"),
-                  {"schema": 6, "mod_version": "0.10.0", "names": 99, "names_failed": 0},
+                  {"schema": dump_meta.SCHEMA, "mod_version": "0.10.0", "names": 99, "names_failed": 0},
                   names={"mod:a": "Anvil"})
             out = os.path.join(inst, "graph.json")
             said = io.StringIO()
