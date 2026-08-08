@@ -48,6 +48,53 @@ public final class GraphDocuments {
                 + "}";
     }
 
+    /**
+     * Write {@link #TINY} into `dir`, point `GraphService` at it, and wait until it is READY.
+     *
+     * THE PROCEDURE MOVED HERE FOR THE REASON THE DOCUMENT DID. This class already forbids
+     * pasting the JSON into another test package, and #254 showed the rule was drawn one step
+     * too small: `client.PlannerEntryTest` and `client.machines.MachinesEntryTest` both need a
+     * loaded graph, and the second arrived as a verbatim copy of the first's `loadGraph` --
+     * same temp file, same system property, same poll, same 30-second deadline. That is four
+     * things to keep in step, and the deadline is the one that rots silently: a copy left at
+     * five seconds passes on an idle box and fails under the twelve-agent load this host
+     * actually runs.
+     *
+     * IT THROWS RATHER THAN RETURNING A FLAG. Every caller needs a loaded graph to mean
+     * anything at all, so a caller that ignored a false would go on to assert about a service
+     * in LOADING and report a confusing failure two frames later instead of this one.
+     *
+     * THE CALLER STILL OWNS `GraphService.reset()` AND THE PROPERTY, in its own `@Before` and
+     * `@After`. This deliberately does not clean up: `GraphSource.PROPERTY` is process-wide,
+     * so a helper that restored it would fight the fixture that saved it, and the two tests
+     * already have the save/restore pair the JUnit lifecycle wants.
+     *
+     * @param dir a per-test temporary directory, usually `TemporaryFolder.getRoot()`
+     * @return the graph file that was written
+     */
+    public static java.io.File loadTinyGraphFrom(java.io.File dir) throws Exception {
+        java.io.File file = new java.io.File(dir, "graph.json");
+        java.io.FileOutputStream out = new java.io.FileOutputStream(file);
+        try {
+            out.write(TINY.getBytes("UTF-8"));
+        } finally {
+            out.close();
+        }
+        System.setProperty(GraphSource.PROPERTY, file.getPath());
+        GraphService.get().startLoad(null);
+        // THIRTY SECONDS FOR A DOCUMENT THIS SIZE IS NOT A GUESS ABOUT THE READ, it is headroom
+        // for a shared host: the read is milliseconds and the wait exists so a box running a
+        // dozen containers does not turn a scheduling delay into a red test.
+        long deadline = System.currentTimeMillis() + 30_000L;
+        while (GraphService.get().state() != GraphService.State.READY) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("graph never loaded: " + GraphService.get().describe());
+            }
+            Thread.sleep(5L);
+        }
+        return file;
+    }
+
     private GraphDocuments() {
     }
 }

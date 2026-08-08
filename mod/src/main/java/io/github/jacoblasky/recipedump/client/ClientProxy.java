@@ -144,6 +144,33 @@ public class ClientProxy extends CommonProxy {
         }
     }
 
+    /**
+     * Open the machines table.
+     *
+     * GUARDED THE SAME WAY {@link #openPlanner} IS, AND FOR THE SAME REASON RATHER THAN BY
+     * SYMMETRY. `MachinesScreen` names ModularUI directly, so it is loaded HERE, on the first
+     * shift-right-click, rather than when this proxy is constructed. The shipped jar
+     * deliberately declares no ModularUI dependency -- the screenshot harness relies on that
+     * too -- so a pack without it must still load the mod and still dump.
+     *
+     * DO NOT "simplify" this by importing `MachinesScreen` at the top and dropping the catch.
+     * That is the eager-resolution trap the two reflective bridges document at length: the
+     * class reference would move into this proxy's constant pool and every client without
+     * ModularUI would fail to load the proxy, taking the dump command with it.
+     *
+     * IT NEEDS NO PLAN BOOK, unlike the planner. The machines table is a view of the pack, not
+     * of the player, which is what lets this open when the planner would only show a not-yet
+     * panel.
+     */
+    @Override
+    public void openMachines(EntityPlayer player) {
+        try {
+            MachinesScreen.open();
+        } catch (Throwable missing) {
+            tell(player, "the machines table needs ModularUI 3.1.5, which is not installed");
+        }
+    }
+
     private static void tell(EntityPlayer player, String message) {
         player.sendMessage(new TextComponentString("[mc-recipe-dump] " + message));
     }

@@ -85,4 +85,20 @@ public class CommonProxy {
      */
     public void openPlanner(EntityPlayer player) {
     }
+
+    /**
+     * Open the machines table. A no-op on a server, which has no screens.
+     *
+     * A SECOND METHOD RATHER THAN A FLAG ON {@link #openPlanner}, because the two windows have
+     * different preconditions and a boolean would hide that. The planner needs a plan or shows
+     * one of four not-yet panels; the machines table needs only the graph, so it is answerable
+     * in cases where the planner is not -- which is exactly why it is reached from the item
+     * rather than from inside the planner. See `CalculatorItem.onItemRightClick`.
+     *
+     * AN EMPTY BODY HERE IS A SEAM, and `SeamInstallationTest` asserts that every empty method
+     * on this class is overridden by {@code ClientProxy} -- because nothing else can tell an
+     * unimplemented hook from a deliberate no-op, and #191 shipped three of the former.
+     */
+    public void openMachines(EntityPlayer player) {
+    }
 }

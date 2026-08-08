@@ -127,11 +127,29 @@ public final class NodeRowText {
      * is two different numbers to anyone comparing them.
      */
     public static String quantity(long need) {
-        StringBuilder digits = new StringBuilder(Long.toString(Math.abs(need)));
+        return grouped(need) + "x";
+    }
+
+    /**
+     * The same grouping without the trailing `x`: `934,400`.
+     *
+     * SHARED WITH `client.machines` RATHER THAN COPIED THERE (#254), and the reason is the
+     * paragraph above this pair rather than brevity. A second comma-inserter next door is a
+     * second thing that can be "simplified" into `NumberFormat.getInstance()`, which renders
+     * `934.400` on a German client -- and a recipe count that reads as a different number
+     * depending on the player's locale is the exact failure {@link #quantity} was written to
+     * avoid. One implementation cannot drift from itself.
+     *
+     * A RECIPE COUNT IS NOT A QUANTITY, which is why the machines table cannot just call
+     * {@link #quantity}: "1,441x" beside a category name claims the reader needs 1,441 of
+     * something.
+     */
+    public static String grouped(long value) {
+        StringBuilder digits = new StringBuilder(Long.toString(Math.abs(value)));
         for (int at = digits.length() - 3; at > 0; at -= 3) {
             digits.insert(at, ',');
         }
-        return (need < 0 ? "-" : "") + digits + "x";
+        return (value < 0 ? "-" : "") + digits;
     }
 
     /**
