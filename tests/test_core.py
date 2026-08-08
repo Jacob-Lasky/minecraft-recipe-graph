@@ -15,12 +15,16 @@ from recipegraph import render  # noqa: E402
 from recipegraph import solve as solve_mod  # noqa: E402
 from recipegraph import explore  # noqa: E402
 from recipegraph.model import (  # noqa: E402
-    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, is_item_key, is_unlocalized,
-    merge_slots, norm_key, path_of, split_discriminator,
+    NON_ITEM_KINDS, Graph, Ingredient, Recipe, base_key, canonical_item_key, is_item_key,
+    is_unlocalized, merge_slots, norm_key, path_of, split_discriminator,
 )
 from recipegraph.solve import Solver  # noqa: E402
 from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
 from recipegraph.sources import jar_json  # noqa: E402
+from recipegraph.names import load_items_csv  # noqa: E402
+from recipegraph.sources import dump_names  # noqa: E402
+from recipegraph.sources import emc as emc_src  # noqa: E402
+from recipegraph.sources import icons as icons_src  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
 
 
@@ -37,6 +41,29 @@ class TestKeys(unittest.TestCase):
 
     def test_bare_name_gets_minecraft_namespace(self):
         self.assertEqual(norm_key("diamond"), "minecraft:diamond")
+
+    def test_canonical_item_key_folds_the_wildcard_meta(self):
+        """#253: the mod writes the any-damage wildcard as the literal 32767, and every
+        recipe spells the same item `:*`. Asserted against literal keys rather than through
+        `norm_key(x, WILDCARD_META)`, so a change to either spelling shows up here."""
+        self.assertEqual(canonical_item_key("mod:thing:32767"), "mod:thing:*")
+        self.assertEqual(canonical_item_key("mod:thing:0"), "mod:thing")
+        self.assertEqual(canonical_item_key("mod:thing:5"), "mod:thing:5")
+        self.assertEqual(canonical_item_key("mod:thing"), "mod:thing")
+
+    def test_canonical_item_key_keeps_a_digest_and_the_meta_under_it(self):
+        # Only names.json carries digests, and the meta sits BEFORE the suffix.
+        self.assertEqual(canonical_item_key("mod:thing:32767#a1b2"), "mod:thing:*#a1b2")
+        self.assertEqual(canonical_item_key("mod:thing#a1b2"), "mod:thing#a1b2")
+        self.assertEqual(canonical_item_key("mod:thing:5#a1b2"), "mod:thing:5#a1b2")
+
+    def test_canonical_item_key_still_takes_a_negative_meta(self):
+        # items.csv carries them; this must not narrow what that reader already accepted.
+        self.assertEqual(canonical_item_key("mod:thing:-1"), "mod:thing:-1")
+
+    def test_canonical_item_key_survives_nothing(self):
+        for junk in ("", None):
+            self.assertEqual(canonical_item_key(junk), junk)
 
     def test_base_key_strips_only_the_discriminator(self):
         self.assertEqual(base_key("forestry:can:1#48a337d94489"), "forestry:can:1")
@@ -65,6 +92,97 @@ class TestKeys(unittest.TestCase):
             self.assertEqual(g.kind(key), name)
         self.assertTrue(is_item_key("minecraft:stone"))
         self.assertEqual(g.kind("minecraft:stone"), "item")
+
+
+class TestNameSourceKeys(unittest.TestCase):
+    """#253: the two sources that NAME items must agree on how a key is spelled.
+
+    `items.csv` has always canonicalised; `names.json` did not, so the any-damage wildcard
+    arrived as the literal `:32767` and named a key nothing produces and nothing consumes.
+    Both readers now share `model.canonical_item_key`, and these pin both ends of that.
+    """
+
+    def _names_json(self, doc):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "names.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh)
+            return dump_names.load_with_count(path)
+
+    def test_names_json_wildcard_meta_lands_on_the_key_recipes_use(self):
+        names, raw = self._names_json({
+            "arcane_essentials:master_fire_sword:32767": "Master Fire Sword",
+            "mod:plain": "Plain",
+        })
+        # Membership first, so reverting the fix reds as an assertion naming the key that
+        # is missing rather than as a KeyError from the lookup on the next line.
+        self.assertIn("arcane_essentials:master_fire_sword:*", names)
+        self.assertEqual(names["arcane_essentials:master_fire_sword:*"], "Master Fire Sword")
+        self.assertNotIn("arcane_essentials:master_fire_sword:32767", names)
+        self.assertEqual(names["mod:plain"], "Plain")
+        # The RAW count is the file's, not the map's, and canonicalising must not move it.
+        self.assertEqual(raw, 2)
+
+    def test_names_json_keeps_a_specific_meta_and_a_digest(self):
+        names, _ = self._names_json({
+            "techreborn:player_detector:2": "Player Detector (You)",
+            "forestry:bee_drone_ge#a3f19c02b8d1": "Forest Drone",
+        })
+        self.assertEqual(names["techreborn:player_detector:2"], "Player Detector (You)")
+        self.assertEqual(names["forestry:bee_drone_ge#a3f19c02b8d1"], "Forest Drone")
+
+    def test_two_raw_keys_folding_onto_one_keep_the_first_name(self):
+        """Canonicalising can now collide, so the tiebreak is pinned rather than incidental.
+        Zero of the reference dump's 2,672 actually collide; this guards the shape."""
+        names, _ = self._names_json({
+            "mod:thing:32767": "First",
+            "mod:thing:*": "Second",
+        })
+        self.assertEqual(names["mod:thing:*"], "First")
+        self.assertEqual(len(names), 1)
+
+    def test_items_csv_agrees_with_names_json_on_the_wildcard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "items.csv")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("mod:thing:32767,Wildcard Thing\nmod:other:5,Meta Thing\n")
+            csv_names = load_items_csv(path)
+        json_names, _ = self._names_json({"mod:thing:32767": "Wildcard Thing"})
+        # Membership first: a reverted canonicaliser must red as an assertion naming the
+        # key that is missing, not as a KeyError from the lookup on the next line.
+        self.assertIn("mod:thing:*", csv_names)
+        self.assertEqual(csv_names["mod:thing:*"], "Wildcard Thing")
+        self.assertEqual(csv_names["mod:other:5"], "Meta Thing")
+        # The point of the shared helper: one item, one key, whichever source named it.
+        self.assertEqual(set(json_names), {"mod:thing:*"})
+
+
+class TestDumpReaderKeySpelling(unittest.TestCase):
+    """#253: EVERY reader of a dump file spells a key the way the graph does.
+
+    `dump_names` was the one with live damage (2,672 keys). These two have ZERO today and
+    are here because the audit that found the first one has to cover the rest: the mod
+    writes what the game stores, so any of them can meet an any-damage stack tomorrow, and
+    both fail silently when it happens -- a missing EMC value is indistinguishable from an
+    item ProjectE does not price, and a missing sprite is a blank square.
+    """
+
+    def test_emc_values_land_on_the_canonical_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "emc.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"mod:thing:32767": 64, "mod:other": 8}, fh)
+            values = emc_src.load(path)
+        self.assertEqual(values, {"mod:thing:*": 64, "mod:other": 8})
+
+    def test_icon_placements_land_on_the_canonical_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "icons.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"icon": 16, "cols": 2, "pages": ["icons-0.png"],
+                           "keys": {"mod:thing:32767": [0, 0, 0], "mod:other": [0, 1, 0]}}, fh)
+            index = icons_src.load(path)
+        self.assertEqual(sorted(index["keys"]), ["mod:other", "mod:thing:*"])
 
 
 class TestJarJson(unittest.TestCase):
