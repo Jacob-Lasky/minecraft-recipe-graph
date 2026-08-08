@@ -28,7 +28,27 @@ WILDCARD_META = 32767
 
 
 def norm_key(item_id, meta=0):
-    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard."""
+    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard.
+
+    THE `minecraft:` DEFAULT BELOW IS FOR IDS THAT COME FROM THE RUNNING GAME, AND IT IS THE
+    WRONG DEFAULT FOR A RECIPE JSON. DO NOT teach this function the recipe file's namespace,
+    and DO NOT delete the fallback as "dead" -- both were considered and both are wrong. See
+    #227.
+
+    Every caller but one hands this a FULLY QUALIFIED registry id, because every one of them
+    is reading a name the RUNNING GAME wrote down: `sources/hei_dump` off JEI's stacks,
+    `sources/catalysts`, `sources/damageable` and `sources/oredict` off the same dump,
+    `names` off the AE2 `items.csv`, and `multiblocks` and `explore` off ids already in the
+    graph. For those an unqualified id really is a vanilla one, so the fallback is right and
+    is what keeps a bare `stone` from becoming a keyless string.
+
+    The one caller that does NOT is `sources/jar_json`, because Forge resolves an unqualified
+    id in a recipe file against THE FILE'S OWN DOMAIN (`JsonContext.appendModId`), not against
+    `minecraft`. That caller qualifies the id itself in `jar_json.qualify` before it gets here.
+    Moving that logic into this function would need a namespace argument on every call site
+    that has no namespace to give, and would silently re-point the dump readers the day one of
+    them saw a bare id.
+    """
     if item_id is None:
         return None
     item_id = str(item_id).strip()

@@ -17,20 +17,57 @@ SHAPED = {"minecraft:crafting_shaped", "forge:ore_shaped"}
 SHAPELESS = {"minecraft:crafting_shapeless", "forge:ore_shapeless"}
 
 
-def _ingredient_alts(node, constants=None, _seen=None):
+def qualify(item_id, default_ns):
+    """An id from a recipe JSON -> the id Forge would register it under. Issue #227.
+
+    FORGE DEFAULTS AN UNQUALIFIED ID TO THE RECIPE FILE'S OWN NAMESPACE, NOT TO `minecraft`.
+    `CraftingHelper.getItemStack` passes every id through `JsonContext.appendModId`, which
+    prepends the domain of the file the recipe was read from, so
+    `assets/tombstone/recipes/tablet_of_home.json` writing `"item": "tablet_of_home"` means
+    `tombstone:tablet_of_home`. `model.norm_key` prepends `minecraft:` instead, which is right
+    for every OTHER caller and wrong for this one -- see the comment on `norm_key` itself.
+
+    Measured on the reference pack before this existed: 78 of 10,301 recipe docs carry at
+    least one unqualified id, producing 64 phantom `minecraft:*` keys, ALL of which reached
+    the shipped `data/graph.json` -- `minecraft:tablet_of_home`, `minecraft:voodoo_poppet`,
+    `minecraft:colossal_star_ein`. The harm is not only cosmetic: 32 of the ids are
+    INGREDIENTS, so the ProjectEx star chain and the tesslocator set became recipes demanding
+    an item that cannot exist, and no AE2 stock can ever satisfy a key the registry has never
+    heard of.
+
+    TWO DIFFERENT CHECKS AGAINST THE DUMP, AND THEY GIVE DIFFERENT NUMBERS ON PURPOSE.
+    **58 of the 64** corrected keys name an item the dump has SEEN (`names.json`), which is
+    the question "is this the real id"; only **55** name an item the dump PRODUCES, which is
+    the narrower question "does something craft it". A world-gen item nobody crafts is known
+    and unproduced, so quoting the smaller number as evidence about identity understates the
+    fix -- which is a mistake this issue's own measurement made once before it was caught.
+
+    `default_ns` of None leaves the id alone and lets `norm_key` do what it always did. That
+    path is for a caller with no namespace to give: `extract` always has one, so in practice
+    it is the unit tests and any future reader of a loose recipe file.
+    """
+    if not isinstance(item_id, str) or ":" in item_id or not default_ns:
+        return item_id
+    return "%s:%s" % (default_ns, item_id)
+
+
+def _ingredient_alts(node, constants=None, default_ns=None, _seen=None):
     """A JSON ingredient -> list of item keys. Handles ore dicts, arrays, nbt forms.
 
     `#name` resolves through Forge's `_constants.json` mechanism (38 jars in this
     pack use it). Unresolved `#name` yields nothing rather than a bogus
     `minecraft:#name` key -- a fake key would silently become a phantom raw item in
     every shopping list.
+
+    `default_ns` is the recipe file's own namespace; see `qualify` for why an unqualified
+    id must not fall back to `minecraft`.
     """
     if node is None:
         return []
     if isinstance(node, list):
         alts = []
         for sub in node:
-            alts.extend(_ingredient_alts(sub, constants, _seen))
+            alts.extend(_ingredient_alts(sub, constants, default_ns, _seen))
         return alts
     if isinstance(node, str):
         node = {"item": node}
@@ -46,7 +83,7 @@ def _ingredient_alts(node, constants=None, _seen=None):
         if isinstance(item, list):
             alts = []
             for sub in item:
-                alts.extend(_ingredient_alts(sub, constants, _seen))
+                alts.extend(_ingredient_alts(sub, constants, default_ns, _seen))
             return alts
         if isinstance(item, str) and item.startswith("#"):
             name = item[1:]
@@ -56,9 +93,11 @@ def _ingredient_alts(node, constants=None, _seen=None):
             target = constants.get(name)
             if target is None:
                 return []
-            return _ingredient_alts(target, constants, seen | {name})
+            return _ingredient_alts(target, constants, default_ns, seen | {name})
+        if not isinstance(item, str):
+            return []  # same guard, same reason, as `_result_outputs`
         data = node.get("data", node.get("meta", 0))
-        return [norm_key(item, data)]
+        return [norm_key(qualify(item, default_ns), data)]
     if "ore" in node:
         return [ore_key(node["ore"])]
     if "tag" in node and isinstance(node["tag"], str):
@@ -66,11 +105,16 @@ def _ingredient_alts(node, constants=None, _seen=None):
     return []
 
 
-def _result_outputs(node):
+def _result_outputs(node, default_ns=None):
     if not isinstance(node, dict):
         return []
     item = node.get("item")
-    if not item:
+    # A NON-STRING id YIELDS NOTHING RATHER THAN A KEY BUILT OUT OF ITS repr(). `norm_key`
+    # str()s whatever it is given, so a list result used to become the literal key
+    # `minecraft:['a', 'b']` -- a phantom of exactly the kind #227 was opened about, arriving
+    # by a different door. No document in the reference pack does this today; the guard is
+    # here because "0 occurrences" is a fact about this pack and not about the format.
+    if not item or not isinstance(item, str):
         return []
     data = node.get("data", node.get("meta", 0))
     count = node.get("count", 1)
@@ -78,15 +122,19 @@ def _result_outputs(node):
         count = int(count)
     except (TypeError, ValueError):
         count = 1
-    return [(norm_key(item, data), max(1, count))]
+    return [(norm_key(qualify(item, default_ns), data), max(1, count))]
 
 
-def parse_recipe_json(doc, rid, constants=None):
-    """One recipe document -> Recipe, or None if unsupported/undecodable."""
+def parse_recipe_json(doc, rid, constants=None, default_ns=None):
+    """One recipe document -> Recipe, or None if unsupported/undecodable.
+
+    `default_ns` is the namespace of the file this document was read from;
+    `qualify` explains why an unqualified id must not fall back to `minecraft`.
+    """
     if not isinstance(doc, dict):
         return None
     rtype = doc.get("type")
-    outputs = _result_outputs(doc.get("result"))
+    outputs = _result_outputs(doc.get("result"), default_ns)
     if not outputs:
         return None
 
@@ -101,7 +149,7 @@ def parse_recipe_json(doc, rid, constants=None):
                 if ch != " ":
                     counts[ch] = counts.get(ch, 0) + 1
         for ch, n in counts.items():
-            alts = _ingredient_alts(key_map.get(ch), constants)
+            alts = _ingredient_alts(key_map.get(ch), constants, default_ns)
             if alts:
                 slots.append(Ingredient(alts, n))
     elif rtype in SHAPELESS or "ingredients" in doc:
@@ -109,7 +157,7 @@ def parse_recipe_json(doc, rid, constants=None):
         agg = {}
         order = []
         for ing in doc.get("ingredients") or []:
-            alts = _ingredient_alts(ing, constants)
+            alts = _ingredient_alts(ing, constants, default_ns)
             if not alts:
                 continue
             k = tuple(alts)
@@ -179,15 +227,31 @@ def _is_recipe_entry(entry):
     return entry.endswith(".json") and entry.startswith("assets/") and "/recipes/" in entry
 
 
+def asset_namespace(entry):
+    """`assets/<ns>/...` -> `<ns>`, or None. The one place that shape is spelled.
+
+    Sibling of `_is_recipe_entry` and here for the same reason it gives: `extract` asks this
+    question in three places -- the constants pass, the recipe pass and the id it qualifies
+    (#227) -- and three copies of `entry.split("/")[1]` is how two readers stop agreeing
+    about what a namespace is.
+    """
+    if not entry.startswith("assets/"):
+        return None
+    parts = entry.split("/")
+    return parts[1] if len(parts) > 2 and parts[1] else None
+
+
 def extract(mods_dir, on_progress=None):
     """Walk every jar directly under mods_dir and yield Recipe objects.
 
     Immediate subdirectories are NOT read; `unread_subdir_jars` reports them and says why.
+
     """
     jars = sorted(
         os.path.join(mods_dir, f) for f in os.listdir(mods_dir) if f.lower().endswith(".jar")
     )
     stats = {"jars": 0, "files": 0, "recipes": 0, "skipped": 0}
+
     for jar in jars:
         stats["jars"] += 1
         if on_progress:
@@ -204,7 +268,7 @@ def extract(mods_dir, on_progress=None):
             for entry in entries:
                 if not entry.endswith("/_constants.json"):
                     continue
-                ns = entry.split("/")[1]
+                ns = asset_namespace(entry)
                 try:
                     doc = json.loads(zf.read(entry).decode("utf-8", "replace"))
                 except (ValueError, OSError):
@@ -215,7 +279,8 @@ def extract(mods_dir, on_progress=None):
 
             for entry in entries:
                 parts = entry.split("/")
-                if len(parts) < 4 or parts[2] != "recipes":
+                ns = asset_namespace(entry)
+                if not ns or len(parts) < 4 or parts[2] != "recipes":
                     continue
                 if parts[-1].startswith("_"):
                     continue  # _constants.json / _factories.json are not recipes
@@ -226,7 +291,7 @@ def extract(mods_dir, on_progress=None):
                     stats["skipped"] += 1
                     continue
                 rid = "%s!%s" % (os.path.basename(jar), entry)
-                recipe = parse_recipe_json(doc, rid, constants.get(parts[1]))
+                recipe = parse_recipe_json(doc, rid, constants.get(ns), ns)
                 if recipe is None:
                     stats["skipped"] += 1
                     continue

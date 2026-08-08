@@ -111,6 +111,112 @@ class TestJarJson(unittest.TestCase):
         self.assertIsNone(parse_recipe_json(doc, "t", {}))
 
 
+class TestJarJsonNamespace(unittest.TestCase):
+    """#227: an unqualified id belongs to the recipe file's namespace, not to `minecraft`.
+
+    EVERY DOCUMENT BELOW IS COPIED VERBATIM OUT OF A PACK JAR, not written for the test. The
+    defect was that `norm_key` prepends `minecraft:`, and a document invented here would only
+    prove the code does what it was written to do; these prove it produces the key the RUNNING
+    GAME uses, each of which was checked against `names.json` in the reference dump.
+    """
+
+    def test_unqualified_result_takes_the_file_namespace(self):
+        # tombstone-1.12.2-4.7.5.jar!assets/tombstone/recipes/tablet_of_home.json
+        doc = {
+            "type": "tombstone:disableable_shapeless",
+            "ingredients": [{"item": "tombstone:crafting_ingredient", "data": 1},
+                            {"item": "minecraft:red_mushroom"}],
+            "result": {"item": "tablet_of_home"},
+        }
+        r = parse_recipe_json(doc, "t", None, "tombstone")
+        self.assertEqual(r.outputs, [("tombstone:tablet_of_home", 1)])
+        # And the qualified ingredients beside it are left exactly alone.
+        self.assertIn(["tombstone:crafting_ingredient:1"],
+                      [i.alternatives for i in r.inputs])
+
+    def test_unqualified_result_with_a_count(self):
+        # Tesslocator-1.1.0.15.jar!assets/tesslocator/recipes/basic_item_tesslocator.json
+        doc = {
+            "type": "minecraft:crafting_shaped",
+            "group": "tesslocator",
+            "result": {"item": "basic_item_tesslocator", "count": 4},
+            "pattern": ["GHG", "HFH", "GHG"],
+            "key": {"G": {"type": "forge:ore_dict", "ore": "nuggetGold"},
+                    "H": {"item": "minecraft:hopper"},
+                    "F": {"item": "itemfilters:filter"}},
+        }
+        r = parse_recipe_json(doc, "t", None, "tesslocator")
+        self.assertEqual(r.outputs, [("tesslocator:basic_item_tesslocator", 4)])
+
+    def test_unqualified_INGREDIENT_takes_the_file_namespace(self):
+        """The damaging half: a phantom INPUT is a demand nothing can ever satisfy.
+
+        BiblioCraft[v2.4.6][MC1.12.2].jar!assets/bibliocraft/recipes/atlasbook.json qualifies
+        its result and not its ingredients, so before #227 this recipe asked for
+        `minecraft:maptool` and `minecraft:slottedbook`. Both exist as `bibliocraft:*` in the
+        dump; neither exists under `minecraft:` in any registry.
+        """
+        doc = {
+            "type": "minecraft:crafting_shaped",
+            "group": "bibliocraft",
+            "pattern": ["RTR", "RBR", "RMR"],
+            "key": {"R": {"item": "minecraft:paper"}, "T": {"item": "maptool"},
+                    "M": {"item": "minecraft:map"}, "B": {"item": "slottedbook"}},
+            "result": {"item": "bibliocraft:atlasbook", "data": 0},
+        }
+        r = parse_recipe_json(doc, "t", None, "bibliocraft")
+        alts = sorted(a for i in r.inputs for a in i.alternatives)
+        self.assertEqual(alts, ["bibliocraft:maptool", "bibliocraft:slottedbook",
+                                "minecraft:map", "minecraft:paper"])
+        self.assertNotIn("minecraft:maptool", alts)
+
+    def test_no_namespace_given_keeps_the_old_behaviour(self):
+        # `default_ns=None` is what the direct callers above pass, and it must not move.
+        doc = {"type": "minecraft:crafting_shapeless",
+               "ingredients": [{"item": "stick"}], "result": {"item": "thing"}}
+        r = parse_recipe_json(doc, "t")
+        self.assertEqual(r.outputs, [("minecraft:thing", 1)])
+
+    def test_qualify_leaves_a_qualified_id_alone(self):
+        self.assertEqual(jar_json.qualify("mod:thing", "other"), "mod:thing")
+        self.assertEqual(jar_json.qualify("thing", "other"), "other:thing")
+        self.assertEqual(jar_json.qualify("thing", None), "thing")
+        # A non-string reaches `norm_key` unchanged, which is the only reader that knows
+        # what to do with garbage; qualifying it would turn `None` into `"ns:None"`.
+        self.assertIsNone(jar_json.qualify(None, "ns"))
+        self.assertEqual(jar_json.qualify(7, "ns"), 7)
+
+    def test_a_non_string_id_yields_nothing_rather_than_a_repr_key(self):
+        """`norm_key` str()s whatever it gets, so a list id used to build the literal key
+        `minecraft:['a', 'b']` -- a phantom arriving by a different door than #227's. No pack
+        document does this today, which is a fact about the pack and not about the format."""
+        self.assertEqual(parse_recipe_json(
+            {"type": "minecraft:crafting_shapeless", "ingredients": [{"item": "x:y"}],
+             "result": {"item": ["a", "b"]}}, "t", None, "mod"), None)
+        # And on the ingredient side the slot is dropped, which drops the recipe.
+        self.assertIsNone(parse_recipe_json(
+            {"type": "minecraft:crafting_shapeless", "ingredients": [{"item": {"bad": 1}}],
+             "result": {"item": "mod:thing"}}, "t", None, "mod"))
+
+    def test_a_constant_target_also_takes_the_file_namespace(self):
+        """`#name` resolves through `_constants.json`, whose targets are in the SAME
+        namespace as the recipe. Missing this leaves the phantom key in the one place the
+        file already warns about faking keys."""
+        constants = {"gear": {"item": "cog", "data": 2}}
+        doc = {"type": "minecraft:crafting_shaped", "pattern": ["GG"],
+               "key": {"G": {"item": "#gear"}}, "result": {"item": "mod:thing"}}
+        r = parse_recipe_json(doc, "t", constants, "mymod")
+        self.assertEqual(r.inputs[0].alternatives, ["mymod:cog:2"])
+
+    def test_asset_namespace_is_the_one_spelling_of_that_shape(self):
+        self.assertEqual(jar_json.asset_namespace("assets/mod/recipes/x.json"), "mod")
+        self.assertEqual(jar_json.asset_namespace("assets/mod/lang/en_us.lang"), "mod")
+        self.assertIsNone(jar_json.asset_namespace("mcmod.info"))
+        self.assertIsNone(jar_json.asset_namespace("assets/"))
+        self.assertIsNone(jar_json.asset_namespace("assets/mod"))
+        self.assertIsNone(jar_json.asset_namespace("assets//recipes/x.json"))
+
+
 def _graph():
     g = Graph()
     g.names = {
