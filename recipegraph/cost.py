@@ -613,7 +613,41 @@ CRAFTABLE_COST = 0.25
 #
 #     The biggest absolute moves are all in the ProjectE star ladder, where prices are already
 #     ~1e12 and a 9.6% rise changes no ordering; nothing there is reachable anyway.
-FORMULA_VERSION = 17
+#
+# 18: #223. THE INGREDIENT TERM IS NOW DIVIDED BY THE EXPECTED YIELD, NOT THE NOMINAL ONE, and
+#     `_scaled_qty` grew a third argument to carry it. A recipe that produces its output 10% of
+#     the time costs ten times as much per unit of it.
+#
+#     THE HASHED INPUTS DO NOT MOVE ON THEIR OWN, WHICH IS EXACTLY WHY THIS CONSTANT EXISTS. A
+#     graph built from a schema-7 dump carries no `q` anywhere, so `fingerprint` sees identical
+#     bytes before and after this change and a cached table computed under 17 would be served
+#     for a formula that no longer produces it.
+#
+#     MEASURED ON THE REFERENCE GRAPH: **the table does not move at all.** All 162,537 finite
+#     prices are identical before and after, none up, none down, none appearing or vanishing.
+#     That is the expected result and it is worth writing down, because the obvious reading of
+#     this bump is that it must have repriced something.
+#
+#     It does not, because a schema-7 graph carries no `q`, so every `chance` here is 1.0 and
+#     `_scaled_qty` returns exactly what it always did. The bump exists for the NEXT graph, not
+#     this one: `fingerprint` hashes the same bytes either way, so a cached table computed
+#     under 17 would otherwise be served for a formula that no longer produces it the moment a
+#     schema-8 dump lands.
+#
+#     THE 618-RECIPE FIX #223 ALSO CARRIES IS NOT IN THIS FUNCTION, and conflating them was an
+#     error in an earlier draft of this comment. `Solver._build` used to read only the FIRST
+#     output slot matching a key while `_shape` summed every one of them, and both now call
+#     `Recipe.expected_yield`. That governs how many RUNS a plan asks for. `_relax` has always
+#     priced each output slot independently and taken the `min`, which is a different question
+#     (what does one unit cost) and is untouched here.
+#
+#     Those two are not the same arithmetic and the gap between them is real but pre-existing:
+#     for TechReborn's Industrial Grinder, four secondary slots of one chunk at 45/23/15/6, a
+#     run yields 89 and `_relax` charges the ingredient term against 45. It overstates, which
+#     is the safe direction, and correcting it would move prices and wants its own measurement.
+#     Filed separately. DO NOT "unify" it into `expected_yield` as a tidy-up: that is a
+#     repricing wearing a refactor's clothes.
+FORMULA_VERSION = 18
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
