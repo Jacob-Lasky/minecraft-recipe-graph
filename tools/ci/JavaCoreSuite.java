@@ -79,6 +79,7 @@ public final class JavaCoreSuite {
         List<String> classNames = new ArrayList<String>();
         String scope = null;
         String notRun = null;
+        int expectAssertions = -1;
         for (int i = 0; i < args.length; i++) {
             if ("--allow-skip".equals(args[i])) {
                 allowedSkips.add(valueAfter(args, ++i, "a Class.method"));
@@ -86,13 +87,16 @@ public final class JavaCoreSuite {
                 scope = valueAfter(args, ++i, "a short label for the banner");
             } else if ("--not-run".equals(args[i])) {
                 notRun = valueAfter(args, ++i, "a sentence naming what this run leaves out");
+            } else if ("--expect-assertions".equals(args[i])) {
+                expectAssertions = number(valueAfter(args, ++i, "a count"), "--expect-assertions");
             } else {
                 classNames.add(args[i]);
             }
         }
         if (classNames.isEmpty()) {
             System.err.println("usage: JavaCoreSuite [--allow-skip Class.method ...] "
-                    + "[--scope <label>] [--not-run <text>] <test class> ...");
+                    + "[--scope <label>] [--not-run <text>] [--expect-assertions <n>] "
+                    + "<test class> ...");
             System.exit(2);
         }
 
@@ -161,6 +165,22 @@ public final class JavaCoreSuite {
             System.out.println("!! the run collected nothing");
             bad = true;
         }
+        // THE `--not-run` SENTENCE QUOTES AN ASSERTION COUNT THAT `ci-java.sh` GOT BY GREPPING
+        // `@Test`, WHICH IS A PROXY FOR WHAT JUNIT ACTUALLY RUNS. The two agree on this tree
+        // today and stop agreeing the moment anything uses `@RunWith(Parameterized)`, inherits a
+        // test method, or carries an `@Ignore`. This is the check that notices, and it is the
+        // whole reason the figure is allowed into output at all: without it the note would be a
+        // number nobody re-derives, which is the defect #244 is about, one level down.
+        if (expectAssertions >= 0 && expectAssertions != result.getRunCount()) {
+            System.out.println("!! THE ASSERTION COUNTER HAS STOPPED MATCHING THIS TREE: "
+                    + "tools/ci-java.sh counted " + expectAssertions + " @Test in the files it "
+                    + "compiled and JUnit ran " + result.getRunCount() + ".");
+            System.out.println("   A static `@Test` grep cannot see a parameterized runner, an "
+                    + "inherited test method or an @Ignore, so the assertion figures in the NOT "
+                    + "RUN line below are now wrong. Fix the counter or drop the figures; do "
+                    + "not adjust this number to match.");
+            bad = true;
+        }
         // IMMEDIATELY ABOVE THE BANNER, AND NOT AT THE TOP OF THE JOB. The counts line and the
         // verdict are the two lines anyone reads; a caveat printed before a screen of compiler
         // output has scrolled off by the time the reader forms an opinion. On a green run this
@@ -187,6 +207,17 @@ public final class JavaCoreSuite {
             System.exit(2);
         }
         return args[index];
+    }
+
+    /** A flag's integer argument, or a legible exit rather than a NumberFormatException trace. */
+    private static int number(String text, String flag) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException notANumber) {
+            System.err.println("!! " + flag + " needs a number, got: " + text);
+            System.exit(2);
+            return -1;
+        }
     }
 
     /** `label` then `body`, with continuation lines indented to line up under the first. */

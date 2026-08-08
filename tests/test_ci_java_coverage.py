@@ -33,7 +33,7 @@ RUNNER = os.path.join(ROOT, "tools", "ci", "JavaCoreSuite.java")
 # The flags the script hands the runner so the run can say what it left out. Both halves have to
 # hold: a script that computes the note and never passes it prints nothing, and a runner that
 # stops parsing the flag swallows it. #244.
-COVERAGE_FLAGS = ("--scope", "--not-run")
+COVERAGE_FLAGS = ("--scope", "--not-run", "--expect-assertions")
 
 
 def _read(path):
@@ -57,6 +57,12 @@ def _counting_block(body):
     match = re.search(r'(find \$CORE_TEST -name .*?\nnot_run_note="[^"]*"\n)', body, re.S)
     assert match, "tools/ci-java.sh no longer computes not_run_note; update this test"
     return match.group(1)
+
+
+def _assertions_in(path):
+    """`@Test` methods in one file, counted the way the script counts them."""
+    with open(path, encoding="utf-8") as handle:
+        return len([line for line in handle if re.match(r"^\s*@Test\b", line)])
 
 
 def _java_test_files(directory):
@@ -130,12 +136,23 @@ class _CountingBlock(object):
             shutil.rmtree(work, ignore_errors=True)
 
 
-def _tree(root, paths):
-    """Create empty files at `paths` under `root`, making directories as needed."""
+# A file that counts as one assertion. NOT EMPTY: the block counts `@Test` and refuses a core
+# with none, so a fixture of empty files exercises the refusal rather than the counting. That
+# guard caught these fixtures the day it was written, which is the correct outcome.
+STUB_TEST = "public class %s {\n    @Test public void anAssertion() { }\n}\n"
+
+
+def _tree(root, paths, assertions=1):
+    """Create minimal `*Test.java` files at `paths`, making directories as needed."""
     for path in paths:
         full = os.path.join(root, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        open(full, "w").close()
+        name = os.path.basename(path)[:-len(".java")]
+        with open(full, "w", encoding="utf-8") as handle:
+            if path.endswith(".java"):
+                handle.write(STUB_TEST % name)
+                for extra in range(assertions - 1):
+                    handle.write("    @Test public void more%d() { }\n" % extra)
 
 
 class TheExtractionFindsSomethingToTestTest(unittest.TestCase):
@@ -185,6 +202,31 @@ class TheRunSaysWhatFractionItCoversTest(unittest.TestCase):
         self.assertLess(len(core), len(every),
                         "this job runs every test file in the tree, which cannot be true while "
                         "the pack jars are unavailable to CI")
+
+    def test_the_assertion_figures_match_the_tree_counted_independently(self):
+        """Assertions, not just files, because a file is not a constant amount of checking.
+
+        24 of 68 files and 324 of 826 assertions are the same defect at two resolutions, and the
+        second is the one that counts the things which could have caught #243.
+        """
+        code, output, note = self.block.run(ROOT)
+        self.assertEqual(code, 0, output)
+        all_test, core_dirs = self.block.roots(ROOT)
+        core = set()
+        for directory in core_dirs:
+            core.update(_java_test_files(os.path.join(ROOT, directory)))
+        every = _java_test_files(os.path.join(ROOT, all_test))
+        total = sum(_assertions_in(p) for p in every)
+        ran = sum(_assertions_in(p) for p in core)
+        self.assertIn("%d of %d assertions" % (total - ran, total), note, note)
+
+    def test_the_core_assertion_count_is_handed_to_the_runner_to_be_checked(self):
+        # The figures above are a `@Test` grep, which is a proxy. It is only allowed into the
+        # output because the runner re-derives it from what JUnit actually ran; see
+        # TheNoteReachesTheRunnerTest for the other half of that contract.
+        body = _read(CI_JAVA)
+        self.assertIn("core_assertions", body)
+        self.assertIn("--expect-assertions", body.split("exec java", 1)[1])
 
     def test_the_note_sends_the_reader_to_the_gate_that_does_cover_them(self):
         # A count with no instruction is a fact nobody acts on. The whole point of #244 is that
@@ -260,6 +302,29 @@ class ASearchThatStoppedMatchingIsRefusedTest(unittest.TestCase):
             # The lead phrase, not a fragment from the middle: `die` wraps its message at the
             # newlines it was written with, so an interior phrase can be split by a line break.
             self.assertIn("the two searches disagree", output)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_a_core_with_no_countable_assertions_is_refused(self):
+        """The control on the assertion counter itself.
+
+        The figures in the note come from grepping `@Test`. If that grep stops matching, it
+        reports zero, and zero read as a real number turns "502 of 826" into "0 of 0" while the
+        run stays green. That is the same shape as the exclusion search breaking, one unit down.
+        """
+        root = tempfile.mkdtemp(prefix="ci-java-tree-")
+        try:
+            pkg = "mod/src/test/java/io/github/jacoblasky/recipedump"
+            _tree(root, ["%s/client/GammaTest.java" % pkg])
+            # Core files that exist but carry nothing the counter can see.
+            for name in ("graph/AlphaTest.java", "plan/BetaTest.java"):
+                full = os.path.join(root, pkg, name)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "w", encoding="utf-8") as handle:
+                    handle.write("public class X { public void notAnnotated() { } }\n")
+            code, output, _ = self.block.run(root)
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("assertion counter has stopped matching", output)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

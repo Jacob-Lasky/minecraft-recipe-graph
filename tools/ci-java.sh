@@ -281,6 +281,7 @@ total=$(wc -l < "$WORK/all-tests.txt")
 # relying on that is how this quietly starts excluding a file it does run.
 grep -vxFf "$WORK/core-tests.txt" "$WORK/all-tests.txt" > "$WORK/not-run-tests.txt" || true
 not_run=$(wc -l < "$WORK/not-run-tests.txt")
+
 # Interpolated values sit at the END of their line on purpose: `die` prints the string as
 # written, so a long path spliced mid-sentence produces a 150-column line in a CI log.
 [ "$((want + not_run))" -eq "$total" ] || die "the two searches disagree: $want core test files
@@ -293,6 +294,23 @@ not_run=$(wc -l < "$WORK/not-run-tests.txt")
 [ "$not_run" -gt 0 ] || die "this job appears to run all $total test files, which cannot be true
    while the pack jars named at the top of this file are unavailable to CI. The exclusion search
    has stopped matching, so the banner would claim coverage that does not exist."
+
+# FILES ARE THE WRONG UNIT ON THEIR OWN, because a file is not a constant amount of checking.
+# "24 of 68 files" and "324 of 826 assertions" are the same defect stated at two resolutions, and
+# the second is the sharper one: it is the count of things that could have caught #243. Both are
+# printed, because a reader chasing a specific test thinks in files.
+#
+# COUNTED BY GREPPING `@Test`, WHICH IS A PROXY, AND THE PROXY IS CHECKED. A static count diverges
+# from what JUnit runs the moment anything uses `@RunWith(Parameterized)`, an inherited test
+# method or a `@Ignore`, so this hands the CORE figure to the runner, which compares it against
+# the number it actually ran and fails if they differ. That turns "the proxy is exact for this
+# tree" from an assumption into an assertion re-made on every run, which is the only way a
+# derived number belongs in output this job asks people to trust.
+core_assertions=$(xargs grep -hE '^[[:space:]]*@Test\b' < "$WORK/core-tests.txt" | wc -l)
+total_assertions=$(xargs grep -hE '^[[:space:]]*@Test\b' < "$WORK/all-tests.txt" | wc -l)
+not_run_assertions=$((total_assertions - core_assertions))
+[ "$core_assertions" -gt 0 ] || die "no @Test found in the $want core test files, so the
+   assertion counter has stopped matching this tree and every figure derived from it is wrong."
 
 # GROUPED BY TOP-LEVEL PACKAGE, from the tree rather than from a list. The package prefix comes
 # out of CORE_TEST rather than being restated, so there is no second copy to go stale; a file
@@ -307,11 +325,14 @@ groups=$(sed "s|^$core_pkg/||" "$WORK/not-run-tests.txt" \
     | sort | uniq -c | sort -rn \
     | awk '{ count = $1; sub(/^ *[0-9]+ +/, ""); \
              printf "%s%s %s", (NR > 1 ? ", " : ""), $0, count } END { print "" }')
-# WRAPPED BY HAND at a width that survives the runner's indent. It prints continuation lines
-# under the label, so a line near 100 characters here comes out past it in a CI log column.
-not_run_note="$not_run of $total *Test.java files: $groups.
-They need ModularUI, a pack jar or the patched Minecraft, none of which this job
-can fetch. tools/check.sh runs the whole suite; run it before merging."
+# WRAPPED BY HAND at a width that survives the runner's indent, which prints continuation lines
+# under the label. `$groups` GETS A LINE TO ITSELF because it is the one part whose length grows
+# with the tree: wrapping prose around it produced "44 of 68" at the end of one line and
+# "*Test.java files" at the start of the next as soon as the assertion figures were added.
+not_run_note="$not_run_assertions of $total_assertions assertions, in $not_run of $total *Test.java files.
+$groups
+They need ModularUI, a pack jar or the patched Minecraft, which this job cannot fetch.
+tools/check.sh runs the whole suite; run it before merging."
 
 got=$(echo "$classes" | wc -l)
 [ "$got" -eq "$want" ] || die "$want *Test.java files but $got *Test.class classes to run"
@@ -327,6 +348,7 @@ exec java -Xmx"${CI_JAVA_HEAP:-6g}" \
     -cp "$RUNNER:$CLASSES:$junit_jar:$hamcrest_jar:$gson_jar" JavaCoreSuite \
     --scope 'core only' \
     --not-run "$not_run_note" \
+    --expect-assertions "$core_assertions" \
     --allow-skip \
 'io.github.jacoblasky.recipedump.plan.PlanFixtureTest.everyFixturePlansExactlyAsThePythonOracleDoes' \
     $classes
