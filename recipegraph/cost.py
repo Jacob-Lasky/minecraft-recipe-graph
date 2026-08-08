@@ -584,7 +584,36 @@ CRAFTABLE_COST = 0.25
 #     fixpoint being approached along a slightly different path once some inputs cost more. The
 #     LARGEST of them is `fluix_microcontroller`, 595.3726 -> 594.9575, a 0.07% relative move,
 #     and the rest are smaller -- `rhenia_artifact` moves in the 8th decimal. No route changes.
-FORMULA_VERSION = 16
+#
+# 17: stock is overlaid AFTER the relaxation instead of seeded into it (#246). The hashed
+#     inputs do not move -- `have` was always in `fingerprint`, and its contents are unchanged
+#     -- while the table computed from them does, which is the case this constant exists for.
+#
+#     MEASURED on the schema-7 pack graph, gating on, nothing placed, against a five-item
+#     network (chest, cobblestone, diamond, iron ore, iron ingot):
+#
+#         priced keys  162,516     moved 28,627     UP 28,627     DOWN 0
+#         all five stocked keys still price 0.0
+#
+#     MONOTONIC, AND THAT IS THE SAFETY ARGUMENT rather than a pleasing statistic. Every move
+#     is upward, so no route this touches can win by a discount it did not earn -- which is
+#     precisely the failure being removed. A stocked key's own price is unmoved, which is why
+#     all four `test_stock_still_*` guards still hold.
+#
+#     THE NUMBER JAKE PREDICTED FROM THE GAME, before any of this was measured: "the price of
+#     a block should be 9x the ingot."
+#
+#         minecraft:iron_ingot   0.0 ->  0.0     held, so unchanged
+#         minecraft:iron_block   1.0 -> 19.0     = 9 x 2.0 production + 1.0 machine
+#
+#     and the route it was filed for, `minecraft:hopper` x2 with five ingots held:
+#
+#         before  Iron Ingot -> Block of Iron -> Molten Iron -> nightmare_binder_iron -> ...
+#         after   Iron Ingot -> minecraft.smelting -> Nether Iron Ore x5
+#
+#     The biggest absolute moves are all in the ProjectE star ladder, where prices are already
+#     ~1e12 and a 9.6% rise changes no ordering; nothing there is reachable anyway.
+FORMULA_VERSION = 17
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -837,17 +866,82 @@ def estimate(graph, have=None, machine_states=None, passes=PASSES, free_sources=
     # sets, and `produced_in_name_only` is MEMOISED -- compute it before the marking and the
     # cached set answers for a graph that had not been marked yet.
     graph.mark_non_production(token_kinds)
-    seed = _seed(graph, have, free_sources, token_kinds, dimension_gates, emc_available,
+    # STOCK IS WITHHELD FROM THE SEED AND OVERLAID AFTERWARDS. #246, and it is the whole fix.
+    # `_stock_floor` below carries the argument; the short version is that a pile is a fact
+    # about a KEY and not an input to production economics, so letting it into the relaxation
+    # lets the discount propagate into everything derived from it.
+    seed = _seed(graph, None, free_sources, token_kinds, dimension_gates, emc_available,
                  craftables, raw)
     cost = _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, None),
                             passes, machine_states, None)
     if not machine_items:
-        return CostTable(cost)
+        return CostTable(_stock_floor(cost, have))
+    # Machine entry costs are derived from the PRE-STOCK table on purpose. What a machine
+    # costs to build is a fact about the pack, not about one player's shelf, and feeding a
+    # stocked zero in here would make a machine look buildable-for-nothing because its parts
+    # happen to be in the network -- which is the same propagation this change is removing,
+    # one layer up.
     entry = machine_entry_costs(machine_items, cost, getattr(graph, "multiblocks", None))
     return CostTable(
-        _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, entry),
-                         passes, machine_states, entry),
+        _stock_floor(
+            _settle_reshaped(graph, _relax(graph, dict(seed), passes, machine_states, entry),
+                             passes, machine_states, entry),
+            have),
         machine_entry=entry)
+
+
+def _stock_floor(cost, have):
+    """Overlay "you already own this" onto a settled table. #246.
+
+    WHY AFTER THE RELAXATION AND NOT IN THE SEED, which is where it lived for the whole life
+    of this module. Both placements give a stocked key the same price, 0.0. They differ in
+    what happens to everything DOWNSTREAM of it, and that difference is a defect Jake found
+    on a hopper:
+
+        five iron ingots in the network, gating on, nothing placed
+
+        seeded    ingot 0.0    block  1.0     a block is nine ingots, and 9 x 0 is 0
+        overlaid  ingot 0.0    block 19.0     nine ingots at what an ingot costs to MAKE
+
+    With the block at 1.0 the solver reads "nine ingots for 1.0" and unpacks a block instead
+    of smelting ore, then has to MAKE the block, finds the five stocked ingots already claimed
+    by the demand, and descends -- on the reference pack, into Molten Iron,
+    `fluid.nightmare_binder_iron` and Molten Abyssalnite. The stock laundered itself into a
+    route that regenerates the very thing it was.
+
+    THE FALLACY, STATED ONCE. A stocked price answers "what does obtaining one cost me", and
+    the relaxation asks "what does MAKING one cost". Those are the same number for a key you
+    can only buy and different for a key you can also build, and the seed conflated them. You
+    cannot spend your five ingots to manufacture ingots; the discount is not available to a
+    route that comes back to the discounted key. Withholding stock from the relaxation is the
+    cheapest way to say that, because the propagation is the only path by which a key's own
+    zero can reach its own producers.
+
+    IT PRESERVES THE FOUR `test_stock_still_*` GUARDS, which is why it is this and not the
+    other three options weighed on #246. Every one of them is about a key's OWN price against
+    an alternative route to that same key, and the overlay pins that price exactly where the
+    seed did:
+
+      * stocked ore still beats mining it              -- the ore is overlaid to 0.0
+      * stocked stock still beats a dimension gate     -- same
+      * stocked stock still beats both declared terminals
+      * FOUR STOCKED BLOCKS STILL MAKE UNPACKING RIGHT -- and this is the sharp one. The
+        BLOCK is what is held, so the BLOCK is overlaid to 0.0, and unpacking prices at the
+        machine alone. The case that breaks is the mirror, holding INGOTS and pricing blocks,
+        which is the bug. The seed could not tell those apart because it ran before the graph
+        was walked; the overlay does not have to, because it never enters the walk.
+
+    `min`, NEVER ASSIGNMENT. `test_acquisition.test_the_seed_only_ever_lowers_a_price` is the
+    invariant and it still holds: a key already cheaper than free -- nothing is, today, but
+    SOURCE_COST and the EMC band both live below BASE_RAW_COST and the ordering is the claim,
+    not the magnitude -- must not be raised by owning one.
+    """
+    if not have:
+        return cost
+    for key, qty in have.items():
+        if qty:
+            cost[key] = min(cost.get(key, math.inf), 0.0)
+    return cost
 
 
 def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):

@@ -405,14 +405,28 @@ public class NodeRowTextTest {
      */
     @Test
     public void theMachinesToBuildAreNameableWithTheirReasons() {
-        PlanView plan = PlanFixtures.load("plan-in-stock");
+        // MOVED OFF `plan-in-stock` AT #246, and the move is the point rather than a rename.
+        // That plan used to route through a Tinkers casting table, because a stocked ingot
+        // made a Block of Iron cost 1.0 and unpacking one beat smelting ore. With stock
+        // overlaid after the relaxation it smelts, so its machine list is now EMPTY and this
+        // test would have gone on passing while asserting nothing about a machine row.
+        // `plan-machine-choice` is named for having machines and has seven.
+        PlanView plan = PlanFixtures.load("plan-machine-choice");
         List<String> lines = NodeRowText.machineLines(plan.machinesToBuild(), TODO_INNER);
-        assertTrue("two machines, at least one line each: " + lines, lines.size() >= 2);
+        assertTrue("several machines, at least one line each: " + lines, lines.size() >= 2);
         String all = join(lines);
-        assertTrue(all, all.contains("Casting"));
+        assertTrue(all, all.contains("Chemical Reactor"));
         assertTrue(all, all.contains("buildable"));
-        assertTrue("the reason a machine is a roadblock is the actionable half: " + all,
-                   all.contains("craftable: tconstruct:casting"));
+        // THE REASON IS ASSERTED ON THE ROW, NOT ON THE JOINED LINES, and that is a real
+        // distinction rather than a dodge. `nuclearcraft:chemical_reactor_idle` is long
+        // enough that `wrapRow` splits it at this width, so a `contains` on the rejoined text
+        // is really asking "did the wrap happen to fall outside this substring" -- which
+        // would pass or fail on the column width rather than on the behaviour. That a long
+        // row survives wrapping WHOLE is the next test in this file, which is where the claim
+        // belongs; this one is that the reason reaches the renderer at all.
+        assertEquals("craftable: nuclearcraft:chemical_reactor_idle",
+                     plan.machinesToBuild().get(0).why());
+        assertTrue("every line carries its reason marker: " + all, all.contains("craftable:"));
     }
 
     /**
