@@ -113,6 +113,8 @@ public final class GraphBuilder {
     private int dumpSchema;
     private String dumpVersion;
     private String instanceDir;
+    private String dumpModDigest;
+    private int dumpModCount;
 
     public GraphBuilder() {
         this(1 << 16, 1 << 20, 1 << 12, 1 << 18, 1 << 12, 1 << 16);
@@ -331,6 +333,23 @@ public final class GraphBuilder {
         this.dumpVersion = version;
     }
 
+    /**
+     * The digest of the jar set the dump SAW, as `model.Graph.dump_mod_digest` writes it.
+     *
+     * READ SO THE MOD CAN ANSWER "IS THIS GRAPH FOR THIS PACK" (#255). `index._refuse_the_wrong`
+     * `_pack` already makes that comparison on the CLI side, where it can only compare a dump
+     * against a graph file. In game the check is stronger, because the mod is running inside
+     * the pack and can compare the graph against reality.
+     */
+    public void dumpModDigest(String digest) {
+        this.dumpModDigest = digest;
+    }
+
+    /** How many jars the dump saw. Zero when the dump predates schema 6. */
+    public void dumpModCount(int count) {
+        this.dumpModCount = count;
+    }
+
     public void instanceDir(String dir) {
         this.instanceDir = dir;
     }
@@ -432,7 +451,8 @@ public final class GraphBuilder {
                 damageableKey.build(damageOrder), permute(maxDamage, damageOrder),
                 emcKey.build(emcOrder), permute(emcValue, emcOrder),
                 blueprints.build(), icons.build(),
-                multiblocks.build(), dumpSchema, dumpVersion, instanceDir);
+                multiblocks.build(), dumpSchema, dumpVersion, instanceDir,
+                dumpModDigest, dumpModCount);
     }
 
     /**

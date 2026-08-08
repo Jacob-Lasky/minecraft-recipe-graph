@@ -3,9 +3,17 @@ package io.github.jacoblasky.recipedump.common;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
 import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
+import io.github.jacoblasky.recipedump.plan.SourceTable;
 
 /**
- * The machines table, resolved off the client thread and held until something changes.
+ * One resolved scenario, held off the client thread, and the screens' views of it.
+ *
+ * IT WAS `MachinesService` UNTIL #255 AND THE NAME HAD BECOME A LIE. What it actually holds is
+ * a `ScenarioInputs.Resolved` -- machine verdicts AND free sources, produced by one pass -- and
+ * the free-sources screen is the second view of it. Two services would resolve the pack twice
+ * and could disagree with each other about what the player owns, which is the divergence
+ * `ScenarioInputs`' own header warns about: "a second resolver on the production path would be
+ * code the golden gate never touches".
  *
  * WHY A SERVICE AND NOT A CALL FROM THE SCREEN. `Machines.resolve` walks every candidate of
  * every category against a 45 MB graph -- 503 categories on the reference pack -- and building
@@ -29,9 +37,9 @@ import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
  * them together would make opening the machines table refuse while a plan is being solved,
  * which is exactly when a player wants to know which machine they are missing.
  */
-public final class MachinesService {
+public final class ScenarioService {
 
-    private static final MachinesService INSTANCE = new MachinesService();
+    private static final ScenarioService INSTANCE = new ScenarioService();
 
     /** What a build can be doing. */
     public enum State {
@@ -46,6 +54,8 @@ public final class MachinesService {
 
     private volatile State state = State.IDLE;
     private volatile MachineTable table;
+    /** Built in the same pass as {@link #table}; see the class note on why they share one. */
+    private volatile SourceTable sources;
     private volatile String detail = "";
     private volatile long generation;
 
@@ -59,10 +69,10 @@ public final class MachinesService {
      */
     private volatile RecipeGraph builtFrom;
 
-    private MachinesService() {
+    private ScenarioService() {
     }
 
-    public static MachinesService get() {
+    public static ScenarioService get() {
         return INSTANCE;
     }
 
@@ -71,6 +81,17 @@ public final class MachinesService {
     }
 
     /** Null until {@link State#DONE}. */
+    /**
+     * The free-sources view of the same resolve. Null until {@link State#DONE}.
+     *
+     * BUILT IN THE SAME PASS AS {@link #table} AND PUBLISHED WITH IT, so the two screens can
+     * never show verdicts and free sources from different resolutions of the scenario -- which
+     * would be two different answers to "what does the player have" on two tabs one click apart.
+     */
+    public SourceTable sources() {
+        return sources;
+    }
+
     public MachineTable table() {
         return table;
     }
@@ -151,7 +172,7 @@ public final class MachinesService {
             public void run() {
                 build(graph);
             }
-        }, "mcrecipedump-machines");
+        }, "mcrecipedump-scenario");
         worker.setDaemon(true);
         worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
@@ -169,10 +190,12 @@ public final class MachinesService {
             ScenarioInputs.Resolved resolved =
                     ScenarioInputs.resolve(graph, PlannerService.liveScenario());
             MachineTable built = MachineTable.of(graph, resolved.machineStates());
+            SourceTable free = SourceTable.of(graph, resolved.freeSources());
             // `table` and `builtFrom` BEFORE `state`, so a reader that sees DONE sees both.
             // Same discipline as `PlannerService.runPlan` and `GraphService`, and the same
             // absence of a lock.
             table = built;
+            sources = free;
             builtFrom = graph;
             state = State.DONE;
             generation++;
@@ -185,6 +208,7 @@ public final class MachinesService {
 
     private void fail(Throwable e) {
         table = null;
+        sources = null;
         builtFrom = null;
         detail = "reading machines failed: " + e.getClass().getSimpleName()
                 + (e.getMessage() == null ? "" : ": " + e.getMessage());
@@ -211,6 +235,7 @@ public final class MachinesService {
     public synchronized void reset() {
         state = State.IDLE;
         table = null;
+        sources = null;
         builtFrom = null;
         detail = "";
         generation++;

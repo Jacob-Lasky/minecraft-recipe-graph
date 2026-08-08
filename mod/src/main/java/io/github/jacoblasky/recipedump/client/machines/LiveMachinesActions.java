@@ -6,7 +6,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.SecondaryPanel;
 
 import io.github.jacoblasky.recipedump.client.PlannerStock;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
 import io.github.jacoblasky.recipedump.plan.Solver;
@@ -182,8 +182,8 @@ public final class LiveMachinesActions implements MachinesActions {
                     // THE TABLE IS LOOKED UP HERE, at open time, and not inside the widget.
                     // `MachinesWidgets` takes data and nothing else, which is what lets every
                     // layout assertion in this package run with no graph and no window; a
-                    // widget that reached for `MachinesService` would end that.
-                    MachineTable table = MachinesService.get().table();
+                    // widget that reached for `ScenarioService` would end that.
+                    MachineTable table = ScenarioService.get().table();
                     return MachinesWidgets.modPicker(table, filter, LiveMachinesActions.this);
                 }
             }, true);

@@ -385,6 +385,18 @@ public final class ShotScreens {
                 JeiKeybindShot.open(arg);
             }
         });
+        register("sources", new Opener() {
+            @Override
+            public void open(String arg) {
+                BrowseShot.openSources(arg);
+            }
+        });
+        register("graph", new Opener() {
+            @Override
+            public void open(String arg) {
+                BrowseShot.openGraph(arg);
+            }
+        });
     }
 
     private ShotScreens() {

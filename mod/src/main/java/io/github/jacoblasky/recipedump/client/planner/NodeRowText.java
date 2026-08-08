@@ -24,8 +24,16 @@ import java.util.List;
  */
 public final class NodeRowText {
 
-    /** The separator the web UI uses between meta parts, in the one place it is spelled. */
-    static final String SEPARATOR = " · ";
+    /**
+     * The separator the web UI uses between meta parts, in the one place it is spelled.
+     *
+     * PUBLIC FOR `client.browse` (#255), because the graph screen joins its fingerprint figures
+     * the same way the planner joins its footer, and a second separator spelled next door would
+     * be two conventions on one 400px panel a player sees both halves of. The reason it is one
+     * place is unchanged: this glyph is the browser's, and the two front ends look wrong beside
+     * each other the moment one of them picks a dash.
+     */
+    public static final String SEPARATOR = " · ";
 
     /**
      * Minecraft's default font advance, in pixels, for ordinary ASCII: a 5px glyph plus 1px.

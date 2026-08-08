@@ -1,8 +1,8 @@
 package io.github.jacoblasky.recipedump.client.machines;
 
+import io.github.jacoblasky.recipedump.client.browse.InputCaveats;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -55,28 +55,18 @@ public final class MachineCaveats {
      * `placed`, and it says so by naming them rather than by counting.
      */
     public static List<String> missing() {
-        List<String> out = new ArrayList<String>();
-        for (ScenarioSource source : FEEDS_A_VERDICT) {
-            if (!source.live()) {
-                out.add(source.field());
-            }
-        }
-        return out;
+        return InputCaveats.missing(FEEDS_A_VERDICT);
     }
 
-    /** The one-line warning, or "" when every input a verdict uses was read. */
+    /**
+     * The one-line warning, or "" when every input a verdict uses was read.
+     *
+     * THE COUNTING MOVED TO {@link InputCaveats} WHEN #255 NEEDED THE SAME SHAPE for the free
+     * sources list. What stays here is the part that has to be right and that a test can pin:
+     * WHICH inputs a machine verdict is built from, and the verb that makes the sentence true
+     * about this screen rather than about the other one.
+     */
     public static String summaryLine() {
-        List<String> missing = missing();
-        if (missing.isEmpty()) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder("verdicts computed without: ");
-        for (int i = 0; i < missing.size(); i++) {
-            if (i > 0) {
-                out.append(", ");
-            }
-            out.append(missing.get(i));
-        }
-        return out.toString();
+        return InputCaveats.summaryLine("verdicts computed", FEEDS_A_VERDICT);
     }
 }

@@ -221,9 +221,29 @@ PY
 # panel, because that is the picture a new player sees. With `:-` an empty value falls back to
 # the default and there is no way to ask for no graph at all except by naming a path that does
 # not exist, which reads as a mistake rather than as an intent.
-# The highest `dump_schema` wins, mtime breaks a tie. Prints nothing on no match, so the
-# caller's own "no graph" message is the one that reaches the log.
-newest_schema_graph() {
+# THE JAR'S OWN SCHEMA, read out of the source rather than out of the built jar. It is a
+# compile-time constant in the same tree, so it cannot drift from the jar this branch builds,
+# and reading it here turns "compare these two numbers yourself" into a check that fires. The
+# previous version of this printed both numbers and asked the reader to compare them, which is
+# the same shape as every other thing on this host that reports success and means nothing.
+jar_schema() {
+    sed -n 's/.*static final int SCHEMA = \([0-9]*\);.*/\1/p' \
+        "$(dirname "$0")/../../mod/src/main/java/io/github/jacoblasky/recipedump/DumpCommand.java"
+}
+
+# Prints "PATH<tab>SCHEMA<tab>NOTE" for the chosen graph, or nothing when no candidate has a
+# `dump_schema`. Nothing rather than an error, so the caller's own "no graph" message is the
+# one that reaches the log.
+#
+# THE TIE-BREAK IS NEWEST-MTIME AND IT IS NOT DECORATION. Four of the six graphs in this
+# directory are `dump_schema=5` today, so the moment the highest schema is one of those --
+# which is as soon as anyone dumps a second graph at the current schema -- this rule decides
+# what the pack boots with. SAME-SCHEMA GRAPHS ARE NOT INTERCHANGEABLE: `graph-oracle-248.json`
+# carries `offworld_ores` and `graph-oracle.json` does not, and that field is what #248's
+# dimension toll rests on, so the loser of a tie can be a graph whose planner cannot express
+# the thing under test. A tie is therefore REPORTED, naming what lost, rather than resolved
+# silently.
+select_graph() {
     python3 - "$LOCAL_BUILD" <<'PYEOF'
 import glob, os, re, sys
 
@@ -249,23 +269,32 @@ def schema_of(path):
             tail = chunk[-64:]
 
 
-best = None
+found = []
 for path in sorted(glob.glob(os.path.join(sys.argv[1], "graph-*.json"))):
     try:
         schema = schema_of(path)
     except OSError:
         continue
-    if schema is None:
-        continue
-    key = (schema, os.path.getmtime(path))
-    if best is None or key > best[0]:
-        best = (key, path)
-if best:
-    print(best[1])
+    if schema is not None:
+        found.append((schema, os.path.getmtime(path), path))
+
+if not found:
+    sys.exit(0)
+
+# Sorted rather than a running maximum, so the losers of a tie are still in hand for the note.
+found.sort(key=lambda row: (row[0], row[1]), reverse=True)
+schema, _, winner = found[0]
+tied = [os.path.basename(row[2]) for row in found[1:] if row[0] == schema]
+note = "sole candidate at that schema" if not tied else (
+    "TIE at dump_schema=%d, newest mtime won over %s" % (schema, ", ".join(tied)))
+print("%s\t%d\t%s" % (winner, schema, note))
 PYEOF
 }
 
-GRAPH_JSON="${RECIPEGRAPH_GRAPH-$(newest_schema_graph)}"
+selected=$(select_graph)
+GRAPH_SCHEMA=$(printf '%s' "$selected" | cut -f2)
+GRAPH_NOTE=$(printf '%s' "$selected" | cut -f3)
+GRAPH_JSON="${RECIPEGRAPH_GRAPH-$(printf '%s' "$selected" | cut -f1)}"
 
 install_graph() {
     dest="$INSTANCE/config/mcrecipedump"
@@ -280,6 +309,21 @@ install_graph() {
              "'no graph.json'. Point RECIPEGRAPH_GRAPH at one." >&2
         return 0
     fi
+    # SAY WHICH GRAPH AND WHETHER IT FITS THE JAR, on every run and not only when it changes,
+    # because the `cmp` shortcut below returns before the copy and a run that skipped the copy
+    # still needs to say what it is booting with.
+    want=$(jar_schema)
+    if [ -n "$GRAPH_SCHEMA" ] && [ -n "$want" ] && [ "$GRAPH_SCHEMA" != "$want" ]; then
+        echo "stage-instance: !! $(basename "$GRAPH_JSON") is dump_schema=$GRAPH_SCHEMA and" \
+             "this tree's DumpCommand.SCHEMA is $want. GraphJsonReader is tolerant and will" \
+             "LOAD it, so nothing downstream will complain -- but a schema that changed how" \
+             "keys are spelled makes keyId answer -1 for keys the pack really has, which" \
+             "reads as 'that item is not in the pack'. Dump a current graph, or name one" \
+             "with RECIPEGRAPH_GRAPH." >&2
+    fi
+    echo "stage-instance: graph is $(basename "$GRAPH_JSON")" \
+         "(dump_schema=${GRAPH_SCHEMA:-unknown}, jar wants ${want:-unknown};" \
+         "${GRAPH_NOTE:-named explicitly})"
     mkdir -p "$dest"
     # `cmp` first: this is 120 MB onto the array, and `prodshot.sh` calls the mod-only path
     # before every run.
@@ -288,23 +332,7 @@ install_graph() {
         return 0
     fi
     cp "$GRAPH_JSON" "$dest/graph.json"
-    echo "stage-instance: installed graph.json from $(basename "$GRAPH_JSON")" \
-         "($(wc -c < "$dest/graph.json") bytes,$(graph_stamp "$GRAPH_JSON"));" \
-         "compare that schema against the jar's SCHEMA line from build-jar.sh"
-}
-
-# The graph's own account of itself, for the log line above. A schema and a version are what
-# tell a reader whether this graph was written for this jar.
-graph_stamp() {
-    python3 - "$1" <<'PYEOF'
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        d = json.JSONDecoder().raw_decode(fh.read())[0]
-    print(" dump_schema=%s dump_version=%s" % (d.get("dump_schema"), d.get("dump_version")))
-except Exception as exc:
-    print(" unreadable: %s" % exc)
-PYEOF
+    echo "stage-instance: installed graph.json ($(wc -c < "$dest/graph.json") bytes)"
 }
 
 # EVERYTHING THAT TOUCHES `$INSTANCE` LIVES IN HERE, so that it can be covered by exactly one
