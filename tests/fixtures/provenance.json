@@ -1,0 +1,667 @@
+{
+  "costs": {
+    "contenttweaker:declared_but_craftable": 2.0,
+    "contenttweaker:declared_nugget": 1.0,
+    "contenttweaker:declared_tool:28": 1.0,
+    "contenttweaker:from_a_future_mechanic": 2000.0,
+    "contenttweaker:from_a_loot_table": 200.0,
+    "contenttweaker:from_a_puzzle": 1000.0,
+    "contenttweaker:from_a_quest": 1000.0,
+    "contenttweaker:from_nowhere": 2000.0,
+    "minecraft:stone": 1.0,
+    "mod:craftable_widget": 3.0,
+    "mod:everything": 6213.0,
+    "mod:future_widget": 2001.0,
+    "mod:loot_widget": 201.0,
+    "mod:marker_widget": 2001.0,
+    "mod:nugget_widget": 2.0,
+    "mod:puzzle_widget": 1001.0,
+    "mod:quest_widget": 1001.0,
+    "mod:tool_widget": 2.0
+  },
+  "graph": {
+    "blueprint_machines": {},
+    "catalysts": {},
+    "category_mods": {},
+    "declared_provenance": {
+      "contenttweaker:declared_but_craftable": "puzzle",
+      "contenttweaker:declared_dead_key": "puzzle",
+      "contenttweaker:declared_nugget": "loot_table",
+      "contenttweaker:declared_tool:28": "puzzle",
+      "contenttweaker:from_a_future_mechanic": "some_future_kind",
+      "contenttweaker:from_a_loot_table": "loot_table",
+      "contenttweaker:from_a_puzzle": "puzzle",
+      "contenttweaker:from_a_quest": "quest"
+    },
+    "dimension_ores": {},
+    "dump_mod_count": null,
+    "dump_mod_digest": null,
+    "dump_names_failed": null,
+    "dump_schema": 5,
+    "dump_version": null,
+    "emc": {},
+    "icons": {},
+    "instance_dir": null,
+    "machine_names": {},
+    "max_damage": {
+      "contenttweaker:declared_tool": 250
+    },
+    "multiblocks": {},
+    "names": {
+      "contenttweaker:declared_but_craftable": "Declared But Craftable",
+      "contenttweaker:declared_dead_key": "A Key No Recipe Touches",
+      "contenttweaker:declared_nugget": "Declared Nugget",
+      "contenttweaker:declared_tool:28": "Declared Tool",
+      "contenttweaker:from_a_future_mechanic": "From A Future Mechanic",
+      "contenttweaker:from_a_loot_table": "From A Loot Table",
+      "contenttweaker:from_a_puzzle": "From A Puzzle",
+      "contenttweaker:from_a_quest": "From A Quest",
+      "contenttweaker:from_nowhere": "From Nowhere",
+      "minecraft:stone": "Stone",
+      "mod:craftable_widget": "Craftable Widget",
+      "mod:everything": "Everything",
+      "mod:future_widget": "Future Widget",
+      "mod:loot_widget": "Loot Widget",
+      "mod:marker_widget": "Marker Widget",
+      "mod:nugget_widget": "Nugget Widget",
+      "mod:puzzle_widget": "Puzzle Widget",
+      "mod:quest_widget": "Quest Widget",
+      "mod:tool_widget": "Tool Widget"
+    },
+    "ore_guessed": [],
+    "ore_members": {
+      "nuggetThing": [
+        "contenttweaker:declared_nugget"
+      ]
+    },
+    "recipes": [
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_puzzle_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:from_a_puzzle"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:puzzle_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_loot_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:from_a_loot_table"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:loot_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_quest_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:from_a_quest"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:quest_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_future_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:from_a_future_mechanic"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:future_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_marker_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:from_nowhere"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:marker_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_craftable_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:declared_but_craftable"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:craftable_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_nugget_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:declared_nugget"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:nugget_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_tool_widget",
+        "in": [
+          {
+            "alt": [
+              "contenttweaker:declared_tool:28"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:tool_widget",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_everything",
+        "in": [
+          {
+            "alt": [
+              "mod:puzzle_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:loot_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:quest_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:future_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:marker_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:craftable_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:nugget_widget"
+            ],
+            "qty": 1
+          },
+          {
+            "alt": [
+              "mod:tool_widget"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "mod:everything",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      },
+      {
+        "cat": "minecraft.crafting",
+        "id": "make_craftable",
+        "in": [
+          {
+            "alt": [
+              "minecraft:stone"
+            ],
+            "qty": 1
+          }
+        ],
+        "out": [
+          {
+            "key": "contenttweaker:declared_but_craftable",
+            "qty": 1
+          }
+        ],
+        "src": "hei_dump"
+      }
+    ],
+    "shadow_ores": {}
+  },
+  "request": {
+    "item": "mod:everything",
+    "qty": 1
+  },
+  "result": {
+    "exhausted": false,
+    "from_emc": [],
+    "from_sources": [],
+    "machines_to_build": [],
+    "max_nodes": 4000,
+    "nodes": 18,
+    "pins_overruled": {},
+    "qty": 1,
+    "shopping_list": [
+      {
+        "key": "contenttweaker:from_a_puzzle",
+        "kind": "item",
+        "label": "From A Puzzle",
+        "name": "From A Puzzle",
+        "provenance": "puzzle",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:from_a_loot_table",
+        "kind": "item",
+        "label": "From A Loot Table",
+        "name": "From A Loot Table",
+        "provenance": "loot_table",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:from_a_quest",
+        "kind": "item",
+        "label": "From A Quest",
+        "name": "From A Quest",
+        "provenance": "quest",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:from_a_future_mechanic",
+        "kind": "item",
+        "label": "From A Future Mechanic",
+        "name": "From A Future Mechanic",
+        "provenance": "some_future_kind",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:from_nowhere",
+        "kind": "item",
+        "label": "From Nowhere",
+        "name": "From Nowhere",
+        "qty": 1,
+        "unsourced": true
+      },
+      {
+        "key": "minecraft:stone",
+        "kind": "item",
+        "label": "Stone",
+        "name": "Stone",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:declared_nugget",
+        "kind": "item",
+        "label": "Declared Nugget",
+        "name": "Declared Nugget",
+        "qty": 1
+      },
+      {
+        "key": "contenttweaker:declared_tool:28",
+        "kind": "item",
+        "label": "Declared Tool",
+        "name": "Declared Tool",
+        "qty": 1
+      }
+    ],
+    "target": "mod:everything",
+    "target_name": "Everything",
+    "tokens_needed": [],
+    "tree": {
+      "alternatives": 1,
+      "category": "minecraft.crafting",
+      "children": [
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:from_a_puzzle",
+              "kind": "item",
+              "label": "From A Puzzle",
+              "name": "From A Puzzle",
+              "need": 1,
+              "note": "the pack makes this with a hidden recipe JEI never publishes, unlocked by solving its puzzle",
+              "provenance": "puzzle",
+              "status": "raw"
+            }
+          ],
+          "key": "mod:puzzle_widget",
+          "kind": "item",
+          "label": "Puzzle Widget",
+          "machine_state": "have",
+          "name": "Puzzle Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_puzzle_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:from_a_loot_table",
+              "kind": "item",
+              "label": "From A Loot Table",
+              "name": "From A Loot Table",
+              "need": 1,
+              "note": "the pack puts this in a loot table, so it is found by playing",
+              "provenance": "loot_table",
+              "status": "raw"
+            }
+          ],
+          "key": "mod:loot_widget",
+          "kind": "item",
+          "label": "Loot Widget",
+          "machine_state": "have",
+          "name": "Loot Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_loot_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:from_a_quest",
+              "kind": "item",
+              "label": "From A Quest",
+              "name": "From A Quest",
+              "need": 1,
+              "note": "the pack hands this out as a quest reward",
+              "provenance": "quest",
+              "status": "raw"
+            }
+          ],
+          "key": "mod:quest_widget",
+          "kind": "item",
+          "label": "Quest Widget",
+          "machine_state": "have",
+          "name": "Quest Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_quest_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:from_a_future_mechanic",
+              "kind": "item",
+              "label": "From A Future Mechanic",
+              "name": "From A Future Mechanic",
+              "need": 1,
+              "note": "the pack declares where this comes from",
+              "provenance": "some_future_kind",
+              "status": "raw"
+            }
+          ],
+          "key": "mod:future_widget",
+          "kind": "item",
+          "label": "Future Widget",
+          "machine_state": "have",
+          "name": "Future Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_future_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:from_nowhere",
+              "kind": "item",
+              "label": "From Nowhere",
+              "name": "From Nowhere",
+              "need": 1,
+              "note": "the pack defines this item and nothing in the dump makes it; it comes from a mechanic no recipe can describe",
+              "status": "raw",
+              "unsourced": true
+            }
+          ],
+          "key": "mod:marker_widget",
+          "kind": "item",
+          "label": "Marker Widget",
+          "machine_state": "have",
+          "name": "Marker Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_marker_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "alternatives": 1,
+              "category": "minecraft.crafting",
+              "children": [
+                {
+                  "key": "minecraft:stone",
+                  "kind": "item",
+                  "label": "Stone",
+                  "name": "Stone",
+                  "need": 1,
+                  "status": "raw"
+                }
+              ],
+              "key": "contenttweaker:declared_but_craftable",
+              "kind": "item",
+              "label": "Declared But Craftable",
+              "machine_state": "have",
+              "name": "Declared But Craftable",
+              "need": 1,
+              "per_run": 1,
+              "recipe": "make_craftable",
+              "runs": 1,
+              "status": "craft"
+            }
+          ],
+          "key": "mod:craftable_widget",
+          "kind": "item",
+          "label": "Craftable Widget",
+          "machine_state": "have",
+          "name": "Craftable Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_craftable_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:declared_nugget",
+              "kind": "item",
+              "label": "Declared Nugget",
+              "name": "Declared Nugget",
+              "need": 1,
+              "status": "raw"
+            }
+          ],
+          "key": "mod:nugget_widget",
+          "kind": "item",
+          "label": "Nugget Widget",
+          "machine_state": "have",
+          "name": "Nugget Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_nugget_widget",
+          "runs": 1,
+          "status": "craft"
+        },
+        {
+          "alternatives": 1,
+          "category": "minecraft.crafting",
+          "children": [
+            {
+              "key": "contenttweaker:declared_tool:28",
+              "kind": "item",
+              "label": "Declared Tool",
+              "name": "Declared Tool",
+              "need": 1,
+              "status": "raw"
+            }
+          ],
+          "key": "mod:tool_widget",
+          "kind": "item",
+          "label": "Tool Widget",
+          "machine_state": "have",
+          "name": "Tool Widget",
+          "need": 1,
+          "per_run": 1,
+          "recipe": "make_tool_widget",
+          "runs": 1,
+          "status": "craft"
+        }
+      ],
+      "key": "mod:everything",
+      "kind": "item",
+      "label": "Everything",
+      "machine_state": "have",
+      "name": "Everything",
+      "need": 1,
+      "per_run": 1,
+      "recipe": "make_everything",
+      "runs": 1,
+      "status": "craft"
+    },
+    "truncated": false,
+    "used_from_stock": [],
+    "work": 18,
+    "work_budget": 80000
+  },
+  "scenario": {
+    "craftables": [],
+    "emc_knowledge": {},
+    "have": {},
+    "machine_overrides": {},
+    "no_machine": [],
+    "pins": {},
+    "placed": {},
+    "raw": [],
+    "source_overrides": {},
+    "token_overrides": {},
+    "visited_dimensions": {
+      ".": 1
+    }
+  },
+  "sets": {
+    "pack_authored_declared": {
+      "contenttweaker:from_a_future_mechanic": "some_future_kind",
+      "contenttweaker:from_a_loot_table": "loot_table",
+      "contenttweaker:from_a_puzzle": "puzzle",
+      "contenttweaker:from_a_quest": "quest"
+    },
+    "pack_authored_unsourced": [
+      "contenttweaker:from_nowhere"
+    ]
+  },
+  "sets_without_declarations": {
+    "pack_authored_declared": {},
+    "pack_authored_unsourced": [
+      "contenttweaker:from_a_future_mechanic",
+      "contenttweaker:from_a_loot_table",
+      "contenttweaker:from_a_puzzle",
+      "contenttweaker:from_a_quest",
+      "contenttweaker:from_nowhere"
+    ]
+  }
+}

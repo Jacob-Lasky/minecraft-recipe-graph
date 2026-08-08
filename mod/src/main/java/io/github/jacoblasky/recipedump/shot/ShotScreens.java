@@ -294,6 +294,15 @@ public final class ShotScreens {
                 LivePlanShot.open(arg);
             }
         });
+        // The only screen that photographs the planner RECOVERING rather than a finished
+        // state. See PlannerRecoveryShot: `:loading` and `:recovered` are one artifact in two
+        // runs, and the second one is a probe as well as a picture (#201).
+        register("planner-recovery", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerRecoveryShot.open(arg);
+            }
+        });
         register("planner-selected", new Opener() {
             @Override
             public void open(String arg) {
@@ -364,6 +373,16 @@ public final class ShotScreens {
             @Override
             public void open(String arg) {
                 MachinesShot.openDetail(arg);
+            }
+        });
+        // The only screen that drives the WHOLE gesture: hover, press, plan. `jei` above
+        // photographs a recipe page and its own header says it moves no mouse, so the half
+        // the feature exists for is unexercised by it. See JeiKeybindShot for why this one
+        // asserts rather than photographs (#240).
+        register("jei-keybind", new Opener() {
+            @Override
+            public void open(String arg) {
+                JeiKeybindShot.open(arg);
             }
         });
     }

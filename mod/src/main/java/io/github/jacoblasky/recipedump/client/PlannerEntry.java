@@ -27,6 +27,39 @@ import io.github.jacoblasky.recipedump.plan.Solver;
  */
 public final class PlannerEntry {
 
+    /**
+     * The target an open planner window is waiting for a GRAPH to arrive for, or null.
+     *
+     * NOT `PlannerStock.waiting`, AND THE TWO MUST NOT BE MERGED however alike they look. That
+     * one is "waiting for this player's ME network to be read", which is a round trip to a
+     * server that is guaranteed to answer, whose absence is checkable up front
+     * (`PlannerStock.canAsk`), and which can only end in a snapshot or a stated refusal. This
+     * one is "waiting for 116 MB of graph.json to be parsed off a daemon thread", which
+     * answers nobody, has no request to be the reply to, and ends in READY, MISSING or FAILED.
+     *
+     * They also RESOLVE IN A FIXED ORDER, which is the part a shared holder would get wrong.
+     * The stock ask is deliberately NOT sent until there is a graph -- see
+     * {@link #planWhenStockIsRead}, "reading the network is a megabyte on the wire; sending
+     * for it to then discover the graph is still loading is a round trip for an answer nobody
+     * will use". One holder for both waits would have to encode that ordering as a state
+     * machine, and the first thing it would get wrong is asking the server during the load.
+     *
+     * A NEWER QUESTION REPLACES AN OLDER ONE, which is the one rule it does share with
+     * `PlannerStock.waiting`, and for the same reason: two held targets means the player used
+     * the keybind and then the item (or the other way round) while the graph was still
+     * loading, and planning the one they have moved on from would throw away the one they are
+     * looking at.
+     *
+     * NOT CLEARED WHEN THE WINDOW CLOSES, deliberately. Only {@link #resumeWhenTheGraphLands}
+     * consumes this and only an open window calls it, so a target held past a close is inert
+     * -- and the next open re-derives its own target and overwrites this one before anything
+     * reads it. A close hook would be a second place for the two to disagree.
+     */
+    private static String waitingTarget;
+
+    /** The book {@link #waitingTarget} came from. Null exactly when that is. */
+    private static PlanBook waitingBook;
+
     private PlannerEntry() {
     }
 
@@ -126,17 +159,154 @@ public final class PlannerEntry {
      * the wire; sending for it to then discover the graph is still loading is a round trip for
      * an answer nobody will use. {@link #startPlan} re-checks both, because it is also called
      * directly by the screenshot harness.
+     *
+     * SKIPPED IS NOT DROPPED, WHICH IS #201. Until that issue this method RETURNED when there
+     * was no graph yet, so a planner opened inside the 5.47 s read never planned anything and
+     * never would: no plan means no plan-generation bump, and the window rebuilds on a
+     * counter. {@link #holdUntilTheGraphLands} keeps the target instead, and
+     * {@link #resumeWhenTheGraphLands} asks the question the moment there is something to ask
+     * it against. DO NOT put the bare `return` back.
+     *
+     * PACKAGE-VISIBLE SO A TEST CAN ENTER BY THE DOOR {@link #open} USES. Its no-graph path
+     * reaches no `Minecraft` at all -- {@link #holdUntilTheGraphLands} answers null and
+     * {@link #askTheServerAndPlan} returns on it -- so the half of #201 that starts the wait is
+     * exercisable headlessly through the production call rather than through a method written
+     * for the test.
      */
-    private static void planWhenStockIsRead(final PlanBook book, final String target) {
-        if (target == null || GraphService.get().state() != GraphService.State.READY) {
+    static void planWhenStockIsRead(PlanBook book, String target) {
+        askTheServerAndPlan(book, holdUntilTheGraphLands(book, target, graphIsReady()));
+    }
+
+    /**
+     * Record `target` as the thing to plan when a graph arrives, or hand it straight back.
+     *
+     * THE HALF OF #201 THAT IS NOT THE COUNTER. Bumping `GraphService.generation` alone makes
+     * the window redraw when the graph lands, and what it redraws as is "nothing planned yet"
+     * -- because the plan that would have been started was dropped on the floor five seconds
+     * earlier by the `state() != READY` return this replaces. Recovering means REPLAYING the
+     * target the window was opened for, so the target has to be kept rather than recomputed:
+     * {@link #openOn} is handed one by the `=` keybind that is nowhere in the book.
+     *
+     * SPLIT FROM THE ASK SO THE DECISION CAN BE EXERCISED WITHOUT A CLIENT, exactly as
+     * {@link PlannerStock#hold} is split from {@code PlannerStock.planWhenRead} and for the
+     * same measured reason: everything past {@link #askTheServerAndPlan} reaches `Minecraft`,
+     * which a JUnit classpath cannot load at all.
+     *
+     * @param graphReady whether there is a graph to plan against right now.
+     * @return the target to plan immediately, or null when it is now waiting for a graph or
+     *         when there was nothing to plan in the first place.
+     */
+    static String holdUntilTheGraphLands(PlanBook book, String target, boolean graphReady) {
+        waitingBook = null;
+        waitingTarget = null;
+        if (target == null || graphReady) {
+            return target;
+        }
+        waitingBook = book;
+        waitingTarget = target;
+        return null;
+    }
+
+    /**
+     * A graph landed while a planner window was open: ask the question it was opened for.
+     *
+     * CALLED FROM `PlannerScreen.PlannerWindow.onUpdate`, which is ModularUI's per-client-tick
+     * hook, and NOT from {@link GraphService#onLoad}. That listener runs on the LOADER thread
+     * and it runs BEFORE READY is published -- both of which are deliberate and documented
+     * there -- so a plan started from it would be started off the client thread against a
+     * service that still reports LOADING, which is to say it would not be started at all.
+     * Polling a counter from the tick is the shape this window already uses for the plan
+     * generation, for the identical thread-safety reason; see `PlannerScreen`.
+     *
+     * BEFORE THE STAMP IS READ, so the rebuild this tick draws "planning 4x mod:plate" rather
+     * than flashing "nothing planned yet" for one frame on its way there.
+     *
+     * IT REACHES NO `Minecraft` ON THE TICK THAT IS NOT A RECOVERY, which is every tick but
+     * one: the two cheap reads come first and the connection check is only made once there is
+     * genuinely a target to release. That ordering is load-bearing rather than tidy -- see
+     * {@code PlannerStock.canAsk}, which cannot even be entered outside a client.
+     *
+     * @return whether a wait ended here. False is the overwhelmingly common case -- every tick
+     *         of every window that is not waiting for anything.
+     */
+    public static boolean resumeWhenTheGraphLands() {
+        if (waitingTarget == null || !graphIsReady()) {
+            return false;
+        }
+        return resumeWhenTheGraphLands(true, PlannerStock.canAsk());
+    }
+
+    /**
+     * The same, told the two facts it needs rather than reading them.
+     *
+     * SPLIT SO THE WHOLE RECOVERY CAN BE EXERCISED AND NOT MERELY DECIDED. Every other split in
+     * this family stops at a boolean, and for #201 that is not enough: the claim worth pinning
+     * is "a plan for the target the window was opened for finished", which needs the released
+     * target to travel all the way to {@link #startPlan}. The one line in the way is
+     * `PlannerStock.canAsk`, measured to be unenterable on a JUnit classpath -- so it is passed
+     * in, and what a test then exercises is the production path with one boolean supplied
+     * instead of read.
+     *
+     * WHAT REMAINS UNTESTED IS STILL EXACTLY ONE LINE, and it is stated rather than implied:
+     * that `canAsk` is fed by the real connection. `PlannerStockTest` makes the same admission
+     * about the same line.
+     *
+     * @param graphReady whether there is a graph to plan against.
+     * @param canAsk whether there is a server to ask for the player's stock.
+     */
+    static boolean resumeWhenTheGraphLands(boolean graphReady, boolean canAsk) {
+        if (waitingTarget == null || !graphReady) {
+            return false;
+        }
+        PlanBook book = waitingBook;
+        String target = waitingTarget;
+        waitingBook = null;
+        waitingTarget = null;
+        PlannerStock.planWhenRead(planTask(book, target), canAsk);
+        return true;
+    }
+
+    /**
+     * EVERYTHING BELOW THIS LINE REACHES `Minecraft`, through {@code PlannerStock.canAsk}.
+     * Above it is the decision, which {@code PlannerEntryTest} walks; see
+     * {@link #holdUntilTheGraphLands}.
+     */
+    private static void askTheServerAndPlan(PlanBook book, String target) {
+        if (target == null) {
             return;
         }
-        PlannerStock.planWhenRead(new Runnable() {
+        PlannerStock.planWhenRead(planTask(book, target));
+    }
+
+    /**
+     * The plan itself, as the continuation the stock wait holds.
+     *
+     * ONE FACTORY FOR BOTH DOORS -- the open path and the recovery -- so the two cannot drift
+     * into asking subtly different questions about the same target, which is the failure
+     * {@link #openOn}'s own note is about one level up.
+     */
+    private static Runnable planTask(final PlanBook book, final String target) {
+        return new Runnable() {
             @Override
             public void run() {
                 startPlan(book, target);
             }
-        });
+        };
+    }
+
+    private static boolean graphIsReady() {
+        return GraphService.get().state() == GraphService.State.READY;
+    }
+
+    /** Test seam: drop the held target, so one test cannot leak into the next. */
+    static void forgetTheWaitingTarget() {
+        waitingBook = null;
+        waitingTarget = null;
+    }
+
+    /** Test seam: what is being held, or null. */
+    static String waitingTarget() {
+        return waitingTarget;
     }
 
     /**

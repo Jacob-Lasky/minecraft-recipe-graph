@@ -371,9 +371,10 @@ public final class PlanView {
         private final String tokenKind;
         private final Long emc;
         private final boolean unsourced;
+        private final String provenance;
 
         EntryRow(String key, String label, long need, String kind, String why,
-                 String tokenKind, Long emc, boolean unsourced) {
+                 String tokenKind, Long emc, boolean unsourced, String provenance) {
             this.key = key;
             this.label = label;
             this.need = need;
@@ -382,6 +383,7 @@ public final class PlanView {
             this.tokenKind = tokenKind;
             this.emc = emc;
             this.unsourced = unsourced;
+            this.provenance = provenance;
         }
 
         /**
@@ -445,6 +447,20 @@ public final class PlanView {
          */
         public boolean unsourced() {
             return unsourced;
+        }
+
+        /**
+         * `shopping_list` only: how the PACK says you get this key, or null. #171/#262.
+         *
+         * THE COMPLEMENT OF {@link #unsourced} AND NEVER SET WITH IT. A declared key is
+         * excluded from the pack-authored unsourced set by construction, so a row carrying
+         * both is a bug rather than a case to render. On this surface it replaces silence:
+         * before #171 these rows were badged "no known source", and dropping that badge
+         * without putting the pack's own answer in its place would be a regression on the one
+         * list a player acts on.
+         */
+        public String provenance() {
+            return provenance;
         }
     }
 

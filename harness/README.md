@@ -158,8 +158,13 @@ worth having. **So check which one a PR's screenshot actually is**: the two are 
 apart full size and easy to confuse in a thumbnail, and the run logs `machines: <what happened>`
 either way.
 
-`flow-hit`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen in that shape
-owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
+Under `prodclient` they get a real graph either way now: `stage-instance.sh` installs a
+`graph.json` into the instance by default (#240), so a prodshot of these shoots the TABLE and
+not the no-graph panel. `RECIPEGRAPH_GRAPH=` (empty) stages none and shoots the panel;
+`RECIPEGRAPH_GRAPH=<path>` stages that one instead.
+
+`flow-hit`, `jei-keybind`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen
+in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the
 harness fails the run if the verdict never arrives OR if it is a NO. There is deliberately no
 call that means only "I spoke": the first cut of this had one, and `ae2-probe` called it on all
@@ -177,6 +182,48 @@ scroll viewport *and* the zoom matrix, and therefore that a diagram click should
 so the picture is evidence that the runtime was captured, a focus was created and the GUI was
 shown. `harness/shot.sh jei` uses an iron pickaxe; `harness/shot.sh jei:minecraft:furnace`
 names another item.
+
+`jei-keybind` is the other half of that, and it drives an INPUT GESTURE end to end rather than
+opening a screen: it filters JEI's item list, walks the real cursor over the overlay until JEI
+reports an item under it, presses the plan key through `PlanTargetKeybind.onPressed`, and then
+fails the run unless the planner solves the key of the item that was under the cursor. It needs
+a world, because the plan book is a capability on the player:
+`harness/shot.sh jei-keybind jeikey -Dmcrecipedump.shotWorld=jeikey`. `jei-keybind:<filter>`
+types something else into JEI's search box; the default is `@minecraft hopper`, chosen so the
+same probe means the same thing on the dev set and on the whole pack.
+
+UNDER `prodshot.sh` IT NEEDS 8g OF CONTAINER AND ~6500M OF HEAP, for the same reason `dump`
+does and not for a reason of its own: the cost is the WORLD. At the 7g/5G a GUI shot is
+comfortable at, the integrated server dies with `OutOfMemoryError: Java heap space` in
+`PECore.serverStarting` -> `EMCMapper.map`, because ProjectE enumerates every Forestry bee
+variant when a world starts. Measured here 2026-08-08. It does not present as an OOM: the
+server crashes, the client bounces back to the main menu, and the harness then reports
+"waiting for the main menu" until the run times out.
+
+```bash
+MEMORY=8g CLIENT_HEAP=6500M harness/prodclient/prodshot.sh jei-keybind packjeikey \
+    -Dmcrecipedump.shotWorld=packjeikey -Dmcrecipedump.shotTimeoutSeconds=3000
+```
+
+DO NOT RAISE IT ABOVE 8g. Tower runs the household's Home Assistant and its doorbell in
+sibling containers, and 8g is the ceiling those live under.
+
+It exists because this is the one path where both halves of a seam can be green and the
+feature still dead, and that happened twice at once. `PlannerHooks.setTargetListener` was never
+called by the shipped mod, so every press was handed to a listener that does nothing; and the
+keybind subscribed only to `InputEvent.KeyInputEvent`, which does not fire while a `GuiScreen`
+is open, which is every frame on which JEI has an overlay to point at. Neither is visible to a
+unit test, because every unit test installs a listener of its own and calls the handler
+directly. The verdict compares keys rather than photographing a tree deliberately: a planner
+opened on the wrong item produces a completely convincing screenshot.
+
+It waits for the plan TWICE, and the second wait is master-specific. `PlanTarget` hands the key
+to `PlannerEntry.openOn`, which holds the solve until `PlannerStock` has the ME stock reply, so
+in a world with a server to ask the press does not start the plan on the frame it is made. The
+probe holds until `PlannerService.generation()` moves before it reads a verdict, and calls the
+wait itself a failure if the reply never comes -- reading on the next frame instead would
+compare the pressed key against the service's *previous* target, which at the start of a run is
+the empty string.
 
 `ae2-probe` needs a world: `harness/shot.sh ae2-probe ae2probe
 -Dmcrecipedump.shotWorld=ae2`. Measured at 177 s and 189 s on a warm cache with one Java file
@@ -337,9 +384,11 @@ running the check at all. So each bullet says whether it was measured.
 * **It has a cursor. MEASURED. Clicks and typing: UNKNOWN.** There is a real X display, so
   `Mouse.setCursorPosition` moves the real cursor and Minecraft's hover pass runs for real:
   `IWidget.isHovering()` answers correctly, which is enough to exercise a hit-test end to end.
-  `flow-hit` does exactly that, and `FlowCanvas.parkCursorOverBox` has the two coordinate
-  conversions it needs (LWJGL's origin is the BOTTOM left, in display pixels rather than GUI
-  pixels).
+  `flow-hit` does exactly that, and `ScreenCursor` has the two coordinate conversions it needs
+  (LWJGL's origin is the BOTTOM left, in display pixels rather than GUI pixels). They live
+  there rather than in `FlowCanvas` because they were written out three times in that file
+  where nothing could assert them; `ScreenCursorTest` now pins the y flip as a fact with no
+  window (#240).
 
   **Hover is proven; a synthetic click is not.** Minecraft reads button state from LWJGL's
   event queue rather than by polling, so pressing a button is a different problem from moving

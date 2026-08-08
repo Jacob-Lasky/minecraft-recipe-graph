@@ -61,16 +61,40 @@ public final class PlannerScreen {
     }
 
     /**
-     * What the window has drawn: the plan's generation and the book's revision together.
+     * What the window has drawn: the graph's generation, the plan's generation and the book's
+     * revision together.
      *
-     * BOTH, because the panel is a function of both and they change independently. The plan
-     * arrives from a worker thread; the book arrives from the server after "Add to TODO" or
-     * "Favourite" in the node menu, and it is what the footer's "N on TODO" counts. Watching
-     * only the plan left those two menu entries looking broken: the packet went, the server
-     * answered, and nothing on screen moved.
+     * ALL THREE, because the panel is a function of all three and they change independently.
+     * The plan arrives from a worker thread; the book arrives from the server after "Add to
+     * TODO" or "Favourite" in the node menu, and it is what the footer's "N on TODO" counts.
+     * Watching only the plan left those two menu entries looking broken: the packet went, the
+     * server answered, and nothing on screen moved.
+     *
+     * THE GRAPH TERM IS #201, and it is the term whose ABSENCE was invisible. The first two
+     * describe a plan, and there is no plan at all during the 5.47 s graph read -- so a window
+     * opened in that gap watched two counters that were both frozen for a reason, and sat on
+     * "reading graph.json" until the player closed it. Neither counter was wrong; between them
+     * they simply said nothing about the thing the window was waiting for.
+     *
+     * IT IS NOT THE WHOLE FIX ON ITS OWN. Adding it makes the window redraw when the graph
+     * lands, and what it redraws as is "nothing planned yet", because nothing started a plan
+     * in the meantime. {@link PlannerEntry#resumeWhenTheGraphLands} is the other half and
+     * {@code PlannerWindow.onUpdate} runs it FIRST, so the rebuild this counter triggers draws
+     * the plan rather than the absence of one.
+     *
+     * WEIGHTED AND SUMMED, which is safe because ALL THREE ONLY EVER GO UP -- each counter
+     * documents that on itself, and `GraphService.reset` bumps forward rather than back to
+     * zero for exactly this reason. Any increase in any term moves the sum, and nothing needs
+     * to recover which one moved. DO NOT add a term that can decrease.
+     *
+     * PACKAGE-VISIBLE RATHER THAN PRIVATE, so `PlannerScreenTest` can read it. It was private
+     * when #201 was filed, and that is a large part of why the issue's evidence had to be read
+     * off the code instead of executed: the window needs ModularUI and a live client, so this
+     * counter is the only piece of the recovery that a headless test can reach at all.
      */
-    private static long stamp(PlanBook book) {
-        return PlannerService.get().generation() * 31L + book.revision();
+    static long stamp(PlanBook book) {
+        return GraphService.get().generation() * 1021L
+                + PlannerService.get().generation() * 31L + book.revision();
     }
 
     /**
@@ -151,9 +175,16 @@ public final class PlannerScreen {
      * the item again. A player has no reason to guess that, and a picker whose click produces
      * no visible change reads as a broken button rather than as a slow one.
      *
-     * A COMBINED COUNTER, not just the plan's -- see {@link #stamp}. Multiplying by a prime
-     * rather than concatenating is enough here because both halves only ever go UP: any
-     * change to either moves the sum, and nothing needs to recover which one moved.
+     * A COMBINED COUNTER, not just the plan's -- see {@link #stamp}. Weighting and summing is
+     * enough here because all three terms only ever go UP: any change to any of them moves the
+     * sum, and nothing needs to recover which one moved.
+     *
+     * AND THE GRAPH IS ONE OF THE THREE (#201). Without it a window opened during the 5.47 s
+     * graph read watched only counters that describe a PLAN -- and no plan can exist before
+     * the graph lands, so it watched two numbers that were frozen by design and never
+     * rebuilt. Each term is named for what it is FOR rather than merely listed, because the
+     * missing one survived #191 wiring three seams in this very file: a list of counters reads
+     * as complete, and a list of the QUESTIONS the window is waiting on does not.
      *
      * A COUNTER POLLED FROM `onUpdate` RATHER THAN A CALLBACK. `onUpdate` is ModularUI's
      * per-client-tick hook, so this runs on the thread that is allowed to touch a GUI; a
@@ -184,6 +215,15 @@ public final class PlannerScreen {
         @Override
         public void onUpdate() {
             super.onUpdate();
+            // FIRST, BEFORE THE STAMP IS READ (#201). A window opened during the graph read is
+            // holding the target it was opened for; this is the tick that notices the graph has
+            // landed and asks the question. Reading the stamp first would rebuild on the graph
+            // counter alone and draw "nothing planned yet" for a frame before the plan started.
+            //
+            // ON THIS THREAD AND NOT FROM `GraphService.onLoad`, which is the hook that looks
+            // right and is not: it runs on the loader thread and before READY is published. See
+            // `PlannerEntry.resumeWhenTheGraphLands` and the counter note above.
+            PlannerEntry.resumeWhenTheGraphLands();
             long generation = plans();
             clearSelectionIfPlanChanged(plans, generation);
             long now = stamp(book);

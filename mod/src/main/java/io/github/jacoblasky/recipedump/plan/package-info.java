@@ -19,8 +19,12 @@
  * {@link io.github.jacoblasky.recipedump.plan.MachineStates} and
  * {@link io.github.jacoblasky.recipedump.plan.CostTable} (results out),
  * {@link io.github.jacoblasky.recipedump.plan.CostInputs},
- * {@link io.github.jacoblasky.recipedump.plan.Structures} (multiblock pricing) and
- * {@link io.github.jacoblasky.recipedump.plan.Tokens}.
+ * {@link io.github.jacoblasky.recipedump.plan.Structures} (multiblock pricing),
+ * {@link io.github.jacoblasky.recipedump.plan.Tokens} and
+ * {@link io.github.jacoblasky.recipedump.plan.Provenance}. The last two are kind
+ * vocabularies and are deliberately NOT one table: a token is a pack PLACEHOLDER standing in
+ * for an instruction, and a provenance kind belongs to a REAL item whose route the JEI dump
+ * could not carry. `present.py` aliases its two imports for the same reason.
  *
  * <h2>Three rules that hold for the whole package</h2>
  *

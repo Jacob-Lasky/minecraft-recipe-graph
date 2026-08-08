@@ -194,6 +194,15 @@ final class Unsourced {
      *     ore-only rule demotes the material the earlier bug was about.</li>
      * </ul>
      *
+     * A THIRD EXCLUSION SINCE #171, AND IT IS THE ONLY ONE THAT READS POSITIVE EVIDENCE. The
+     * two above say "this key is not what it looks like"; `declared_provenance` says "the pack
+     * states how you get this, and no recipe could have carried it". `provenance.py` reads the
+     * pack's own scripts and quest book, and the load-bearing case is `recipes.addHidden*`:
+     * the pack registers 82 puzzle rewards as REAL crafting recipes and hides them from JEI on
+     * purpose, so a JEI dump cannot see them BY CONSTRUCTION. 53 of the 285 keys that survive
+     * the two exclusions above are declared, leaving 232 here. See {@link #packAuthoredDeclared}
+     * for the other half and {@link Cost#provenanceCost} for what it costs instead.
+     *
      * Mirrors `Graph.pack_authored_unsourced` in python, whose docstring carries the same
      * measurements; the golden fixtures hold the two implementations equal.
      */
@@ -202,6 +211,41 @@ final class Unsourced {
         IntArray scratch = new IntArray();
         for (int keyId = 0; keyId < g.keyCount(); keyId++) {
             if (isPackAuthoredUnsourced(g, keyId, scratch)) {
+                Bits.set(out, keyId);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The keys {@link #packAuthored} WOULD hold if the pack had not explained them. 53 on the
+     * reference oracle, against that set's 232. #171/#262.
+     *
+     * THE OTHER HALF OF ONE PREDICATE, WHICH IS WHY IT IS HERE AND NOT BESIDE THE READER. Both
+     * sets run {@link #isPackAuthoredUnexplained}'s five clauses and differ only in which side
+     * of `declaredProvenance` they take, exactly as python shares
+     * `Graph._is_pack_authored_unexplained` between its two properties. Splitting them any
+     * other way lets the two drift into disagreeing about a key that is in neither or both --
+     * and a key in NEITHER is priced by no rule at all, which is silent.
+     *
+     * AND IT IS NOT "EVERY KEY THE PACK DECLARES", WHICH IS THE MISTAKE THAT LOOKS RIGHT. The
+     * pack declares 896 keys and 843 of them are items the graph already makes: 397 price
+     * below `LOOT_COST` and `ae2stuff:adv_wireless_kit` prices at 380,435. Pricing every
+     * declaration would say a quest awarding a thing IS a route to it -- measured on the
+     * oracle, that moves 301 keys off their real prices and drags 20 more up through the
+     * fixpoint. A declared key with a producer is priced by its producer, a declared world ore
+     * by mining, a declared damage variant by its undamaged base. THE CLAUSES ARE NOT
+     * NEGOTIABLE HERE EITHER.
+     *
+     * A BITSET AND NOT A MAP, because the kind is already on the graph: {@link Cost#seed} walks
+     * this and reads {@link RecipeGraph#declaredProvenance} for the word. A map would be a
+     * second copy of an answer the graph holds.
+     */
+    static long[] packAuthoredDeclared(RecipeGraph g) {
+        long[] out = Bits.ofSize(g.keyCount());
+        IntArray scratch = new IntArray();
+        for (int keyId = 0; keyId < g.keyCount(); keyId++) {
+            if (isPackAuthoredDeclared(g, keyId, scratch)) {
                 Bits.set(out, keyId);
             }
         }
@@ -224,6 +268,44 @@ final class Unsourced {
      * kept passing; that is the mistake this shape exists to not repeat.
      */
     static boolean isPackAuthoredUnsourced(RecipeGraph g, int keyId, IntArray scratch) {
+        // THE ONLY CLAUSE THAT READS POSITIVE EVIDENCE, and the only one that separates this
+        // from {@link #isPackAuthoredDeclared}. #171/#262.
+        if (g.declaredProvenance(keyId) != null) {
+            return false;
+        }
+        return isPackAuthoredUnexplained(g, keyId, scratch);
+    }
+
+    /**
+     * The membership test for {@link #packAuthoredDeclared}, for ONE key. #171/#262.
+     *
+     * THE EXACT COMPLEMENT OF {@link #isPackAuthoredUnsourced} over the same five clauses, and
+     * {@link Solver} needs the per-key shape for the same reason it needs the other one: a
+     * badge decision on one plan node must not build a 300,000-key bitset.
+     */
+    static boolean isPackAuthoredDeclared(RecipeGraph g, int keyId, IntArray scratch) {
+        return g.declaredProvenance(keyId) != null
+                && isPackAuthoredUnexplained(g, keyId, scratch);
+    }
+
+    /**
+     * The five clauses {@link #isPackAuthoredUnsourced} and {@link #isPackAuthoredDeclared}
+     * share. Mirrors `Graph._is_pack_authored_unexplained` in python.
+     *
+     * ONE SPELLING, because the two predicates PARTITION its result on `declaredProvenance`
+     * and a key that fell out of both would be silently unpriced by either rule -- neither the
+     * `UNSOURCED_COST` sweep nor the provenance band would reach it, and nothing would say so.
+     * See {@link #packAuthored} for what each clause is for and the measurement that bought it.
+     *
+     * LIVENESS IS A CLAUSE HERE AND NOT A LOOP BOUND, WHICH IS THE DIFFERENCE THAT BIT. The
+     * unsourced half could get it from iterating live keys, so it never needed to say so; the
+     * declared half iterates the PACK'S map, which names items no recipe touches. Python
+     * shipped without this clause for one measurement and 54 dead keys -- `a_smithys_tablet`,
+     * `toy_sword` -- went from infinity to a gate price, inventing a number for items that
+     * cannot appear in any plan. DO NOT hoist this out into the callers' loops.
+     */
+    private static boolean isPackAuthoredUnexplained(RecipeGraph g, int keyId,
+                                                     IntArray scratch) {
         if (!g.isLive(keyId) || g.hasProducers(keyId)) {
             return false;
         }

@@ -851,6 +851,30 @@ public final class Solver {
                 node.unsourced = Boolean.TRUE;
                 node.note = "the pack defines this item and nothing in the dump makes it; "
                         + "it comes from a mechanic no recipe can describe";
+            } else {
+                // THE FOURTH POPULATION, AND IT IS THE ONE THAT IS NOT UNSOURCED. #171/#262.
+                //
+                // These keys used to reach the branch above, because until `declared_provenance`
+                // was read the graph had no way to tell "nothing explains this" from "the pack
+                // explains it and the dump could not carry the explanation". They are excluded
+                // from `Unsourced.packAuthored` now, so this branch is what they reach instead,
+                // and the badge follows the price exactly as it does above: `Cost.seed` charges
+                // them `provenanceCost` rather than `UNSOURCED_COST`, so `node.unsourced` is
+                // deliberately NOT set. THE TWO ARE MUTUALLY EXCLUSIVE BY CONSTRUCTION and a
+                // node carrying both is a bug rather than a case to handle.
+                //
+                // SAYING WHERE IT COMES FROM IS THE WHOLE POINT, and it is why this cannot
+                // simply drop the badge along with the mark. The reader still sees this key on
+                // a shopping list with no route under it -- there is no recipe, so nothing
+                // changed about the plan's shape -- and "no known source" was at least an
+                // explanation. Replacing it with silence would be a regression in the one place
+                // a reader looks. Mirrors the same branch in `solve.expand`, and the fixtures
+                // hold the two sentences byte-equal.
+                String declared = packAuthoredDeclared(keyId);
+                if (declared != null) {
+                    node.provenance = declared;
+                    node.note = Provenance.noteFor(declared);
+                }
             }
             leafTotals.add(keyId, remainder);
             return node;
@@ -1165,6 +1189,19 @@ public final class Solver {
      */
     boolean packAuthoredUnsourced(int keyId) {
         return Unsourced.isPackAuthoredUnsourced(g, keyId, scratch);
+    }
+
+    /**
+     * How the PACK says you get this key, or null. The COMPLEMENT of
+     * {@link #packAuthoredUnsourced}, not another flavour of it. See {@link Unsourced}.
+     *
+     * A DELEGATE FOR THE SAME REASON AS ITS SIBLING, and to the same file: the two run one
+     * predicate and partition it, so a second spelling here could put a key in both sets or
+     * in neither, and neither failure says anything at the moment it happens.
+     */
+    String packAuthoredDeclared(int keyId) {
+        return Unsourced.isPackAuthoredDeclared(g, keyId, scratch)
+                ? g.declaredProvenance(keyId) : null;
     }
 
     /**
@@ -1575,6 +1612,19 @@ public final class Solver {
             int rowKey = g.keyId(row.key);
             if (reachableForm(rowKey) >= 0 || packAuthoredUnsourced(rowKey)) {
                 row.unsourced = Boolean.TRUE;
+            } else {
+                // AND WHERE THE PACK SAYS IT COMES FROM, WHICH IS NOT A THIRD SPELLING OF THE
+                // MARK ABOVE BUT ITS COMPLEMENT. #171. A declared key is excluded from
+                // `Unsourced.packAuthored` and `reachableForm` is -1 for it, so neither
+                // predicate fires and the row would otherwise carry nothing at all -- a
+                // REGRESSION on the shopping list, the one surface where "no known source" was
+                // doing useful work. This is the list a player takes into the world, so it is
+                // the best place in the tool to say "solve its puzzle" rather than the worst
+                // place to say nothing. Mirrors `Solver._need_entry` in python.
+                String declared = packAuthoredDeclared(rowKey);
+                if (declared != null) {
+                    row.provenance = declared;
+                }
             }
         }
         result.usedFromStock = entries(usedFromStock);

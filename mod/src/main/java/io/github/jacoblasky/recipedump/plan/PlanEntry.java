@@ -34,6 +34,14 @@ public final class PlanEntry {
      * a "drawn from stock" row contradicts the row it sits on.
      */
     public Boolean unsourced;
+    /**
+     * `shopping_list` only: how the PACK says you get this key. #171/#262.
+     *
+     * THE COMPLEMENT OF {@link #unsourced}, not another flavour of it, and set on the same one
+     * list for the same reason: this is what a player carries into the world, so it is the
+     * best place in the tool to say "solve its puzzle" and the worst place to say nothing.
+     */
+    public String provenance;
 
     PlanEntry(String key, String name, String kind, String label, long qty) {
         this.key = key;

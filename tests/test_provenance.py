@@ -505,6 +505,110 @@ class BuildWiresItInTest(unittest.TestCase):
         self.assertEqual(g.declared_provenance, Graph.load(out).declared_provenance)
 
 
+class TheSyntheticGraphTheJavaPortIsHeldToTest(unittest.TestCase):
+    """`tests/fixtures/provenance.json`, which is this feature's cross-language contract. #262.
+
+    WHY A SECOND FIXTURE SET EXISTS AT ALL, since `tests/fixtures/plan/*.json` is already the
+    Java port's correctness proof. Those are generated from the reference ORACLE, and no graph
+    on disk carries `declared_provenance` -- `index.build` writes it and no oracle has been
+    rebuilt since. So both languages compute the same 285-key set,
+    `everyFixturePlansExactlyAsThePythonOracleDoes` compares like with like, and the gate is
+    green for a reason that expires the next time anybody redumps. Nothing in the golden set
+    can exercise the port of #171 until that day, and on that day the divergence arrives as an
+    opaque diff on an unrelated branch. The only way to test it beforehand is to SYNTHESISE a
+    graph that carries the field, which `tools/make-provenance-fixture.py` does.
+
+    THE PYTHON SIDE IS THE ORACLE HERE, exactly as it is for the golden set, so this class does
+    what `test_plan_fixtures` does for that one: regenerate and compare. A fixture that varied
+    between runs would make `ProvenanceFixtureTest.java` flaky and worthless, and a fixture that
+    silently stopped describing this implementation would leave the Java suite passing against
+    a snapshot of something that no longer exists.
+
+    DO NOT "FIX" A FAILURE HERE BY EDITING THE FIXTURE. Regenerate, read the diff, and decide
+    whether the behaviour change was intended; the diff IS the change to the port's contract.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Through importlib because `tools/` is not a package and the filename is hyphenated,
+        # the way `test_plan_fixtures` reaches its own generator. Importing it rather than
+        # restating the graph is the point: the fixture and the assertions below cannot
+        # describe two different packs.
+        path = os.path.join(root, "tools", "make-provenance-fixture.py")
+        spec = importlib.util.spec_from_file_location("make_provenance_fixture", path)
+        cls.maker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.maker)
+        with open(cls.maker.FIXTURE) as fh:
+            cls.text = fh.read()
+        cls.doc = json.loads(cls.text)
+
+    def test_the_file_on_disk_is_exactly_what_the_generator_writes(self):
+        # BYTES, NOT A STRUCTURAL COMPARISON. Python-to-Python is the one direction where a
+        # byte diff is meaningful -- see the generator's docstring on why the JAVA side must
+        # parse instead -- and it is what catches a hand edit and a stale regeneration alike.
+        self.assertEqual(self.maker.dump(self.maker.generate()), self.text,
+                         "tests/fixtures/provenance.json is stale; regenerate it with "
+                         "python3 tools/make-provenance-fixture.py")
+
+    def test_the_graph_in_the_file_is_the_graph_the_answers_were_computed_from(self):
+        # THE GAP THE TEST ABOVE CANNOT SEE. It compares the generator against itself, so a
+        # field that `to_json` drops -- or that `load` re-derives -- would leave both arms
+        # agreeing while the JAVA side, which reads the serialised document and nothing else,
+        # got a different graph. `declared_provenance` is persisted rather than re-derived for
+        # exactly this class of reason; this asserts the persistence end to end.
+        again = self._round_trip(self.doc["graph"])
+        self.assertEqual(sorted(self.doc["sets"]["pack_authored_unsourced"]),
+                         sorted(again.pack_authored_unsourced))
+        self.assertEqual(self.doc["sets"]["pack_authored_declared"],
+                         again.pack_authored_declared)
+
+    def test_the_two_arms_partition_one_predicate_exactly(self):
+        # THE CLAIM `Graph._is_pack_authored_unexplained` IS ONE FUNCTION FOR. The two
+        # properties run its five clauses and split on the declaration, so the union with the
+        # pack read must equal the unsourced set with the pack unread. A key in NEITHER is
+        # charged by neither `cost._seed` rule and nothing says so -- which is exactly what
+        # `live_keys` makes possible, since the declared half iterates the PACK'S map rather
+        # than the live set.
+        with_pack = set(self.doc["sets"]["pack_authored_unsourced"])
+        declared = set(self.doc["sets"]["pack_authored_declared"])
+        without = set(self.doc["sets_without_declarations"]["pack_authored_unsourced"])
+        self.assertEqual(set(), with_pack & declared, "a key in both sets is a bug")
+        self.assertEqual(without, with_pack | declared)
+        self.assertEqual({}, self.doc["sets_without_declarations"]["pack_authored_declared"])
+
+    def test_the_declared_key_no_recipe_touches_is_in_neither_set(self):
+        # `live_keys` IS A CLAUSE AND NOT A LOOP BOUND, named rather than left to the partition
+        # above -- which would still hold if this key were wrongly admitted to both arms.
+        # Python shipped without the clause for one measurement and 54 dead keys went from
+        # infinity to a gate price, inventing a number for items that cannot appear in a plan.
+        graph = self._round_trip(self.doc["graph"])
+        dead = [key for key in graph.declared_provenance if key not in graph.live_keys]
+        self.assertEqual(1, len(dead),
+                         "the fixture no longer carries a declared key no recipe touches, so "
+                         "this clause is no longer exercised")
+        self.assertNotIn(dead[0], graph.pack_authored_unsourced)
+        self.assertNotIn(dead[0], graph.pack_authored_declared)
+        self.assertNotIn(dead[0], self.doc["costs"])
+
+    def test_it_covers_all_three_kinds_and_the_unknown_one(self):
+        # A fixture that quietly stopped exercising a kind would leave the Java band for it
+        # unasserted while every test here stayed green.
+        kinds = set(self.doc["sets"]["pack_authored_declared"].values())
+        self.assertEqual(set(provenance.KINDS) | {"some_future_kind"}, kinds)
+
+    def _round_trip(self, doc):
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(handle, "w") as fh:
+                json.dump(doc, fh)
+            return Graph.load(path)
+        finally:
+            os.unlink(path)
+
+
 class AgainstTheRealPackTest(unittest.TestCase):
     """The measurements the module docstring claims, read off the pack rather than restated.
 
@@ -544,38 +648,6 @@ class AgainstTheRealPackTest(unittest.TestCase):
         after = len(graph.pack_authored_unsourced)
         self.assertEqual(285, before)
         self.assertEqual(232, after)
-
-    def test_the_java_port_does_not_yet_know_about_this(self):
-        """THE ONE THING THAT COULD MAKE A GREEN GOLDEN GATE A LIE, said out loud. #171.
-
-        `Unsourced.isPackAuthoredUnsourced` in the Java port mirrors
-        `Graph.pack_authored_unsourced` clause for clause, and it has not been taught the
-        `declared_provenance` exclusion or `Cost.PROVENANCE_COST`. Today that costs nothing,
-        because no graph on disk carries the field: `index.build` writes it and no oracle has
-        been rebuilt since, so both languages compute the same 285-key set and
-        `everyFixturePlansExactlyAsThePythonOracleDoes` is comparing like with like.
-
-        THE MOMENT SOMEBODY REDUMPS, THAT STOPS BEING TRUE, and the failure would arrive as an
-        opaque fixture diff on a branch that has nothing to do with this one -- the Java reader
-        skips unknown top-level sections by design, so the port will load the new field, ignore
-        it, and quietly price 53 keys differently from python. This assertion exists to fail
-        FIRST and say why.
-
-        WHEN THIS FAILS: do #262, which is the port -- the exclusion and the band into
-        `Unsourced` and `Cost` in `mod/src/main/java/.../plan/`, plus the reader and the
-        badge -- or drop `declared_provenance` from the oracle. #262 is where the file list
-        and the acceptance criteria live, so the failure message names it rather than the
-        umbrella; landing on #171 would mean re-deriving the writeup.
-
-        DELETING THIS TEST IS PART OF #262 AND NOT A WAY TO GO GREEN. It goes when the port
-        lands, so that the tripwire and the thing it guards are removed together; deleting it
-        to quiet a red suite is the silent-death shape `check.sh` exists to prevent, one level
-        up.
-        """
-        self.assertEqual(
-            {}, self.graph.declared_provenance,
-            "this oracle carries declared_provenance, so the Java port is now behind python "
-            "and the golden plan gate is comparing two different cost models. See #262.")
 
     def test_the_example_the_issue_names_is_one_of_them(self):
         # #171 says `contenttweaker:curious_bullet` "is priced 1.0 and is obtained from a
