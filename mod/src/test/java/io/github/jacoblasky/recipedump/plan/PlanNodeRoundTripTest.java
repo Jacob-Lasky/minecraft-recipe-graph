@@ -91,7 +91,7 @@ public class PlanNodeRoundTripTest {
                 + "\"resolved_to\":\"mod:other\",\"alt_count\":3,"
                 + "\"not_consumed\":true,"
                 + "\"dimension\":\"The End\",\"token_kind\":\"gate\","
-                + "\"unsourced\":true,"
+                + "\"unsourced\":true,\"provenance\":\"puzzle\","
                 + "\"children\":[{\"key\":\"mod:child\",\"label\":\"Child\","
                 + "\"name\":\"Child\",\"kind\":\"item\",\"need\":1,"
                 + "\"status\":\"raw\"}]}";
@@ -113,6 +113,7 @@ public class PlanNodeRoundTripTest {
 
         assertNull("pinned was absent and must stay absent", node.pinned);
         assertNull("unsourced was absent and must stay absent", node.unsourced);
+        assertNull("provenance was absent and must stay absent", node.provenance);
         assertNull("from_stock was absent and must stay absent", node.fromStock);
         assertNull("runs was absent and must stay absent", node.runs);
         assertNull("per_run was absent and must stay absent", node.perRun);

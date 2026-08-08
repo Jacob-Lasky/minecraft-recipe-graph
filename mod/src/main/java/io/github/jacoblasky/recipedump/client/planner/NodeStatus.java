@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Provenance;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -152,6 +153,18 @@ public final class NodeStatus {
             if (refined != null) {
                 return refined;
             }
+        }
+        // THE PACK'S OWN ANSWER OUTRANKS "no known source", and the two cannot both be set.
+        // #171/#262: `Solver.expand` writes exactly one of them -- a declared key is excluded
+        // from the pack-authored unsourced set by construction -- so the order below is stated
+        // only so a caller passing both is not silently resolved. The more specific claim wins
+        // again: naming the puzzle beats saying nothing is known. Mirrors
+        // `present.status_badge`, which orders its two branches the same way.
+        //
+        // STILL NO NEW COLOUR. It remains something you have to go and obtain; what changed is
+        // that this time the tool can tell you where to look.
+        if (node.provenance() != null && !node.provenance().isEmpty()) {
+            return Provenance.badgeFor(node.provenance());
         }
         // #139's mark. The solver resolved this identically to any other raw leaf, but a
         // reader must not treat it identically: the tool cannot say where to get it. A TOKEN

@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Provenance;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -246,6 +247,11 @@ public final class NodeRowText {
             // `why` is set only on the infinite-sources list, whose rows are by definition
             // sourced. The `else` keeps that true here rather than restating it.
             parts.add(NodeStatus.UNSOURCED_BADGE);
+        } else if (row.provenance() != null && !row.provenance().isEmpty()) {
+            // THE COMPLEMENT OF THE BADGE ABOVE, NOT A SECOND ONE. #171/#262: the pack says
+            // how you get this, so "no known source" would be a lie and silence would be a
+            // regression -- `render._rows` puts the same word on the same row in the browser.
+            parts.add(Provenance.badgeFor(row.provenance()));
         }
         if (row.tokenKind() != null && !row.tokenKind().isEmpty()) {
             parts.add(NodeStatus.tokenBadge(row.tokenKind()));
