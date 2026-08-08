@@ -61,6 +61,45 @@ import org.junit.Test;
  * tests beside this one -- `PlanTargetTest`, `PlannerStockTest`, and #195's
  * `dumpPluginInstallsTheSeamAndTheGraphArrivesAfterwards` -- which drive the production entry
  * point itself. This is the net that catches the ones nobody thought to write one for.
+ *
+ * <h2>The boundary of what any gate in this file can see. #205</h2>
+ *
+ * Three gates live here and they answer three different questions. What follows is where they
+ * stop, written down so the next person reaching for a cleverer bytecode trick reads it here
+ * rather than rediscovering it over a day. Each limit below was measured, not reasoned about.
+ *
+ * <b>PER-CONSTANT GRANULARITY IS NOT RECOVERABLE FROM A CONSTANT POOL, AND NO TRICK FIXES IT.</b>
+ * `ScenarioSource.HAVE.readBy(...)` and `ScenarioSource.PINS.readBy(...)` compile to the SAME
+ * `Methodref` behind different `getstatic`s. So `everySettableSeamIsInstalledSomewhereInProduction`
+ * reported `readBy` as installed while `HAVE` had no reader at all, because `PinStore` has
+ * called it since #140 -- the gate was not blind to that #191 defect, it was reporting the
+ * opposite. Pairing constants by co-occurrence in one class is a heuristic that CAN PASS
+ * WRONGLY, and an approximate gate is indistinguishable from a real one until the day it
+ * matters, while also stopping anyone from looking for a better answer. DO NOT ADD ONE.
+ *
+ * <b>CLASS-GRANULARITY REACHABILITY IS INSUFFICIENT, WITH A WORKED EXAMPLE.</b> "Is there a
+ * `Methodref` chain from `ClientProxy` to this class" stays green with the method in question
+ * completely orphaned: `PlannerStock` is referenced from `ClientProxy`, `PlannerEntry` and
+ * `LivePlannerActions` for `planWhenRead` and `accept`, so a class-level answer says "reached"
+ * while `install()` is dead. Every gate here is therefore METHOD-precise -- it asks whether one
+ * `owner.nameDescriptor` is in some production class's pool -- and never class-precise. Doing
+ * better than that needs parsing each method's `Code` attribute and deciding what to do about
+ * virtual dispatch, which is real work for an answer that is still an approximation.
+ *
+ * <b>THE SCAN MUST COVER NESTED CLASSES, AND FORGETTING THAT FAILS ON CORRECT CODE.</b> The only
+ * production caller of `PlannerStock.accept` is the anonymous `Runnable` inside
+ * `ClientProxy.applyStockSnapshot`, so the `Methodref` lives in `ClientProxy$1` and not in
+ * `ClientProxy`. A scan narrowed to the obvious class finds nothing and reports a defect that
+ * is not there. `theAcceptCallLivesInAnInnerClassAndTheScanFindsItAnyway` pins this.
+ *
+ * <b>WHAT NOTHING HERE COVERS: A SELF-CONSISTENT REMOVAL.</b> These gates catch joints coming
+ * APART, which is how #191 actually happened -- one end stopped calling and the other end sat
+ * there with its default. They cannot catch a coherent edit that removes both ends at once,
+ * because afterwards nothing is inconsistent to notice. Deleting `LiveStock.request()` AND its
+ * call in `PlannerStock.planWhenRead` leaves every gate in this file green, and #204 measured
+ * that shape at 684 passed, 0 failed. The only thing that catches it is evidence from a running
+ * client -- a harness probe that opens the planner and asserts stock actually arrived, scoped
+ * in #146's neighbourhood. That is a probe worth having for its own reasons, not a gate.
  */
 public class SeamInstallationTest {
 
@@ -113,7 +152,6 @@ public class SeamInstallationTest {
         final String method;
         /** JVM descriptor, so an overload cannot be mistaken for its sibling. */
         final String descriptor;
-        final Set<String> callers = new LinkedHashSet<String>();
 
         Seam(String owner, String method, String descriptor) {
             this.owner = owner;
@@ -138,11 +176,12 @@ public class SeamInstallationTest {
     public void everySettableSeamIsInstalledSomewhereInProduction() throws Exception {
         Scan scan = findSeams();
         assertTheScanFoundTheSeamsItIsKnownToHave(scan);
-        recordCallers(scan.seams);
+        Map<String, Set<String>> callers = emptyCallerMap(scan.seams.keySet());
+        recordProductionCallers(callers);
 
         List<String> unwired = new ArrayList<String>();
         for (Seam seam : scan.seams.values()) {
-            if (seam.callers.isEmpty()) {
+            if (callers.get(seam.reference()).isEmpty()) {
                 unwired.add(seam.label() + seam.descriptor);
             }
         }
@@ -154,8 +193,9 @@ public class SeamInstallationTest {
         // knowable in advance.
         System.out.println("seams found (" + scan.seams.size() + "), " + scan);
         for (Seam seam : scan.seams.values()) {
+            Set<String> found = callers.get(seam.reference());
             System.out.println("  " + seam.label() + " <- "
-                    + (seam.callers.isEmpty() ? "NOTHING" : seam.callers.toString()));
+                    + (found.isEmpty() ? "NOTHING" : found.toString()));
         }
         if (!unwired.isEmpty()) {
             fail("these seams exist, and nothing in the shipped mod installs one -- so the"
@@ -215,6 +255,148 @@ public class SeamInstallationTest {
     }
 
     /**
+     * A FOURTH SHAPE: the switch is called, and the traffic beside it is not. #205
+     *
+     * The gate above asks whether production calls `PlannerStock.install()`. It does, from
+     * `ClientProxy`. That proves the `HAVE` reader is installed and proves NOTHING about the two
+     * methods that carry the actual work, and both are joints #191 broke:
+     *
+     * <ul>
+     * <li>`planWhenRead` is what asks the server for the grid. If `PlannerEntry` and
+     *     `LivePlannerActions` stopped calling it, `LiveStock.request()` is dead again by
+     *     exactly the #191 route and the gate above stays green, because `install()` is still
+     *     called and the reader still answers -- with the "not read yet" caveat, forever.</li>
+     * <li>`accept` is where the reply lands. If `ClientProxy` stopped calling it, the server
+     *     still sends a megabyte of item list and nothing receives it, and
+     *     {@link #everyEmptyProxyHookIsOverriddenByTheClientProxy} does NOT catch that: it
+     *     asserts the override's body is not a bare `return`, so a body that schedules a task
+     *     and drops it passes.</li>
+     * </ul>
+     *
+     * DERIVED FROM THE INSTALLER SET RATHER THAN LISTED, so the next class of this shape is
+     * covered the day it is written. The population is deliberately narrow: only classes that
+     * already have an `install()` entry point, which is two classes and three methods today.
+     * THAT NARROWNESS IS THE POINT AND NOT A LIMITATION TO FIX. "This public method has a
+     * caller" applied generally is a dead-code detector rather than a seam gate, and it would
+     * flag legitimate API across `graph/` and `plan/`; a class whose whole job is joining two
+     * halves of the mod together is the one place the rule is exactly right.
+     *
+     * THE NO-ARGUMENT VOID SHAPE IS EXCLUDED because the gate above owns it. Two tests failing
+     * for one cause names the diagnosis twice and points at neither.
+     */
+    @Test
+    public void everyEntryPointOfASeamInstallerIsCalledByProduction() throws Exception {
+        Scan scan = findSeams();
+        assertTheScanFoundTheSeamsItIsKnownToHave(scan);
+        Set<String> installers = new LinkedHashSet<String>();
+        for (String entry : installerEntryPoints(scan).keySet()) {
+            installers.add(entry.substring(0, entry.indexOf('.')));
+        }
+        // THE POPULATION BEFORE THE PROPERTY. An installer set that collapsed to empty finds no
+        // orphaned traffic and reports success, which is the exact failure this whole file is
+        // about wearing the gate's own clothes.
+        assertTrue("no seam-installing classes found, so this gate is asserting nothing about"
+                   + " nothing; the `install()` shape must have moved", installers.size() >= 2);
+
+        Map<String, Set<String>> traffic = productionCallersOfPublicStatics(installers);
+        String stock = ClassFiles.ROOT_PACKAGE + "/client/PlannerStock";
+        assertTrue("`planWhenRead` is the ask half of the stock join and must be in the"
+                   + " population; found " + traffic.keySet(),
+                   traffic.containsKey(stock + ".planWhenRead(Ljava/lang/Runnable;)V"));
+        assertTrue("`accept` is the reply half of the stock join and must be in the population;"
+                   + " found " + traffic.keySet(),
+                   traffic.containsKey(
+                           stock + ".accept(Lnet/minecraft/nbt/NBTTagCompound;)V"));
+
+        List<String> orphaned = new ArrayList<String>();
+        for (Map.Entry<String, Set<String>> entry : traffic.entrySet()) {
+            System.out.println("installer traffic " + entry.getKey() + " <- "
+                    + (entry.getValue().isEmpty() ? "NOTHING" : entry.getValue().toString()));
+            if (entry.getValue().isEmpty()) {
+                orphaned.add(entry.getKey());
+            }
+        }
+        assertEquals("a class whose job is joining two halves of the mod has an entry point"
+                     + " nothing in the shipped mod calls, so that half of the join is present,"
+                     + " tested, and absent in the game -- which is #191 exactly",
+                     Collections.emptyList(), orphaned);
+    }
+
+    /**
+     * Every public static method on these classes EXCEPT the no-argument void ones, mapped to
+     * the production classes that call it.
+     *
+     * KEYED BY DESCRIPTOR, so an overload cannot be counted as its sibling: `accept(NBTTagCompound)`
+     * and a future `accept(StockSnapshot)` are different joins and one being called says nothing
+     * about the other.
+     */
+    private static Map<String, Set<String>> productionCallersOfPublicStatics(Set<String> owners)
+            throws IOException {
+        Map<String, Set<String>> found = new LinkedHashMap<String, Set<String>>();
+        for (String owner : owners) {
+            Class<?> loaded = load(owner);
+            if (loaded == null) {
+                continue;
+            }
+            for (Method method : loaded.getDeclaredMethods()) {
+                int modifiers = method.getModifiers();
+                if (!Modifier.isPublic(modifiers) || !Modifier.isStatic(modifiers)
+                        || method.isSynthetic()) {
+                    continue;
+                }
+                if (method.getParameterTypes().length == 0
+                        && method.getReturnType() == void.class) {
+                    continue;  // the `install()` shape, owned by the gate above
+                }
+                found.put(owner + "." + method.getName() + descriptorOf(method),
+                          new LinkedHashSet<String>());
+            }
+        }
+        recordProductionCallers(found);
+        return found;
+    }
+
+    /** A method's JVM descriptor, which is how a `Methodref` spells it. */
+    private static String descriptorOf(Method method) {
+        StringBuilder descriptor = new StringBuilder("(");
+        for (Class<?> parameter : method.getParameterTypes()) {
+            descriptor.append(typeDescriptor(parameter));
+        }
+        return descriptor.append(')').append(typeDescriptor(method.getReturnType())).toString();
+    }
+
+    private static String typeDescriptor(Class<?> type) {
+        if (type.isArray()) {
+            return "[" + typeDescriptor(type.getComponentType());
+        }
+        if (!type.isPrimitive()) {
+            return "L" + internalNameOf(type) + ";";
+        }
+        if (type == void.class) {
+            return "V";
+        }
+        if (type == boolean.class) {
+            return "Z";
+        }
+        if (type == byte.class) {
+            return "B";
+        }
+        if (type == char.class) {
+            return "C";
+        }
+        if (type == short.class) {
+            return "S";
+        }
+        if (type == int.class) {
+            return "I";
+        }
+        if (type == long.class) {
+            return "J";
+        }
+        return type == float.class ? "F" : "D";
+    }
+
+    /**
      * `owner.install()V` for every seam-installing class, mapped to its production callers.
      *
      * PUBLIC, STATIC, VOID AND NO ARGUMENTS, because that is the shape of "turn this on": a
@@ -251,19 +433,7 @@ public class SeamInstallationTest {
                 continue;
             }
         }
-        for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
-            String caller = ClassFiles.internalName(file);
-            if (isHarness(caller)) {
-                continue;
-            }
-            for (String reference : ClassFiles.methodReferences(ClassFiles.read(file))) {
-                Set<String> callers = found.get(reference);
-                if (callers != null && !isSelf(reference.substring(0, reference.indexOf('.')),
-                                               caller)) {
-                    callers.add(caller);
-                }
-            }
-        }
+        recordProductionCallers(found);
         return found;
     }
 
@@ -344,6 +514,83 @@ public class SeamInstallationTest {
         assertFalse("the scan reported a call to a method that does not exist",
                     fromAreaSource.contains("io/github/jacoblasky/recipedump/client/jei/"
                             + "PlannerHooks.setAreaSourceNotReally()V"));
+    }
+
+    /**
+     * THE CALL THE FOURTH GATE DEPENDS ON IS NOT WHERE A READER WOULD LOOK FOR IT. #205
+     *
+     * `ClientProxy.applyStockSnapshot` schedules the work onto the client thread, so the call to
+     * `PlannerStock.accept` is compiled into the anonymous `Runnable` -- `ClientProxy$1` -- and
+     * `ClientProxy`'s own constant pool does not hold it at all. A scan narrowed to the obvious
+     * class therefore reports the join broken WHEN IT IS FINE, which is a gate that fails on
+     * correct code and gets deleted rather than fixed. That mistake has been made once already,
+     * in #223's first seam test, for the same reason one level over.
+     *
+     * BOTH HALVES ARE ASSERTED, and the negative half is the one doing the work: it pins that
+     * the outer class really is the wrong place to look, so this stops being a tautology the day
+     * someone inlines the scheduling and the join moves back up. If that happens this fails and
+     * the comment above should move with it.
+     */
+    @Test
+    public void theAcceptCallLivesInAnInnerClassAndTheScanFindsItAnyway() throws Exception {
+        String accept = ClassFiles.ROOT_PACKAGE + "/client/PlannerStock.accept"
+                + "(Lnet/minecraft/nbt/NBTTagCompound;)V";
+        String proxy = ClassFiles.ROOT_PACKAGE + "/client/ClientProxy";
+        // FOUND BY SEARCH RATHER THAN NAMED `ClientProxy$1`. `ClientProxy` builds three
+        // anonymous classes and the one that matters is the third, so a hardcoded number is
+        // wrong today and would be wrong again on the next edit for a different reason.
+        List<String> nestedHolders = new ArrayList<String>();
+        Set<String> outer = Collections.emptySet();
+        for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE + "/client")) {
+            String internal = ClassFiles.internalName(file);
+            if (!isSelf(proxy, internal)) {
+                continue;
+            }
+            Set<String> references = ClassFiles.methodReferences(ClassFiles.read(file));
+            if (internal.equals(proxy)) {
+                outer = references;
+            } else if (references.contains(accept)) {
+                nestedHolders.add(internal);
+            }
+        }
+
+        assertFalse("ClientProxy itself must NOT hold this reference, or this test is asserting"
+                    + " nothing and a class-narrowed scan would have worked all along",
+                    outer.contains(accept));
+        assertEquals("exactly one nested class of ClientProxy hands the reply on, and the"
+                     + " gate's whole-production scan is what sees it", 1, nestedHolders.size());
+        assertTrue("a caller inside a nested class is still a caller from another class",
+                   !isSelf(ClassFiles.ROOT_PACKAGE + "/client/PlannerStock",
+                           nestedHolders.get(0)));
+    }
+
+    /** A sample whose only job is to have a descriptor worth checking. See below. */
+    public static boolean sampleSignature(int count, String[] names, long[][] grid) {
+        return count > 0 && names != null && grid != null;
+    }
+
+    /**
+     * THE DESCRIPTOR IS THE LOOKUP KEY, so getting it wrong means the gate matches nothing.
+     *
+     * `productionCallersOfPublicStatics` builds `owner.nameDescriptor` and looks it up against
+     * constant-pool entries, so a descriptor that is wrong in any position finds no callers and
+     * reports every entry point orphaned -- or, if the population assertions were ever relaxed,
+     * finds nothing to check and passes. The two live cases only exercise object parameters and
+     * a void return, so primitives, arrays and a non-void return would otherwise ship untested
+     * against the day an installer class grows one.
+     *
+     * ASSERTED AGAINST A LITERAL rather than against a second call to the code under test,
+     * because a test that spells its expectation with the thing it is testing agrees with any
+     * bug the implementation has.
+     */
+    @Test
+    public void aDescriptorIsSpeltTheWayTheConstantPoolSpellsIt() throws Exception {
+        Method sample = SeamInstallationTest.class.getMethod(
+                "sampleSignature", int.class, String[].class, long[][].class);
+        assertEquals("(I[Ljava/lang/String;[[J)Z", descriptorOf(sample));
+        assertEquals("V", typeDescriptor(void.class));
+        assertEquals("D", typeDescriptor(double.class));
+        assertEquals("[B", typeDescriptor(byte[].class));
     }
 
     /**
@@ -472,20 +719,55 @@ public class SeamInstallationTest {
         return false;
     }
 
-    /** Every production class that names one of the seams in its constant pool. */
-    private static void recordCallers(Map<String, Seam> seams) throws IOException {
+    /**
+     * Fill in, for every `owner.nameDescriptor` key already present, the production classes
+     * whose constant pool names it. A key with no caller keeps the empty set it arrived with,
+     * which is what every gate here reads as "nothing in the shipped mod calls this".
+     *
+     * ONE WALK FOR ALL THREE GATES. Each carried its own copy of this loop, identical down to
+     * the self-check, which is the dangerous kind of duplication rather than the harmless kind:
+     * three implementations that agree today drift one at a time, and a gate that drifts stops
+     * DISCRIMINATING rather than failing, so nothing reports it. #205 added the third copy and
+     * this removes all three.
+     *
+     * A CLASS DOES NOT COUNT AS ITS OWN CALLER, nested classes included. A default reinstalling
+     * its own default is the exact no-op this whole file exists to notice.
+     */
+    private static void recordProductionCallers(Map<String, Set<String>> into)
+            throws IOException {
         for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
             String caller = ClassFiles.internalName(file);
             if (isHarness(caller)) {
                 continue;
             }
             for (String reference : ClassFiles.methodReferences(ClassFiles.read(file))) {
-                Seam seam = seams.get(reference);
-                if (seam != null && !isSelf(seam.owner, caller)) {
-                    seam.callers.add(caller);
+                Set<String> callers = into.get(reference);
+                if (callers != null && !isSelf(ownerOf(reference), caller)) {
+                    callers.add(caller);
                 }
             }
         }
+    }
+
+    /** A caller map with every key present and no callers found yet. */
+    private static Map<String, Set<String>> emptyCallerMap(Set<String> references) {
+        Map<String, Set<String>> map = new LinkedHashMap<String, Set<String>>();
+        for (String reference : references) {
+            map.put(reference, new LinkedHashSet<String>());
+        }
+        return map;
+    }
+
+    /**
+     * The declaring class of an `owner.nameDescriptor` reference.
+     *
+     * THE FIRST `.` IS THE SEPARATOR AND THAT IS NOT AN ACCIDENT: an owner is an INTERNAL name,
+     * so it is `a/b/C` and cannot contain a dot, while everything after the first one is the
+     * method name and its descriptor. Spelled once because it was open-coded at three call
+     * sites, and the assumption is worth saying rather than leaving to be re-derived.
+     */
+    private static String ownerOf(String reference) {
+        return reference.substring(0, reference.indexOf('.'));
     }
 
     private static void assertTheScanFoundTheSeamsItIsKnownToHave(Scan scan) {
