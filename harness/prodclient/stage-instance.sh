@@ -195,11 +195,23 @@ PY
 # setup error: `jei-keybind` correctly hovered the item, correctly resolved its key, and then
 # had nothing to plan against.
 #
-# THE GRAPH MUST MATCH THE JAR'S DUMP SCHEMA. `mod/tools/build-jar.sh` prints the jar's
-# `SCHEMA n`, and a graph written by an older one parses into a graph that answers `keyId` -1
-# for keys the pack really has, which reads as "that item is not in the pack" rather than as a
-# version mismatch. `RECIPEGRAPH_GRAPH` names one explicitly; the default is the newest
-# `graph-s7.json` beside the build, which is the schema-7 dump of this pack.
+# DO NOT PIN A FILENAME HERE. The first version of this defaulted to `graph-s7.json` and was
+# stale within the same afternoon, because master bumped `DumpCommand.SCHEMA` to 8 underneath
+# it. The default is now "the graph with the highest `dump_schema` in the build directory",
+# which tracks the jar without naming a file, and the choice is LOGGED with its schema and
+# version so a mismatch is visible in the run rather than inferred from a wrong plan.
+#
+# NEWEST-BY-MTIME WOULD BE WRONG, and it is the obvious alternative. `/coding/.recipegraph-build`
+# is shared by a dozen agents, and the newest file there right now is `graph-oracle-248.json`,
+# which is schema 5 -- three behind the jar. Recency says who wrote last, not who wrote for
+# this jar.
+#
+# WHY THE SCHEMA MATTERS AT ALL: `GraphJsonReader` is deliberately tolerant and skips sections
+# it does not know, so an old graph LOADS. What it does not do is warn, and a schema that
+# changed how keys are spelled -- schema 4 did, see `DumpCommand`'s "THIS FORMAT IS PART OF
+# SCHEMA 4" -- then answers `keyId` -1 for keys the pack really has, which reads as "that item
+# is not in the pack" rather than as a version mismatch. `RECIPEGRAPH_GRAPH` names one
+# explicitly when a run wants a specific graph.
 #
 # ABSENT IS NOT FATAL, because the eleven screens that photograph a fixture do not need it and
 # a 120 MB copy is not free. It says so instead, which is what the failing run needed.
@@ -209,7 +221,51 @@ PY
 # panel, because that is the picture a new player sees. With `:-` an empty value falls back to
 # the default and there is no way to ask for no graph at all except by naming a path that does
 # not exist, which reads as a mistake rather than as an intent.
-GRAPH_JSON="${RECIPEGRAPH_GRAPH-$LOCAL_BUILD/graph-s7.json}"
+# The highest `dump_schema` wins, mtime breaks a tie. Prints nothing on no match, so the
+# caller's own "no graph" message is the one that reaches the log.
+newest_schema_graph() {
+    python3 - "$LOCAL_BUILD" <<'PYEOF'
+import glob, os, re, sys
+
+# SCANNED IN CHUNKS RATHER THAN PARSED. Each candidate is ~120 MB and `prodshot.sh` runs the
+# mod-only path before EVERY run, so `json.load` on six of them to read six integers would put
+# a minute of array I/O in front of every shot. `dump_schema` is a top-level scalar written by
+# `DumpCommand`, so a regex over a sliding window finds it without building the document.
+PATTERN = re.compile(rb'"dump_schema"\s*:\s*(\d+)')
+WINDOW = 1 << 20
+
+
+def schema_of(path):
+    with open(path, "rb") as fh:
+        tail = b""
+        while True:
+            chunk = fh.read(WINDOW)
+            if not chunk:
+                return None
+            found = PATTERN.search(tail + chunk)
+            if found:
+                return int(found.group(1))
+            # Carry enough to catch a match split across the boundary.
+            tail = chunk[-64:]
+
+
+best = None
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "graph-*.json"))):
+    try:
+        schema = schema_of(path)
+    except OSError:
+        continue
+    if schema is None:
+        continue
+    key = (schema, os.path.getmtime(path))
+    if best is None or key > best[0]:
+        best = (key, path)
+if best:
+    print(best[1])
+PYEOF
+}
+
+GRAPH_JSON="${RECIPEGRAPH_GRAPH-$(newest_schema_graph)}"
 
 install_graph() {
     dest="$INSTANCE/config/mcrecipedump"
@@ -233,7 +289,22 @@ install_graph() {
     fi
     cp "$GRAPH_JSON" "$dest/graph.json"
     echo "stage-instance: installed graph.json from $(basename "$GRAPH_JSON")" \
-         "($(wc -c < "$dest/graph.json") bytes)"
+         "($(wc -c < "$dest/graph.json") bytes,$(graph_stamp "$GRAPH_JSON"));" \
+         "compare that schema against the jar's SCHEMA line from build-jar.sh"
+}
+
+# The graph's own account of itself, for the log line above. A schema and a version are what
+# tell a reader whether this graph was written for this jar.
+graph_stamp() {
+    python3 - "$1" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        d = json.JSONDecoder().raw_decode(fh.read())[0]
+    print(" dump_schema=%s dump_version=%s" % (d.get("dump_schema"), d.get("dump_version")))
+except Exception as exc:
+    print(" unreadable: %s" % exc)
+PYEOF
 }
 
 # EVERYTHING THAT TOUCHES `$INSTANCE` LIVES IN HERE, so that it can be covered by exactly one
