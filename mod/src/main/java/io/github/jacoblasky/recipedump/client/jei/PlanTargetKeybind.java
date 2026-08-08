@@ -79,8 +79,16 @@ public final class PlanTargetKeybind {
      *
      * Returns whether a target was delivered, so the screenshot harness and the tests can
      * tell those apart without reading a log.
+     *
+     * PUBLIC FOR THE HARNESS, WHICH IS IN ANOTHER PACKAGE. `jei-keybind` presses the key
+     * through THIS method rather than calling {@code PlanTarget} or {@code PlannerHooks},
+     * deliberately: reaching past it would exercise the half that was already wired and skip
+     * the half that was not, which is how both of this feature's real defects -- no listener
+     * installed, and a key event that cannot fire while a GUI is open -- stayed invisible to
+     * every unit test. DO NOT narrow this back to package-private without moving the probe
+     * (#240).
      */
-    static boolean onPressed() {
+    public static boolean onPressed() {
         if (!JeiBridge.isAvailable()) {
             return false;
         }
