@@ -548,10 +548,19 @@ rebuild and re-commit the jar rather than editing the expected numbers.
 **Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
 two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
 
-**This jar writes dump schema 6.** Schemas 5 and 6 add files and fields; neither changes how
+**This jar writes dump schema 7.** Schemas 5, 6 and 7 add files and fields; none changes how
 an NBT-bearing stack is digested, so a schema-4 graph's keys are still the keys this reader
-computes and AE2 stock still matches. Upgrading from 4 or 5 costs a `/recipedump` and a
+computes and AE2 stock still matches. Upgrading from 4, 5 or 6 costs a `/recipedump` and a
 `recipegraph build` to pick up the new fields, and no re-run of `have`.
+
+**Schema 7 is worth the redump even though nothing will look broken without it.** It adds `p`
+on an input stack: how much of that input a run actually spends. Tinkers casts, Modular
+Machinery's `setChance(0.0)` catalysts and anything else that sits in the machine rather than
+being consumed by it are now recorded as permanent, so a plan asks you to own one rather than
+to buy one per craft. A schema-6 dump parses perfectly and simply prices those inputs into
+every run — 14,354 recipes in MeatballCraft, led by every casting recipe in the pack.
+`summary.json`'s `catalyst_slots` says how many the dump found, and zero on a pack that ships
+Tinkers means the reader is broken rather than that the pack has none.
 
 **A schema-3 graph is a different matter and is not compatible.** The digest that identifies
 an NBT-bearing stack changed at schema 4 (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in

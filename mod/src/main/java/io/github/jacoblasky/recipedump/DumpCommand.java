@@ -11,6 +11,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -259,6 +260,15 @@ public class DumpCommand extends CommandBase {
         }
         if (!ModularMachineryBridge.available()) {
             reply(sender, "  no machine_names.json: " + ModularMachineryBridge.absence());
+        }
+        // #175's sources have NO SIDECAR FILE TO BE MISSING, which is why they are announced
+        // here rather than left to be noticed. A bridge that fails to resolve produces a dump
+        // in which nothing is ever a catalyst, and that is byte-for-byte the dump a pack with
+        // no catalysts produces -- the exact "absence is indistinguishable from zero" failure
+        // this whole summary exists to end. `catalyst_slots` in summary.json is the other
+        // half: this says the reader is off, that says it found nothing.
+        if (!TinkersCastingBridge.available()) {
+            reply(sender, "  no cast retention: " + TinkersCastingBridge.absence());
         }
         if (traceNbt) {
             // Say it up front either way. The trace being DEFAULT is the surprising half
@@ -654,7 +664,7 @@ public class DumpCommand extends CommandBase {
             List<String> modIds = activeModIds();
             writeSummary(new File(dir, SUMMARY_FILE), perCategory, categoryMod,
                          recipes, failed, skips.size(), sink.names().size(), namesFailed,
-                         modIds);
+                         sink.catalystSlots(), modIds);
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
             int ores = writeOreDict(new File(dir, "oredict.json"));
             writeNames(new File(dir, "names.json"), sink.names());
@@ -807,7 +817,8 @@ public class DumpCommand extends CommandBase {
         CollectingIngredients collected = new CollectingIngredients();
         wrapper.getIngredients(collected);
 
-        String itemIn = stackSlots(collected.rawInputs(ItemStack.class), sink);
+        List<List<Object>> itemInSlots = collected.rawInputs(ItemStack.class);
+        String itemIn = stackSlots(itemInSlots, sink, consumeChances(wrapper, itemInSlots));
         String itemOut = flatStacks(collected.rawOutputs(ItemStack.class), sink);
         String fluidIn = fluidSlots(collected.rawInputs(FluidStack.class));
         String fluidOut = flatFluids(collected.rawOutputs(FluidStack.class));
@@ -819,14 +830,52 @@ public class DumpCommand extends CommandBase {
                 + ",\"out\":" + itemOut + ",\"fin\":" + fluidIn + ",\"fout\":" + fluidOut + "}";
     }
 
+    /**
+     * How much of each ITEM input slot a run actually spends. Issue #175.
+     *
+     * ONLY ITEM INPUTS, NEVER FLUIDS. Every catalyst source here describes a thing that sits
+     * in the machine; the fluid is the material being worked. Marking a fluid permanent would
+     * make its recipe free, which is a far worse failure than the one this fixes.
+     *
+     * TWO SOURCES, ASKED IN ORDER OF HOW MUCH THEY COVER, and null from both leaves the array
+     * absent so every slot keeps the pre-#175 default of "spent". The third source, vanilla
+     * `getRemainingItems`, is #228 and is not wired here: it reaches 3 of the 14,409 recipes
+     * that consume a cast, so it is not worth a per-wrapper `InventoryCrafting` until that
+     * issue settles what it actually reports for a `.reuse()` marker.
+     */
+    private static float[] consumeChances(IRecipeWrapper wrapper, List<List<Object>> itemSlots) {
+        if (itemSlots.isEmpty()) {
+            return null;
+        }
+        Float casting = TinkersCastingBridge.itemInputChance(wrapper);
+        if (casting != null) {
+            float[] out = new float[itemSlots.size()];
+            Arrays.fill(out, casting.floatValue());
+            return out;
+        }
+        return ModularMachineryBridge.itemInputChances(wrapper, itemSlots);
+    }
+
     /** Nested: list of slots, each slot a list of interchangeable stacks. */
-    private static String stackSlots(List<List<Object>> slots, KeySink sink) {
+    private static String stackSlots(List<List<Object>> slots, KeySink sink, float[] chances) {
         StringBuilder sb = new StringBuilder("[");
         boolean firstSlot = true;
+        int index = -1;
         for (List<Object> slot : slots) {
+            index++;
+            // Indexed over the RAW slot list rather than over emitted slots, because the
+            // `continue` below drops empty grid spacers and a chance array built by the
+            // bridges is aligned to what the wrapper reported, not to what survives here.
+            float chance = chances == null || index >= chances.length ? 1.0f : chances[index];
+            if (chance != 1.0f && sink != null) {
+                // Counted per SLOT, not per alternative: an oredict slot is one requirement
+                // however many stacks satisfy it, and counting stacks would make the number
+                // vary with how wide the oredict happens to be.
+                sink.recordCatalystSlot();
+            }
             List<String> alts = new ArrayList<String>();
             for (Object o : slot) {
-                String s = stack(o, sink);
+                String s = stack(o, sink, chance);
                 if (s != null) {
                     alts.add(s);
                 }
@@ -895,7 +944,21 @@ public class DumpCommand extends CommandBase {
         return "[" + String.join(",", out) + "]";
     }
 
+    /**
+     * For OUTPUTS, which have no consume chance and must never acquire one.
+     *
+     * Kept as an overload rather than a `1.0f` at the call site so the absence is a statement
+     * instead of a magic argument: `p` answers "how much of this input does a run spend", and
+     * an output is not spent by its own recipe. A chance on the output side is a different
+     * question entirely -- how often the recipe YIELDS it -- which is #223 and wants its own
+     * field, because writing it here would read as "this output is a catalyst" to every
+     * consumer of `p`.
+     */
     private static String stack(Object o, KeySink sink) {
+        return stack(o, sink, 1.0f);
+    }
+
+    private static String stack(Object o, KeySink sink, float chance) {
         if (!(o instanceof ItemStack)) {
             return null;
         }
@@ -912,9 +975,16 @@ public class DumpCommand extends CommandBase {
         if (sink != null) {
             sink.record(stackKey(stack), stack);
         }
+        // `p` IS OMITTED AT 1.0 RATHER THAN WRITTEN, and that is a size decision with a
+        // correctness consequence worth stating. 1.0 is the reader's default for an absent
+        // field, so omitting it costs nothing to parse and keeps a 335,000-recipe NDJSON
+        // from growing by a field that would be constant on all but ~14,400 lines. It also
+        // means a schema-7 dump is byte-identical to a schema-6 one wherever nothing is a
+        // catalyst, so a diff between the two shows exactly the recipes this issue changed.
         return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
                 + ",\"c\":" + stack.getCount()
-                + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"") + "}";
+                + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"")
+                + (chance == 1.0f ? "" : ",\"p\":" + chance) + "}";
     }
 
     /**
@@ -939,8 +1009,26 @@ public class DumpCommand extends CommandBase {
         /** null when not tracing, which is how every normal dump runs. */
         private final Map<String, String> trace;
 
+        /**
+         * Input slots this dump wrote a non-default `p` onto. #175.
+         *
+         * COUNTED SO THAT ZERO IS A MEASUREMENT RATHER THAN A SILENCE. A bridge that fails to
+         * resolve emits no `p` at all, which is byte-for-byte what a pack with no catalysts
+         * emits. Every other "absence is indistinguishable from zero" hole in this file got a
+         * count for the same reason; this one has no sidecar file whose absence could hint.
+         */
+        private int catalystSlots;
+
         KeySink(boolean traceNbt) {
             this.trace = traceNbt ? new LinkedHashMap<String, String>() : null;
+        }
+
+        void recordCatalystSlot() {
+            catalystSlots++;
+        }
+
+        int catalystSlots() {
+            return catalystSlots;
         }
 
         Map<String, String> names() {
@@ -1455,6 +1543,16 @@ public class DumpCommand extends CommandBase {
      *   6  summary.json gains `names` and `names_failed`, so a short names.json stops being
      *      undetectable in principle, and `mod_count` / `mod_digest`, so a dump can say
      *      which jars it saw. See #194.
+     *   7  an item input stack may carry `p`, the probability a run SPENDS it, absent meaning
+     *      1.0. Written for Tinkers casts that survive and Modular Machinery's `setChance`.
+     *      See #175.
+     *
+     * SEVEN IS AN ADDED FIELD, SO A SCHEMA-6 READER IS NOT WRONG, ONLY OLDER, and the bump is
+     * still right. `p` is absent wherever it would be 1.0, so a 6 reader sees exactly the
+     * dump it saw before on every non-catalyst line and never misparses one. What it cannot
+     * do is tell a genuinely permanent catalyst from an unmarked one, which is a difference
+     * in what the plan COSTS rather than in what it parses -- and the number's job is to let
+     * a reader say "this dump knows something I do not" rather than to gate a crash.
      *
      * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
      * expensive step is a launch of the game, not the code, and five increments on one
@@ -1488,7 +1586,7 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 6;
+    static final int SCHEMA = 7;
 
     /**
      * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194
@@ -1671,7 +1769,8 @@ public class DumpCommand extends CommandBase {
     static void writeSummary(File file, Map<String, int[]> perCategory,
                              Map<String, String> categoryMod,
                              int recipes, int threw, int skipLines,
-                             int names, int namesFailed, List<String> modIds) {
+                             int names, int namesFailed, int catalystSlots,
+                             List<String> modIds) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             // Stamp what produced this. Without it a dump is undatable: the only signal
@@ -1691,6 +1790,15 @@ public class DumpCommand extends CommandBase {
             // the dump records. `names` is that total, so the python reader can compare it
             // against the file's actual length and refuse a truncated one. #194
             w.write(",\n \"names\": " + names + ",\n \"names_failed\": " + namesFailed);
+            // ZERO HERE IS A MEASUREMENT, ABSENT IS NOT, which is the same distinction
+            // `names_failed` was added to make and the reason this is written
+            // unconditionally. A schema-7 dump saying 0 has looked and found no permanent
+            // input; a schema-6 dump says nothing and could be either. Without it a bridge
+            // that quietly stopped resolving -- a Tinkers update renaming its recipe class,
+            // a pack dropping Modular Machinery -- produces a dump indistinguishable from a
+            // pack that genuinely has no catalysts, and the only symptom is that plans get
+            // slowly more expensive. #175
+            w.write(",\n \"catalyst_slots\": " + catalystSlots);
             // OMITTED ENTIRELY when Forge would not answer, rather than written as 0 or
             // null. The fields exist to let a reader tell a five-jar dump from a full-pack
             // one, and a recorded zero is a claim about the jar set; absence is the honest

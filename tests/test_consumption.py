@@ -418,3 +418,114 @@ class TheChangeMovesNoPriceOnAGraphWithoutPTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheCastIsBoughtOnceAndTheRankerStillAvoidsItTest(unittest.TestCase):
+    """The hopper Jake asked about, and the half of it this emitter does NOT fix.
+
+    Asked for Iron Ingots, the in-game planner cast a BLOCK of iron for 1,296 mB and broke it
+    up rather than casting the ingots directly at 144 mB each. Both routes melt identical
+    metal per ingot, so the material explains nothing; the difference is that the casting
+    table takes an Ingot Cast and the basin does not.
+
+    TWO SEPARATE THINGS WERE WRONG AND ONLY ONE OF THEM IS #175. Writing this test is what
+    separated them, and the separation is the reason the class is named for both halves.
+
+      FIXED HERE. The shopping list multiplied the cast by the number of runs. Five ingots
+      asked for five casts. That is this issue's defect exactly, the same shape as its 64
+      Blaze Data Models, and `survives_run` ends it.
+
+      NOT FIXED HERE, AND DELIBERATELY SO. The per-unit ranker charges a retained input at
+      FULL price and never amortises it, so an ingot ranks at 43.144 through the casting
+      table against 22.366 through the basin, and the detour still wins. That is not an
+      oversight: `_relax` and `input_cost` both say in terms why a retained input is priced
+      in full rather than at zero, because #176 found that pricing it free makes routes
+      through catalysts THE CHEAPEST IN THE MODEL and sends the solver at machines whose
+      catalyst the player cannot obtain.
+
+    So the ranker and the solver now disagree in a new direction: the solver knows one cast
+    serves 64 ingots, and the ranker charges the cast into all 64. Every existing note in
+    `cost.py` guards the divergence that makes the ranker prefer a route the solver cannot
+    take. This is its mirror image, where the ranker avoids a route the solver would execute
+    cheaply, and nothing here has ever had to think about that direction. It needs a decision
+    rather than a patch, so this class PINS the current behaviour rather than asserting the
+    behaviour someone might prefer.
+    """
+
+    METAL = 144      # mB per ingot, both routes
+    PER_BLOCK = 1296 # 9 x 144: the basin is the same metal per ingot, not a worse rate
+
+    @classmethod
+    def _base(cls):
+        g = Graph()
+        g.names = {"mod:ingot": "Iron Ingot", "mod:block": "Block of Iron",
+                   "mod:cast": "Ingot Cast", "fluid:iron": "Molten Iron",
+                   "mod:gold": "Gold Ingot"}
+        g.add(Recipe("cast_craft", "Ingot Cast", [("mod:cast", 1)],
+                     [Ingredient(["mod:gold"], 3)], category="minecraft.crafting"))
+        return g
+
+    @classmethod
+    def _casting_route(cls, chance):
+        g = cls._base()
+        g.add(Recipe("cast_ingot", "Casting", [("mod:ingot", 1)],
+                     [Ingredient(["mod:cast"], 1, "item", chance),
+                      Ingredient(["fluid:iron"], cls.METAL, "fluid")],
+                     category="tconstruct.casting_table"))
+        return g
+
+    @classmethod
+    def _basin_route(cls):
+        g = cls._base()
+        g.add(Recipe("cast_block", "Casting", [("mod:block", 1)],
+                     [Ingredient(["fluid:iron"], cls.PER_BLOCK, "fluid")],
+                     category="tconstruct.casting_table"))
+        g.add(Recipe("unblock", "Crafting", [("mod:ingot", 9)],
+                     [Ingredient(["mod:block"], 1)], category="minecraft.crafting"))
+        return g
+
+    @staticmethod
+    def _ingot(g):
+        return cost_mod.estimate(g, have={}, machine_states={},
+                                 free_sources=set()).get("mod:ingot")
+
+    @classmethod
+    def _shopping(cls, chance, qty):
+        plan = Solver(cls._casting_route(chance)).solve("mod:ingot", qty)
+        return {c["key"]: c["need"] for c in plan["tree"]["children"]}
+
+    # ---- the half this issue fixes ----
+
+    def test_before_the_fix_five_ingots_asked_for_five_casts(self):
+        # The control. If this stops failing on the old behaviour the fixture no longer
+        # reproduces what #175 was filed about.
+        self.assertEqual(self._shopping(1.0, 5)["mod:cast"], 5)
+
+    def test_a_permanent_cast_is_bought_once_however_many_ingots(self):
+        self.assertEqual(self._shopping(0.0, 5)["mod:cast"], 1)
+        self.assertEqual(self._shopping(0.0, 64)["mod:cast"], 1)
+
+    def test_the_metal_still_scales_because_it_is_genuinely_spent(self):
+        # The guard against the obvious over-correction. A bridge that applied the chance to
+        # the FLUID slot would make every casting recipe cost nothing, which is a far worse
+        # failure than the one being fixed.
+        for chance in (1.0, 0.0):
+            self.assertEqual(self._shopping(chance, 5)["fluid:iron"], self.METAL * 5)
+
+    # ---- the half it does not, pinned so nobody "fixes" it by accident ----
+
+    def test_the_ranker_charges_a_retained_cast_in_full_which_is_deliberate(self):
+        # Priced identically at both chances, because `input_cost` skips the scaling exactly
+        # when the input survives. Read the comment there before changing this: scaling to
+        # zero here is the #176 defect reintroduced through a different door.
+        self.assertEqual(self._ingot(self._casting_route(0.0)),
+                         self._ingot(self._casting_route(1.0)))
+
+    def test_and_that_is_why_the_basin_detour_still_outranks_the_casting_table(self):
+        # The honest statement of what is left. This is NOT the assertion anyone wants to be
+        # true; it is the one that is true, and pinning it is what stops the next reader
+        # believing #175 closed the hopper report.
+        self.assertGreater(self._ingot(self._casting_route(0.0)),
+                           self._ingot(self._basin_route()),
+                           "if this ever fails the ranker has started amortising retained "
+                           "inputs; that is a real design change and it needs #176 re-read")

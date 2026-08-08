@@ -64,11 +64,15 @@ public class SchemaSixTest {
     }
 
     @Test
-    public void theSchemaIsSix() {
-        // Pinned here as well as read out of the jar's constant pool by
-        // tests/test_dist_jar.py, because the python side's dump_meta.SCHEMA has to move
-        // with it and `tests/test_catalysts.py` compares the two by reading this source.
-        assertEquals(6, DumpCommand.SCHEMA);
+    public void sixIsNoLongerTheCurrentSchema() {
+        // THE LITERAL MOVED TO `SchemaSevenTest`, mirroring the python side where the newest
+        // schema's file owns the tripwire. What stays in this file is schema 6's own FIELDS,
+        // `names` / `names_failed` / `mod_count` / `mod_digest`, none of which moved at 7.
+        //
+        // Asserted as an inequality rather than deleted, so this file still fails if someone
+        // walks the number back to 6 without touching `SchemaSevenTest`.
+        assertTrue("schema 6 is behind the current dump format",
+                   DumpCommand.SCHEMA > 6);
     }
 
     @Test
@@ -122,13 +126,13 @@ public class SchemaSixTest {
         Map<String, String> categoryMod = new LinkedHashMap<String, String>();
         categoryMod.put("minecraft.crafting", "Minecraft");
 
-        DumpCommand.writeSummary(file, perCategory, categoryMod, 7, 0, 2, 41, 3,
+        DumpCommand.writeSummary(file, perCategory, categoryMod, 7, 0, 2, 41, 3, 0,
                                  mods("jei", "mcrecipedump"));
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(json, json.contains("\"names\": 41"));
         assertTrue(json, json.contains("\"names_failed\": 3"));
-        assertTrue(json, json.contains("\"schema\": 6"));
+        assertTrue(json, json.contains("\"schema\": " + DumpCommand.SCHEMA));
     }
 
     @Test
@@ -139,7 +143,7 @@ public class SchemaSixTest {
         File file = File.createTempFile("summary-clean", ".json");
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0,
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0,
                                  mods("jei"));
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
@@ -160,7 +164,7 @@ public class SchemaSixTest {
         List<String> ids = mods("appliedenergistics2", "jei", "mcrecipedump");
 
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(json, json.contains("\"mod_count\": 3"));
@@ -177,7 +181,7 @@ public class SchemaSixTest {
         file.deleteOnExit();
 
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, null);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, null);
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
         assertFalse(json, json.contains("mod_count"));
@@ -231,7 +235,7 @@ public class SchemaSixTest {
         file.deleteOnExit();
         List<String> ids = mods("appliedenergistics2", "jei", "mcrecipedump");
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
 
         DumpCommand.ModSet set = DumpCommand.readModSet(file);
 
@@ -250,7 +254,7 @@ public class SchemaSixTest {
         File summary = new File(dir, DumpCommand.SUMMARY_FILE);
         summary.deleteOnExit();
         DumpCommand.writeSummary(summary, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
         return dir;
     }
 

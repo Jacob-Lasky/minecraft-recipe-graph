@@ -20,6 +20,16 @@ not the mod version. Bump it in DumpCommand.java and here together:
   6  summary.json gains `names` and `names_failed`, so a names.json that lost entries stops
      being undetectable in principle, and `mod_count` / `mod_digest`, so a dump can say
      which jars it saw (#194)
+  7  an item input stack may carry `p`, the probability a run SPENDS it. Absent means 1.0,
+     so every non-catalyst line is byte-identical to schema 6. Written for Tinkers casts
+     that survive and Modular Machinery's `setChance` (#175)
+
+SCHEMA 7 IS THE FIRST BUMP WHOSE COST IS A WRONG PRICE RATHER THAN A MISPARSE, which is why
+it is a bump at all. `_consume_chance` already defaulted an absent `p` to 1.0 long before any
+dump wrote one, so a schema-6 dump parses identically under a schema-7 reader and vice versa.
+What a schema-6 dump cannot do is distinguish a permanent catalyst from a consumed one, and
+the graph built from it prices an Ingot Cast into every ingot ever cast. That is invisible to
+every shape check in this file, so the number is the only thing that can say it.
 
 SCHEMA 6 IS ADDITIVE AND CHANGES NO EXISTING FIELD, so a schema-5 dump is read exactly as it
 was; what it cannot do is answer the question the new fields exist to answer, and `describe`
@@ -46,7 +56,7 @@ try:
 except ImportError:  # run directly as a script; see ae2_inventory's module docstring
     from nbt_digest import DIGEST_FORMAT_SCHEMA
 
-SCHEMA = 6
+SCHEMA = 7
 
 #: The directory `/recipedump` writes into, relative to the pack's `minecraft/` dir.
 #:
@@ -158,6 +168,15 @@ def read(dump_dir):
         "mod_digest": (doc.get("mod_digest")
                        if isinstance(doc.get("mod_digest"), str) and doc.get("mod_digest")
                        else None),
+        # Schema 7: input slots the dump wrote a non-default `p` onto. #175.
+        #
+        # NONE AND ZERO ARE DIFFERENT ANSWERS, for the third time in this dict and for the
+        # sharpest reason yet. None is a pre-7 dump that could not look. Zero is a schema-7
+        # dump that looked and found no permanent input anywhere -- which on a pack shipping
+        # Tinkers is not a plausible reading of the world, it is a bridge that stopped
+        # resolving. The failure has no other symptom: the dump parses, the graph builds, and
+        # plans just get quietly more expensive.
+        "catalyst_slots": _count(doc, "catalyst_slots"),
     }
 
 
