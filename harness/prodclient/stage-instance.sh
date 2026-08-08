@@ -203,10 +203,22 @@ PY
 #
 # ABSENT IS NOT FATAL, because the eleven screens that photograph a fixture do not need it and
 # a 120 MB copy is not free. It says so instead, which is what the failing run needed.
-GRAPH_JSON="${RECIPEGRAPH_GRAPH:-$LOCAL_BUILD/graph-s7.json}"
+#
+# `${RECIPEGRAPH_GRAPH-...}` AND NOT `:-`, SO AN EMPTY VALUE MEANS "STAGE NOTHING". That is the
+# escape hatch for the case #254 wants: `machines` deliberately photographs the "no graph.json"
+# panel, because that is the picture a new player sees. With `:-` an empty value falls back to
+# the default and there is no way to ask for no graph at all except by naming a path that does
+# not exist, which reads as a mistake rather than as an intent.
+GRAPH_JSON="${RECIPEGRAPH_GRAPH-$LOCAL_BUILD/graph-s7.json}"
 
 install_graph() {
     dest="$INSTANCE/config/mcrecipedump"
+    if [ -z "$GRAPH_JSON" ]; then
+        rm -f "$dest/graph.json"
+        echo "stage-instance: RECIPEGRAPH_GRAPH is empty; staged no graph, so screens that" \
+             "SOLVE will shoot the 'no graph.json' panel"
+        return 0
+    fi
     if [ ! -f "$GRAPH_JSON" ]; then
         echo "stage-instance: no graph at $GRAPH_JSON; screens that SOLVE will report" \
              "'no graph.json'. Point RECIPEGRAPH_GRAPH at one." >&2

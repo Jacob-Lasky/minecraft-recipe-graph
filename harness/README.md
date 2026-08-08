@@ -158,9 +158,13 @@ worth having. **So check which one a PR's screenshot actually is**: the two are 
 apart full size and easy to confuse in a thumbnail, and the run logs `machines: <what happened>`
 either way.
 
-`flow-hit`, `jei-keybind`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen in
-that shape
-owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
+Under `prodclient` they get a real graph either way now: `stage-instance.sh` installs a
+`graph.json` into the instance by default (#240), so a prodshot of these shoots the TABLE and
+not the no-graph panel. `RECIPEGRAPH_GRAPH=` (empty) stages none and shoots the panel;
+`RECIPEGRAPH_GRAPH=<path>` stages that one instead.
+
+`flow-hit`, `jei-keybind`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen
+in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the
 harness fails the run if the verdict never arrives OR if it is a NO. There is deliberately no
 call that means only "I spoke": the first cut of this had one, and `ae2-probe` called it on all
