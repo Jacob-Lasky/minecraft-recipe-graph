@@ -65,7 +65,20 @@ subject. This one cannot: with no file the load resolves MISSING synchronously a
 wait to photograph, so the run reports that rather than producing a plausible picture of
 something else.
 
-**Check which picture you got.** Without `RECIPEGRAPH_ORACLE` the three `machines` shots
+```bash
+# The other two browse tabs (#255). Both need the oracle; `graph` is the faster.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh sources sources
+cp $SHOTS/sources.png docs/shots/browse-free.png
+
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh graph graph
+cp $SHOTS/graph.png docs/shots/browse-graph.png
+```
+
+**The `graph` shot is the one to read carefully.** Its whole subject is which graph is being
+read, so the useful check is that the instance path in the picture is the pack you expect --
+which is also the check a fixture could have faked, and the reason there is no fixture.
+
+**Check which picture you got.** Without `RECIPEGRAPH_ORACLE` the `machines`, `sources` and `graph` shots
 succeed and photograph the "no graph.json, looked in ..." panel instead of the table. That is
 a legitimate picture and it is also easy to mistake for the real one in a PR thumbnail. The
 run logs `machines: <what happened>`; read that line before attaching the file.

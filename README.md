@@ -684,15 +684,41 @@ each component does the job it is named for) and:
 | gesture | window |
 | --- | --- |
 | right-click | the **planner**: the crafting tree, the shopping list, the TODO panel, the flow diagram, and a recipe picker that writes a pin the solver honours |
-| **shift**-right-click | the **machines table**: all 503 categories with their verdicts, filtered by state and by mod, and a per-category detail view listing every candidate block |
+| **shift**-right-click | the **browse** screens, behind a tab strip |
 
-**Shift rather than a second item, and from the item rather than from inside the planner.** The
+The browse group is three tabs, and shift-right-click lands on the first:
+
+| tab | what it answers |
+| --- | --- |
+| **Machines** | what can I build with? All 504 categories with their verdicts, filtered by state and by mod, and a per-category detail view listing every candidate block |
+| **Free** | why is *that* costing me nothing? Everything the planner will not charge for, with the evidence for each — a placed water source, a cobblestone generator, a curated default |
+| **Graph** | am I planning against the right graph? The file being read, the game instance the dump came from, the build that wrote it, and the totals as a fingerprint |
+
+**One gesture and a tab strip, not three modifiers.** Three windows behind three chords is
+undiscoverable, and until the strip existed nothing on screen said there was anywhere else to
+go. The strip is also what makes the machines table findable at all — before it, reaching that
+screen meant knowing to hold shift.
+
+**The Graph tab is deliberately not the browser's Coverage page.** That page answers "how
+complete is this graph" for whoever built it, and in game nobody is that person. The same
+numbers answer a question the browser never had to: `graph.json` is a file you copied into
+`config/mcrecipedump/` and it survives a pack update, so the live failure is a *stale* graph
+answering confidently for a pack that has moved. The tab leads with the instance path for
+exactly that comparison. The browser's twenty-five-biggest-categories table is dropped rather
+than ported — it is a maintainer's curiosity in a 1,424px table, and the machines tab already
+sorts by recipe count.
+
+**Free is read-only.** The web page can add a generator, switch one off and toggle the
+vanilla-water assumption; those write `source_overrides`, which the mod has no path for yet, so
+the footer names `recipegraph sources` instead of offering buttons that would do nothing.
+
+**From the item rather than from inside the planner.** The
 planner shows one of four not-yet panels until a graph is read and something is planned; the
 machines table needs only the graph. Reaching it through the planner would make it unreachable
 during the graph load and unreachable when nothing has been planned — which is exactly when a
 player is asking "what can I even build with".
 
-The table's filters narrow each other: switching on `no route` re-counts the mod list to that
+The machines filters narrow each other: switching on `no route` re-counts the mod list to that
 state and sinks the mods with nothing in it, and a selection that stops matching anything is
 cleared rather than left over an empty table. Clicking a row opens the detail view; clicking a
 candidate block there plans one of it. A row marked `(manual)` is a verdict you set by hand,
