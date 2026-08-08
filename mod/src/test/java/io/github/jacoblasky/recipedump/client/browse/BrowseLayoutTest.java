@@ -61,6 +61,30 @@ public class BrowseLayoutTest {
         return b.build();
     }
 
+    /**
+     * The same graph, carrying a recorded jar-set stamp.
+     *
+     * WITHOUT THE STAMP EVERY VERDICT IS `CANNOT_TELL`, which is what made the first cut of the
+     * two verdict tests below useless: one compared two identical `CANNOT_TELL` lines and
+     * failed, and its sibling guarded its comparison on the verdicts differing, so it passed
+     * without ever comparing anything. An unstamped fixture cannot exercise a check whose whole
+     * subject is a recorded stamp.
+     */
+    private static GraphFacts stampedFacts(String digest, int count, String... keys) {
+        GraphBuilder b = new GraphBuilder();
+        for (int i = 0; i < keys.length; i++) {
+            b.beginRecipe();
+            b.beginSlot(1, "item");
+            b.alternative(b.key("mod:leaf"));
+            b.endSlot();
+            b.output(b.key(keys[i]), 1);
+            b.endRecipe("r_" + i, "cat." + i, "Machine", "hei_dump", false, false);
+        }
+        b.dumpModDigest(digest);
+        b.dumpModCount(count);
+        return GraphFacts.of(b.build());
+    }
+
     private static SourceTable sources(int count, boolean longKeys) {
         String[] keys = new String[count];
         for (int i = 0; i < count; i++) {
@@ -84,6 +108,7 @@ public class BrowseLayoutTest {
     private static ModularPanel laidOutGraph(GraphFacts facts, String path) {
         return laidOutGraph(facts, path, facts.checkAgainst("live-digest", 410));
     }
+
 
     private static ModularPanel laidOutGraph(GraphFacts facts, String path,
                                              GraphFacts.PackCheck check) {
@@ -316,12 +341,17 @@ public class BrowseLayoutTest {
         // ALL THREE STATES, because the longest of them -- the MISMATCH line, which carries
         // "plans from this graph are suspect" -- is the one that can overflow, and it is also
         // the one a reader most needs to be able to read in full.
-        GraphFacts facts = GraphFacts.of(graph("mod:a", "mod:b"));
+        GraphFacts facts = stampedFacts("recorded", 367, "mod:a", "mod:b");
         GraphFacts.PackCheck[] checks = {
-            facts.checkAgainst(null, 0),
-            facts.checkAgainst("x", 410),
-            facts.checkAgainst("y", 1),
+            facts.checkAgainst(null, 0),            // CANNOT_TELL
+            facts.checkAgainst("recorded", 367),    // MATCHES
+            facts.checkAgainst("different", 410),   // DIFFERS
         };
+        // THE FIXTURE MUST PRODUCE THREE DIFFERENT VERDICTS or the comparison below is
+        // vacuous, which it silently was until the stamp was added.
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL, checks[0].verdict());
+        assertEquals(GraphFacts.Verdict.MATCHES, checks[1].verdict());
+        assertEquals(GraphFacts.Verdict.DIFFERS, checks[2].verdict());
         List<String> lines = new ArrayList<String>();
         for (GraphFacts.PackCheck check : checks) {
             ModularPanel panel = laidOutGraph(facts, LONG_PATH, check);
@@ -344,10 +374,16 @@ public class BrowseLayoutTest {
     public void anUncheckedPackNeverDrawsTheSameWordAsAMatchingOne() {
         // The single assertion that would have caught rendering "cannot compare" as agreement,
         // which is the failure the third verdict exists to prevent.
-        GraphFacts facts = GraphFacts.of(graph("mod:a"));
-        assertNotEquals(GraphWidgets.verdictLine(facts.checkAgainst("d", 1)),
-                        GraphWidgets.verdictLine(facts.checkAgainst(null, 0)));
-        assertNotEquals(GraphWidgets.verdictColour(facts.checkAgainst("d", 1)),
-                        GraphWidgets.verdictColour(facts.checkAgainst(null, 0)));
+        GraphFacts facts = stampedFacts("recorded", 410, "mod:a");
+        GraphFacts.PackCheck matching = facts.checkAgainst("recorded", 410);
+        GraphFacts.PackCheck unchecked = facts.checkAgainst(null, 0);
+        // The premise, asserted rather than assumed: an unstamped fixture would make both of
+        // these CANNOT_TELL and the test would compare a thing with itself.
+        assertEquals(GraphFacts.Verdict.MATCHES, matching.verdict());
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL, unchecked.verdict());
+        assertNotEquals(GraphWidgets.verdictLine(matching),
+                        GraphWidgets.verdictLine(unchecked));
+        assertNotEquals(GraphWidgets.verdictColour(matching),
+                        GraphWidgets.verdictColour(unchecked));
     }
 }
