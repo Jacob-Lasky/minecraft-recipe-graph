@@ -174,8 +174,19 @@ public final class GraphBuilder {
         recipes.addOutput(keyId, qty);
     }
 
+    /**
+     * Adds an output, saying how often a run actually YIELDS it (#223).
+     *
+     * The two-argument form exists because `graph.json` carries a `q` per output stack and the
+     * two-argument form must keep meaning "yielded every run", which is what every graph
+     * written before that field means. See `model.Recipe.yield_chance` for the Python half.
+     */
+    public void output(int keyId, int qty, double yieldChance) {
+        recipes.addOutput(keyId, qty, yieldChance);
+    }
+
     public void beginSlot(int qty, String role) {
-        beginSlot(qty, role, 1.0f);
+        beginSlot(qty, role, 1.0);
     }
 
     /**
@@ -185,7 +196,7 @@ public final class GraphBuilder {
      * two-argument form must keep meaning "fully consumed", which is what every graph written
      * before that field means. See `model.Ingredient.consume_chance` for the Python half.
      */
-    public void beginSlot(int qty, String role, float consumeChance) {
+    public void beginSlot(int qty, String role, double consumeChance) {
         recipes.beginSlot(qty, roles.add(role == null ? "item" : role), consumeChance);
     }
 

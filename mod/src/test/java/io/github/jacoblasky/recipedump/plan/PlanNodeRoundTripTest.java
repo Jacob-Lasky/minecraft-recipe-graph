@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.plan;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -70,17 +71,25 @@ public class PlanNodeRoundTripTest {
         // fixture nodes and written unconditionally, so a node without one is not a shape the
         // wire format produces and is not what this test is for.
         //
-        // THE FIXTURES ONLY COVER WHAT THEY HAPPEN TO CONTAIN. The 22 field names now live in
-        // two files -- the writer here and the reader in `client.planner` -- and a rename in
-        // one is caught by the round trip only for fields some fixture exercises. This sets
-        // all of them, so a name that no plan happens to use is still pinned.
+        // THE FIXTURES ONLY COVER WHAT THEY HAPPEN TO CONTAIN. The field names live in two
+        // files -- the writer here and the reader in `client.planner` -- and a rename in one
+        // is caught by the round trip only for fields some fixture exercises. This sets EVERY
+        // optional field, so a name that no plan happens to use is still pinned.
+        //
+        // "EVERY" IS LOAD-BEARING AND THIS SET WAS INCOMPLETE UNTIL #223. `not_consumed` and
+        // `interchangeable` were both missing, and `not_consumed` was not read back at all --
+        // a field the writer had emitted since #175, dropped in a round trip, with no fixture
+        // carrying one to notice. Adding a field to `PlanNode` means adding it HERE.
         String json = "{\"key\":\"mod:thing\",\"name\":\"Thing\",\"kind\":\"item\","
                 + "\"label\":\"Thing\",\"need\":7,\"status\":\"partial\","
                 + "\"from_stock\":3,\"note\":\"a note\",\"recipe\":\"r:1\","
-                + "\"category\":\"crafting_shaped\",\"runs\":2,\"per_run\":4,"
-                + "\"alternatives\":5,\"pinned\":true,\"machine\":\"Smeltery\","
+                + "\"category\":\"crafting_shaped\",\"runs\":2,\"per_run\":0.5,"
+                + "\"yield_chance\":0.125,"
+                + "\"alternatives\":5,\"interchangeable\":4,\"pinned\":true,"
+                + "\"machine\":\"Smeltery\","
                 + "\"machine_state\":\"buildable\",\"machine_why\":\"craftable: x\","
                 + "\"resolved_to\":\"mod:other\",\"alt_count\":3,"
+                + "\"not_consumed\":true,"
                 + "\"dimension\":\"The End\",\"token_kind\":\"gate\","
                 + "\"unsourced\":true,"
                 + "\"children\":[{\"key\":\"mod:child\",\"label\":\"Child\","
@@ -106,6 +115,14 @@ public class PlanNodeRoundTripTest {
         assertNull("unsourced was absent and must stay absent", node.unsourced);
         assertNull("from_stock was absent and must stay absent", node.fromStock);
         assertNull("runs was absent and must stay absent", node.runs);
+        assertNull("per_run was absent and must stay absent", node.perRun);
+        // #223. Absent means CERTAIN, and the reader must not manufacture a 0.0 that
+        // `PlanNode.yieldChance()` would then have to distinguish from a real one.
+        assertNull("yield_chance was absent and must stay absent", node.yieldChance);
+        // AND THE ACCESSOR READS ABSENT AS CERTAIN, not as zero. Every other optional number
+        // on this class defaults to 0, and a renderer that assumed the same here would draw
+        // every ordinary craft node as a recipe that never works. #223.
+        assertEquals(1.0, node.yieldChance(), 0.0);
         assertNull("children was absent, so the field is null", node.children);
 
         // ...and the accessors still answer without a null check, which is the other half of

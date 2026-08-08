@@ -11,6 +11,18 @@
 #
 #   harness/shot.sh fixture fixture -Dmcrecipedump.shotDebugOverlay=true
 #
+# WITH SEVERAL AGENTS ON THIS HOST, GIVE YOURSELF YOUR OWN GRADLE HOME:
+#
+#   CACHE_NAME=gradle-cache-shot-mine harness/shot.sh fixture
+#
+# `CACHE_NAME` below separates this harness's Gradle home from a `build`'s, which is one axis
+# of the problem and not the only one: two SHOT runs still share `gradle-cache-shot` and
+# collide on it the same way, dying on "Timeout waiting to lock journal cache" -- a message
+# naming a PID from another container's namespace, so it reads as a stale lock when it is
+# usually a busy directory. `tools/check.sh` and `mod/tools/build-jar.sh` document
+# `GRADLE_CACHE=<dir>` for exactly this; the harness path needs it too. Seed a new one with
+# `cp -a` from a warm cache to skip the ~9m fernflower decompile.
+#
 # It builds a container image if one is missing, starts Xvfb plus mesa's llvmpipe inside it,
 # runs RetroFuturaGradle's `runClient` against the dev mod set, and the mod opens the named
 # screen, writes the PNG and exits. Screens are registered one line each in `ShotScreens`;
@@ -112,12 +124,6 @@ fi
 
 mkdir -p "$LOCAL_SHOTS" "$LOCAL_BUILD/$CACHE_NAME"
 
-# ALWAYS build, rather than only when the image is missing. A cached build is about a second,
-# and the alternative is that an edit to the Dockerfile keeps rendering against the old
-# libraries with no sign that it has -- which is the worst way to lose an afternoon, because
-# the screenshot still appears and still looks plausible.
-docker build -q -t "$IMAGE" "$(dirname "$0")" >/dev/null
-
 OUT_PNG="$LOCAL_SHOTS/$OUT_NAME.png"
 # Remove any previous PNG at this path FIRST. Without it a run that fails after the client
 # starts leaves the last successful screenshot sitting there, and the next person reads a
@@ -127,36 +133,71 @@ rm -f "$OUT_PNG"
 STARTED=$(date +%s)
 echo "shot.sh: screen '$SCREEN' -> $OUT_PNG"
 
-set +e
-# --user 99:100 is UnRAID's nobody:users. A root container writing into these bind mounts
-# leaves root-owned files that wedge the array share for everything else that writes to it.
+# THE BUILD AND THE RUN ARE ONE GATE ACQUISITION, and they were two steps with the gate held
+# for only the second one until #265. Both reasons are the same ones `harness/prodclient/
+# prodshot.sh` spells out at length, and they apply here unchanged:
 #
-# `/repo` is the REPOSITORY ROOT and not `mod/`. `runClient` alone would survive a mod/-only
-# mount, but the Java test suite would not: DigestFixtureTest reads
-# tests/fixtures/nbt_digest.json from above `mod/` and fails with a bare IOException that
-# names nothing. Keep the mount the same shape as the one the skill documents for `build`.
-gated docker run --rm \
-    --user 99:100 \
-    --memory="$MEMORY" --memory-swap="$MEMORY" \
-    -v "$HOST_REPO:/repo" \
-    -v "$HOST_BUILD/$DEPS_NAME:/deps:ro" \
-    -v "$HOST_BUILD/$CACHE_NAME:/gradle" \
-    -v "$HOST_BUILD/shots:/shots" \
-    $ORACLE_ARGS \
-    -e GRADLE_USER_HOME=/gradle \
-    -e XVFB_SCREEN="${SHOT_WIDTH}x${SHOT_HEIGHT}x24" \
-    -w /repo/mod \
-    "$IMAGE" \
-    ./gradlew --no-daemon --console=plain runClient \
-        -Ppack_mods=/deps \
-        -Dorg.gradle.jvmargs=-Xmx1g \
-        -Dmcrecipedump.shot="$SCREEN" \
-        -Dmcrecipedump.shotOut="/shots/$OUT_NAME.png" \
-        -Dmcrecipedump.shotWidth="$SHOT_WIDTH" \
-        -Dmcrecipedump.shotHeight="$SHOT_HEIGHT" \
-        ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.graph=/oracle.json} \
-        ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.planJsonOut=/shots/$OUT_NAME.plan.json} \
-        "$@"
+#   * `$IMAGE` is a TAG ON A SHARED DAEMON. Every worktree on this host builds
+#     `mcrecipedump-shot:latest`, and a branch is allowed to change `harness/Dockerfile` -- that
+#     is why this rebuilds every run in the first place. With the build outside the gate,
+#     another agent's build replaces the tag between our build and our `docker run`, and the
+#     screenshot is rendered by THEIR image. It still appears and it still looks plausible,
+#     which is the failure this file's own comment calls the worst way to lose an afternoon.
+#   * A cold build pulls a JDK base and installs mesa; racing that against another agent's
+#     container is the memory contention the gate exists to prevent.
+#
+# No deadlock: `docker build` takes no gate of its own, so this is one acquisition, not two.
+shot_run() {
+    # ALWAYS build, rather than only when the image is missing. A cached build is about a
+    # second, and the alternative is that an edit to the Dockerfile keeps rendering against the
+    # old libraries with no sign that it has.
+    if ! docker build -q -t "$IMAGE" "$(dirname "$0")" >/dev/null; then
+        echo "shot.sh: IMAGE BUILD FAILED, so nothing was rendered (exit 89 below is that, not" \
+             "the client's)" >&2
+        return 89
+    fi
+    # --user 99:100 is UnRAID's nobody:users. A root container writing into these bind mounts
+    # leaves root-owned files that wedge the array share for everything else that writes to it.
+    #
+    # `/repo` is the REPOSITORY ROOT and not `mod/`. `runClient` alone would survive a mod/-only
+    # mount, but the Java test suite would not: DigestFixtureTest reads
+    # tests/fixtures/nbt_digest.json from above `mod/` and fails with a bare IOException that
+    # names nothing. Keep the mount the same shape as the one the skill documents for `build`.
+    docker run --rm \
+        --user 99:100 \
+        --memory="$MEMORY" --memory-swap="$MEMORY" \
+        -v "$HOST_REPO:/repo" \
+        -v "$HOST_BUILD/$DEPS_NAME:/deps:ro" \
+        -v "$HOST_BUILD/$CACHE_NAME:/gradle" \
+        -v "$HOST_BUILD/shots:/shots" \
+        $ORACLE_ARGS \
+        -e GRADLE_USER_HOME=/gradle \
+        -e XVFB_SCREEN="${SHOT_WIDTH}x${SHOT_HEIGHT}x24" \
+        -w /repo/mod \
+        "$IMAGE" \
+        ./gradlew --no-daemon --console=plain runClient \
+            -Ppack_mods=/deps \
+            -Dorg.gradle.jvmargs=-Xmx1g \
+            -Dmcrecipedump.shot="$SCREEN" \
+            -Dmcrecipedump.shotOut="/shots/$OUT_NAME.png" \
+            -Dmcrecipedump.shotWidth="$SHOT_WIDTH" \
+            -Dmcrecipedump.shotHeight="$SHOT_HEIGHT" \
+            ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.graph=/oracle.json} \
+            ${RECIPEGRAPH_ORACLE:+-Dmcrecipedump.planJsonOut=/shots/$OUT_NAME.plan.json} \
+            "$@"
+}
+
+set +e
+# `"$@"` IS PASSED THROUGH BECAUSE INSIDE A FUNCTION IT MEANS THE FUNCTION'S ARGUMENTS. This
+# script's pass-through tail is how the knobs it does not set reach gradle; dropped, they would
+# not error, the shot would simply be taken without them.
+#
+# FOREGROUND, deliberately, and NOT `& wait` as `prodshot.sh` does. That form exists there to
+# make a signal handler fire promptly, and prodshot has one. Here there is none, and a
+# backgrounded job in a non-interactive shell has SIGINT set to IGNORE -- so ^C would kill this
+# shell and leave the container running with nobody waiting on it. A ninety-second run that
+# answers to ^C is worth more than symmetry with a half-hour one.
+gated shot_run "$@"
 STATUS=$?
 set -e
 

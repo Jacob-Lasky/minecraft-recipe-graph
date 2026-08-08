@@ -65,7 +65,25 @@ public final class PlanNode {
      * count negative, silently, at the last step.
      */
     Long runs;
-    Long perRun;
+    /**
+     * What one run yields of the key this node is about, ON AVERAGE. #223.
+     *
+     * A DOUBLE AND NOT A LONG, WHICH IT WAS UNTIL #223 GAVE OUTPUTS A CHANCE. A recipe that
+     * yields its product one run in ten produces 0.1 of it per run, and the whole correction
+     * is that `runs` divides by that rather than by 1. Narrowing it here would floor the
+     * divisor back to zero and the plan would be the pre-#223 plan again, silently.
+     * `solve._build` writes `Recipe.expected_yield`, which is a float for the same reason.
+     */
+    Double perRun;
+    /**
+     * `perRun` over what the recipe NOMINALLY says it makes, so a renderer can say "this
+     * works 10% of the time". #223.
+     *
+     * ABSENT WHEN THE TWO ARE EQUAL, which is every node of every plan built from a graph
+     * older than schema 8, so the field's PRESENCE is the signal rather than its value.
+     * Mirrors `solve._build`, which omits the key on the same condition.
+     */
+    Double yieldChance;
     /** How many recipes could have made this, so the UI can offer the choice. */
     Integer alternatives;
     /**
@@ -189,8 +207,20 @@ public final class PlanNode {
         return runs == null ? 0L : runs.longValue();
     }
 
-    public long perRun() {
-        return perRun == null ? 0L : perRun.longValue();
+    /** 0.0 when the node names no recipe, which is what the absent key means. */
+    public double perRun() {
+        return perRun == null ? 0.0 : perRun.doubleValue();
+    }
+
+    /**
+     * How often a run of this node's recipe actually yields the key, 0.0 to 1.0. #223.
+     *
+     * 1.0 WHEN THE FIELD IS ABSENT, because absent means certain. A caller must never read
+     * this as 0.0-when-missing: that would render every ordinary craft node as a recipe that
+     * never works.
+     */
+    public double yieldChance() {
+        return yieldChance == null ? 1.0 : yieldChance.doubleValue();
     }
 
     public int alternatives() {
@@ -272,6 +302,7 @@ public final class PlanNode {
         other.category = category;
         other.runs = runs;
         other.perRun = perRun;
+        other.yieldChance = yieldChance;
         other.alternatives = alternatives;
         other.interchangeable = interchangeable;
         other.pinned = pinned;
@@ -387,8 +418,13 @@ public final class PlanNode {
             return this;
         }
 
-        public Builder perRun(Long value) {
+        public Builder perRun(Double value) {
             node.perRun = value;
+            return this;
+        }
+
+        public Builder yieldChance(Double value) {
+            node.yieldChance = value;
             return this;
         }
 

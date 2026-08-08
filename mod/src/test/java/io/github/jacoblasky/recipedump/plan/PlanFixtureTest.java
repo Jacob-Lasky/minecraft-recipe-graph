@@ -100,7 +100,8 @@ public class PlanFixtureTest {
         node.recipe = "r:1";
         node.category = "crafting_shaped";
         node.runs = 1L;
-        node.perRun = 1L;
+        node.perRun = Double.valueOf(1.0);
+        node.yieldChance = Double.valueOf(0.5);
         node.alternatives = 1;
         // MAXIMAL MEANS MAXIMAL, and `pinned` below suppresses this one on a REAL node --
         // #181 writes `interchangeable` only in the `else` of the pin branch. Both are set

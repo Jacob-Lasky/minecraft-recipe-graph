@@ -198,4 +198,57 @@ public class GraphJsonReaderTest {
         assertTrue(graph.hasName(controller));
         assertEquals("Catalyzer Controller", graph.bareName(controller));
     }
+
+    @Test
+    public void anOutputWithoutAQIsCertain() {
+        // Neither recipe in `DOCUMENT` carries a `q`, which is every graph written before
+        // schema 8. Absent must read as 1.0 or every output of every old graph becomes
+        // unobtainable. #223.
+        RecipeStore recipes = graph.recipes();
+        assertEquals(1.0, recipes.outputChanceAt(recipes.outputStart(0)), 0.0);
+        assertEquals(1.0, recipes.outputChanceAt(recipes.outputStart(1)), 0.0);
+    }
+
+    @Test
+    public void theStACKPROBABILITIESAreReadASDOUBLESAndNotNarrowed() throws IOException {
+        // #223, AND #175 WITH IT. `q` on an output stack and `p` on an input slot are
+        // DIFFERENT FIELDS answering different questions, and both are compared against
+        // python's parse of the same bytes with a ZERO delta by `PlanFixtureTest`. 0.001 and
+        // 0.95 are values the reference pack really declares and NEITHER survives a float:
+        // they come back 0.0010000000474974513 and 0.949999988079071. This document is
+        // separate from `DOCUMENT` on purpose -- that one is shared with
+        // `NaiveGraphAgreementTest`, and widening a shared fixture to carry a field only one
+        // of the two readers knows about would be testing the agreement of two different
+        // documents.
+        String doc = "{\"dump_schema\":8,"
+                + "\"names\":{\"mod:dust\":\"Dust\"},"
+                + "\"recipes\":[{"
+                + "\"cat\":\"mm.grinder\","
+                + "\"id\":\"grind\","
+                + "\"in\":[{\"alt\":[\"mod:ore\"],\"qty\":1,\"p\":0.95}],"
+                + "\"out\":[{\"key\":\"mod:dust\",\"qty\":1},"
+                + "{\"key\":\"mod:gem\",\"qty\":1,\"q\":0.001}],"
+                + "\"src\":\"hei_dump\"}]"
+                + "}";
+        byte[] bytes = doc.getBytes("UTF-8");
+        RecipeGraph g = GraphJsonReader.read(new ByteArrayInputStream(bytes), bytes.length);
+        RecipeStore recipes = g.recipes();
+
+        assertEquals(1.0, recipes.outputChanceAt(recipes.outputStart(0)), 0.0);
+        assertEquals(0.001, recipes.outputChanceAt(recipes.outputStart(0) + 1), 0.0);
+        assertEquals(0.95, recipes.slotConsumeChance(recipes.slotStart(0)), 0.0);
+    }
+
+    @Test
+    public void aQOnAnOutputDoesNotBecomeAConsumeChanceAndViceVersa() {
+        // The exact confusion the separate fields exist to prevent, and the reason
+        // `hei_dump._yield_chance` and `_consume_chance` are two functions over one validator.
+        // A `p` read as a yield says "this recipe never makes its output"; a `q` read as a
+        // consume chance marks the input a permanent catalyst.
+        RecipeStore recipes = graph.recipes();
+        assertEquals("no `q` in DOCUMENT, so no output may read as uncertain",
+                1.0, recipes.outputChanceAt(recipes.outputStart(0)), 0.0);
+        assertEquals("no `p` in DOCUMENT, so no slot may read as retained",
+                1.0, recipes.slotConsumeChance(recipes.slotStart(0)), 0.0);
+    }
 }

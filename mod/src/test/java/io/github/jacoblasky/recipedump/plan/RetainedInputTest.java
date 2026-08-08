@@ -30,7 +30,7 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 public class RetainedInputTest {
 
     /** One recipe: the shard is retained, the material is spent. */
-    private static RecipeGraph forgeGraph(float shardChance) {
+    private static RecipeGraph forgeGraph(double shardChance) {
         GraphBuilder b = new GraphBuilder();
         b.name(b.key("mod:widget"), "Widget");
         b.name(b.key("mod:shard"), "Shard");
@@ -59,10 +59,10 @@ public class RetainedInputTest {
     public void theDefaultIsFullyConsumedSoAnOldGraphIsUnchanged() {
         // The property that let this land before the mod change: an absent `p` is 1.0, so every
         // graph any existing dump can produce behaves exactly as it did.
-        RecipeGraph g = forgeGraph(1.0f);
+        RecipeGraph g = forgeGraph(1.0);
         assertFalse("a default slot must not read as retained",
                 g.recipes().slotSurvivesRun(g.recipes().slotStart(0)));
-        assertEquals(1.0f, g.recipes().slotConsumeChance(g.recipes().slotStart(0)), 0.0f);
+        assertEquals(1.0, g.recipes().slotConsumeChance(g.recipes().slotStart(0)), 0.0);
     }
 
     @Test
@@ -77,13 +77,13 @@ public class RetainedInputTest {
         b.output(b.key("mod:out"), 1);
         b.endRecipe("r", "minecraft.crafting", null, "jar_json", false, false);
         RecipeGraph g = b.build();
-        assertEquals(1.0f, g.recipes().slotConsumeChance(0), 0.0f);
+        assertEquals(1.0, g.recipes().slotConsumeChance(0), 0.0);
         assertFalse(g.recipes().slotSurvivesRun(0));
     }
 
     @Test
     public void aRetainedSlotDoesNotScaleWithRuns() {
-        RecipeGraph g = forgeGraph(0.0f);
+        RecipeGraph g = forgeGraph(0.0);
         PlanResult plan = new Solver.Builder(g).build().solve(g.keyId("mod:widget"), 64);
         Map<String, PlanNode> kids = childrenByKey(plan.tree);
         assertEquals("64 runs need the same one shard, not 64 of them",
@@ -94,7 +94,7 @@ public class RetainedInputTest {
 
     @Test
     public void theRowSaysItIsNotConsumed() {
-        RecipeGraph g = forgeGraph(0.0f);
+        RecipeGraph g = forgeGraph(0.0);
         PlanResult plan = new Solver.Builder(g).build().solve(g.keyId("mod:widget"), 64);
         Map<String, PlanNode> kids = childrenByKey(plan.tree);
         assertTrue(kids.get("mod:shard").notConsumed());
@@ -104,12 +104,64 @@ public class RetainedInputTest {
     @Test
     public void aConsumedInputIsUnchangedByAllOfThis() {
         // The control, so the test above cannot pass by shrinking every slot to its base qty.
-        RecipeGraph g = forgeGraph(1.0f);
+        RecipeGraph g = forgeGraph(1.0);
         PlanResult plan = new Solver.Builder(g).build().solve(g.keyId("mod:widget"), 64);
         Map<String, PlanNode> kids = childrenByKey(plan.tree);
         assertEquals(64L, kids.get("mod:shard").need());
         assertEquals(64L, kids.get("mod:material").need());
         assertFalse(kids.get("mod:shard").notConsumed());
+    }
+
+    @Test
+    public void mergingKeepsTWOFRACTIONALChancesOfOneItemApart() {
+        // THE CASE THE 0.0-VERSUS-1.0 TEST BELOW CANNOT REACH. #175 packed the bucket key as
+        // 32 bits of item id plus the 32 bits of a float chance, which was lossless while the
+        // chance was a float; #223 widened it to a double, and any fold back down to 32 bits
+        // would let two DIFFERENT chances collide and be summed -- the exact defect the
+        // bucket was widened to fix, arriving through the hash instead of through the key.
+        // 0.95 and 0.5 are both real `setChance` values in the reference pack.
+        GraphBuilder b = new GraphBuilder();
+        b.name(b.key("mod:out"), "Out");
+        b.name(b.key("mod:a"), "A");
+        b.beginRecipe();
+        b.beginSlot(2, "item", 0.95);
+        b.alternative(b.key("mod:a"));
+        b.endSlot();
+        b.beginSlot(3, "item", 0.5);
+        b.alternative(b.key("mod:a"));
+        b.endSlot();
+        b.output(b.key("mod:out"), 1);
+        b.endRecipe("r", "minecraft.crafting", null, "hei_dump", false, false);
+        RecipeGraph g = b.build();
+
+        List<Solver.MergedSlot> slots = new Solver.Builder(g).build().mergeSlots(0);
+        assertEquals("two chances of one item are two requirements", 2, slots.size());
+        assertEquals(2L, slots.get(0).qty);
+        assertEquals(0.95, slots.get(0).consumeChance, 0.0);
+        assertEquals(3L, slots.get(1).qty);
+        assertEquals(0.5, slots.get(1).consumeChance, 0.0);
+    }
+
+    @Test
+    public void mergingSTILLCollapsesTwoSlotsThatShareAChance() {
+        // The control for the test above, and the case the merge exists for: a 3x3 of one
+        // ingredient is nine slots and one row. A bucket that had become unique per slot
+        // would pass the split assertions above while destroying the collapse.
+        GraphBuilder b = new GraphBuilder();
+        b.name(b.key("mod:out"), "Out");
+        b.beginRecipe();
+        for (int i = 0; i < 9; i++) {
+            b.beginSlot(1, "item", 0.95);
+            b.alternative(b.key("mod:a"));
+            b.endSlot();
+        }
+        b.output(b.key("mod:out"), 1);
+        b.endRecipe("r", "minecraft.crafting", null, "hei_dump", false, false);
+        RecipeGraph g = b.build();
+
+        List<Solver.MergedSlot> slots = new Solver.Builder(g).build().mergeSlots(0);
+        assertEquals("nine slots sharing a chance are one row", 1, slots.size());
+        assertEquals(9L, slots.get(0).qty);
     }
 
     @Test
@@ -120,7 +172,7 @@ public class RetainedInputTest {
         b.name(b.key("mod:out"), "Out");
         b.name(b.key("mod:a"), "A");
         b.beginRecipe();
-        b.beginSlot(1, "item", 0.0f);
+        b.beginSlot(1, "item", 0.0);
         b.alternative(b.key("mod:a"));
         b.endSlot();
         b.beginSlot(5, "item");
@@ -175,8 +227,8 @@ public class RetainedInputTest {
         // dividing a permanent requirement by it says a big enough output makes it free, which
         // is the error the amortisation comment in `Cost` was written about for machines. The
         // pack has a recipe yielding 60,466,176 fruit.
-        double one = contribution(0.0f, 1);
-        double many = contribution(0.0f, 4096);
+        double one = contribution(0.0, 1);
+        double many = contribution(0.0, 4096);
         assertTrue("the shard has to cost something to begin with: " + one, one > 0.0);
         assertEquals("a retained input's contribution must not shrink with the batch",
                 one, many, 1e-9);
@@ -186,8 +238,8 @@ public class RetainedInputTest {
     public void aConsumedInputDoesAmortise() {
         // The mirror image, and it is what proves the test above measures anything: the same
         // slot at the default chance must have its contribution collapse over 4096.
-        double one = contribution(1.0f, 1);
-        double many = contribution(1.0f, 4096);
+        double one = contribution(1.0, 1);
+        double many = contribution(1.0, 4096);
         assertTrue(one > 0.0);
         assertTrue("a consumed input must amortise: " + one + " at 1, " + many + " at 4096",
                 many < one / 100.0);
@@ -198,8 +250,8 @@ public class RetainedInputTest {
         // `Cost.recipeCost` is a SECOND pricing path, used by the solver's own ranking, and the
         // review pass found it had not been taught the chance at all. A ranker that prices a
         // route differently from the relaxation is the divergence #29 is about.
-        double full = runCost(1.0f);
-        double quarter = runCost(0.25f);
+        double full = runCost(1.0);
+        double quarter = runCost(0.25);
         assertEquals("a quarter-consumed input must cost a quarter per run",
                 Cost.BASE_RAW_COST * 0.75, full - quarter, 1e-6);
     }
@@ -210,9 +262,9 @@ public class RetainedInputTest {
         // the shard before the forge runs. Scaling to zero would tell the ranker a recipe
         // needing an unobtainable permanent input is the cheapest available, which is #176's
         // defect through the ranking door.
-        assertEquals(runCost(1.0f), runCost(0.0f), 1e-6);
+        assertEquals(runCost(1.0), runCost(0.0), 1e-6);
         assertTrue("a retained input must still cost what it costs",
-                runCost(0.0f) >= Cost.BASE_RAW_COST - 1e-9);
+                runCost(0.0) >= Cost.BASE_RAW_COST - 1e-9);
     }
 
     /**
@@ -223,7 +275,7 @@ public class RetainedInputTest {
      * The shard is a leaf with no producer, so it is seeded at `BASE_RAW_COST` whatever the
      * chance is, which is what makes the two calls comparable.
      */
-    private static double runCost(float chance) {
+    private static double runCost(double chance) {
         GraphBuilder b = new GraphBuilder();
         b.name(b.key("mod:out"), "Out");
         b.name(b.key("mod:shard"), "Shard");
@@ -247,12 +299,12 @@ public class RetainedInputTest {
      * with "22.0 -> 21.000244140625" and the code was right. Any tolerance wide enough to
      * accept that drop is wide enough to accept the retained term vanishing as well.
      */
-    private static double contribution(float chance, int batch) {
+    private static double contribution(double chance, int batch) {
         return priceOfOut(chance, batch, true) - priceOfOut(chance, batch, false);
     }
 
     /** The price of `mod:out`, with or without the shard slot in front of the material. */
-    private static double priceOfOut(float chance, int batch, boolean withShard) {
+    private static double priceOfOut(double chance, int batch, boolean withShard) {
         GraphBuilder b = new GraphBuilder();
         b.name(b.key("mod:out"), "Out");
         b.name(b.key("mod:shard"), "Shard");

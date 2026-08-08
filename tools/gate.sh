@@ -49,6 +49,46 @@
 # DO NOT NEST IT. `flock` is not recursive: a gated script calling another gated script
 # deadlocks against itself, with the second waiting on a lock its own parent holds. Each script
 # that runs a container takes the gate around its OWN `docker run`, and callers do not wrap it.
+#
+# WHEN THE CALLER GENUINELY HAS TO HOLD IT ACROSS THE CALLEE, PASS `GATE_LOCK=`. #265: two
+# sequential acquisitions around two steps leave a window between them, and another agent
+# restaging shared state in that window is exactly the wrong-jar measurement the staging step
+# exists to prevent. The fix is one acquisition spanning both steps, which means the outer
+# script holds the gate while the inner one runs -- so the inner one must not try to take it:
+#
+#     gated my_whole_run                  # the OUTER acquisition, taken once
+#     ...
+#     my_whole_run() { GATE_LOCK= inner.sh; docker run ...; }
+#
+# `GATE_LOCK=` is the opt-out documented above and it is the right spelling here, because the
+# thing it opts out of has already happened. IN A SCRIPT it is correct only on a line that is
+# lexically inside a held gate, and anywhere else it is an ungated container;
+# `tests/test_container_gate.py` checks that and nothing else in the tree would notice, because
+# the container it lets loose is in a different file. A human typing it in front of a command
+# is the separate, deliberate opt-out at the top of this header -- that one is a choice being
+# made once, in the open, by someone who can see the host.
+#
+# THE COMMAND RUNS WITH THE LOCK'S DESCRIPTOR OPEN, AND SO DOES EVERY CHILD IT LEAVES BEHIND.
+# The lock lives on fd 9 of the subshell below; the kernel holds it until the LAST copy of that
+# descriptor closes. A process backgrounded from inside `"$@"` inherits it, so the gate stays
+# held for as long as that process lives, however long after the container exited -- silently,
+# because nothing here is waiting on it. Start watchdogs and other background helpers OUTSIDE
+# the `gated` call. The same property is what makes the gate safe against death: a holder that
+# is SIGKILLed drops the lock immediately, because its descriptors close with it, so there is
+# no path where a crash leaves the fleet queueing forever.
+#
+# WHICH MEANS THERE IS NOTHING TO RECLAIM AND NO STALE LOCK TO CLEAN UP, and that is worth
+# saying out loud because every pid-in-a-file lock this pattern resembles DOES need reclaiming.
+# Measured here, 2026-08-08, one holder and one waiter on a /tmp lock:
+#
+#   holder alive, child `sleep` running          lock HELD
+#   holder SIGKILLed, its child still running    lock HELD   -- holder's STAT is now Z
+#   child gone as well                           lock FREE   -- nothing was cleaned up
+#
+# So the identity line written below names a process that may be a zombie while the lock is
+# genuinely held by an orphaned child of it, and a "is the holder alive" check answers neither
+# question. That is why the give-up message tells the reader to look at STAT and at children
+# rather than at `/proc/<pid>`, and why it says not to delete this file.
 
 GATE_LOCK=${GATE_LOCK-/tmp/recipegraph-container.gate.lock}
 # SIX HOURS, AND THE OLD ONE HOUR WAS DERIVED FROM THE WRONG QUANTITY. The reasoning above for
@@ -68,6 +108,12 @@ GATE_LOCK=${GATE_LOCK-/tmp/recipegraph-container.gate.lock}
 # stated starvation reason, so it is a design change rather than a constant change and it is not
 # being made while ten runners are live on the lock.
 GATE_WAIT=${GATE_WAIT:-21600}
+# EXPORTED so that a child can size its own timeouts against the wait it is going to inherit.
+# `harness/prodclient/stallwatch.sh` gives up waiting for its container after this long, and
+# hardcoded an hour until #265: a run that queued for longer than that outlived its watchdog and
+# booted unwatched, which on a host with a dozen agents is the ordinary case. Anything that waits
+# for a gated run to START has to wait at least as long as the gate will.
+export GATE_WAIT
 
 gated() {
     if [ -z "${GATE_LOCK:-}" ]; then
@@ -103,6 +149,17 @@ gated() {
                     echo "!! The SAME run held it the whole time, so it is probably stuck:" >&2
                     echo "!!   $held_after" >&2
                     echo "!! Check \`docker ps\` and that pid before deleting the lock." >&2
+                    # HOW to check it, because the obvious way answers the wrong question and
+                    # the wrong answer is always "still working". Both halves measured.
+                    echo "!! Check that pid for LIVENESS, not existence:" >&2
+                    echo "!!   ps -o pid,ppid,stat,etime,cmd -p <pid>   # STAT must not be Z" >&2
+                    echo "!! A zombie keeps its /proc entry and its etime keeps climbing, so" >&2
+                    echo "!! \`test -d /proc/<pid>\` reports a dead run as a busy one." >&2
+                    echo "!! And DELETING THIS FILE RELEASES NOTHING: flock lives on the open" >&2
+                    echo "!! descriptor, so a new file just gives you a second, emptier queue" >&2
+                    echo "!! to stand in while the real one is still held. What releases it is" >&2
+                    echo "!! the holder AND its children exiting -- a child that inherited the" >&2
+                    echo "!! descriptor keeps the lock after the holder is already a zombie." >&2
                 else
                     echo "!! The holder CHANGED while waiting, so the queue is MOVING and this" >&2
                     echo "!! cap was too short for it. Nothing is wedged." >&2

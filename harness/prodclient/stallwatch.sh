@@ -46,7 +46,14 @@ POLL=15
 #
 # The wait is BOUNDED and its expiry is silent. A container that never appears means the run
 # failed before it started, which is `prodshot.sh`'s business to report, not this script's.
-APPEAR_TIMEOUT="${STALLWATCH_APPEAR_TIMEOUT:-3600}"
+#
+# THE BOUND IS THE GATE'S BOUND, and the old hardcoded hour was the same defect one level up as
+# the missing wait loop itself. `tools/gate.sh` waits GATE_WAIT (six hours by default, sized for
+# a QUEUE rather than for one container after #214), so any run that queued for more than an
+# hour outlived its own watchdog and booted unwatched -- and with a dozen agents sharing this
+# host, queues longer than an hour are the normal case, not the exotic one. A guard whose
+# timeout is shorter than the wait it exists to survive is inert exactly when it is needed.
+APPEAR_TIMEOUT="${STALLWATCH_APPEAR_TIMEOUT:-${GATE_WAIT:-21600}}"
 waited=0
 until docker ps --filter "name=^${CONTAINER}$" --quiet | grep -q .; do
     waited=$(( waited + POLL ))

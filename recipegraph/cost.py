@@ -761,11 +761,59 @@ CRAFTABLE_COST = 0.25
 #
 # SO THE ASYMMETRY IS THE POINT: a rule whose input this function already hashes needs no bump,
 # and a rule reading something off the GRAPH does.
+#
+# 18: #223. THE INGREDIENT TERM IS NOW DIVIDED BY THE EXPECTED YIELD, NOT THE NOMINAL ONE, and
+#     `_scaled_qty` grew a third argument to carry it. A recipe that produces its output 10% of
+#     the time costs ten times as much per unit of it.
+#
+#     THE HASHED INPUTS DO NOT MOVE ON THEIR OWN, WHICH IS EXACTLY WHY THIS CONSTANT EXISTS. A
+#     graph built from a schema-7 dump carries no `q` anywhere, so `fingerprint` sees identical
+#     bytes before and after this change and a cached table computed under 17 would be served
+#     for a formula that no longer produces it.
+#
+#     MEASURED ON THE REFERENCE GRAPH, RE-MEASURED AGAINST MASTER AFTER #171 LANDED: **the
+#     table does not move at all.** All 162,469 finite prices are identical before and after,
+#     none up, none down, none appearing or vanishing -- both trees digest to sha256
+#     11f86367e3e7ac160f348003ccd6df331b57357b771a6349d8f4fd727cc41e92. That is the expected
+#     result and it is worth writing down, because the obvious reading of this bump is that it
+#     must have repriced something.
+#
+#     THE EQUALITY IS ONLY EVIDENCE BECAUSE THE PROBE WAS MADE TO FAIL FIRST. Two trees
+#     agreeing is indistinguishable from a probe that measures nothing, and this repo has a
+#     warm `.cost-cache.json` that could serve both arms. Positive control: perturbing
+#     `BASE_RAW_COST` to 1.0001 under the same probe moves the digest to 4b13800448a64dc0...,
+#     which is what says `estimate` is really being recomputed here and the cache sits above
+#     it. DO NOT re-state this equality after a rebase without re-running that control; an
+#     earlier draft of this comment carried 162,537, a count from a different oracle, and
+#     nothing in a green suite would ever have contradicted it.
+#
+#     It does not, because a schema-7 graph carries no `q`, so every `chance` here is 1.0 and
+#     `_scaled_qty` returns exactly what it always did. The bump exists for the NEXT graph, not
+#     this one: `fingerprint` hashes the same bytes either way, so a cached table computed
+#     under 17 would otherwise be served for a formula that no longer produces it the moment a
+#     schema-8 dump lands.
+#
+#     THE 618-RECIPE FIX #223 ALSO CARRIES IS NOT IN THIS FUNCTION, and conflating them was an
+#     error in an earlier draft of this comment. `Solver._build` used to read only the FIRST
+#     output slot matching a key while `_shape` summed every one of them, and both now call
+#     `Recipe.expected_yield`. That governs how many RUNS a plan asks for. `_relax` has always
+#     priced each output slot independently and taken the `min`, which is a different question
+#     (what does one unit cost) and is untouched here.
+#
+#     Those two are not the same arithmetic and the gap between them is real but pre-existing:
+#     for TechReborn's Industrial Grinder, four secondary slots of one chunk at 45/23/15/6, a
+#     run yields 89 and `_relax` charges the ingredient term against 45. It overstates, which
+#     is the safe direction, and correcting it would move prices and wants its own measurement.
+#     Filed separately. DO NOT "unify" it into `expected_yield` as a tidy-up: that is a
+#     repricing wearing a refactor's clothes.
 # 19: an off-world TOLL is seeded beside the dimension gate, and JEResources is read as a
 #     second source for both (#248).
 #
-#     18 IS #223'S AND IS NOT SKIPPED. `fix/223-output-chance` took it at 62ead92 on a
-#     branch ahead of this one, so this is 19 rather than a second 18. Two branches
+#     18 IS #223'S AND IS NOT SKIPPED. It is the entry directly above this one; #223 merged
+#     to master at #267 before this landed, so 18 is taken and this is 19 rather than a
+#     second 18. That ordering was deliberate rather than lucky: had #248 landed first, 18
+#     would have been a hole in the counter and this entry would have described a state that
+#     never existed on master. Two branches
 #     claiming one version is exactly the failure this counter exists to prevent: the
 #     caches would collide silently and a warm table would be served for arithmetic that
 #     no longer produces it. #223's entry records a blast radius of ZERO -- a schema-7
@@ -1002,9 +1050,17 @@ def category_entry_cost(category, machine_states=None, machine_entry=None):
             else UNGATED_MACHINE_COST)
 
 
-def _scaled_qty(key, qty):
-    """Quantity in normalised units: 1 item, or 1 bucket of fluid."""
-    q = max(qty, 1) * (FLUID_SCALE if key.startswith(FLUID_PREFIX) else 1.0)
+def _scaled_qty(key, qty, chance=1.0):
+    """Quantity in normalised units: 1 item, or 1 bucket of fluid.
+
+    `chance` is #223's output yield probability, and it belongs HERE rather than at the call
+    site so the floor below governs it. A recipe yielding its product 0.1% of the time really
+    does produce a tenth of a percent of an item per run, and dividing by that is correct; a
+    chance of 0.0 is a recipe that never yields it at all, and dividing by THAT manufactures
+    an infinitely cheap resource out of a typo. The existing floor already exists for the
+    sub-millibucket case and catches this one by construction.
+    """
+    q = max(qty, 1) * chance * (FLUID_SCALE if key.startswith(FLUID_PREFIX) else 1.0)
     # A sub-millibucket output would divide by ~0 and manufacture a free resource.
     return max(q, FLUID_SCALE)
 
@@ -1656,7 +1712,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                     ingredients += c * ing.consume_chance
             if math.isinf(ingredients):
                 continue
-            for key, qty in r.outputs:
+            for out_index, (key, qty) in enumerate(r.outputs):
                 # A container transfer never makes its fluid cheaper: emptying a can you own
                 # is not production. THROUGH `Graph.real_production`, which is the predicate
                 # the solver walks -- if these disagree the ranker prices a route the solver
@@ -1674,7 +1730,25 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                 # to 8e-5 and 126 items (diamond, coal, string, redstone) priced under 0.1.
                 # That is how "one iron ingot" came out as "smelt a Spawner Shard", which
                 # needs a Pristine Matter run, which needs bee drones. See issue #29.
-                per_unit = base + retained + ingredients / _scaled_qty(key, qty)
+                #
+                # #223: THE CHANCE SCALES THE YIELD, WHICH IS THE DIVISOR, so a recipe that
+                # produces its output 10% of the time costs ten times as much per unit of it.
+                # The pack makes 834 fractional `addItemOutput` declarations spanning 0.99
+                # down to 0.001, so this is up to a 1000x correction and it only ever moves
+                # prices UP.
+                #
+                # DELIBERATELY NOT APPLIED TO `base`, and that is the same decision the
+                # paragraph above makes for a large batch rather than a new one. A 1% yield
+                # genuinely needs ~100 runs and therefore ~100 machine-runs, so the strictly
+                # correct per-unit machine cost is `base / (qty * chance)`. `base` is already
+                # charged once per unit rather than once per batch, precisely so a big output
+                # cannot make an unavailable machine free, and dividing it here would be that
+                # same collapse arriving through the other term. Leaving it undivided
+                # UNDERSTATES the machine cost of a chance recipe, which is the conservative
+                # direction: it can make a chance route look cheaper than it is, never a
+                # certain route look dearer than it is.
+                per_unit = (base + retained
+                            + ingredients / _scaled_qty(key, qty, r.yield_of(out_index)))
                 if per_unit < cost.get(key, math.inf) - 1e-9:
                     cost[key] = per_unit
                     changed += 1

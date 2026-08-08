@@ -1,6 +1,5 @@
 package io.github.jacoblasky.recipedump;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -15,6 +14,12 @@ import org.junit.Test;
  * `tests/test_consumption.py` covers the arithmetic thoroughly in both languages. What is new
  * here is that the EMITTER exists, so this file is about the number and the wiring.
  *
+ * THE SCHEMA LITERAL MOVED TO {@link SchemaEightTest}, WHICH IS THE CONVENTION HERE: the
+ * newest schema's file owns the tripwire, exactly as `tests/test_schema_seven.py` handed its
+ * copy to `tests/test_schema_eight.py`. What stays here is schema 7's own field, `p`, which
+ * did not go anywhere at 8 and is still emitted the same way. #223 added `q` BESIDE it rather
+ * than instead of it, and keeping the two apart is the whole point of both files.
+ *
  * WHY A JAVA FILE WHEN THE PYTHON SIDE ALREADY PINS ALL OF THIS. `tests/test_schema_seven.py`
  * asserts against DumpCommand.java by READING ITS SOURCE, which catches a renamed field and
  * cannot catch a compile-time mistake -- a chance passed to the wrong parameter, or a
@@ -23,13 +28,10 @@ import org.junit.Test;
  */
 public class SchemaSevenTest {
 
-    @Test
-    public void theSchemaIsSeven() {
-        // Pinned here as well as read out of the jar's constant pool by
-        // tests/test_dist_jar.py, because the python side's dump_meta.SCHEMA has to move
-        // with it and `tests/test_catalysts.py` compares the two by reading this source.
-        assertEquals(7, DumpCommand.SCHEMA);
-    }
+    // THE SCHEMA NUMBER IS PINNED IN `SchemaEightTest`, NOT HERE. It is one constant with one
+    // current value, so it belongs to the newest schema's test; asserting 7 here after #223
+    // moved it to 8 would be a test that fails on the correct code. What this file still owns
+    // is everything schema 7 ADDED, which schema 8 does not change. #223.
 
     @Test
     public void aBridgeThatCannotResolveItsModSaysSoRatherThanThrowing() {
@@ -75,7 +77,7 @@ public class SchemaSevenTest {
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new java.util.LinkedHashMap<String, int[]>(),
                                  new java.util.LinkedHashMap<String, String>(),
-                                 0, 0, 0, 0, 0, 0, java.util.Arrays.asList("jei"));
+                                 0, 0, 0, 0, 0, 0, 0, java.util.Arrays.asList("jei"));
         String json = new String(java.nio.file.Files.readAllBytes(file.toPath()),
                                  java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(json, json.contains("\"catalyst_slots\": 0"));
@@ -87,7 +89,7 @@ public class SchemaSevenTest {
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new java.util.LinkedHashMap<String, int[]>(),
                                  new java.util.LinkedHashMap<String, String>(),
-                                 0, 0, 0, 0, 0, 14354, java.util.Arrays.asList("jei"));
+                                 0, 0, 0, 0, 0, 14354, 0, java.util.Arrays.asList("jei"));
         String json = new String(java.nio.file.Files.readAllBytes(file.toPath()),
                                  java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(json, json.contains("\"catalyst_slots\": 14354"));

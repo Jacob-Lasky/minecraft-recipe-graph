@@ -2438,7 +2438,7 @@
              "machine_state": "have",
              "name": "Opalescent Matter",
              "need": 1,
-             "per_run": 1,
+             "per_run": 6,
              "recipe": "hei:bdew.jeibees.produce.rootBees:145300",
              "runs": 1,
              "status": "craft"
@@ -4111,7 +4111,7 @@
                      "machine_state": "have",
                      "name": "Beecon Comb",
                      "need": 1,
-                     "per_run": 1,
+                     "per_run": 2,
                      "recipe": "hei:bdew.jeibees.produce.rootBees:145292",
                      "runs": 1,
                      "status": "craft"
@@ -6943,7 +6943,7 @@
                  "machine_state": "have",
                  "name": "Isekai Comb",
                  "need": 1,
-                 "per_run": 1,
+                 "per_run": 4,
                  "recipe": "hei:bdew.jeibees.produce.rootBees:145289",
                  "runs": 1,
                  "status": "craft"
@@ -8764,7 +8764,7 @@
              "machine_why": "craftable: modularmachinery:hostile_computing_unit_controller",
              "name": "Living Matter Twilight",
              "need": 1,
-             "per_run": 16,
+             "per_run": 48,
              "recipe": "hei:modularmachinery.recipes.hostile_computing_unit:159392",
              "runs": 1,
              "status": "craft"

@@ -198,10 +198,19 @@ public final class PlanJson {
                 .machineWhy(optional(json, "machine_why"))
                 .recipe(optional(json, "recipe"))
                 .runs(longOrNull(json, "runs"))
-                .perRun(longOrNull(json, "per_run"))
+                .perRun(doubleOrNull(json, "per_run"))
+                .yieldChance(doubleOrNull(json, "yield_chance"))
                 .alternatives(intOrNull(json, "alternatives"))
                 .interchangeable(intOrNull(json, "interchangeable"))
                 .altCount(intOrNull(json, "alt_count"))
+                // #175's slot mark, WHICH THIS READER SILENTLY DROPPED UNTIL #223. `PlanJson`
+                // has emitted `not_consumed` since #175 and nothing read it back, so a plan
+                // round-tripped through this class lost the "you only need to OWN one" badge
+                // and rendered a retained input as an ingredient to spend. Invisible because
+                // the only trees under test come from a schema-5 oracle, which carries no `p`
+                // and therefore no node with this field -- the same masking that hid the
+                // float-width defect in `RecipeStore`.
+                .notConsumed(boolOrNull(json, "not_consumed"))
                 .note(optional(json, "note"))
                 .resolvedTo(optional(json, "resolved_to"))
                 .dimension(optional(json, "dimension"))
@@ -231,6 +240,18 @@ public final class PlanJson {
     /** The value, or null when the key is absent. See {@link #readNode} for why null. */
     private static Long longOrNull(JsonObject json, String field) {
         return has(json, field) ? Long.valueOf(json.get(field).getAsLong()) : null;
+    }
+
+    /**
+     * The value as a double, or null when the key is absent. #223.
+     *
+     * SEPARATE FROM `longOrNull` BECAUSE `per_run` IS NOT A WHOLE NUMBER ANY MORE. A recipe
+     * that yields its product one run in ten has a `per_run` of 0.1, and `getAsLong` on that
+     * truncates to 0 -- a plan panel reporting a chance recipe as producing nothing per run,
+     * from JSON that said otherwise.
+     */
+    private static Double doubleOrNull(JsonObject json, String field) {
+        return has(json, field) ? Double.valueOf(json.get(field).getAsDouble()) : null;
     }
 
     private static Integer intOrNull(JsonObject json, String field) {

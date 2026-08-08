@@ -548,9 +548,9 @@ rebuild and re-commit the jar rather than editing the expected numbers.
 **Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
 two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
 
-**This jar writes dump schema 7.** Schemas 5, 6 and 7 add files and fields; none changes how
+**This jar writes dump schema 8.** Schemas 5 through 8 add files and fields; none changes how
 an NBT-bearing stack is digested, so a schema-4 graph's keys are still the keys this reader
-computes and AE2 stock still matches. Upgrading from 4, 5 or 6 costs a `/recipedump` and a
+computes and AE2 stock still matches. Upgrading from 4, 5, 6 or 7 costs a `/recipedump` and a
 `recipegraph build` to pick up the new fields, and no re-run of `have`.
 
 **Schema 7 is worth the redump even though nothing will look broken without it.** It adds `p`
@@ -561,6 +561,17 @@ to buy one per craft. A schema-6 dump parses perfectly and simply prices those i
 every run — 14,354 recipes in MeatballCraft, led by every casting recipe in the pack.
 `summary.json`'s `catalyst_slots` says how many the dump found, and zero on a pack that ships
 Tinkers means the reader is broken rather than that the pack has none.
+
+**Schema 8 is the mirror of 7, on the output side, and it is the more expensive of the two to
+go without.** It adds `q` on an OUTPUT stack: how often a run actually yields that output.
+`setChance` applies to outputs as well as inputs, and where the input side is overwhelmingly
+the binary `setChance(0.0)` catalyst, the output side is almost entirely fractional — 834 of
+MeatballCraft's 835 `addItemOutput` chances, spanning 0.99 down to 0.001. A schema-7 dump
+parses perfectly and reads every one of those as guaranteed, so the solver divides the work by
+a yield up to a thousand times too high and every plan through such a recipe understates both
+the runs and every input those runs consume. `summary.json`'s `chance_outputs` says how many
+the dump found, and zero on a pack that ships Modular Machinery means the bridge stopped
+resolving rather than that the pack has none.
 
 **A schema-3 graph is a different matter and is not compatible.** The digest that identifies
 an NBT-bearing stack changed at schema 4 (see `SORTED_LIST_TAGS` and `COSMETIC_TAGS` in

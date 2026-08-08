@@ -126,7 +126,7 @@ public class SchemaSixTest {
         Map<String, String> categoryMod = new LinkedHashMap<String, String>();
         categoryMod.put("minecraft.crafting", "Minecraft");
 
-        DumpCommand.writeSummary(file, perCategory, categoryMod, 7, 0, 2, 41, 3, 0,
+        DumpCommand.writeSummary(file, perCategory, categoryMod, 7, 0, 2, 41, 3, 0, 0,
                                  mods("jei", "mcrecipedump"));
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
@@ -143,7 +143,7 @@ public class SchemaSixTest {
         File file = File.createTempFile("summary-clean", ".json");
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0,
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, 0,
                                  mods("jei"));
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
@@ -164,7 +164,7 @@ public class SchemaSixTest {
         List<String> ids = mods("appliedenergistics2", "jei", "mcrecipedump");
 
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, 0, ids);
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(json, json.contains("\"mod_count\": 3"));
@@ -181,7 +181,7 @@ public class SchemaSixTest {
         file.deleteOnExit();
 
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, null);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, 0, null);
         String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
 
         assertFalse(json, json.contains("mod_count"));
@@ -235,7 +235,7 @@ public class SchemaSixTest {
         file.deleteOnExit();
         List<String> ids = mods("appliedenergistics2", "jei", "mcrecipedump");
         DumpCommand.writeSummary(file, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, 0, ids);
 
         DumpCommand.ModSet set = DumpCommand.readModSet(file);
 
@@ -254,7 +254,7 @@ public class SchemaSixTest {
         File summary = new File(dir, DumpCommand.SUMMARY_FILE);
         summary.deleteOnExit();
         DumpCommand.writeSummary(summary, new LinkedHashMap<String, int[]>(),
-                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, ids);
+                                 new LinkedHashMap<String, String>(), 0, 0, 0, 0, 0, 0, 0, ids);
         return dir;
     }
 
