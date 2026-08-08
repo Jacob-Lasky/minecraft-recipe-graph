@@ -14,6 +14,11 @@ to fix 4 problems, so a test that only checks the markers move would pass on a r
 wrecks the graph. Every case below is one of the four populations measured on the reference
 graph, and the three CONTROL populations outnumber the marker one 884 to 283.
 
+NOT `tests/test_provenance.py`, WHICH IS THE NEIGHBOUR AND A DIFFERENT SUBJECT. This file is
+about the SET -- which keys the graph cannot explain -- and that one is about the pack's own
+statement of where an item comes from, which is what takes 53 keys back out of this set. The
+names are close because the subjects are adjacent; read the first line of each.
+
 THE EXCLUSIONS ARE PACK-DECLARED DATA, NOT KEY-SHAPE GUESSES. `damage_base` reads
 `max_damage` back from the item registry and `ores_of` reads oredict membership; neither
 infers anything from what a key looks like. That is what `reachable_form`'s docstring means
