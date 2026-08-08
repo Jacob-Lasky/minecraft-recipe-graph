@@ -218,9 +218,28 @@ transformer, so it adds dev-workspace failure surface for provably zero recipe b
 never stage the dump mod's own jar into the pack -- two jars declaring modid `mcrecipedump` is a
 duplicate-mod startup failure.
 
-**What survives untouched:** `jar_json` really does supply 802 produced keys the client's own
-HEI dump lacks, including `advancedrocketry:lathe`. That is a possible DUMP gap and it is worth
-more than the parity question ever was.
+**THE "802 KEYS, POSSIBLE DUMP GAP" THIS FILE CARRIED IS ALSO MEASURED FALSE, AND IT POINTED
+THE WRONG WAY.** Re-measured in #227 with both arms at the same stage and a planted-removal
+control in each direction: the gap is **190, not 802**, and the dump is not under-supplying --
+`jar_json` was over-supplying. At least 170 of the 190 were keys the running game does not have,
+from two `jar_json` defects now fixed (#249, an unqualified id defaulting to `minecraft:`
+instead of the recipe file's namespace; #250, Forge `conditions` never read) plus the pack's own
+CraftTweaker deletions, which this source cannot see and which are why `hei_dump` is
+authoritative. **The method and every number live in #227's comment; do not restate them here,
+because two copies is two places for the next correction to miss.**
+
+**AND THIS FILE'S FLAGSHIP EXAMPLE WAS WRONG IN THE OPPOSITE DIRECTION.** The dump **HAS**
+`advancedrocketry:lathe`, produced by `compactmachines3.MultiblockMiniaturization`. What is
+missing is its CRAFTING recipe, because the pack deletes it in
+`scripts/AdvancedRocketryGating.zs:292`, and `ToolTips2.zs:772` tags the item "Non-rods recipes
+are caused by a bug and do not work". `advancedrocketry:rollingmachine` is the same story at
+`:167`. Anyone reading the old line went looking for a dump defect that does not exist. Before
+quoting a missing key as evidence against the dump, grep the pack's scripts for it.
+
+**The 22,188 `no outputs` skips are not a dump gap either.** `DumpCommand.encode` returns null
+only when JEI's own `getIngredients` reported zero item AND zero fluid outputs, so the dump
+cannot discard an output it was handed; the losses are upstream, at the JEI wrapper. Census and
+sample are in #227.
 
 **THE DENOMINATOR, PINNED, because "410" was quoted repeatedly and matched nothing:** 367
 top-level jars in `mods/` (what `jar_json` walks), 370 distinct modids in `mcmod.info`, 22 jars
