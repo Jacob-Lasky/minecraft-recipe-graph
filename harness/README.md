@@ -39,6 +39,64 @@ harness/prodclient/prodshot.sh fixture packfixture -Dmcrecipedump.shotTimeoutSec
 
 Keep using `shot.sh` for ordinary GUI iteration. Ten mods and ninety seconds is why it exists.
 
+### Running a long job in the background, on any of these scripts
+
+**`setsid nohup`, always, and `... &` never.** This is not specific to `prodshot.sh`; it
+applies to `tools/check.sh --java`, `mod/tools/build-jar.sh` and anything else here that runs
+for minutes.
+
+```bash
+setsid nohup harness/prodclient/prodshot.sh dump > /tmp/dump.log 2>&1 < /dev/null &
+```
+
+A plain `&` leaves the job in the launching shell's process group, and when that shell is
+reaped the whole group goes with it. The job dies; **the wrapper survives as a zombie**, which
+is what makes it so expensive:
+
+* `ps -o etime` reports a zombie happily and its elapsed time keeps climbing. Measured on this
+  host: three liveness checks over two hours returned `01:11:29`, `01:32:13` and `02:33:51`,
+  all three from a `<defunct>` process, and the reader waited two and a half hours on a run
+  that had been dead for two minutes.
+* **`/proc/<pid>` existing is not liveness.** A zombie keeps its `/proc` entry. `/proc/<pid>/
+  cmdline` is the right way to confirm a pid's IDENTITY and is no evidence at all that it is
+  running.
+* The failure is silent in the "still working" direction, and on this host gate contention is
+  usually true as well, so the wrong reading gets corroborated by a real queue.
+
+Check liveness with both of these, not with either alone:
+
+```bash
+ps -o pid,ppid,stat,etime,cmd -p <pid>   # STAT must not contain Z
+ps --ppid <pid>                          # a live runner HAS children
+```
+
+`prodshot.sh` ends every run with exactly one of `OK in`, `FAILED after` or `KILLED BY`, so a
+log that stops without one of those was killed rather than being slow. `setsid` reporting
+`Done` immediately is correct -- it forks and exits; verify the real worker with the commands
+above.
+
+### One agent's run must not restage another agent's instance, or rebuild its image
+
+`prodshot.sh` takes the container gate **once**, around the image build, the mod restage *and*
+the boot together. It used to take it twice with a gap between, and in that gap another agent's
+`stage-instance.sh` could swap the jar in the shared `prodinstance/`, so the run booted
+somebody else's jar and reported it as a missing screen registration. #265, and #228 for what
+it cost. If you are editing these scripts, `tests/test_prodshot_gate_span.py` runs two agents
+against one instance and will tell you if that window comes back.
+
+Everything that writes into the instance is inside the gate now, including
+`stage-instance.sh`'s `rm -rf`. The one sanctioned way to call a gated script from inside a
+held gate is `GATE_LOCK=`, gate.sh's own opt-out; `gated` inside `gated` deadlocks.
+
+**`docker build` is inside that acquisition too, in both `shot.sh` and `prodshot.sh`**, and it
+is not only about memory. `mcrecipedump-shot:latest` and `mcrecipedump-prodclient:latest` are
+tags on the daemon every worktree here shares, and a branch is allowed to change a Dockerfile
+-- which is exactly why these rebuild every run. Outside the gate, another agent's build
+replaces the tag between yours and your `docker run`, and you render, or boot, out of *their*
+image. Cached, that build measured 0.78 s (prodclient) and 0.89 s (shot) on 2026-08-08, so the
+gate pays almost nothing for it; a cold one pulls a JDK base and is the contention the gate
+exists for.
+
 ## Why it exists
 
 This machine cannot run the game and the desktop can only run it by hand. Issue #19 is mostly
@@ -328,6 +386,13 @@ HeadlessMC's loader list is Fabric, Forge and NeoForge.
 * **The harness has its own `GRADLE_USER_HOME`** (`gradle-cache-shot`), because Gradle locks
   it exclusively and sharing one with a concurrent `build` fails on "Timeout waiting to lock
   journal cache". Seed a new one with `cp -a` from the build cache to skip the cold decompile.
+  **That separation is per-HARNESS, not per-agent, and the difference bites when several
+  agents share this host**: two `shot.sh` runs still collide with each other on
+  `gradle-cache-shot`, exactly as two builds collide on `gradle-cache`. `tools/check.sh` and
+  `mod/tools/build-jar.sh` document `GRADLE_CACHE=<dir>` for this and the harness path needs
+  the same treatment -- pass `CACHE_NAME=gradle-cache-shot-<yours>` and seed it with `cp -a`.
+  The message names a PID from another container's namespace, so it reads as a stale lock when
+  it usually is not; copy the directory rather than deleting the lock.
 * **Cap the container at 4g and never above 8g.** Tower runs the household's Home Assistant
   and its doorbell in sibling containers. The client heap is capped separately, through
   `cmdlineJvmArgs` in `mod/build.gradle`, and the harness prints the heap ceiling it actually

@@ -27,19 +27,44 @@ set -e
 # right to. An exemption list is where "one container at a time" stops being a constraint and goes
 # back to being a sentence in a README, which is the whole argument in `tools/gate.sh`. The copy
 # also moves ~800 MB off the array, so it is not free even though it is short.
+#
+# THE GATE COVERS EVERY WRITE TO `$INSTANCE`, NOT JUST THE CONTAINER, and until #265 it covered
+# only the container. `build_instance` opens with `rm -rf "$INSTANCE"` and ran UNGATED, so a
+# plain `stage-instance.sh` deleted the game directory out from under whatever client was
+# booting from it -- a shared directory, a 28 minute read, and a delete nothing was serialising
+# against. `--mod-only` had the same hole one size down: it swaps the jar under test while
+# another agent's client is starting, which is the wrong-jar measurement #265 was filed for.
+# A gate that covers the cheap container and not the destructive `cp` is guarding the wrong
+# thing.
 . "$(dirname "$0")/../../tools/gate.sh"
 
 HEADLESS_ONLY=0
 [ "${1:-}" = "--headless-only" ] && HEADLESS_ONLY=1
 
 # Reinstall the mod jar and nothing else. What `prodshot.sh` runs before every shot, so a run
-# cannot measure a jar older than the source tree beside it. Takes no container and no gate,
-# which is why it is safe to call from inside a script that is about to take both.
+# cannot measure a jar older than the source tree beside it. Takes no container, but it DOES take
+# the gate now (#265): it writes into a directory another agent's client may be booting from, and
+# "it is only a `cp`" is what made that invisible. `prodshot.sh` calls it with `GATE_LOCK=`
+# because it already holds the gate across both steps; anything else must let it take its own.
 MOD_ONLY=0
 [ "${1:-}" = "--mod-only" ] && MOD_ONLY=1
 
 LOCAL_BUILD="${LOCAL_BUILD:-/coding/.recipegraph-build}"
-INSTANCE="${INSTANCE:-$LOCAL_BUILD/prodinstance}"
+# `INSTANCE` MEANT TWO DIFFERENT THINGS IN THE TWO SCRIPTS OF THIS HARNESS, and `prodshot.sh`
+# passes its value straight down here through the environment. There it is a NAME under
+# `$LOCAL_BUILD`; here it used to be a FULL PATH. `INSTANCE=prodinstance-228 prodshot.sh` then
+# booted `$LOCAL_BUILD/prodinstance-228` while this script staged into `./prodinstance-228`,
+# relative to whatever directory the caller happened to be in -- so the shot measured a
+# directory nobody had staged, and the workaround in #228 only worked because it was launched
+# from `/coding/.recipegraph-build`, where the two spellings happen to resolve alike.
+#
+# Both spellings are accepted, and a relative one now means the same thing it means one script
+# up. The default is unchanged.
+INSTANCE="${INSTANCE:-prodinstance}"
+case "$INSTANCE" in
+    /*) ;;
+    *) INSTANCE="$LOCAL_BUILD/$INSTANCE" ;;
+esac
 PACK_JARS="${PACK_JARS:-$LOCAL_BUILD/packserver377}"
 PACK_CONFIG="${PACK_CONFIG:-$LOCAL_BUILD/packconfig}"
 MOD_JAR="${MOD_JAR:-}"
@@ -59,7 +84,14 @@ stage_from_amp() {
     # 99:100 container cannot read it at all. The `chown -R 99:100` at the end of the script
     # below is what keeps the rule intact, by handing the copy back to the array's owner rather
     # than leaving root-owned files that wedge every other writer.
-    gated docker run --rm --user 0:0 --memory=1g --memory-swap=1g \
+    #
+    # NO `gated` ON THIS LINE, and that is not an exemption. Every caller of this function is
+    # inside `stage_instance`, which is only ever invoked as `gated stage_instance`, so the gate
+    # is already held here -- and `flock` is not recursive, so re-taking it would deadlock
+    # against this script's own lock. `tests/test_container_gate.py` checks that transitively
+    # rather than taking the word of a `gated` prefix, and it carries controls that prove it can
+    # still reject an ungated one.
+    docker run --rm --user 0:0 --memory=1g --memory-swap=1g \
         -v "$AMP:/mc:ro" -v "$HOST_BUILD:/out" \
         alpine sh -c '
             mkdir -p /out/packserver377 /out/packconfig
@@ -154,18 +186,30 @@ else:
 PY
 }
 
-if [ "$MOD_ONLY" -eq 1 ]; then
-    install_mod
-    exit 0
-fi
+# EVERYTHING THAT TOUCHES `$INSTANCE` LIVES IN HERE, so that it can be covered by exactly one
+# gate acquisition. One, and not one per step: a run that released between the delete and the
+# copy would hand another agent a half-built instance, which is the same defect as #265 with a
+# worse blast radius.
+stage_instance() {
+    if [ "$MOD_ONLY" -eq 1 ]; then
+        install_mod
+        return 0
+    fi
 
-if [ "$HEADLESS_ONLY" -eq 0 ]; then
-    stage_from_amp
-    build_instance
-    install_mod
-fi
-apply_headless_overrides
+    if [ "$HEADLESS_ONLY" -eq 0 ]; then
+        stage_from_amp
+        build_instance
+        install_mod
+    fi
+    apply_headless_overrides
 
-echo "stage-instance: $(ls "$INSTANCE"/mods/*.jar | wc -l) jars in mods/," \
-     "$(ls "$INSTANCE"/mods/1.12.2/*.jar 2>/dev/null | wc -l) in mods/1.12.2/," \
-     "$(ls "$INSTANCE"/scripts 2>/dev/null | wc -l) scripts"
+    echo "stage-instance: $(ls "$INSTANCE"/mods/*.jar | wc -l) jars in mods/," \
+         "$(ls "$INSTANCE"/mods/1.12.2/*.jar 2>/dev/null | wc -l) in mods/1.12.2/," \
+         "$(ls "$INSTANCE"/scripts 2>/dev/null | wc -l) scripts"
+}
+
+# THE ONLY CALL SITE, AND IT IS GATED. A caller that already holds the gate passes `GATE_LOCK=`,
+# gate.sh's own documented opt-out, rather than calling `stage_instance` directly -- so this line
+# is the single place the gate is taken and there is no second, ungated way in. `prodshot.sh` is
+# that caller and its comment says why.
+gated stage_instance

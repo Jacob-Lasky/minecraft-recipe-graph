@@ -8,6 +8,17 @@
 #   GRADLE_CACHE=<dir> tools/check.sh
 #   GATE_LOCK= tools/check.sh       # opt out of the one-container-at-a-time gate
 #
+# IN THE BACKGROUND, `setsid nohup`, NEVER A BARE `&`:
+#
+#   setsid nohup tools/check.sh --java > /tmp/check.log 2>&1 < /dev/null &
+#
+# A bare `&` leaves this in the launching shell's process group and the whole group dies when
+# that shell is reaped -- the run dies and the WRAPPER survives as a zombie, whose `etime` goes
+# on climbing so every liveness check says it is fine. There are 23 defunct `check.sh` entries
+# on this box as of 2026-08-08. Check `ps -o stat=,etime= -p <pid>` for a Z and `ps --ppid
+# <pid>` for children; `/proc/<pid>` existing proves identity, never liveness. The same rule and
+# the measurement behind it are in `harness/README.md`.
+#
 # IT TAKES THE CONTAINER GATE AROUND ITS CONTAINERS AND NOT AROUND ITSELF. Several agents share
 # this host and three 8 GB JVMs against 20 GB free is a real problem, so `tools/gate.sh`
 # serialises them -- but the python arm is eleven minutes that starts no container, and holding

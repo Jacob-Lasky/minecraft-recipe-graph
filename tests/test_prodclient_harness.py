@@ -16,6 +16,18 @@ import os
 import re
 import unittest
 
+# The shell reader lives next door, in the file that enforces the gate on every container in
+# the tree, and is imported rather than written twice: a second copy of "which function is this
+# line inside" would drift from the one the compliance sweep actually uses, and the two tests
+# would then disagree about whether prodshot.sh holds its gate.
+from tests.test_container_gate import (
+    _blank_comments,
+    _command_words,
+    _enclosing_function,
+    _functions,
+    _gate_covered_functions,
+)
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRODCLIENT = os.path.join(REPO, "harness", "prodclient")
 MOD_SOURCE = os.path.join(REPO, "mod", "src", "main", "java")
@@ -144,26 +156,117 @@ class ProdClientHarnessTest(unittest.TestCase):
         measured whatever `stage-instance.sh` last happened to install. On a branch that changes
         Java that is a 22-minute run photographing the OLD behaviour, with nothing in the log to
         say which jar it was. It has to be `--mod-only`: re-staging the whole instance copies 377
-        jars out of the AMP server and takes the container gate, and a gated script calling
-        another one is the deadlock `tools/gate.sh` warns about in its header."""
+        jars out of the AMP server and takes about a minute."""
         prodshot = strip_comments(read("prodshot.sh"))
         # Loose about what sits between, because the path is `$(dirname "$0")/...` and the
         # nested quotes inside it defeat any character class written to exclude them.
-        found = re.search(r"gated .*stage-instance\.sh.* --mod-only", prodshot)
-        self.assertTrue(found,
-                        "prodshot.sh must reinstall the mod jar before running, and take the"
-                        " gate to do it: build-jar.sh holds the gate while gradle rewrites the"
-                        " jar being copied")
-        self.assertLess(prodshot.index("--mod-only"), prodshot.index("gated docker run"),
-                        "the reinstall must finish before the run's own gate is taken;"
-                        " nesting flock deadlocks")
+        self.assertTrue(re.search(r"stage-instance\.sh.* --mod-only", prodshot),
+                        "prodshot.sh must reinstall the mod jar before running")
         staging = strip_comments(read("stage-instance.sh"))
         self.assertIn("--mod-only", staging,
                       "stage-instance.sh must accept the flag prodshot.sh passes it")
         body = re.search(r"install_mod\(\) \{(.*?)\n\}", staging, re.S)
         self.assertTrue(body, "stage-instance.sh must define install_mod")
         self.assertNotIn("gated", body.group(1),
-                         "install_mod must take no container, or prodshot.sh deadlocks on it")
+                         "install_mod must take no gate of its own: it runs inside one")
+
+    def test_the_restage_and_the_boot_are_one_gate_acquisition(self):
+        """#265, and the reason the whole harness can be trusted to measure its own jar.
+
+        `gated stage; gated docker run` satisfies both of the rules the staging step exists
+        for and still loses: the gate is RELEASED between them, another agent's
+        `stage-instance.sh` restages the shared instance in that window, and this run boots
+        their jar. It cost a ~30 minute boot in #228 and reported itself as a missing screen
+        registration, which is a bug in innocent code.
+
+        Asserted structurally rather than by grepping for a phrase, because the property is
+        structural: ONE acquisition, and both steps inside the command it wraps.
+        """
+        text = read("prodshot.sh")
+        functions = _functions(text)
+        _, covered = _gate_covered_functions(text)
+        self.assertTrue(covered, "prodshot.sh takes the gate around nothing at all")
+
+        lines = _blank_comments(text).splitlines()
+        stage = [i for i, line in enumerate(lines) if "--mod-only" in line]
+        boot = [i for i, line in enumerate(lines) if re.match(r"\s*docker\s+run\b", line)]
+        self.assertEqual(1, len(stage), "expected exactly one restage line: %s" % stage)
+        self.assertEqual(1, len(boot), "expected exactly one docker run: %s" % boot)
+
+        holder = _enclosing_function(functions, boot[0])
+        self.assertIsNotNone(holder, "the boot is not inside a gated function any more")
+        self.assertIn(holder, covered,
+                      "%s() can be reached without the gate held" % holder)
+        self.assertEqual(holder, _enclosing_function(functions, stage[0]),
+                         "the restage and the boot are in different places, so the gate is "
+                         "released between them and another agent restages in the window")
+
+        # And exactly one acquisition, so a second `gated` cannot creep back in beside it.
+        acquisitions = [i for i, line in enumerate(lines)
+                        if any(g for _w, g in _command_words(line))]
+        self.assertEqual(1, len(acquisitions),
+                         "prodshot.sh takes the gate %d times; #265 is that any number above "
+                         "one has a window between them (lines %s)"
+                         % (len(acquisitions), [i + 1 for i in acquisitions]))
+
+    def test_the_gated_function_is_handed_the_scripts_own_arguments(self):
+        """`"$@"` inside a shell function is the FUNCTION's arguments, not the script's.
+
+        The boot moved into a function for #265 and its command line ends `launch.sh
+        $SHOT_ARGS "$@"` -- the pass-through that carries `-Dmcrecipedump.shotTimeoutSeconds`
+        and everything else the caller added. Called with no arguments, the function's `"$@"`
+        is EMPTY, the client runs with default settings, and the run still finishes. A
+        half-hour run silently configured differently from the way it was asked for is the
+        exact failure shape this whole file exists to catch.
+        """
+        prodshot = strip_comments(read("prodshot.sh"))
+        self.assertTrue(re.search(r'gated \w+ "\$@"', prodshot),
+                        'the gated call must pass "$@" through, or the extra JVM arguments '
+                        'are silently dropped')
+
+    def test_a_crash_report_is_matched_against_the_boot_and_not_against_the_queue(self):
+        """"Is that crash report ours" has to be measured from when the CONTAINER started.
+
+        The gate wait is the whole rest of the queue -- hours, with a dozen agents on this
+        host -- and every crash report any of them wrote in that time is newer than the moment
+        this script started. Comparing against the script's start therefore prints somebody
+        else's crash under "THIS RUN WROTE A CRASH REPORT", which is a false verdict in the
+        one place the harness is trusted to give a true one.
+        """
+        prodshot = strip_comments(read("prodshot.sh"))
+        stamp = re.search(r"BOOT_STAMP=(\S+)", prodshot)
+        self.assertIsNotNone(stamp, "prodshot.sh no longer records when the boot started")
+        self.assertIn('stat -c %Y "$LATEST_CRASH")" -ge "$BOOTED_AT"', prodshot,
+                      "the crash-report window must start at the boot, not at the script")
+        self.assertIn('date +%s > "$BOOT_STAMP"', prodshot,
+                      "the boot timestamp must be written from inside the gate; a variable "
+                      "set there is in a subshell and never reaches the check")
+
+    def test_the_watchdog_outlasts_the_gate_it_is_waiting_behind(self):
+        """`stallwatch.sh` gives up waiting for its container after APPEAR_TIMEOUT, and the
+        thing it is waiting through is the container gate. An hour, which is what it used to
+        be, is shorter than `GATE_WAIT` by a factor of six -- so any run that queued for more
+        than an hour, which is the ordinary case here, booted with no watchdog at all and
+        nothing said so. Same shape as the missing wait loop it sits next to."""
+        appear = shell_default(read("stallwatch.sh"), "STALLWATCH_APPEAR_TIMEOUT")
+        self.assertIsNotNone(appear, "stallwatch.sh no longer declares an appear timeout")
+        # No closing brace in the pattern: `shell_default` stops at the FIRST `}`, which for a
+        # nested default is the inner one. The nesting is the point here, so match what it
+        # returns rather than pretending the outer brace survived.
+        fallback = re.fullmatch(r"\$\{GATE_WAIT:-(\d+)", appear)
+        self.assertIsNotNone(fallback,
+                             "the appear timeout must default to the gate's own wait, not to "
+                             "a number of its own: got %r" % appear)
+        with open(os.path.join(REPO, "tools", "gate.sh"), encoding="utf-8") as handle:
+            gate = handle.read()
+        gate_wait = re.search(r"GATE_WAIT=\$\{GATE_WAIT:-(\d+)\}", gate)
+        self.assertIsNotNone(gate_wait, "tools/gate.sh no longer declares a GATE_WAIT default")
+        self.assertGreaterEqual(int(fallback.group(1)), int(gate_wait.group(1)),
+                                "the watchdog's standalone fallback is shorter than the gate "
+                                "wait it has to survive")
+        self.assertIn("export GATE_WAIT", gate,
+                      "GATE_WAIT must be exported, or the watchdog never sees the value the "
+                      "run is actually waiting on and silently uses its fallback")
 
     def test_the_watchdog_waits_for_the_container_before_watching_it(self):
         """The watchdog is started before `docker run`, and `docker run` blocks on the container
