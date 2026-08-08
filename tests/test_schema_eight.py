@@ -218,3 +218,48 @@ class ACertainRecipePlansExactlyAsItAlwaysDidTest(unittest.TestCase):
         uncertain = Recipe("r", "s", [("mod:b", 7), ("mod:b", 5)], [Ingredient(["mod:a"], 1)],
                            yield_chance=[1.0, 0.5])
         self.assertNotEqual(uncertain.expected_yield("mod:b"), 12)
+
+
+class ACertainYieldStaysAnIntegerTest(unittest.TestCase):
+    """The fixture-churn guard, and it is the reason `expected_yield` is not one line.
+
+    `Solver._build` writes `expected_yield` straight into a plan node's `per_run`. Returning a
+    float where the old `sum(qty for ...)` returned an int rewrites that field in every
+    fixture: measured at 17 of 24 files, 1,407 insertions and 1,407 deletions, `"per_run": 1`
+    becoming `"per_run": 1.0`, with not one plan actually different. That buries the real
+    movements this issue causes inside noise and makes the diff unreviewable.
+    """
+
+    def test_a_certain_recipe_yields_an_int(self):
+        recipe = Recipe("r", "s", [("mod:b", 7), ("mod:b", 5)], [Ingredient(["mod:a"], 1)])
+        got = recipe.expected_yield("mod:b")
+        self.assertEqual(got, 12)
+        self.assertIsInstance(got, int)
+        self.assertNotIsInstance(got, float)
+
+    def test_an_uncertain_recipe_yields_a_float(self):
+        recipe = Recipe("r", "s", [("mod:b", 7), ("mod:b", 5)], [Ingredient(["mod:a"], 1)],
+                        yield_chance=[1.0, 0.5])
+        got = recipe.expected_yield("mod:b")
+        self.assertIsInstance(got, float)
+        self.assertAlmostEqual(got, 9.5)
+
+    def test_a_whole_number_expectation_is_still_a_float(self):
+        # Two slots of 4 at 0.5 is 4.0, and 4.0 is not the same claim as 4. An expectation
+        # that lands on a whole number by arithmetic accident must not read as a guarantee.
+        recipe = Recipe("r", "s", [("mod:b", 4), ("mod:b", 4)], [Ingredient(["mod:a"], 1)],
+                        yield_chance=[0.5, 0.5])
+        got = recipe.expected_yield("mod:b")
+        self.assertEqual(got, 4)
+        self.assertIsInstance(got, float)
+
+    def test_a_certain_output_of_a_partly_uncertain_recipe_stays_an_int(self):
+        # Per key, not per recipe. `mod:c` has nothing to do with `mod:b`'s chance.
+        recipe = Recipe("r", "s", [("mod:b", 3), ("mod:c", 2)], [Ingredient(["mod:a"], 1)],
+                        yield_chance=[0.25, 1.0])
+        self.assertIsInstance(recipe.expected_yield("mod:c"), int)
+        self.assertIsInstance(recipe.expected_yield("mod:b"), float)
+
+    def test_a_key_the_recipe_does_not_make_is_a_plain_zero(self):
+        recipe = Recipe("r", "s", [("mod:b", 1)], [Ingredient(["mod:a"], 1)])
+        self.assertEqual(recipe.expected_yield("nothing:like_it"), 0)

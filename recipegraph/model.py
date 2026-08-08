@@ -516,15 +516,38 @@ class Recipe:
         is one expectation, and reading a single chance for the key would be wrong for both
         halves of it.
 
-        Returns 0.0 for a key this recipe does not make, and callers must handle that rather
+        Returns 0 for a key this recipe does not make, and callers must handle that rather
         than dividing by it: a recipe whose only slot for `key` has a chance of 0.0 yields it
         never, and no number of runs produces one.
+
+        AN INT WHEN EVERY CONTRIBUTING SLOT IS CERTAIN, AND THAT IS NOT COSMETIC. `Solver`
+        writes this straight into a plan node's `per_run`, so returning `1.0` where the old
+        `sum(qty for ...)` returned `1` rewrites that field in every fixture. Measured before
+        this guard existed: 17 of 24 golden fixtures changed, 1,407 insertions and 1,407
+        deletions, every one of them `"per_run": 1` becoming `"per_run": 1.0`. Not a single
+        plan differed. That churn is worse than useless -- it buries the handful of real
+        movements this issue does cause inside 1,407 lines that mean nothing, and it makes the
+        diff unreviewable at exactly the moment a reviewer needs to see what moved.
+
+        PER KEY, NOT PER RECIPE, because a recipe may carry a chance on one output and
+        certainty on another. Asking "does this recipe have any chances" would drag the second
+        one into float for a reason that has nothing to do with it.
         """
-        total = 0.0
+        total = 0
+        certain = True
         for index, (out, qty) in enumerate(self.outputs):
-            if out == key:
-                total += qty * self.yield_of(index)
-        return total
+            if out != key:
+                continue
+            chance = self.yield_of(index)
+            if chance == 1.0:
+                total += qty
+            else:
+                certain = False
+                total += qty * chance
+        # `certain` rather than `float(total).is_integer()`: an expected yield that lands on a
+        # whole number by arithmetic accident (2 slots of 4 at 0.5) is still an expectation and
+        # must not masquerade as a guaranteed count.
+        return total if certain else float(total)
 
     def to_json(self):
         return {
