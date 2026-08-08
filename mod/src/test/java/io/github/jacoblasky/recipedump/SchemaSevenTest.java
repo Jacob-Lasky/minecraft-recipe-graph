@@ -28,6 +28,11 @@ import org.junit.Test;
  */
 public class SchemaSevenTest {
 
+    // THE SCHEMA NUMBER IS PINNED IN `SchemaEightTest`, NOT HERE. It is one constant with one
+    // current value, so it belongs to the newest schema's test; asserting 7 here after #223
+    // moved it to 8 would be a test that fails on the correct code. What this file still owns
+    // is everything schema 7 ADDED, which schema 8 does not change. #223.
+
     @Test
     public void aBridgeThatCannotResolveItsModSaysSoRatherThanThrowing() {
         // No Tinkers on the test classpath, which is the case every non-Tinkers pack is in.
@@ -72,7 +77,7 @@ public class SchemaSevenTest {
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new java.util.LinkedHashMap<String, int[]>(),
                                  new java.util.LinkedHashMap<String, String>(),
-                                 0, 0, 0, 0, 0, 0, java.util.Arrays.asList("jei"));
+                                 0, 0, 0, 0, 0, 0, 0, java.util.Arrays.asList("jei"));
         String json = new String(java.nio.file.Files.readAllBytes(file.toPath()),
                                  java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(json, json.contains("\"catalyst_slots\": 0"));
@@ -84,7 +89,7 @@ public class SchemaSevenTest {
         file.deleteOnExit();
         DumpCommand.writeSummary(file, new java.util.LinkedHashMap<String, int[]>(),
                                  new java.util.LinkedHashMap<String, String>(),
-                                 0, 0, 0, 0, 0, 14354, java.util.Arrays.asList("jei"));
+                                 0, 0, 0, 0, 0, 14354, 0, java.util.Arrays.asList("jei"));
         String json = new String(java.nio.file.Files.readAllBytes(file.toPath()),
                                  java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(json, json.contains("\"catalyst_slots\": 14354"));
