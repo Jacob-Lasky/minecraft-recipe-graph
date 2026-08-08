@@ -59,6 +59,7 @@ public final class GraphService {
     private volatile File source;
     private volatile long totalBytes;
     private volatile long readBytes;
+    private volatile long generation;
     private Thread loader;
 
     private GraphService() {
@@ -70,6 +71,37 @@ public final class GraphService {
 
     public State state() {
         return state;
+    }
+
+    /**
+     * How many times this service has had something new to say. Strictly increasing.
+     *
+     * A COUNTER RATHER THAN A LISTENER, for exactly the reason
+     * {@link PlannerService#generation()} gives and NOT by symmetry with it: the subscriber is
+     * an open GUI and the publisher is the
+     * loader thread, so a callback would rebuild widgets off the client thread, which in 1.12.2
+     * surfaces as a ConcurrentModificationException from inside a GUI and gets blamed on the
+     * GUI. {@link #onLoad} is the callback that does exist, and it is deliberately not that: it
+     * runs ON the loader thread, BEFORE READY is published, for work that must not touch a
+     * screen. Anything that has to redraw asks this instead, once per client tick.
+     *
+     * #201 IS WHAT IT IS FOR, and it is worth saying what went wrong without it. The planner
+     * window rebuilds when a counter moves, and the counter it watched was the PLAN's -- so a
+     * window opened during the 5.47 s read had nothing to watch, because no plan can be started
+     * before the graph lands and the plan counter therefore never moved. Every piece was
+     * individually right and the window stayed on "loading" until the player closed it.
+     *
+     * BUMPED ON EVERY TRANSITION, not only on READY. MISSING and FAILED are different things to
+     * draw than "reading graph.json, 62%", and a parse error five seconds in must move the
+     * window off a progress bar that is never going to finish.
+     *
+     * IT IS BUMPED LAST IN EACH CASE, after the state it describes and after
+     * {@link #graph}, so a reader that sees a new number sees everything behind it. That is the
+     * same discipline as the `graph`-before-`state` note on this class, extended by one field;
+     * DO NOT hoist a bump above the assignment it reports.
+     */
+    public long generation() {
+        return generation;
     }
 
     /**
@@ -206,6 +238,7 @@ public final class GraphService {
         if (file == null) {
             state = State.MISSING;
             detail = GraphSource.describeSearch(configDir);
+            generation++;
             return;
         }
         source = file;
@@ -213,6 +246,7 @@ public final class GraphService {
         readBytes = 0L;
         detail = "";
         state = State.LOADING;
+        generation++;
         loader = new Thread(new Loader(file), "mcrecipedump-graph-load");
         // A DAEMON, so a half-finished load cannot keep the JVM alive after the player quits.
         // Nothing downstream of a load is durable -- no file is written, no state is
@@ -224,7 +258,19 @@ public final class GraphService {
         loader.start();
     }
 
-    /** Drop the graph and forget how it went, so the next {@link #startLoad} really reloads. */
+    /**
+     * Drop the graph and forget how it went, so the next {@link #startLoad} really reloads.
+     *
+     * IT DOES NOT STOP A LOAD THAT IS ALREADY RUNNING, and calling it during one is a defect
+     * waiting to happen rather than a supported thing to do. The loader thread writes `graph`
+     * and `state` without this monitor -- that is deliberate and documented on the class, the
+     * happens-before is the whole synchronisation here -- so a `reset` mid-read is overwritten
+     * seconds later by the load it was meant to cancel, and the service comes back READY with
+     * a graph nobody asked for. Nothing in the mod does this today: every caller either runs
+     * before a load has started or after one has settled. If a caller ever needs to cancel a
+     * running read, this needs a load epoch the loader checks before it publishes, and NOT a
+     * `synchronized` on `Loader.run`, which would hold the monitor across a 5.47 s read.
+     */
     public synchronized void reset() {
         state = State.IDLE;
         graph = null;
@@ -232,6 +278,11 @@ public final class GraphService {
         source = null;
         totalBytes = 0L;
         readBytes = 0L;
+        // FORWARD, NEVER BACK TO ZERO. `PlannerScreen.stamp` sums this with two other
+        // counters and relies on every one of them only going UP -- a reset to zero could
+        // land the sum back on a value an open window has already recorded as drawn, and the
+        // window would then sit on a panel built from a graph that has been dropped.
+        generation++;
     }
 
     private final class Loader implements Runnable {
@@ -253,6 +304,8 @@ public final class GraphService {
                 graph = loaded;
                 notifyLoaded(loaded);
                 state = State.READY;
+                // LAST, after `graph` and after `state`. See the note on `generation`.
+                generation++;
             } catch (IOException e) {
                 fail(e);
             } catch (RuntimeException e) {
@@ -296,6 +349,10 @@ public final class GraphService {
             detail = e.getClass().getSimpleName()
                     + (e.getMessage() == null ? "" : ": " + e.getMessage());
             state = State.FAILED;
+            // A FAILURE MOVES THE COUNTER TOO. A window opened during the read is showing a
+            // progress bar for a load that has just stopped; without this bump it would show
+            // that bar for the rest of the session. Same defect as #201, other branch.
+            generation++;
         }
 
         /** Counts bytes as they are consumed, so {@link #progress} has something to report. */
