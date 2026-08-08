@@ -426,6 +426,14 @@ class Solver:
         # 1% of the time, and reporting that pair as an arbitrary tie would call a hundredfold
         # difference a coin toss. Inert on every graph built before schema 8, where every
         # chance is 1.0 and this is the sum it always was.
+        #
+        # A FLOAT IN A SHAPE TUPLE IS COMPARED EXACTLY, and that is acceptable in this one
+        # direction. Two recipes whose expected yields are equal in arithmetic but differ in
+        # the last bit will read as different offers, so a tie can be SPLIT that should have
+        # joined. Splitting under-reports ties, which says "this was a real choice" about a
+        # coin toss; the reverse would call a hundredfold difference arbitrary. Certain
+        # recipes are unaffected: `expected_yield` multiplies integer quantities by exactly
+        # 1.0, which is exact.
         per_run = recipe.expected_yield(key)
         # THE CONSUME CHANCE IS DELIBERATELY NOT PART OF THE SHAPE. A shape is what two
         # recipes have to share to count as the same OFFER for #181's tie reporting, and
@@ -1049,7 +1057,17 @@ class Solver:
             # falling back to the nominal yield keeps the plan finite and visibly wrong rather
             # than infinite and invisible.
             per_run = nominal or 1
-        runs = math.ceil(remainder / per_run)
+        if per_run == nominal:
+            # INTEGER ARITHMETIC WHEREVER NOTHING IS UNCERTAIN, which is every recipe in every
+            # graph built before schema 8 and the overwhelming majority after. `math.ceil` on
+            # a float divide is not the same function as `-(-a // b)` on two ints: a quotient
+            # that lands one bit above an exact integer, which `remainder / per_run` can
+            # produce and `//` cannot, rounds up to one run too many. That would move plans,
+            # and therefore fixtures, for recipes this issue does not touch at all -- churn
+            # indistinguishable from the real change it is buried in.
+            runs = -(-remainder // int(nominal))
+        else:
+            runs = math.ceil(remainder / per_run)
         node = dict(base)
         node.update({
             "status": STATUS_PARTIAL if from_stock else STATUS_CRAFT,

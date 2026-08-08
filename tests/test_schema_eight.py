@@ -190,3 +190,31 @@ class TheYieldIsTheDivisorTest(unittest.TestCase):
         # so; this pins the contract that makes its guard meaningful.
         recipe = Recipe("r", "s", [("b", 1)], [Ingredient(["a"], 1)])
         self.assertEqual(recipe.expected_yield("nothing:like_it"), 0.0)
+
+
+class ACertainRecipePlansExactlyAsItAlwaysDidTest(unittest.TestCase):
+    """The regression guard for the port of `runs` from integer to float arithmetic.
+
+    Every graph built before schema 8 has a chance of 1.0 everywhere, so #223 must be a no-op
+    on all of them. It nearly was not: `math.ceil(remainder / per_run)` is not the same
+    function as `-(-remainder // per_run)` when the quotient lands one bit above an exact
+    integer, and the difference is one extra run on a recipe this issue does not touch.
+    """
+
+    def test_the_two_ceilings_agree_on_every_certain_case_in_a_wide_sweep(self):
+        import math
+        for nominal in range(1, 65):
+            for remainder in range(1, 400):
+                self.assertEqual(-(-remainder // nominal),
+                                 math.ceil(remainder / float(nominal)),
+                                 "runs must not move for a certain recipe: %d / %d"
+                                 % (remainder, nominal))
+
+    def test_and_the_float_path_is_only_taken_when_something_is_uncertain(self):
+        # The condition that routes between them, asserted directly: expected equals nominal
+        # exactly when nothing is uncertain, because the multiply is by exactly 1.0.
+        certain = Recipe("r", "s", [("mod:b", 7), ("mod:b", 5)], [Ingredient(["mod:a"], 1)])
+        self.assertEqual(certain.expected_yield("mod:b"), 12)
+        uncertain = Recipe("r", "s", [("mod:b", 7), ("mod:b", 5)], [Ingredient(["mod:a"], 1)],
+                           yield_chance=[1.0, 0.5])
+        self.assertNotEqual(uncertain.expected_yield("mod:b"), 12)
