@@ -531,6 +531,282 @@ public class NodeRowTextTest {
         assertFalse(owned, owned.contains("no blueprint in reach"));
     }
 
+    @Test
+    public void aCraftNodeSaysHowManyRunsAndWhatEachOneYields() {
+        // #190 found `runs` and `per_run` parsed and drawn by nothing, main or test. This is
+        // the assertion that they reach a row at all.
+        String meta = NodeRowText.meta(yieldNode(2L, Double.valueOf(4.0), null));
+        assertTrue(meta, meta.contains("2 runs"));
+        assertTrue(meta, meta.contains("4 per run"));
+    }
+
+    @Test
+    public void aWholePerRunIsGroupedLikeTheQuantityBesideIt() {
+        // One panel must not measure the same thing two ways. A #190 screenshot caught exactly
+        // this on fluids, `934,400x` above `934400 mB`, which no test saw because both halves
+        // were individually correct and only the adjacency was wrong.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(60_466_176.0), null));
+        assertTrue(meta, meta.contains("60,466,176 per run"));
+        assertFalse("a whole yield must not render as a decimal: " + meta,
+                    meta.contains("60466176.0"));
+    }
+
+    @Test
+    public void aFractionalYieldSaysHowOftenItPaysOut() {
+        // The #223 case this exists for: 834 of the pack's 835 output chances are fractional.
+        String meta = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+        assertTrue(meta, meta.contains("1,000 runs"));
+        assertTrue(meta, meta.contains(", 0.1%"));
+        // NOT `0.0%`, which is what a fixed one-decimal format renders and which reads as
+        // "never" for a route that does work.
+        assertFalse("a rare yield must not round to zero: " + meta, meta.contains("0.0%"));
+        assertFalse("the prose form is what the cut was eating: " + meta,
+                    meta.contains("of the time"));
+    }
+
+    @Test
+    public void aOneForOneCraftSaysNothingAboutItsYield() {
+        // FOUND BY LOOKING AT THE SHOT, not by a test. "1 run, 1 per run" is the default and
+        // it is 28.4% of committed craft nodes, 400 of 1,406, so on a real panel it was most
+        // rows, and `fit` was cutting the machine name off the end to make room for it.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(1.0), null));
+        assertFalse("a one-for-one craft must not spend row width saying so: " + meta,
+                    meta.contains("run"));
+    }
+
+    @Test
+    public void aBatchYieldIsWorthSayingEvenOnASingleRun() {
+        // The boundary of the rule above: one run that makes 64 is NOT the default and is the
+        // difference between needing one craft and needing sixty-four.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(64.0), null));
+        assertTrue(meta, meta.contains("1 run"));
+        assertTrue(meta, meta.contains("64 per run"));
+        // AND IT IS SINGULAR. This is the only surviving row shape with a run count of one,
+        // since the one-for-one case is now suppressed, so the plural rule is asserted here
+        // rather than in a test of its own.
+        assertFalse("a single run must not read as `1 runs`: " + meta, meta.contains("1 runs"));
+    }
+
+    @Test
+    public void aRareYieldIsSaidEvenWhenTheRunCountIsOne() {
+        // The other boundary: a single run that pays out one time in a thousand is the whole
+        // point of #223 and must survive the suppression rule.
+        String meta = NodeRowText.meta(
+                yieldNode(1L, Double.valueOf(1.0), Double.valueOf(0.001)));
+        assertTrue(meta, meta.contains(", 0.1%"));
+    }
+
+    @Test
+    public void aFractionalPerRunIsDrawnAtThePrecisionItCarries() {
+        // `per_run` is the expected yield after #223 and is itself fractional, so the amount
+        // must not round to a whole number and imply the machine produces one each time.
+        //
+        // ON A CERTAIN NODE, because a CHANCED one no longer draws `per_run` at all: it gives
+        // up its place to the percentage, which does not fit beside it at real label lengths.
+        // This still has to be asserted, because a certain recipe with a fractional expected
+        // yield is reachable -- `Recipe.expected_yield` refuses to call a sum of chanced slots
+        // whole even when it lands on an integer -- and it is the only case left that draws a
+        // fractional `per_run`. See `yieldBit` for the width measurement.
+        String meta = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), null));
+        assertTrue(meta, meta.contains("0.004 per run"));
+
+        // And the chanced node trades it away rather than drawing both.
+        String chanced = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+        assertFalse("per_run must give up its place to the chance: " + chanced,
+                    chanced.contains("per run"));
+        assertTrue(chanced, chanced.contains(", 0.1%"));
+    }
+
+    @Test
+    public void aNodeWithRunsButNoRecordedYieldSaysOnlyTheRuns() {
+        // `solve.py` writes `or 1` rather than emit a zero yield, so an absent `per_run` means
+        // "not recorded" and not "yields nothing". Saying "0 per run" would be the second
+        // claim, which is the exact shape of the defect #252 is about.
+        String meta = NodeRowText.meta(yieldNode(7L, null, null));
+        assertTrue(meta, meta.contains("7 runs"));
+        assertFalse("an absent yield must not be drawn as zero: " + meta,
+                    meta.contains("per run"));
+    }
+
+    @Test
+    public void aFullYieldSaysNothingAboutChance() {
+        // `yield_chance` is written only when the expectation falls short, so a row without it
+        // is already saying "this yields all of it". Repeating that on every craft row would
+        // make the mark unbelievable on the rows that carry it.
+        String meta = NodeRowText.meta(yieldNode(3L, Double.valueOf(1.0), null));
+        assertFalse(meta, meta.contains("yields"));
+        assertFalse(meta, meta.contains("%"));
+    }
+
+    @Test
+    public void aLeafSaysNothingAboutRuns() {
+        // A raw node has no recipe, so "0 runs" would be a claim about work that is not done.
+        assertFalse(NodeRowText.meta(node("raw")).contains("run"));
+    }
+
+    /**
+     * AT WHAT DEPTH DOES THE YIELD SURVIVE THE CUT. #252, and it is the measurement that
+     * replaced a guess with a number.
+     *
+     * The first planner shot of this render showed rows reading `1 run, 1,0...` -- the cut had
+     * landed inside the run count and the yield was gone entirely. `fit` keeps the head and
+     * drops the tail, so everything this issue added is at risk and the only question that
+     * matters is how much width a row actually has at real indent depths.
+     *
+     * MEASURED HERE RATHER THAN IN A SCREENSHOT, because a shot is a sixteen-minute pack boot
+     * and answers one depth. This reproduces the production geometry exactly:
+     * `PlannerWidgets.row` charges `ICON + GAP`, `QTY + GAP` and the indent before the label,
+     * and `NodeRowText.fit` spends `CHAR_WIDTH` per character.
+     *
+     * A TEST RATHER THAN A NOTE, because #232 is editing this same line to disambiguate
+     * colliding labels, and its text lands in the same budget. Two changes that each fit alone
+     * do not fit together, and the shot that would show it is on neither author's branch. If
+     * this fails, the row has run out of width and something has to give: say which, in the
+     * commit, rather than widening the assertion.
+     */
+    @Test
+    public void theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy() {
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
+
+        // THE COLUMN IS DERIVED, NOT WRITTEN DOWN, and two wrong literals are why. The first
+        // version of this test measured against `yieldNode`'s five-character "Thing" and passed
+        // everywhere while the number was cut from every real row. The second hardcoded a
+        // 53/45-character column, which was wrong twice over -- `GAP` is 3 and not 2, and the
+        // BADGE is subtracted from every full-width tree row -- so it asserted a boundary the
+        // panel does not have and passed by agreeing with its own arithmetic. A literal goes
+        // stale silently; `columnAtDepth` below calls the same constants and the same
+        // `badgeWidthFor` that `PlannerWidgets.row` does, so it moves when the panel moves.
+        //
+        // What the real column leaves for the yield, after a 3-character separator and this
+        // 16-character meta: 18 characters at depth 0, 14 at depth 4, 10 at the indent cap.
+        for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH; depth++) {
+            String fitted = NodeRowText.fit(
+                    "Iron Ingot" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                    columnAtDepth(depth));
+            assertTrue("a 10-character label must keep the yield at depth " + depth + ": "
+                       + fitted, fitted.contains("0.1%"));
+        }
+
+        // AND THE LIMIT, WHICH IS THE HONEST HALF. `Everwatching Eye` is the longest label in
+        // the reference plans that keeps the yield at all, and it keeps it only while the row
+        // is shallow; at the indent cap even that is cut. Measured over the committed fixtures,
+        // the yield is lost on 574 of 769 rows in `plan-fluid-chain` (74.6%) and 35 of 52 in
+        // `plan-truncated` (67.3%).
+        //
+        // THAT IS NOT AN ARGUMENT AGAINST THIS FORM, and the alternative is what settles it:
+        // `yields 0.1% of the time` is 23 characters against this 4, so it is lost on strictly
+        // more rows, and before #252 the number was drawn on none at all. A row that sometimes
+        // shows the yield beats a row that never rendered one. Buying the rest means evicting
+        // the badge or the machine, which is the trade #232 is constrained against.
+        String shallow = NodeRowText.fit(
+                "Everwatching Eye" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                columnAtDepth(0));
+        assertTrue("16 characters still fits at depth 0: " + shallow, shallow.contains("0.1%"));
+        String deep = NodeRowText.fit(
+                "Everwatching Eye" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                columnAtDepth(PlannerWidgets.MAX_INDENT_DEPTH));
+        assertFalse("...and is known NOT to fit at the indent cap; if it now does, the column"
+                    + " widened and the percentages above are stale: " + deep,
+                    deep.contains("0.1%"));
+    }
+
+    /**
+     * The label column at one indent depth, computed the way `PlannerWidgets.row` computes it.
+     *
+     * CALLS THE PRODUCTION CONSTANTS AND `badgeWidthFor` RATHER THAN RESTATING THEM. The badge
+     * is the piece a hand-written version forgets: `badgeWidthFor` reserves it on every
+     * full-width tree row, cap included, and `aFullWidthTreeRowStillCarriesItsBadgeEvenAtTheIn`
+     * `dentCap` pins that. Omitting it overstates the label column by 93px, which is 16
+     * characters and the whole of the disagreement this test was re-pinned to settle.
+     */
+    private static int columnAtDepth(int depth) {
+        int x = Math.min(depth, PlannerWidgets.MAX_INDENT_DEPTH) * PlannerWidgets.INDENT
+                + PlannerWidgets.ICON + PlannerWidgets.GAP
+                + PlannerWidgets.QTY + PlannerWidgets.GAP;
+        int badge = PlannerWidgets.badgeWidthFor(PlannerWidgets.CONTENT_WIDTH, x);
+        return Math.max(PlannerWidgets.GAP, PlannerWidgets.CONTENT_WIDTH - x
+                        - (badge > 0 ? badge + PlannerWidgets.GAP : 0));
+    }
+
+    @Test
+    public void theRejectedFormsWouldNotHaveSurvivedIt() {
+        // THE CONTROL, and without it the assertion above is a claim about nothing. It has to
+        // be shown that the budget is tight enough for the wording to matter, or `0.1%`
+        // surviving proves only that the row was never short of room.
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
+        // BOTH REJECTED FORMS, at the SHALLOWEST depth, which is the strongest place to refuse
+        // them: if they lose the number where the row is widest they lose it everywhere. The
+        // first is the original prose. The second is the abbreviation with `per_run` still
+        // beside it, which is what this branch shipped before the shot came back byte-identical
+        // to the one before it -- the cut had landed before the part that differed.
+        String meta = NodeRowText.meta(node);
+        String prose = "Mildly Recursive Goo" + NodeRowText.SEPARATOR
+                + meta.replace(", 0.1%", ", 0.004 per run, yields 0.1% of the time");
+        String withPerRun = "Mildly Recursive Goo" + NodeRowText.SEPARATOR
+                + meta.replace(", 0.1%", ", 0.004 per run, 0.1%");
+        int labelWidth = 400 - 6 * 2 - ((10 + 2) + (52 + 2));
+        assertFalse("the original form, prose with per_run beside it: "
+                    + NodeRowText.fit(prose, labelWidth),
+                    NodeRowText.fit(prose, labelWidth).contains("0.1%"));
+        assertFalse("keeping per_run beside the chance is not what the width rules out: "
+                    + NodeRowText.fit(withPerRun, labelWidth),
+                    NodeRowText.fit(withPerRun, labelWidth).contains("0.1%"));
+    }
+
+    @Test
+    public void theYieldComesBeforeTheMachineReasonSoACutTakesTheReasonFirst() {
+        // WHY IT IS EARLY IN THE RUN. `machineWhyBit` is last so `fit` drops it first, because
+        // its full text lives on the TODO panel's machine section. The yield has no second
+        // home and it is the part that says the plan may not be worth starting, so a cut must
+        // reach the reason before it reaches the yield.
+        //
+        // BUILT WITH BOTH PARTS PRESENT, and asserted on their ORDER rather than on their
+        // presence. An earlier version of this test allowed the machine to be absent, which
+        // made it pass on a node that could not have failed it.
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001),
+                                  "buildable", "craftable: mod:pulverizer");
+        String meta = NodeRowText.meta(node);
+        // THE PERCENT SIGN IS THE YIELD NOW. #252 abbreviated `yields 0.1% of the time`
+        // to a bare `0.1%` because the prose was 23 characters carrying 4 of content and
+        // `fit` was cutting it off entirely; there is no other proportion on this row.
+        int yieldAt = meta.indexOf("%");
+        int whyAt = meta.indexOf("craftable: mod:pulverizer");
+        assertTrue("the yield is missing from: " + meta, yieldAt >= 0);
+        assertTrue("the machine reason is missing from: " + meta, whyAt >= 0);
+        assertTrue("the yield must precede the machine reason: " + meta, yieldAt < whyAt);
+    }
+
+    private static PlanNode yieldNode(long runs, Double perRun, Double yieldChance) {
+        return yieldNode(runs, perRun, yieldChance, null, null);
+    }
+
+    private static PlanNode yieldNode(long runs, Double perRun, Double yieldChance,
+                                      String machineState, String machineWhy) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("recipe", "r:1");
+        json.addProperty("runs", Long.valueOf(runs));
+        if (perRun != null) {
+            json.addProperty("per_run", perRun);
+        }
+        if (yieldChance != null) {
+            json.addProperty("yield_chance", yieldChance);
+        }
+        if (machineState != null) {
+            json.addProperty("category", "thermalexpansion.pulverizer");
+            json.addProperty("machine", "Pulverizer");
+            json.addProperty("machine_state", machineState);
+            json.addProperty("machine_why", machineWhy);
+        }
+        return PlanJson.readNode(json);
+    }
+
     private static PlanNode machineNode(String state, String why) {
         com.google.gson.JsonObject json = new com.google.gson.JsonObject();
         json.addProperty("key", "test:thing");
