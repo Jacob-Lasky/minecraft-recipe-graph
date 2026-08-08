@@ -597,13 +597,17 @@ public final class NodeRowText {
      * which is the defect a #190 screenshot caught on fluids and is invisible in a diff.
      */
     private static String amount(double value) {
-        // `Quantities.isWhole` RATHER THAN A LOCAL COMPARISON, because the emitter has to ask
-        // the same question about the same number to choose `4` or `4.0` on the wire, and the
-        // agreed rule for #223 is that integral values are written as integers. THE EMITTER
-        // DOES NOT CALL THIS YET: `plan.PlanJson` still writes every `per_run` as a double,
-        // which is what `PerRunRoundTripTest.anIntegralPerRunStaysAnIntegerOnTheWire` is red
-        // against. The predicate lives here so there is one definition to adopt rather than a
-        // second one to write, and so the row and the wire cannot drift once it is.
+        // `Quantities.isWhole` RATHER THAN A LOCAL COMPARISON, so the row and the wire cannot
+        // drift about which values are whole.
+        //
+        // THE EMITTER'S RULE IS STRICTLY NARROWER THAN THIS PREDICATE, and the difference is
+        // not a rounding detail. It writes an integer only when the value is whole AND the
+        // node carries no `yield_chance`, because a `per_run` that lands on a whole number by
+        // arithmetic accident, two slots of four at 0.5, is still an EXPECTATION and must not
+        // masquerade as a guaranteed count. `solve.py` refuses `float(total).is_integer()` for
+        // exactly that reason. Here it is only ever a display choice, so the narrower clause
+        // does not apply: an expected four and a certain four are drawn the same because a
+        // reader gets the certainty from the `yields ...% of the time` part beside it.
         if (Quantities.isWhole(value)) {
             return quantityPlain((long) value);
         }
