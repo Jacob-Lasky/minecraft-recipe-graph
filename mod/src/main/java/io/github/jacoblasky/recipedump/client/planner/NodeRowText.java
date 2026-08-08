@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Quantities;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -579,13 +580,13 @@ public final class NodeRowText {
      * which is the defect a #190 screenshot caught on fluids and is invisible in a diff.
      */
     private static String amount(double value) {
-        if (value == Math.rint(value) && !Double.isInfinite(value)) {
+        // THE SAME PREDICATE THE EMITTER USES, on purpose. See `Quantities.isWhole`: if the
+        // wire and the row disagree about which values are whole, one panel measures the same
+        // number two ways and both halves pass their own tests.
+        if (Quantities.isWhole(value)) {
             return quantityPlain((long) value);
         }
-        return BigDecimal.valueOf(value)
-                .round(new MathContext(3))
-                .stripTrailingZeros()
-                .toPlainString();
+        return significant(value);
     }
 
     /**
@@ -598,10 +599,26 @@ public final class NodeRowText {
      * small value cannot come out in scientific notation.
      */
     private static String percent(double fraction) {
-        return BigDecimal.valueOf(fraction * 100.0)
+        return significant(fraction * 100.0) + "%";
+    }
+
+    /**
+     * `value` to three significant figures, with no trailing zeros and never in exponent form.
+     *
+     * ONE COPY, SHARED BY {@link #amount} AND {@link #percent}, which is not tidiness: they
+     * format two numbers a reader compares on the same row, `0.004 per run` beside
+     * `yields 0.1% of the time`. Two copies of the rounding rule would let one of them drift to
+     * a different precision and make the pair look inconsistent rather than merely rounded.
+     *
+     * `toPlainString` RATHER THAN `toString`, because `BigDecimal.toString` switches to
+     * scientific notation for small values and `1E-3` on a crafting row is not a quantity a
+     * player can act on.
+     */
+    private static String significant(double value) {
+        return BigDecimal.valueOf(value)
                 .round(new MathContext(3))
                 .stripTrailingZeros()
-                .toPlainString() + "%";
+                .toPlainString();
     }
 
     private static String quantityPlain(long value) {

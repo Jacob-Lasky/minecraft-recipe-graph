@@ -532,6 +532,36 @@ public class NodeRowTextTest {
     }
 
     @Test
+    public void aSingleRunIsSingular() {
+        // A branch I wrote and had not asserted. "1 runs" is the kind of thing that survives
+        // review because it is beneath notice and then reads as sloppy on every one-run row.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(1.0), null));
+        assertTrue(meta, meta.contains("1 run"));
+        assertFalse(meta, meta.contains("1 runs"));
+    }
+
+    @Test
+    public void aFractionalPerRunIsDrawnAtThePrecisionItCarries() {
+        // The companion to the percentage: `per_run` is the expected yield after #223 and is
+        // itself fractional, so the amount must not round to a whole number and imply the
+        // machine produces one each time.
+        String meta = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+        assertTrue(meta, meta.contains("0.004 per run"));
+    }
+
+    @Test
+    public void aNodeWithRunsButNoRecordedYieldSaysOnlyTheRuns() {
+        // `solve.py` writes `or 1` rather than emit a zero yield, so an absent `per_run` means
+        // "not recorded" and not "yields nothing". Saying "0 per run" would be the second
+        // claim, which is the exact shape of the defect #252 is about.
+        String meta = NodeRowText.meta(yieldNode(7L, null, null));
+        assertTrue(meta, meta.contains("7 runs"));
+        assertFalse("an absent yield must not be drawn as zero: " + meta,
+                    meta.contains("per run"));
+    }
+
+    @Test
     public void aFullYieldSaysNothingAboutChance() {
         // `yield_chance` is written only when the expectation falls short, so a row without it
         // is already saying "this yields all of it". Repeating that on every craft row would
