@@ -742,16 +742,22 @@ public final class PlannerWidgets {
         ListWidget list = new ListWidget();
         list.size(width, height);
         list.crossAxisAlignment(Alignment.CrossAxis.START);
-        appendRows(plan.tree(), 0, width, list, actions);
+        // ASKED ONCE FOR THE WHOLE TREE, mirroring `entryLines`: which labels collide is a
+        // property of the list and not of a row, and a row cannot see its siblings. #232.
+        java.util.Map<String, String> fragments = NodeRowText.disambiguators(plan.tree());
+        appendRows(plan.tree(), 0, width, list, actions, fragments);
         return list;
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static void appendRows(PlanNode node, int depth, int width, ListWidget into,
-                                   PlannerActions actions) {
-        into.child(row(node, depth, width, actions));
+                                   PlannerActions actions,
+                                   java.util.Map<String, String> fragments) {
+        // `get` RETURNS NULL FOR A ROW WITH NOTHING TO DISAMBIGUATE, which is the signal `row`
+        // wants, so there is no second lookup and no way to ask the wrong question.
+        into.child(row(node, depth, width, actions, fragments.get(node.key())));
         for (PlanNode child : node.children()) {
-            appendRows(child, depth + 1, width, into, actions);
+            appendRows(child, depth + 1, width, into, actions, fragments);
         }
     }
 
@@ -906,6 +912,22 @@ public final class PlannerWidgets {
      */
     public static ParentWidget<?> row(final PlanNode node, int depth, int width,
                                       final PlannerActions actions) {
+        return row(node, depth, width, actions, null);
+    }
+
+    /**
+     * {@link #row(PlanNode, int, int, PlannerActions)}, told whether this row's label collides
+     * with another in the same tree. #232.
+     *
+     * A CALLER PASSING NULL FOR A COLLIDING ROW DRAWS TWO ROWS A PLAYER CANNOT TELL APART,
+     * which is the defect this exists to prevent -- the same warning {@link
+     * NodeRowText#entryLine} carries for the summary lists. Prefer {@link #tree}, which asks
+     * {@link NodeRowText#disambiguators(PlanNode)} once and answers it per row. The four-argument
+     * form above keeps null because a caller holding ONE node cannot know: ambiguity is a
+     * property of the list it sits in, so a lone node is unambiguous as far as anyone can tell.
+     */
+    public static ParentWidget<?> row(final PlanNode node, int depth, int width,
+                                      final PlannerActions actions, String fragment) {
         ClickableGroup row = new ClickableGroup(new Runnable() {
             @Override
             public void run() {
@@ -932,7 +954,8 @@ public final class PlannerWidgets {
         // version of this bug is the one that gets found by a screenshot rather than a test.
         int badgeWidth = badgeWidthFor(width, x);
         int labelWidth = Math.max(GAP, width - x - (badgeWidth > 0 ? badgeWidth + GAP : 0));
-        row.child(line(labelAndMeta(node), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
+        row.child(line(labelAndMeta(node, fragment, labelWidth), labelWidth,
+                       NodeStatus.INK_MUTED).pos(x, 0));
         if (badgeWidth > 0) {
             row.child(line(NodeStatus.badge(node), badgeWidth, colour)
                               .pos(width - badgeWidth, 0));
@@ -948,9 +971,36 @@ public final class PlannerWidgets {
      * separator carries the distinction that a colour would otherwise have carried.
      */
     static String labelAndMeta(PlanNode node) {
+        return labelAndMeta(node, null, Integer.MAX_VALUE);
+    }
+
+    /**
+     * {@link #labelAndMeta(PlanNode)}, disambiguated ONLY IF THE WHOLE LINE STILL FITS. #232.
+     *
+     * THE WIDTH IS THE WHOLE DECISION, and it is made here because this is the only place that
+     * knows it. Measured across the fixtures: 11 rows carry a machine name on a line that is
+     * ALREADY over its column -- `Ender Pearl · Crafting · 5...` in 29 characters -- so on
+     * those rows there is no spare width at all, and adding a disambiguator of ANY length
+     * removes the machine name that renders on master today. A collision fixed by deleting
+     * information the row already showed is a worse row. #273 carries those 11: they need the
+     * name to arrive already disambiguated from `RecipeGraph.bareName`, where the characters
+     * sit ahead of the cut instead of competing with what is behind it.
+     *
+     * So the test is whether the disambiguated line survives `fit` UNTRUNCATED. If it does,
+     * nothing was evicted, by construction rather than by measurement. If it does not, the row
+     * draws exactly what it drew before and stays ambiguous, which is the honest trade.
+     */
+    static String labelAndMeta(PlanNode node, String fragment, int labelWidth) {
         String meta = NodeRowText.meta(node);
-        return meta.isEmpty() ? NodeRowText.label(node)
-                              : NodeRowText.label(node) + NodeRowText.SEPARATOR + meta;
+        String plain = NodeRowText.label(node);
+        if (fragment != null) {
+            String marked = NodeRowText.labelWith(node, fragment);
+            String candidate = meta.isEmpty() ? marked : marked + NodeRowText.SEPARATOR + meta;
+            if (NodeRowText.fit(candidate, labelWidth).equals(candidate)) {
+                return candidate;
+            }
+        }
+        return meta.isEmpty() ? plain : plain + NodeRowText.SEPARATOR + meta;
     }
 
     /**
