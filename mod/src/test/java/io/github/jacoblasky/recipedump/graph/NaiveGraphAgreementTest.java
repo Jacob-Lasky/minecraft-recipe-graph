@@ -42,6 +42,7 @@ public class NaiveGraphAgreementTest {
         assertEquals(naive.names().size(), compact.namedKeyCount());
         assertEquals(naive.oreGroups().size(), compact.oreGroupCount());
         assertEquals(naive.worldOreKeys().size(), compact.worldOreCount());
+        assertEquals(naive.offworldOreKeys().size(), compact.offworldOreCount());
     }
 
     @Test

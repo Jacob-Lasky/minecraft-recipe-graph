@@ -322,8 +322,9 @@ public final class ScenarioInputs {
      * `dimensions.gates_for`: the ores a plan would need a trip to reach.
      *
      * A STOCK FILE WITH NO `dimensions` RECORD GATES NOTHING. Reading "no record" as "never
-     * been anywhere" would surcharge eight ores the moment an old stock file was loaded -- a
-     * silent repricing of the pack triggered by a missing field.
+     * been anywhere" would surcharge every gated ore the moment an old stock file was loaded
+     * -- a silent repricing of the pack triggered by a missing field. That was 8 ores when
+     * #112 shipped and is 95 since #248 widened the source.
      */
     private static void resolveGates(RecipeGraph g, JsonObject visited, Resolved out) {
         if (g.dimensionOreCount() == 0 || visited.entrySet().isEmpty()) {

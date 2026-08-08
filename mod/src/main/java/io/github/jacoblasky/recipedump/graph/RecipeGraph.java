@@ -116,6 +116,7 @@ public final class RecipeGraph {
     private final int[] oreKeyGroup;
     private final long[] oreGuessed;
     private final long[] worldOres;
+    private final long[] offworldOres;
     private final long[] liveKeys;
     private final long[] reshapedOnly;
 
@@ -193,7 +194,8 @@ public final class RecipeGraph {
                 StringTable machineNames, StringTable sources, StringTable roles,
                 RecipeStore recipes, Csr byOutput, Csr byInput, int[] wildcardSibling,
                 StringTable oreNames, Csr oreMembers, Csr oreIndex, int[] oreGroupKeyId,
-                KeyIndex oreKeys, int[] oreKeyGroup, long[] oreGuessed, long[] worldOres, long[] liveKeys, long[] reshapedOnly,
+                KeyIndex oreKeys, int[] oreKeyGroup, long[] oreGuessed, long[] worldOres,
+                long[] offworldOres, long[] liveKeys, long[] reshapedOnly,
                 Csr catalysts, StringTable categoryMods, int[] categoryModId,
                 KeyIndex dimensionOres, int[] dimensionOreDimId, int[] dimensionOreNameId,
                 StringTable dimensionNames, KeyIndex damageable, int[] maxDamage,
@@ -221,6 +223,7 @@ public final class RecipeGraph {
         this.oreKeyGroup = oreKeyGroup;
         this.oreGuessed = oreGuessed;
         this.worldOres = worldOres;
+        this.offworldOres = offworldOres;
         this.liveKeys = liveKeys;
         this.reshapedOnly = reshapedOnly;
         this.catalysts = catalysts;
@@ -681,6 +684,25 @@ public final class RecipeGraph {
         return Bits.get(worldOres, keyId);
     }
 
+    /**
+     * Is this an ore no pack source ever places in the overworld, so that MINING it means
+     * walking through a portal? #248. Says nothing about crafted routes, which compete
+     * normally: the toll raises a floor, exactly as the gate does.
+     *
+     * <p>NOT THE SAME QUESTION AS {@link #dimensionOf}, and the two must not be collapsed.
+     * That one asks whether the save has ever been to the dimension, and stops being true the
+     * moment the player goes; this asks whether the ore generates anywhere in the overworld,
+     * and never stops being true. An ore behind a portal you have used a thousand times is
+     * still dearer than the identical ore you can walk to, which is the whole of #248.
+     */
+    public boolean isOffworldOre(int keyId) {
+        return Bits.get(offworldOres, keyId);
+    }
+
+    public int offworldOreCount() {
+        return Bits.cardinality(offworldOres);
+    }
+
     public int worldOreCount() {
         return Bits.cardinality(worldOres);
     }
@@ -730,7 +752,17 @@ public final class RecipeGraph {
         return catalysts;
     }
 
-    /** The dimension id an ore is exclusive to, or -1. */
+    /**
+     * The dimension id an ore is exclusive to, or -1.
+     *
+     * <p>DO NOT USE -1 AS THE MEMBERSHIP TEST. It is also the Nether's real dimension id, so
+     * a gated Nether ore and an ungated one return the same number. That was harmless while
+     * planetDefs was the only source and no gated dimension had a negative id; #248 unioned
+     * in JEResources and 21 Nether-only ores are now gated, which makes the collision live.
+     * Ask {@link #dimensionName} instead -- it returns null for a non-member and cannot
+     * collide with anything. `ScenarioInputs.resolveGates` guards on the name for this
+     * reason and must keep doing so.
+     */
     public int dimensionOf(int keyId) {
         int slot = dimensionOres.slotOf(keyId);
         return slot < 0 ? -1 : dimensionOreDimId[slot];
@@ -1272,7 +1304,7 @@ public final class RecipeGraph {
                 + Sizes.bytes(wildcardSibling)
                 + oreMembers.retainedBytes() + oreIndex.retainedBytes()
                 + Sizes.bytes(oreGroupKeyId) + oreKeys.retainedBytes()
-                + Sizes.bytes(oreKeyGroup) + Sizes.bytes(worldOres)
+                + Sizes.bytes(oreKeyGroup) + Sizes.bytes(worldOres) + Sizes.bytes(offworldOres)
                 + Sizes.bytes(liveKeys) + Sizes.bytes(reshapedOnly);
         long itemFacts = damageable.retainedBytes() + Sizes.bytes(maxDamage)
                 + emcKeys.retainedBytes() + Sizes.bytes(emcValue)

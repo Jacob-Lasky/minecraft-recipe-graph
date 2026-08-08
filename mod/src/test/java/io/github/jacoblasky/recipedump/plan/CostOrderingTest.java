@@ -62,6 +62,45 @@ public class CostOrderingTest {
     }
 
     @Test
+    public void aMachineYouCanBuildIsNotHarderThanAPortal() {
+        // #248's BINDING constraint, and it is not LOOT_COST. The sweep found every positive
+        // toll routing-equivalent across the probe set, so the magnitude is settled by the
+        // ordering alone, and the tightest bound is the machine band: an ore you walk to
+        // through a portal must not read as a bigger obstacle than a machine you have to
+        // BUILD. At a toll of 100 the floor is 101 and this fails.
+        assertTrue(Cost.BASE_RAW_COST + Cost.OVERWORLD_TOLL
+                < Cost.MACHINE_COST[MachineInfo.BUILDABLE]);
+    }
+
+    @Test
+    public void aPortalCostsMoreThanGoingOutsideAndFarLessThanABoss() {
+        // #248. Above BASE_RAW_COST so the overworld ore wins OUTRIGHT rather than by dump
+        // order, which is the entire fix; the whole tolled band below LOOT_COST so a rock
+        // behind a portal never loses to farming a boss. The FLOOR is what has to be bounded,
+        // so the sum is what is compared, not the term on its own.
+        assertTrue(Cost.OVERWORLD_TOLL > 0.0);
+        assertTrue(Cost.BASE_RAW_COST + Cost.OVERWORLD_TOLL < Cost.LOOT_COST);
+        assertTrue(Cost.OVERWORLD_TOLL < Cost.DIMENSION_COST);
+    }
+
+    @Test
+    public void aGateAndATollCanBothApplyAndStayFinite() {
+        // The two terms coexist -- an ore in a dimension you have never been to pays for the
+        // trip AND the portal -- so the SUM is what must still be a route the solver will take
+        // when it is the only one.
+        assertTrue(Cost.BASE_RAW_COST + Cost.DIMENSION_COST + Cost.OVERWORLD_TOLL
+                < Cost.MACHINE_COST[MachineInfo.UNAVAILABLE]);
+    }
+
+    @Test
+    public void theTollIsItsOwnNumber() {
+        // #95's lesson again: one figure for two unrelated statements destroys both orderings.
+        assertNotEquals(Cost.OVERWORLD_TOLL, Cost.DIMENSION_COST, 0.0);
+        assertNotEquals(Cost.OVERWORLD_TOLL, Cost.LOOT_COST, 0.0);
+        assertNotEquals(Cost.OVERWORLD_TOLL, Cost.BASE_RAW_COST, 0.0);
+    }
+
+    @Test
     public void transmutingSitsBetweenStockAndGoingToFarmTheDungeon() {
         // Above a generator because EMC is spent and has to be earned back; below a raw leaf
         // because a player with a working network does not go and farm the drop.

@@ -684,23 +684,62 @@ An ore you can only mine on another planet is not as easy to get as a cobbleston
 until this it was priced as though it were. Travelling is not a recipe, so the graph could
 not see the trip.
 
-Two sources, deliberately kept apart:
+Pack data and world state, deliberately kept apart — so the gate lifts by itself once you
+have been somewhere, with no edit to any list:
 
 | What | Where it comes from | Lives in |
 | --- | --- | --- |
-| Which ores generate in which dimension | the pack's `config/advRocketry/planetDefs.xml` | `graph.json` |
+| Which ores generate in which dimension | the pack's `config/advRocketry/planetDefs.xml` **and** `config/jeresources/world-gen.json` | `graph.json` |
 | Which dimensions you have entered | `<save>/DIM<id>/region/*.mca` | `ae2_have.json` |
+
+**The two files are not the same kind of evidence, and that decides what each may do.**
+planetDefs is a *declaration*: Advanced Rocketry states what it adds to a planet, and means
+it whether or not anyone has looked. `world-gen.json` is a *measurement*: the output of
+JEResources' in-game profiler, which force-generates chunks at random coordinates across
+every registered dimension. Its positive rows are trustworthy; its silences are not, because
+"does not generate there" and "was never sampled" look identical in it.
+
+So the two are used asymmetrically:
+
+- **Only planetDefs may put an ore behind a gate.** A gate says "you cannot get there yet"
+  and is the most expensive thing the cost model says about a place.
+- **JEResources may only ever take a gate away**, on the strength of a positive overworld
+  sighting. That is what freed `abyssalcraft:abyore` from a rocket to Diamerisma and
+  `nuclearcraft:ore:4` from one to Oi — both are ordinary overworld ores and both had been
+  gated since the feature shipped.
+- **JEResources may add to the toll**, because a wrong toll is small and bounded where a
+  wrong gate is not.
+
+The short version: *we are willing to be wrong by a toll and not by a gate.*
 
 An ore is charged for a trip when exactly one dimension declares it, that dimension has no
 generated terrain in your save, and the ore is one the pack registered under an `ore*`
-oredict group. **A planet is not a special kind of place** — Advanced Rocketry registers
-its planets as ordinary dimensions, and the same rule would price the Nether if a config
-declared an ore exclusive to it.
+oredict group. **A planet is not a special kind of place** — Advanced Rocketry registers its
+planets as ordinary dimensions, and nothing in the mechanism treats them specially.
+
+**The gate does not reach the Nether, and that is a limitation rather than a design goal.**
+Only planetDefs may create one, and planetDefs describes Advanced Rocketry planets, so no
+vanilla or modded non-planet dimension can be gated by it however obviously off-world its
+ores are. Cobalt Ore generates in the Nether and nowhere else and still pays only the toll.
+Closing that needs a source that can carry an *absence*, which is #259.
+
+**A gate is not a toll, and both are charged.** The gate above expires: go to the dimension
+once and it stops costing anything, which is right for "you cannot get there yet". A portal
+still has to exist and you still have to walk through it every time, so an ore no source
+places in the overworld also pays a small permanent surcharge. Without it every iron ore in
+the pack priced identically and a plan for a hopper sent you to the Nether for five Nether
+Iron Ore, because nothing separated it from the iron ore in the hill outside.
+
+An ore no source places anywhere at all pays **nothing**. Silence is not evidence: nobody
+profiled the Erebus, so its ores are untolled rather than surcharged on a guess.
 
 The surcharge is a **floor**, not a verdict: every crafted route still competes, and one
-cheaper than the trip wins. On the reference pack 11 keys are gated and 6 end up actually
-paying for the trip; Uranium Ore is declared on Oi but has four crafted routes, so it
+cheaper than the trip wins. Uranium Ore is declared on Oi but has four crafted routes, so it
 settles at 2.0 rather than 801.
+
+On the reference pack 10 ores are gated and 98 pay the toll. The gate set *shrank* when the
+second source landed, which is the direction the asymmetry above guarantees: an observation
+can only ever withdraw one.
 
 **The same ore under the pack's other id is gated too.** MeatballCraft registers several of
 its ores twice — once as the block `planetDefs.xml` names, once as a ContentTweaker

@@ -30,6 +30,11 @@ public class GraphJsonReaderTest {
             + "\"catalysts\":{\"te.pulverizer\":[\"thermalexpansion:machine:1\"]},"
             + "\"category_mods\":{\"te.pulverizer\":\"Thermal Expansion\"},"
             + "\"dimension_ores\":{\"contenttweaker:sednanite_ore\":[147,\"Sedna\"]},"
+            // #248. A SUPERSET of `dimension_ores`, so the fixture carries the gated ore plus
+            // one that is tolled without being gated -- an ore in two off-world dimensions is
+            // behind a portal either way and locked to neither.
+            + "\"offworld_ores\":{\"contenttweaker:sednanite_ore\":[147,\"Sedna\"],"
+            + "\"cyclicmagic:nether_iron_ore\":[-1,\"the_nether\"]},"
             + "\"dump_schema\":4,"
             + "\"dump_version\":\"0.8.0\","
             + "\"future_field_nobody_here_knows\":{\"whatever\":[1,2,3]},"
@@ -161,6 +166,30 @@ public class GraphJsonReaderTest {
         assertEquals("Sedna", graph.dimensionName(ore));
         assertEquals(-1, graph.dimensionOf(graph.keyId("minecraft:iron_ingot")));
         assertNull(graph.dimensionName(graph.keyId("minecraft:iron_ingot")));
+    }
+
+    @Test
+    public void anOffworldOreIsRememberedByKeyAndNothingElse() {
+        // #248. The toll is a flat term, so the compact model keeps membership and drops the
+        // dimension the section still carries -- see GraphBuilder.offworldOre.
+        assertTrue(graph.isOffworldOre(graph.keyId("contenttweaker:sednanite_ore")));
+        assertTrue(graph.isOffworldOre(graph.keyId("cyclicmagic:nether_iron_ore")));
+        assertFalse(graph.isOffworldOre(graph.keyId("minecraft:iron_ingot")));
+        assertEquals(2, graph.offworldOreCount());
+    }
+
+    @Test
+    public void aTolledOreNeedNotBeGated() {
+        // The two sets are different claims and the gate is the strict subset: an ore in two
+        // off-world dimensions is behind a portal either way and locked to neither. Collapsing
+        // them would make the toll expire on the first visit, which is the #248 bug.
+        //
+        // ASSERTED ON THE NAME, NOT ON dimensionOf's -1. For a Nether ore those two answers
+        // are the same number -- "not gated" and "gated, in DIM-1" both read -1 -- so an
+        // assertion on the id would pass whether or not this key was gated. See dimensionOf.
+        int nether = graph.keyId("cyclicmagic:nether_iron_ore");
+        assertTrue(graph.isOffworldOre(nether));
+        assertNull(graph.dimensionName(nether));
     }
 
     @Test

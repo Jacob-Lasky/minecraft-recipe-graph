@@ -71,6 +71,10 @@ final class NaiveGraph {
     private final Map<String, List<String>> catalysts = new HashMap<String, List<String>>();
     private final Map<String, String> categoryMods = new HashMap<String, String>();
     private final Map<String, String[]> dimensionOres = new HashMap<String, String[]>();
+    // #248's toll set. Held as the full `[dim id, name]` value the section carries rather than
+    // as a bare key set, even though the compact model keeps only the key: this class exists to
+    // weigh the naive shape honestly, and storing less than the file holds would flatter it.
+    private final Map<String, String[]> offworldOres = new HashMap<String, String[]>();
     // The five schema-5 sections, in the shapes `model.py` holds them. Read HERE TOO and not
     // skipped: leaving them out would make the naive model look cheaper than it is by
     // exactly what they weigh, and the whole value of this class is that the comparison is
@@ -150,6 +154,10 @@ final class NaiveGraph {
         return worldOres;
     }
 
+    Set<String> offworldOreKeys() {
+        return offworldOres.keySet();
+    }
+
     Map<String, List<String>> oreGroups() {
         return oreMembers;
     }
@@ -179,6 +187,7 @@ final class NaiveGraph {
                 + "names                  " + names.size() + "\n"
                 + "oredict groups         " + oreMembers.size() + "\n"
                 + "world ores             " + worldOres.size() + "\n"
+                + "off-world ores         " + offworldOres.size() + "\n"
                 + "by-output keys         " + byOutput.size() + "\n"
                 + "by-input keys          " + byInput.size() + "\n"
                 + "catalyst categories    " + catalysts.size() + "\n"
@@ -274,6 +283,20 @@ final class NaiveGraph {
                     }
                     reader.endArray();
                     dimensionOres.put(ore, new String[] {dimension, name});
+                }
+                reader.endObject();
+            } else if (field.equals("offworld_ores")) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    String ore = key(reader.nextName());
+                    reader.beginArray();
+                    String dimension = String.valueOf(reader.nextInt());
+                    String name = reader.nextString();
+                    while (reader.hasNext()) {
+                        reader.skipValue();
+                    }
+                    reader.endArray();
+                    offworldOres.put(ore, new String[] {dimension, name});
                 }
                 reader.endObject();
             } else if (field.equals("multiblocks")) {

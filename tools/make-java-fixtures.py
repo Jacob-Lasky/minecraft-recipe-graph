@@ -793,7 +793,9 @@ def graph_identity(graph, path):
     content one. The counts are here because a bare hash mismatch says nothing about WHAT
     moved, and `dimension_ores` in particular is the tell for an oracle built before #112 and
     #117 -- three of the targets below would assert the pre-fix behaviour against such a
-    graph while looking exactly as green, so `generate` refuses one.
+    graph while looking exactly as green, so `generate` refuses one. `offworld_ores` is the
+    same tell for #248, and it moves INDEPENDENTLY of `dimension_ores`: the toll set is a
+    superset of the gate set, so a graph can carry a full gate set and no toll at all.
     """
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -808,6 +810,7 @@ def graph_identity(graph, path):
         "ore_members": len(graph.ore_members),
         "multiblocks": len(graph.multiblocks or {}),
         "dimension_ores": len(graph.dimension_ores or {}),
+        "offworld_ores": len(getattr(graph, "offworld_ores", None) or {}),
     }
 
 
@@ -1041,8 +1044,8 @@ PINNED_CONSTANTS = (
     "BASE_RAW_COST", "BLOCKED_CEILING", "BLOCKED_FLOOR", "BUILD_KNEE", "BUILD_SCALE",
     "BUILD_SLOPE", "BUILD_SPREAD", "CRAFTABLE_COST", "DIMENSION_COST",
     "EMC_COST", "FLUID_SCALE",
-    "GATE_COST", "LOOT_COST", "NON_PRODUCTION_PENALTY", "PASSES", "PRICED_CEILING",
-    "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
+    "GATE_COST", "LOOT_COST", "NON_PRODUCTION_PENALTY", "OVERWORLD_TOLL", "PASSES",
+    "PRICED_CEILING", "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
     "UNPRICED_MACHINE_COST", "UNSOURCED_COST",
 )
 
@@ -1073,6 +1076,12 @@ def generate(graph_path):
             "the dimension gates at all -- three targets would assert the pre-fix behaviour "
             "and look green doing it. Build an oracle with current code first."
             % graph_path)
+    if not getattr(graph, "offworld_ores", None):
+        raise SystemExit(
+            "%s has no offworld_ores, so it was built before #248 and cannot exercise the "
+            "off-world toll -- every iron ore in it ties at BASE_RAW_COST, which is the bug, "
+            "and a fixture frozen against it would assert the pre-fix behaviour while "
+            "looking green. Build an oracle with current code first." % graph_path)
     if not getattr(graph, "emc", None):
         raise SystemExit(
             "%s carries no emc, so it predates schema 5 and #50's terminator can never fire "
