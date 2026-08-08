@@ -104,6 +104,103 @@ class ResolveTest(unittest.TestCase):
         self.assertNotIn("contenttweaker:dungeon_drop", doc["tokens"])
 
 
+class CompleteFamiliesTest(unittest.TestCase):
+    """The curated list has drifted, and the fix derives the gap rather than listing it. #171.
+
+    `DEFAULT_TOKENS` declares `hunter_level_1/20/30` and `chapter_1/2/4/5/6/8`; the reference
+    pack also uses `hunter_level_3/5/9/12/13/17/19/40/50` and `chapter_9`. Ten GATE ids, all
+    consumed by real recipes, none curated. Pasting them in fixes today and guarantees
+    tomorrow, which is the failure the list is already demonstrating.
+    """
+
+    def family_graph(self, *keys):
+        """A graph where every named key is pack-authored, consumed and produced by nothing."""
+        g = Graph()
+        g.names = {"mod:plate": "Plate"}
+        for i, key in enumerate(keys):
+            g.names[key] = key.split(":")[1]
+            g.add(Recipe("r%d" % i, "t", [("mod:plate", 1)], [Ingredient([key], 1)]))
+        return g
+
+    def test_it_completes_a_family_a_human_already_verified(self):
+        g = self.family_graph("contenttweaker:hunter_level_40")
+        got = tokens.complete_families(dict(tokens.DEFAULT_TOKENS), g)
+        self.assertEqual(tokens.GATE, got["contenttweaker:hunter_level_40"])
+
+    def test_it_never_invents_a_family_of_its_own(self):
+        # THE CLAUSE THAT KEEPS IT NARROW. The pack is full of numbered ids that are real
+        # markers -- `1_in_200`, `level15` -- and guessing at them is `candidates`' job to
+        # OFFER a human, not this function's to assert. The stem has to come from a curated id.
+        g = self.family_graph("contenttweaker:some_new_thing_7")
+        got = tokens.complete_families(dict(tokens.DEFAULT_TOKENS), g)
+        self.assertNotIn("contenttweaker:some_new_thing_7", got)
+
+    def test_a_different_separator_is_a_different_family(self):
+        # `chapter_9` and `chapter9` are not the same claim, and treating them as one would
+        # let a stem match ids the curator never looked at.
+        g = self.family_graph("contenttweaker:chapter9")
+        self.assertNotIn("contenttweaker:chapter9",
+                         tokens.complete_families(dict(tokens.DEFAULT_TOKENS), g))
+
+    def test_a_family_that_disagrees_with_itself_is_left_alone(self):
+        # A stem whose curated members carry two kinds is a list saying it does not know.
+        # Resolving that by majority or by first-seen would invent an answer.
+        g = self.family_graph("contenttweaker:mixed_3")
+        known = {"contenttweaker:mixed_1": tokens.GATE, "contenttweaker:mixed_2": tokens.LOOT}
+        self.assertNotIn("contenttweaker:mixed_3", tokens.complete_families(known, g))
+
+    def test_a_key_the_graph_can_explain_is_not_swept_in(self):
+        # THE #117/#168 GUARD. Calling a produced item a placeholder hides a real crafting
+        # route, which costs more than the drift it fixes. On the reference pack no member
+        # needs this clause; it is here for the pack with a craftable `chapter_10`.
+        g = self.family_graph("contenttweaker:hunter_level_40")
+        g.add(Recipe("makes", "t", [("contenttweaker:hunter_level_40", 1)],
+                     [Ingredient(["mod:screw"], 1)]))
+        self.assertNotIn("contenttweaker:hunter_level_40",
+                         tokens.complete_families(dict(tokens.DEFAULT_TOKENS), g))
+
+    def test_a_key_no_recipe_touches_is_not_swept_in_either(self):
+        # `DEFAULT_TOKENS` makes this call by hand -- `chapter_3` and `chapter_7` are
+        # "deliberately ABSENT: the pack defines the item but no recipe references it". Both
+        # are named and neither is live, so this reaches the same answer without being told.
+        g = self.family_graph("contenttweaker:hunter_level_40")
+        g.names["contenttweaker:chapter_3"] = "Chapter 3"
+        self.assertNotIn("contenttweaker:chapter_3",
+                         tokens.complete_families(dict(tokens.DEFAULT_TOKENS), g))
+
+    def test_no_graph_means_no_widening_rather_than_a_guess(self):
+        self.assertEqual(tokens.DEFAULT_TOKENS,
+                         tokens.complete_families(dict(tokens.DEFAULT_TOKENS), None))
+
+    def test_resolve_completes_a_family_the_user_declared(self):
+        # Completion runs AFTER the user's additions, so a family they declare behaves
+        # exactly like a curated one.
+        g = self.family_graph("contenttweaker:custom_2")
+        got = tokens.resolve({"tokens": {"contenttweaker:custom_1": tokens.LOOT}}, g)
+        self.assertEqual(tokens.LOOT, got["contenttweaker:custom_2"])
+
+    def test_a_user_can_disable_a_derived_id(self):
+        # And BEFORE the removals, so a curated list the user cannot edit does not appear by
+        # the back door. Someone who has looked at `hunter_level_9` and decided it is not a
+        # gate has to be able to say so.
+        g = self.family_graph("contenttweaker:hunter_level_40")
+        got = tokens.resolve({"disabled": ["contenttweaker:hunter_level_40"]}, g)
+        self.assertNotIn("contenttweaker:hunter_level_40", got)
+
+    def test_it_does_not_mutate_the_map_it_was_given(self):
+        g = self.family_graph("contenttweaker:hunter_level_40")
+        known = dict(tokens.DEFAULT_TOKENS)
+        tokens.complete_families(known, g)
+        self.assertEqual(tokens.DEFAULT_TOKENS, known)
+
+    def test_candidates_stops_offering_what_completion_already_claimed(self):
+        # Re-offering a derived id asks a human to curate an answer the tool already has.
+        g = self.family_graph("contenttweaker:hunter_level_40", "contenttweaker:novel_thing")
+        offered = {key for key, _n, _c in tokens.candidates(g)}
+        self.assertNotIn("contenttweaker:hunter_level_40", offered)
+        self.assertIn("contenttweaker:novel_thing", offered)
+
+
 class GroupTest(unittest.TestCase):
     def test_kinds_group_and_keep_their_members_named(self):
         """The rollup Jake asked for, and the reason it stops short of one "drop" line:
@@ -292,9 +389,11 @@ class TokensCommandTest(unittest.TestCase):
         stdout, stderr = sys.stdout, sys.stderr
         sys.stdout, sys.stderr = buf, err
         try:
+            self.out = buf
             return cli.cmd_tokens(self.Args(graph=self.path, file=self.ov, **kw))
         finally:
             sys.stdout, sys.stderr = stdout, stderr
+            self.printed = buf.getvalue()
 
     def test_a_bad_kind_is_refused_rather_than_written(self):
         # Writing it would put a key in the file that `resolve` then silently drops, so the
@@ -313,6 +412,26 @@ class TokensCommandTest(unittest.TestCase):
     def test_disabling_removes_a_curated_default(self):
         self.assertEqual(self._run(disable=["contenttweaker:dungeon_drop"]), 0)
         self.assertNotIn("contenttweaker:dungeon_drop", tokens.for_path(self.ov))
+
+    def test_the_listing_shows_the_families_the_plan_prices(self):
+        """The listing resolves WITH the graph, or it disagrees with every other surface.
+
+        #171. This command is the one place a person audits the curated list, so a listing
+        that printed 37 while `plan` priced 47 would hide the very drift the completion rule
+        exists to close -- and it would hide it on the screen someone opened specifically to
+        look for drift. Caught by running the real command against the reference pack.
+        """
+        graph = drop_graph()
+        graph.names["contenttweaker:hunter_level_40"] = "Hunter Level 40"
+        graph.add(Recipe("gate", "t", [("mod:plate", 1)],
+                         [Ingredient(["contenttweaker:hunter_level_40"], 1)]))
+        graph.save(self.path)
+        self.assertEqual(self._run(), 0)
+        self.assertIn("contenttweaker:hunter_level_40", self.printed)
+        # And it is listed as RECOGNISED rather than merely offered as a candidate, which is
+        # the difference between "the tool prices this as a gate" and "somebody should look".
+        recognised = self.printed.split("not recognised")[0]
+        self.assertIn("contenttweaker:hunter_level_40", recognised)
 
 
 if __name__ == "__main__":

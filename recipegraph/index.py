@@ -169,7 +169,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # is a report about what the curated defaults will demote rather than a baked verdict.
     # It is said at build time anyway because this is the log a human reads once per redump,
     # and a rule that has drifted away from the pack shows up as a count that moved.
-    demotions = g.mark_non_production(tokens.resolve())
+    demotions = g.mark_non_production(tokens.resolve(graph=g))
     for line in notproduction.report(demotions):
         say("not production -- " + line)
 
@@ -752,7 +752,7 @@ def coverage(g, token_kinds=None):
         by_source[r.source] = by_source.get(r.source, 0) + 1
         by_cat[r.category] = by_cat.get(r.category, 0) + 1
     if token_kinds is None:
-        token_kinds = tokens.resolve()
+        token_kinds = tokens.resolve(graph=g)
     demotions = g.mark_non_production(token_kinds)
     return {
         "recipes": len(g.recipes),

@@ -87,7 +87,7 @@ def census(graph, have, placed, machines_path, sources_path, tokens_path=None,
     # a warm .cost-cache.json would answer for whichever ones were current when it was written.
     costs = cost_mod.estimate(graph, have=have, machine_states=states,
                               free_sources=free, machine_items=targets,
-                              token_kinds=tokens_mod.for_path(tokens_path),
+                              token_kinds=tokens_mod.for_path(tokens_path, graph),
                               craftables=craftables)
     return states, targets, costs, dict(getattr(costs, "machine_entry", None) or {})
 

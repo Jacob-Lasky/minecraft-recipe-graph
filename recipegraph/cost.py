@@ -679,6 +679,15 @@ CRAFTABLE_COST = 0.25
 # IF A LATER CHANGE GIVES `declared_provenance` A DEFAULT DERIVED IN `load` rather than read
 # from the file -- which `Graph.load` refuses, and says why -- that stops being true and this
 # number has to move.
+#
+# AND FAMILY COMPLETION DECLINES IT FOR THE OPPOSITE REASON, which is worth stating beside the
+# first because the two look alike and are not. `tokens.complete_families` DOES move prices on
+# today's oracle -- 13 keys, ten of them the derived GATE ids -- and still needs no bump,
+# because what moved is `token_kinds`, and `fingerprint` HASHES that. The map goes from 37
+# entries to 47, so the stamp differs and the cache invalidates itself.
+#
+# SO THE ASYMMETRY IS THE POINT: a rule whose input this function already hashes needs no bump,
+# and a rule reading something off the GRAPH does.
 FORMULA_VERSION = 17
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry

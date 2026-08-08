@@ -220,13 +220,18 @@ def _machine_states(graph, have_path, overrides_path):
     return states, overrides, machines.build_targets(info)
 
 
-def _token_kinds(args):
+def _token_kinds(args, graph=None):
     """{key: kind} for pack placeholders, honouring the user's overrides file.
 
     Read through `tokens.resolve` rather than reaching for DEFAULT_TOKENS directly, so the
     plan, the `tokens` listing and any future caller all see the same effective map.
+
+    THE GRAPH IS WHAT COMPLETES A NUMBERED FAMILY, so pass it wherever there is one. #171:
+    `DEFAULT_TOKENS` curates `hunter_level_1/20/30` and the pack also uses nine more, which
+    `tokens.complete_families` derives off `pack_authored_unsourced`. A caller without a graph
+    gets the curated map, which is the pre-#171 answer -- correct, and narrower.
     """
-    return tokens_mod.for_path(getattr(args, "tokens", None))
+    return tokens_mod.for_path(getattr(args, "tokens", None), graph)
 
 
 def _free_sources(have_path, sources_path):
@@ -322,7 +327,7 @@ def cmd_plan(args):
     free = {} if args.ignore_sources else _free_sources(args.have, args.sources)
     # Resolved ONCE and handed to both the cost table and the solver. Two calls would be two
     # reads of data/tokens.json, and a plan whose prices disagreed with its own badges.
-    token_kinds = _token_kinds(args)
+    token_kinds = _token_kinds(args, g)
     # Same rule as the tokens above: resolved once, so the price a route is ranked at and
     # the trip the plan reports are derived from one answer.
     gates = dimensions.gates_for(g, visited)
@@ -783,7 +788,10 @@ def cmd_tokens(args):
         tokens_mod.save_overrides(args.file, added, disabled)
         print("wrote %s" % args.file)
         ov = tokens_mod.load_overrides(args.file)
-    known = tokens_mod.resolve(ov)
+    # `g`, so the LISTING and the PLAN agree about what a token is. #171: family completion
+    # derives ten more GATE ids off the graph, and resolving without it here would print 37
+    # while `plan` priced 47 -- a drift on the one surface a person uses to audit the list.
+    known = tokens_mod.resolve(ov, g)
     by_kind = {}
     for key, kind in known.items():
         by_kind.setdefault(kind, []).append(key)
@@ -910,7 +918,7 @@ def cmd_stats(args):
     g = _load_graph(args.graph)
     # Through `_token_kinds` rather than letting `coverage` default, so the demotion counts it
     # reports are the ones a plan on this machine would actually use. See notproduction.
-    print(json.dumps(index.coverage(g, _token_kinds(args)), indent=2))
+    print(json.dumps(index.coverage(g, _token_kinds(args, g)), indent=2))
     return 0
 
 
