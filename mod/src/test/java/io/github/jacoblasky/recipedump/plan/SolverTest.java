@@ -373,7 +373,10 @@ public class SolverTest {
 
         PlanResult plan = solver(g).build().solve(g.keyId("mod:planks"), 5);
         assertEquals(Long.valueOf(2), plan.tree.runs);   // ceil(5 / 4)
-        assertEquals(Long.valueOf(4), plan.tree.perRun);
+        assertEquals(Double.valueOf(4.0), plan.tree.perRun);
+        // #223 writes the ratio only when the expected yield is below the nominal one, and
+        // a certain recipe is exactly the case where it must stay absent.
+        assertNull("a certain recipe must not carry a yield_chance", plan.tree.yieldChance);
         assertEquals("two runs need two logs", 2, plan.tree.children.get(0).need);
     }
 
@@ -529,7 +532,12 @@ public class SolverTest {
 
         String json = PlanJson.toJson(solver(g).build().solve(g.keyId("mod:planks"), 1));
         assertTrue(json, json.contains("\"target\": \"mod:planks\""));
-        assertTrue(json, json.contains("\"per_run\": 4"));
+        // `4.0` AND NOT `4`: #223 made `per_run` a double on both sides, because a chance
+        // recipe yields a fraction of an item per run. Pinned with the decimal point so a
+        // silent narrowing back to a long fails here rather than only on a chance graph.
+        assertTrue(json, json.contains("\"per_run\": 4.0"));
+        assertTrue("a certain recipe must not carry a yield_chance",
+                !json.contains("\"yield_chance\""));
         // QUOTED ON BOTH SIDES. A bare `from_stock` is a substring of `used_from_stock`,
         // which is always present, so the unquoted check passes on a plan that wrongly
         // emitted the field and fails on one that correctly did not.

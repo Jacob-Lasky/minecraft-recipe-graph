@@ -995,8 +995,14 @@ public final class Solver {
      *
      * A STRING KEY rather than a value class, because it only ever feeds a HashMap and a
      * record type would need equals/hashCode maintained in step with python's tuple.
+     *
+     * PACKAGE-VISIBLE FOR THE TESTS, on the same terms as {@link #mergeSlots}: what it
+     * PARTITIONS is the whole contract and there is no way to observe that through a plan.
+     * Two offers that differ only in yield chance price differently, so they never tie, so
+     * `interchangeable` can never show whether the shape told them apart -- and a shape that
+     * silently stopped discriminating would report a hundredfold difference as a coin toss.
      */
-    private String offerShape(int recipeId, int keyId) {
+    String offerShape(int recipeId, int keyId) {
         RecipeStore store = g.recipes();
         List<MergedSlot> slots = mergeSlots(recipeId);
         // Sorted, matching python's `tuple(sorted(...))`: slot ORDER must not make two
@@ -1006,12 +1012,25 @@ public final class Solver {
             parts.add(slot.options + "x" + slot.qty);
         }
         Collections.sort(parts);
-        long perRun = 0;
-        for (int p = store.outputStart(recipeId); p < store.outputEnd(recipeId); p++) {
-            if (store.outputKeyAt(p) == keyId) {
-                perRun += store.outputQtyAt(p);
-            }
-        }
+        // #223: THE EXPECTED YIELD, NOT THE NOMINAL ONE, AND UNLIKE THE CONSUME CHANCE THIS
+        // ONE DOES BELONG IN THE SHAPE. The javadoc above excludes `p` because a slot's
+        // consume chance does not change what the offer COSTS. A yield chance does: two
+        // recipes that both say "1 iron" are not the same offer when one of them delivers it
+        // 1% of the time, and reporting that pair as an arbitrary tie would call a hundredfold
+        // difference a coin toss. Inert on every graph built before schema 8, where every
+        // chance is 1.0 and this is the sum it always was. Mirrors `solve.Solver._shape`.
+        //
+        // A DOUBLE IN A SHAPE KEY IS COMPARED EXACTLY, AND THAT IS ACCEPTABLE IN THIS ONE
+        // DIRECTION. `Double.toString` is injective over distinct doubles, so appending it
+        // below is an exact comparison by another route -- the same property python gets from
+        // putting a float in a tuple. Two recipes whose expected yields are equal in
+        // arithmetic but differ in the last bit therefore read as DIFFERENT offers, so a tie
+        // can be SPLIT that should have joined. Splitting under-reports ties, which says "this
+        // was a real choice" about a coin toss; the reverse would call a hundredfold
+        // difference arbitrary, and that is the error that would actually mislead. DO NOT
+        // "fix" this with a tolerance. Certain recipes are unaffected either way, because
+        // `expectedYield` multiplies integer quantities by exactly 1.0.
+        double perRun = store.expectedYield(recipeId, keyId);
         // A BOOLEAN HERE WHERE PYTHON WRITES THE GROUND, and the two partition identically.
         // Python appends `recipe.not_production or ""`, so it separates a `loot_table` entry
         // from an `annotation` one; this writes true for both. They cannot disagree, and the
@@ -1232,27 +1251,71 @@ public final class Solver {
         // recipe makes `animus:kama_bound#fd1adc426e12` and yields per that key, so reading
         // `keyId` would fall through to a per-run of 1 and plan the wrong number of runs.
         int made = variant >= 0 ? variant : keyId;
-        long perRun = 1;
-        for (int p = store.outputStart(recipeId); p < store.outputEnd(recipeId); p++) {
-            if (store.outputKeyAt(p) == made) {
-                perRun = store.outputQtyAt(p);
-                break;
-            }
+        // THE SUM ACROSS EVERY SLOT THAT MAKES IT, WHICH THIS USED TO GET WRONG. It read the
+        // FIRST matching slot and stopped, while `offerShape` above already summed them, so
+        // the ranker and the expander disagreed about how much a run produces on the 618
+        // reference-graph recipes that name one output key more than once. TechReborn's
+        // Industrial Grinder is the population: four secondary slots, one key, quantities like
+        // 45/23/15/6, of which the first-match read saw 45. That is #29's ranker-versus-solver
+        // divergence in miniature, and `RecipeStore.expectedYield` is now the one spelling both
+        // sides call.
+        //
+        // AND IT IS THE EXPECTED YIELD, so #223's chance is folded in: a slot that delivers
+        // 10% of the time contributes a tenth of its quantity to what a run is worth.
+        double perRun = store.expectedYield(recipeId, made);
+        // Nominal is what the recipe SAYS it makes; expected is what it makes on average. The
+        // ratio is the only honest single number for "how often does this work", and it is
+        // reported below so a plan can say so rather than quietly presenting an expectation as
+        // a certainty.
+        long nominal = store.nominalYield(recipeId, made);
+        if (perRun <= 0.0) {
+            // A recipe that never yields the key is not a way to obtain it, and dividing by
+            // zero here would report one run for any demand. No such recipe exists in the
+            // reference pack (all 835 `addItemOutput` chances are above zero, 834 of them
+            // fractional), so this is a guard against a future dump rather than a live case;
+            // falling back to the nominal yield keeps the plan finite and visibly wrong rather
+            // than infinite and invisible. `nominal or 1` on the Python side.
+            perRun = nominal != 0 ? nominal : 1;
         }
-        if (perRun == 0) {
-            perRun = 1;   // `or 1` on the Python side: a zero-yield output is not a divisor
+        // THE INTEGER CEILING IS KEPT WHEREVER NOTHING IS UNCERTAIN, and that is the whole of
+        // `3a21fd5`. `Math.ceil` on a double divide is NOT the same function as an exact
+        // integer ceiling: a quotient that lands one bit above an exact integer, which the
+        // double divide can produce and integer division cannot, rounds up to ONE RUN TOO
+        // MANY. Every graph built before schema 8 carries a chance of 1.0 everywhere, so a
+        // naive float port would have moved plans -- and therefore fixtures -- for recipes
+        // #223 does not touch at all, churn indistinguishable from the real change it is
+        // buried in.
+        //
+        // THE ROUTE IS AN EXACT FLOAT COMPARISON AND THAT IS SOUND HERE. `expectedYield`
+        // multiplies integer quantities by exactly 1.0 when every chance is 1.0, and 1.0 is
+        // exact in IEEE754, so `perRun == nominal` holds for a certain recipe and fails for an
+        // uncertain one. `nominal` widens to a double for the comparison, exactly as python
+        // compares its float to its int.
+        //
+        // AND IT MATTERS MORE HERE THAN IN PYTHON, because java has no `//` to copy: integer
+        // division truncates toward zero, so the ceiling has to be written deliberately.
+        // `-Math.floorDiv(-remainder, nominal)` is that ceiling and it is the arithmetic this
+        // method used before #223. Written through `floorDiv` rather than as `(a + b - 1) / b`
+        // because the shorthand overflows on a large remainder, and this pack has a recipe
+        // yielding 60,466,176 at once.
+        long runs;
+        if (perRun == nominal) {
+            runs = -Math.floorDiv(-remainder, nominal);
+        } else {
+            runs = (long) Math.ceil(remainder / perRun);
         }
-        // Python's `-(-remainder // per_run)`, which is ceiling division. Written through
-        // floorDiv rather than as `(a + b - 1) / b`, because Java's `/` truncates toward zero
-        // and the shorthand overflows on a large remainder.
-        long runs = -Math.floorDiv(-remainder, perRun);
 
         PlanNode node = base.copy();
         node.status = fromStock != 0 ? PlanStatus.PARTIAL : PlanStatus.CRAFT;
         node.recipe = store.rid(recipeId);
         node.category = g.categoryName(store.categoryId(recipeId));
         node.runs = runs;
-        node.perRun = perRun;
+        node.perRun = Double.valueOf(perRun);
+        if (nominal != 0 && perRun < nominal) {
+            // OMITTED AT CERTAINTY so every plan of a pre-#223 graph is unchanged, and so the
+            // field's presence is itself the signal a renderer keys on. Mirrors `solve._build`.
+            node.yieldChance = Double.valueOf(perRun / nominal);
+        }
         // OF THE KEY THE RECIPE ACTUALLY MAKES. For a substitution that is the variant, and
         // counting the bare key's producers would report 0 -- "there was no other way to do
         // this" -- on a node that is one of several ways.
@@ -1332,9 +1395,9 @@ public final class Solver {
         long qty;
         int options;
         /** Probability a run consumes this slot. 1.0 on every graph predating #175. */
-        final float consumeChance;
+        final double consumeChance;
 
-        MergedSlot(int keyId, long qty, int options, float consumeChance) {
+        MergedSlot(int keyId, long qty, int options, double consumeChance) {
             this.keyId = keyId;
             this.qty = qty;
             this.options = options;
@@ -1342,7 +1405,7 @@ public final class Solver {
         }
 
         boolean survivesRun() {
-            return consumeChance == 0.0f;
+            return consumeChance == 0.0;
         }
     }
 
@@ -1368,15 +1431,15 @@ public final class Solver {
      */
     List<MergedSlot> mergeSlots(int recipeId) {
         RecipeStore store = g.recipes();
-        Map<Long, MergedSlot> merged = new LinkedHashMap<Long, MergedSlot>();
+        Map<SlotBucket, MergedSlot> merged = new LinkedHashMap<SlotBucket, MergedSlot>();
         for (int slot = store.slotStart(recipeId); slot < store.slotEnd(recipeId); slot++) {
             int chosen = pickAlternative(slot);
             if (chosen < 0) {
                 continue;   // an empty slot: a spacer in the recipe grid
             }
             int options = store.altEnd(slot) - store.altStart(slot);
-            float chance = store.slotConsumeChance(slot);
-            Long bucket = Long.valueOf(mergeBucket(chosen, chance));
+            double chance = store.slotConsumeChance(slot);
+            SlotBucket bucket = new SlotBucket(chosen, chance);
             MergedSlot row = merged.get(bucket);
             if (row == null) {
                 merged.put(bucket,
@@ -1396,18 +1459,51 @@ public final class Solver {
      * permanently and spend the same item as an ingredient, which are two different
      * requirements: own one, and spend N per run. Bucketing on the item alone fused them and
      * SUMMED their quantities, turning the retained one into stock you spend. `model.merge_slots`
-     * buckets identically, and the two must agree or the golden fixtures diverge.
+     * buckets on the tuple `(key, consume_chance)`, and the two must agree or the golden
+     * fixtures diverge.
      *
-     * The 3x3-of-one-ingredient collapse this method exists for is unaffected, because those
+     * The 3x3-of-one-ingredient collapse the merge exists for is unaffected, because those
      * nine slots share a chance.
      *
-     * PACKED INTO A `long` RATHER THAN A STRING KEY: this runs once per slot of every candidate
-     * recipe, and a `String.format` there would allocate on the hot path. `+ 0.0f` normalises
-     * `-0.0f` to `0.0f` before taking the bits, because the two compare equal and would
-     * otherwise land in different buckets, splitting a row on a distinction nothing else makes.
+     * A VALUE CLASS AND NOT A PACKED `long`, WHICH IS WHAT #175 USED AND WHAT #223 OUTGREW.
+     * The chance was a float then and 32 bits of key plus 32 of chance fit exactly; widening
+     * it to a double leaves no lossless packing, and folding the 64 bits down to 32 would make
+     * two DIFFERENT chances share a bucket and be summed -- the same defect the bucket was
+     * widened to fix, arriving through the hash. This costs no allocation over what was there:
+     * the packed form was boxed into a `Long` for the map anyway, and every real bucket is far
+     * outside the `Long.valueOf` cache.
+     *
+     * `+ 0.0` normalises `-0.0` to `0.0` before the comparison, because the two compare equal
+     * under `==` and would otherwise land in different buckets on `doubleToLongBits`, splitting
+     * a row on a distinction nothing else in either language makes.
      */
-    private static long mergeBucket(int keyId, float chance) {
-        return ((long) keyId << 32) | (Float.floatToIntBits(chance + 0.0f) & 0xffffffffL);
+    private static final class SlotBucket {
+        private final int keyId;
+        private final double chance;
+
+        SlotBucket(int keyId, double chance) {
+            this.keyId = keyId;
+            this.chance = chance + 0.0;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (!(other instanceof SlotBucket)) {
+                return false;
+            }
+            SlotBucket that = (SlotBucket) other;
+            // `Double.compare` and not `==`, so that NaN buckets with NaN rather than with
+            // nothing. No dump has ever written one -- `hei_dump._chance` refuses anything
+            // outside 0.0 to 1.0 -- but a bucket key that is never equal to itself would leak
+            // one row per slot, which is a far stranger failure than a merged pair.
+            return keyId == that.keyId && Double.compare(chance, that.chance) == 0;
+        }
+
+        @Override
+        public int hashCode() {
+            long bits = Double.doubleToLongBits(chance);
+            return keyId * 31 + (int) (bits ^ (bits >>> 32));
+        }
     }
 
     // -- the wire format ----------------------------------------------------------------

@@ -53,6 +53,22 @@ which only a schema-5 dump supplies, so on an older oracle they would freeze the
 the feature -- a fixture a port passes by implementing nothing. `generate` refuses an oracle
 with no `emc`, for the same reason it refuses one with no `dimension_ores`.
 
+AND THE OTHER DIRECTION HAS A STANDING GAP THAT NO FIXTURE HERE CAN CLOSE, which is worth
+knowing before anyone reads a green gate as covering the whole port. The oracle in use is a
+SCHEMA-5 graph. It carries no `p` (#175) and no `q` (#223) anywhere, so every consume chance
+and every yield chance in it is 1.0 -- and a port that dropped both features entirely would
+pass all 21 plan fixtures. That masked a float-narrowed consume chance in `RecipeStore` for
+the whole of #175's life. The features are pinned by unit tests on both sides instead:
+`tests/test_consumption.py` and `tests/test_schema_eight.py` in python,
+`mod/.../plan/RetainedInputTest.java` and `mod/.../plan/ChanceOutputTest.java` in java.
+
+DO NOT ADD A REFUSAL FOR A MISSING `q`, the way `emc` and `dimension_ores` have one. Those two
+refuse an oracle that is too OLD for a fixture that already exists; there is no chance-output
+fixture to protect, because no oracle that could carry one exists yet. A refusal would make
+the fixture set unbuildable today and buy nothing. When a schema-8 dump lands, add a TARGET
+that routes through a chance recipe and let the coverage check below hold it -- that is the
+mechanism, and it is the one that will notice when the claim lapses.
+
 WHY THE SCENARIOS ARE HARDCODED RATHER THAN READ FROM data/. A fixture is a contract, and a
 contract whose inputs live in a gitignored 193 KB world scan cannot be reproduced by anyone
 else -- including the Java suite, which has to construct the same solver. So every input

@@ -1546,13 +1546,25 @@ public class DumpCommand extends CommandBase {
      *   7  an item input stack may carry `p`, the probability a run SPENDS it, absent meaning
      *      1.0. Written for Tinkers casts that survive and Modular Machinery's `setChance`.
      *      See #175.
+     *   8  an OUTPUT stack may carry `q`, the probability a run YIELDS it, absent meaning
+     *      1.0. `setChance` applies to outputs too and the pack makes 835 such calls, 834 of
+     *      them fractional and spanning 0.99 down to 0.001. See #223.
      *
-     * SEVEN IS AN ADDED FIELD, SO A SCHEMA-6 READER IS NOT WRONG, ONLY OLDER, and the bump is
-     * still right. `p` is absent wherever it would be 1.0, so a 6 reader sees exactly the
-     * dump it saw before on every non-catalyst line and never misparses one. What it cannot
-     * do is tell a genuinely permanent catalyst from an unmarked one, which is a difference
-     * in what the plan COSTS rather than in what it parses -- and the number's job is to let
-     * a reader say "this dump knows something I do not" rather than to gate a crash.
+     * SEVEN AND EIGHT ARE ADDED FIELDS, SO AN OLDER READER IS NOT WRONG, ONLY OLDER, and the
+     * bumps are still right. Both are absent wherever they would be 1.0, so an older reader
+     * sees exactly the dump it saw before on every unmarked line and never misparses one.
+     * What it cannot do is tell a genuinely permanent catalyst from an unmarked one, or a 0.1%
+     * yield from a guaranteed one, which is a difference in what the plan COSTS rather than in
+     * what it parses -- and the number's job is to let a reader say "this dump knows something
+     * I do not" rather than to gate a crash.
+     *
+     * `q` IS A SEPARATE FIELD FROM `p` AND MUST STAY ONE. `p` answers "how much of this input
+     * does a run spend"; `q` answers "how often does a run yield this output". `stack` already
+     * refuses to conflate them from the emitting end, and the reader halves are two functions
+     * over one validator in `sources/hei_dump.py` for the same reason. They also differ in
+     * which direction a missing value is safe: an absent `p` overstates a price, which is
+     * harmless, while an absent `q` leaves a 0.1% recipe reading as guaranteed, which is the
+     * defect #223 exists to fix.
      *
      * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
      * expensive step is a launch of the game, not the code, and five increments on one
@@ -1586,7 +1598,7 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 7;
+    static final int SCHEMA = 8;
 
     /**
      * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194

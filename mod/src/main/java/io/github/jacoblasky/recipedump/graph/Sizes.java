@@ -51,8 +51,8 @@ public final class Sizes {
         return array == null ? 0L : array(array.length, 8);
     }
 
-    public static long bytes(float[] array) {
-        return array == null ? 0L : array(array.length, 4);
+    public static long bytes(double[] array) {
+        return array == null ? 0L : array(array.length, 8);
     }
 
     /** An object with `fieldBytes` of declared fields, header included. */
