@@ -3,6 +3,8 @@ package io.github.jacoblasky.recipedump.client.planner;
 import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -370,6 +372,20 @@ public final class NodeRowText {
         if (node.fromStock() > 0) {
             parts.add(quantityPlain(node.fromStock()) + " from stock");
         }
+        // EARLY IN THE RUN, WHICH IS THE OPPOSITE END FROM `machineWhyBit` AND FOR THE SAME
+        // REASON (#252). That one goes last so `fit` cuts it first, because the machine
+        // and its state are what a reader scans for and the full sentence lives on the TODO
+        // panel. This one has no second home and it is a warning: a fractional yield means the
+        // machine will run and produce nothing, which changes whether the plan is worth
+        // starting. Cutting it first would drop the only thing on the row that says so.
+        //
+        // NO BROWSER ORDER TO MIRROR HERE, unlike everything else in this run. `render.py`
+        // draws neither `runs` nor `per_run` on a row, which is what #190 found and #252 is
+        // fixing, so the placement is argued from this panel rather than copied.
+        String yield = yieldBit(node);
+        if (yield != null) {
+            parts.add(yield);
+        }
         String machine = machineBit(node);
         if (machine != null) {
             parts.add(machine);
@@ -520,6 +536,72 @@ public final class NodeRowText {
             return "search gave up early -- the plan below may be missing branches";
         }
         return "";
+    }
+
+    /**
+     * How much work this node is, and how much of it is wasted, or null on a leaf.
+     *
+     * ONE PART RATHER THAN THREE, so {@link #fit} keeps or drops the whole statement. Split
+     * across three parts, a cut lands mid-sentence and leaves `1,000 runs` standing alone,
+     * which is the number that looks fine and is the reason the other two exist.
+     *
+     * GUARDED ON `runs`, NOT ON `perRun`. A leaf has neither, and `perRun` is the one that can
+     * legitimately be absent on a node that has runs: `solve.py` writes `or 1` rather than
+     * emit a zero yield, so a missing `per_run` means "not recorded" and not "yields nothing".
+     *
+     * THE CHANCE IS ONLY SHOWN BELOW 1. `yield_chance` is written by `solve.Solver._build` as
+     * `per_run / nominal` and only when the expectation falls short, so a present value at 1
+     * would be a plan saying "this yields all of it", which is what every row without the mark
+     * already says. See `PlanNode.yieldChance` for why it is a separate field from `perRun`.
+     */
+    private static String yieldBit(PlanNode node) {
+        if (node.runs() <= 0) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(quantityPlain(node.runs())).append(node.runs() == 1L ? " run" : " runs");
+        if (node.perRun() > 0.0) {
+            sb.append(", ").append(amount(node.perRun())).append(" per run");
+        }
+        double chance = node.yieldChance();
+        if (chance > 0.0 && chance < 1.0) {
+            sb.append(", yields ").append(percent(chance)).append(" of the time");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A quantity that is usually whole and is sometimes not.
+     *
+     * THE WHOLE CASE GOES THROUGH {@link #quantity}'S COMMA GROUPING, so a per-run yield and
+     * the `need` beside it on the same row are formatted by one rule. A plan rendering
+     * `60,466,176x` above `60466176 per run` is one panel measuring the same thing two ways,
+     * which is the defect a #190 screenshot caught on fluids and is invisible in a diff.
+     */
+    private static String amount(double value) {
+        if (value == Math.rint(value) && !Double.isInfinite(value)) {
+            return quantityPlain((long) value);
+        }
+        return BigDecimal.valueOf(value)
+                .round(new MathContext(3))
+                .stripTrailingZeros()
+                .toPlainString();
+    }
+
+    /**
+     * A fraction as a percentage, with the precision the fraction actually carries.
+     *
+     * THREE SIGNIFICANT FIGURES RATHER THAN A FIXED DECIMAL COUNT, because this field spans
+     * three orders of magnitude: the pack's output chances run from 0.99 down to 0.001, so
+     * `%.1f%%` renders the bottom of that range as `0.1%` and the 0.001 case as `0.0%`, which
+     * reads as "never" for a route that does work. `toPlainString` rather than `toString` so a
+     * small value cannot come out in scientific notation.
+     */
+    private static String percent(double fraction) {
+        return BigDecimal.valueOf(fraction * 100.0)
+                .round(new MathContext(3))
+                .stripTrailingZeros()
+                .toPlainString() + "%";
     }
 
     private static String quantityPlain(long value) {

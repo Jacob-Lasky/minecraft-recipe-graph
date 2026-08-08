@@ -499,6 +499,102 @@ public class NodeRowTextTest {
         assertFalse(owned, owned.contains("no blueprint in reach"));
     }
 
+    @Test
+    public void aCraftNodeSaysHowManyRunsAndWhatEachOneYields() {
+        // #190 found `runs` and `per_run` parsed and drawn by nothing, main or test. This is
+        // the assertion that they reach a row at all.
+        String meta = NodeRowText.meta(yieldNode(2L, Double.valueOf(4.0), null));
+        assertTrue(meta, meta.contains("2 runs"));
+        assertTrue(meta, meta.contains("4 per run"));
+    }
+
+    @Test
+    public void aWholePerRunIsGroupedLikeTheQuantityBesideIt() {
+        // One panel must not measure the same thing two ways. A #190 screenshot caught exactly
+        // this on fluids, `934,400x` above `934400 mB`, which no test saw because both halves
+        // were individually correct and only the adjacency was wrong.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(60_466_176.0), null));
+        assertTrue(meta, meta.contains("60,466,176 per run"));
+        assertFalse("a whole yield must not render as a decimal: " + meta,
+                    meta.contains("60466176.0"));
+    }
+
+    @Test
+    public void aFractionalYieldSaysHowOftenItPaysOut() {
+        // The #223 case this exists for: 834 of the pack's 835 output chances are fractional.
+        String meta = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+        assertTrue(meta, meta.contains("1,000 runs"));
+        assertTrue(meta, meta.contains("yields 0.1% of the time"));
+        // NOT `0.0%`, which is what a fixed one-decimal format renders and which reads as
+        // "never" for a route that does work.
+        assertFalse("a rare yield must not round to zero: " + meta, meta.contains("0.0%"));
+    }
+
+    @Test
+    public void aFullYieldSaysNothingAboutChance() {
+        // `yield_chance` is written only when the expectation falls short, so a row without it
+        // is already saying "this yields all of it". Repeating that on every craft row would
+        // make the mark unbelievable on the rows that carry it.
+        String meta = NodeRowText.meta(yieldNode(3L, Double.valueOf(1.0), null));
+        assertFalse(meta, meta.contains("yields"));
+        assertFalse(meta, meta.contains("%"));
+    }
+
+    @Test
+    public void aLeafSaysNothingAboutRuns() {
+        // A raw node has no recipe, so "0 runs" would be a claim about work that is not done.
+        assertFalse(NodeRowText.meta(node("raw")).contains("run"));
+    }
+
+    @Test
+    public void theYieldComesBeforeTheMachineReasonSoACutTakesTheReasonFirst() {
+        // WHY IT IS EARLY IN THE RUN. `machineWhyBit` is last so `fit` drops it first, because
+        // its full text lives on the TODO panel's machine section. The yield has no second
+        // home and it is the part that says the plan may not be worth starting, so a cut must
+        // reach the reason before it reaches the yield.
+        //
+        // BUILT WITH BOTH PARTS PRESENT, and asserted on their ORDER rather than on their
+        // presence. An earlier version of this test allowed the machine to be absent, which
+        // made it pass on a node that could not have failed it.
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001),
+                                  "buildable", "craftable: mod:pulverizer");
+        String meta = NodeRowText.meta(node);
+        int yieldAt = meta.indexOf("yields");
+        int whyAt = meta.indexOf("craftable: mod:pulverizer");
+        assertTrue("the yield is missing from: " + meta, yieldAt >= 0);
+        assertTrue("the machine reason is missing from: " + meta, whyAt >= 0);
+        assertTrue("the yield must precede the machine reason: " + meta, yieldAt < whyAt);
+    }
+
+    private static PlanNode yieldNode(long runs, Double perRun, Double yieldChance) {
+        return yieldNode(runs, perRun, yieldChance, null, null);
+    }
+
+    private static PlanNode yieldNode(long runs, Double perRun, Double yieldChance,
+                                      String machineState, String machineWhy) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("recipe", "r:1");
+        json.addProperty("runs", Long.valueOf(runs));
+        if (perRun != null) {
+            json.addProperty("per_run", perRun);
+        }
+        if (yieldChance != null) {
+            json.addProperty("yield_chance", yieldChance);
+        }
+        if (machineState != null) {
+            json.addProperty("category", "thermalexpansion.pulverizer");
+            json.addProperty("machine", "Pulverizer");
+            json.addProperty("machine_state", machineState);
+            json.addProperty("machine_why", machineWhy);
+        }
+        return PlanJson.readNode(json);
+    }
+
     private static PlanNode machineNode(String state, String why) {
         com.google.gson.JsonObject json = new com.google.gson.JsonObject();
         json.addProperty("key", "test:thing");
