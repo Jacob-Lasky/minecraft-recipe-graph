@@ -431,7 +431,27 @@ public strictfp final class Cost {
      * Saturating at `Integer.MAX_VALUE` instead would agree with python only up to 2^31.
      */
     static double scaledQty(RecipeGraph graph, int keyId, long qty) {
-        double q = Math.max(qty, 1L) * (graph.isFluid(keyId) ? FLUID_SCALE : 1.0);
+        return scaledQty(graph, keyId, qty, 1.0);
+    }
+
+    /**
+     * The same, scaled by #223's output yield probability.
+     *
+     * THE CHANCE BELONGS HERE RATHER THAN AT THE CALL SITE SO THE FLOOR BELOW GOVERNS IT, and
+     * that is the whole reason this takes a third argument instead of the caller dividing
+     * afterwards. A recipe yielding its product 0.1% of the time really does produce a tenth
+     * of a percent of an item per run, and dividing by that is correct; a chance of 0.0 is a
+     * recipe that never yields it at all, and dividing by THAT manufactures an infinitely
+     * cheap resource out of a typo. The floor already exists for the sub-millibucket case and
+     * catches this one by construction. Mirrors `cost._scaled_qty` in python, whose default
+     * argument is what the two-argument form above spells.
+     *
+     * THE MULTIPLICATION ORDER IS PART OF THE CONTRACT: `qty * chance * scale`, exactly as
+     * python writes it. Floating-point multiplication is not associative, the plan fixtures
+     * compare with a zero delta, and `qty * (chance * scale)` is a different double.
+     */
+    static double scaledQty(RecipeGraph graph, int keyId, long qty, double chance) {
+        double q = Math.max(qty, 1L) * chance * (graph.isFluid(keyId) ? FLUID_SCALE : 1.0);
         // A sub-millibucket output would divide by ~0 and manufacture a free resource.
         return Math.max(q, FLUID_SCALE);
     }
@@ -1042,8 +1062,26 @@ public strictfp final class Cost {
                     // 60,466,176 fruit, so the 5,000 wall in front of an unavailable machine
                     // collapsed to 8e-5 and 126 items priced under 0.1. That is how "one iron
                     // ingot" came out as "smelt a Spawner Shard". See #29.
+                    //
+                    // #223: THE CHANCE SCALES THE YIELD, WHICH IS THE DIVISOR, so a recipe that
+                    // produces its output 10% of the time costs ten times as much per unit of
+                    // it. The pack makes 834 fractional `addItemOutput` declarations spanning
+                    // 0.99 down to 0.001, so this is up to a 1000x correction and it only ever
+                    // moves prices UP.
+                    //
+                    // DELIBERATELY NOT APPLIED TO `base`, and that is the same decision the
+                    // paragraph above makes for a large batch rather than a new one. A 1% yield
+                    // genuinely needs ~100 runs and therefore ~100 machine-runs, so the strictly
+                    // correct per-unit machine cost is `base / (qty * chance)`. `base` is
+                    // already charged once per unit rather than once per batch, precisely so a
+                    // big output cannot make an unavailable machine free, and dividing it here
+                    // would be that same collapse arriving through the other term. Leaving it
+                    // undivided UNDERSTATES the machine cost of a chance recipe, which is the
+                    // conservative direction: it can make a chance route look cheaper than it
+                    // is, never a certain route look dearer than it is. Mirrors `cost._relax`.
                     double perUnit = base + retained + ingredients
-                            / scaledQty(graph, key, recipes.outputQtyAt(p));
+                            / scaledQty(graph, key, recipes.outputQtyAt(p),
+                                    recipes.outputChanceAt(p));
                     if (perUnit < cost[key] - 1e-9) {
                         cost[key] = perUnit;
                         changed++;

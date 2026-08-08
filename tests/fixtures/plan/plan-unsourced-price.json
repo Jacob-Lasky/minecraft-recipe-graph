@@ -64,7 +64,7 @@
    "machine_state": "have",
    "name": "HEUF Fuel",
    "need": 1,
-   "per_run": 1,
+   "per_run": 2,
    "recipe": "hei:bdew.jeibees.produce.rootBees:145281",
    "runs": 1,
    "status": "craft"

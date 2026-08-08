@@ -141,6 +141,12 @@ public final class GraphJsonReader {
                 while (reader.hasNext()) {
                     String key = null;
                     int qty = 1;
+                    // 1.0, NOT 0.0: absent `q` means the run always yields this output, and
+                    // that default is the only reason a graph written before #223 reads
+                    // identically. Getting it backwards would make every output of every old
+                    // graph unobtainable, since `Solver` treats a zero expected yield as no
+                    // route rather than as a divisor.
+                    double yieldChance = 1.0;
                     reader.beginObject();
                     while (reader.hasNext()) {
                         String outField = reader.nextName();
@@ -148,13 +154,20 @@ public final class GraphJsonReader {
                             key = reader.nextString();
                         } else if (outField.equals("qty")) {
                             qty = reader.nextInt();
+                        } else if (outField.equals("q")) {
+                            // `q` AND NOT `p`, WHICH IS A DIFFERENT FIELD ON A DIFFERENT
+                            // STACK. `p` is how much of an INPUT a run spends and lives on an
+                            // `in` slot; `q` is how often a run yields an OUTPUT. Reading one
+                            // as the other would mark a chance output a catalyst. See
+                            // `sources/hei_dump._yield_chance` and `dump_meta`'s schema 8.
+                            yieldChance = reader.nextDouble();
                         } else {
                             reader.skipValue();
                         }
                     }
                     reader.endObject();
                     if (key != null) {
-                        builder.output(builder.key(key), qty);
+                        builder.output(builder.key(key), qty, yieldChance);
                     }
                 }
                 reader.endArray();
@@ -192,10 +205,10 @@ public final class GraphJsonReader {
         while (reader.hasNext()) {
             int qty = 1;
             String role = null;
-            // 1.0f, NOT 0.0f: absent `p` means fully consumed, and this default is the only
+            // 1.0, NOT 0.0: absent `p` means fully consumed, and this default is the only
             // reason a graph written before #175 reads identically. Getting it backwards would
             // make every slot in every old graph a permanent requirement.
-            float consumeChance = 1.0f;
+            double consumeChance = 1.0;
             IntArray alternatives = new IntArray(4);
             reader.beginObject();
             while (reader.hasNext()) {
@@ -222,7 +235,11 @@ public final class GraphJsonReader {
                 } else if (field.equals("role")) {
                     role = nextStringOrNull(reader);
                 } else if (field.equals("p")) {
-                    consumeChance = (float) reader.nextDouble();
+                    // NOT NARROWED TO A FLOAT ON THE WAY IN, which it was until #223. Python
+                    // holds this as the double `json` parsed, `Cost` multiplies a price by it,
+                    // and `PlanFixtureTest` compares the result with a zero delta -- and
+                    // `(double) 0.95f` is 0.949999988079071. See `RecipeStore.slotConsume`.
+                    consumeChance = reader.nextDouble();
                 } else {
                     reader.skipValue();
                 }

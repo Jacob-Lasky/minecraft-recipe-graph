@@ -134,7 +134,10 @@ public final class PlanJson {
             w.name("runs").value(node.runs.longValue());
         }
         if (node.perRun != null) {
-            w.name("per_run").value(node.perRun.longValue());
+            writePerRun(w, node);
+        }
+        if (node.yieldChance != null) {
+            w.name("yield_chance").value(node.yieldChance.doubleValue());
         }
         if (node.alternatives != null) {
             w.name("alternatives").value(node.alternatives);
@@ -181,4 +184,44 @@ public final class PlanJson {
         }
         w.endObject();
     }
+    /**
+     * `per_run`, as the token python writes: an INTEGER when the yield is certain, a DOUBLE
+     * when it is an expectation. #252 owns this rule and #223 carries it.
+     *
+     * WHY THE RULE EXISTS AT ALL. An always-double emitter and this one compare EQUAL under
+     * `JsonCompare`, which parses before comparing, so no golden gate can tell them apart --
+     * and that is exactly why it had to be decided rather than discovered. Measured on the
+     * python side before its own guard landed: 17 of 24 fixtures changed, 1,407 insertions
+     * and 1,407 deletions, every line `"per_run": 1` becoming `"per_run": 1.0`, and not one
+     * plan different. That churn buries the handful of real movements and makes the diff
+     * unreviewable at the moment a reviewer most needs to see what moved.
+     *
+     * CERTAINTY, NOT MERE INTEGRALITY, AND THE TWO ARE NOT THE SAME PREDICATE. `Recipe.
+     * expected_yield` returns an int only when every contributing slot is certain, and its
+     * comment refuses `float(total).is_integer()` in as many words: two slots of 4 at a chance
+     * of 0.5 sum to exactly 4.0, and that is still an EXPECTATION that must not masquerade as
+     * a guaranteed count. Asking `isWhole` alone would write `4` there where python writes
+     * `4.0`. So the integrality test is ANDed with the wire's own certainty signal.
+     *
+     * `yieldChance == null` IS THAT SIGNAL, and it is exact rather than convenient. `Solver.
+     * build` writes the field precisely when `perRun < nominal`, which holds for an uncertain
+     * key and fails for a certain one, so its absence means "every slot making this key was
+     * certain" -- the same condition python tracks with its `certain` flag.
+     *
+     * AND `isWhole` STILL GUARDS THE CAST, because absence of a chance is not proof of a whole
+     * number on hand-written or malformed JSON. Without it a `per_run` of 0.5 with no
+     * `yield_chance` would be cast to a long and written as `0`, turning a display defect into
+     * a silent data loss. See {@link Quantities#isWhole} for why the range check is part of
+     * the question.
+     */
+    private static void writePerRun(JsonWriter w, PlanNode node) throws IOException {
+        double perRun = node.perRun.doubleValue();
+        if (node.yieldChance == null && Quantities.isWhole(perRun)) {
+            w.name("per_run").value((long) perRun);
+        } else {
+            w.name("per_run").value(perRun);
+        }
+    }
+
+
 }

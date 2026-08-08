@@ -153,7 +153,7 @@ final class ModularMachineryBridge {
         }
     }
 
-    // ---- #175: the consume chance on an item input ----
+    // ---- #175 and #223: the chance on an item requirement, either side ----
 
     private static final String WRAPPER_CLASS =
             "hellfirepvp.modularmachinery.common.integration.recipe.DynamicRecipeWrapper";
@@ -167,11 +167,44 @@ final class ModularMachineryBridge {
     private static Field requiredField;
     private static Field oreDictField;
     private static boolean chanceResolved;
+    private static String chanceAbsence = "not resolved yet";
 
     /**
-     * MM's `chance` is the probability the slot is CONSUMED, which is the same direction the
-     * dump's `p` uses, so the number passes through unscaled. `setChance(0.0)` in a pack
-     * script is a catalyst; the reference pack makes 1,942 such calls.
+     * The two keys of `finalOrderedComponents`, matched against `IOType`'s `toString()`.
+     *
+     * NAMED RATHER THAN INLINE BECAUSE A TYPO HERE CANNOT FAIL A TEST ON THIS CLASSPATH.
+     * Every assertion about this reader without Modular Machinery present is that it returns
+     * null, so `"OUPUT"` would pass the whole suite and silently emit a dump in which no
+     * output is ever chanced. `IOType` is a plain enum with no `toString` override, verified
+     * with `javap -p` against ModularMachinery-CE-2.2.2, so these ARE its constant names;
+     * {@link #itemRequirements} is package-visible so the selection can be exercised against
+     * a hand-built map rather than only against a mod that is not here.
+     */
+    static final String IO_INPUT = "INPUT";
+    static final String IO_OUTPUT = "OUTPUT";
+
+    /**
+     * ONE RESOLUTION FOR BOTH SIDES, because there is one field. `RequirementItem` is a single
+     * class carrying `public float chance`, and its `actionType` is what makes an instance an
+     * input or an output; verified with `javap -p` against the pack's own
+     * ModularMachinery-CE-2.2.2.jar rather than taken from docs.
+     *
+     * WHAT THE NUMBER MEANS DEPENDS ON THE SIDE IT SITS ON, and that is the whole of #223.
+     * On an INPUT it is the probability the slot is CONSUMED, which is the direction the
+     * dump's `p` uses, so it passes through unscaled, and `setChance(0.0)` is a catalyst. On
+     * an OUTPUT it is the probability the run YIELDS the stack, which is `q`. Writing a yield
+     * into `p` would tell every consumer the output is a catalyst.
+     *
+     * THE CENSUS BEHIND BOTH, re-measured for #223 over the pack's 479 `scripts/*.zs` by
+     * attributing every `setChance` to the nearest preceding `add*Input` / `add*Output` in
+     * file order, which places all 1,937 of them with zero orphans: 1,102 on `addItemInput`,
+     * of which 1,078 are 0.0 and 24 fractional, and 835 on `addItemOutput`, of which 834 are
+     * fractional and 1 is exactly 1.0. Nothing else takes a chance at all.
+     *
+     * THE "1,942" THIS COMMENT CARRIED BEFORE #223 COUNTED A FILE THE GAME DOES NOT LOAD.
+     * A plain recursive grep of `config/` finds 1,942, and the extra five are all in
+     * `scripts/ModularPrimalMana.txt`, which CraftTweaker never reads because it is not `.zs`.
+     * Count over `*.zs` or the number describes a script that has no effect on any recipe.
      */
     private static synchronized void resolveChance() {
         if (chanceResolved) {
@@ -186,31 +219,102 @@ final class ModularMachineryBridge {
             chanceField = requirementItem.getField("chance");
             requiredField = requirementItem.getField("required");
             oreDictField = requirementItem.getField("oreDictName");
+            chanceAbsence = "";
+        } catch (ClassNotFoundException notInstalled) {
+            wrapperClass = null;
+            chanceAbsence = "Modular Machinery is not installed";
         } catch (Throwable t) {
             wrapperClass = null;  // any missing piece disables the whole reader
+            chanceAbsence = "Modular Machinery present but its recipe chances did not "
+                    + "resolve: " + t;
         }
     }
 
+    /** Whether {@link #itemInputChances} and {@link #itemOutputChances} can answer at all. */
+    static boolean chancesAvailable() {
+        resolveChance();
+        return wrapperClass != null;
+    }
+
     /**
-     * `chance` for each ITEM input slot of a Modular Machinery wrapper, or null.
+     * Why {@link #chancesAvailable} is false, or "" when it is true.
      *
-     * READ OFF `finalOrderedComponents` RATHER THAN `MachineRecipe#getCraftingRequirements`,
-     * because it is the very structure the wrapper's own `getIngredients` walks to fill the
-     * slots. The recipe's raw requirement list is in declaration order and includes outputs,
-     * energy and fluids, so lining it up with the item input slots would mean reimplementing
-     * the wrapper's filtering and hoping it stays in step.
+     * SEPARATE FROM {@link #absence()} BECAUSE THEY ARE SEPARATE READERS. `available` gates the
+     * machine-name lookup and resolves `MachineRegistry` plus `ItemBlueprint`; this gates the
+     * chance lookup and resolves `DynamicRecipeWrapper` plus `RequirementItem`. Either can
+     * break while the other works, and reporting one as if it covered both would announce a
+     * dump was fine on exactly the axis that had failed.
+     */
+    static String chanceAbsence() {
+        resolveChance();
+        return chanceAbsence;
+    }
+
+    /**
+     * `chance` for each ITEM INPUT slot of a Modular Machinery wrapper, or null. #175.
      *
-     * INDEX CORRESPONDENCE IS VERIFIED BY CONTENT, NOT ASSUMED. Position i of the INPUT
-     * ItemStack list should describe slot i, and when it does not -- a future MM that filters
-     * one more case, an addon that injects a requirement -- the answer silently shifts by one
-     * and marks the WRONG ingredient permanent, which invents a free recipe rather than
-     * failing. So each candidate is checked against the slot it claims to describe, and a
-     * mismatch falls back to the pre-#175 default instead of guessing.
+     * <p>See {@link #chances} for how the correspondence is established and why.
      */
     static float[] itemInputChances(Object wrapper, List<List<Object>> itemSlots) {
+        return chances(wrapper, itemSlots, IO_INPUT);
+    }
+
+    /**
+     * `chance` for each ITEM OUTPUT slot of a Modular Machinery wrapper, or null. #223.
+     *
+     * ALIGNED TO THE RAW OUTPUT SLOT LIST, NOT TO WHAT THE DUMP EMITS. `DumpCommand.flatStacks`
+     * collapses each slot to its first stack and drops a slot that yields none, so its emitted
+     * list is shorter than the slot list whenever a recipe has an empty output slot. Index i
+     * here is index i of `CollectingIngredients.rawOutputs(ItemStack.class)`, which
+     * `putLists` keeps one-to-one with what the wrapper reported, and the caller is what walks
+     * the two together. Aligning to the emitted list instead would shift every `q` after the
+     * first empty slot onto the wrong product.
+     *
+     * ITEM OUTPUTS ONLY, AND THAT IS A MEASURED LIMIT RATHER THAN AN OVERSIGHT. The pack's 479
+     * `scripts/*.zs` make 1,957 `addFluidOutput` calls and attach ZERO `setChance` to any of
+     * them, so a fluid-side reader would be dead code today. Same census as
+     * {@link #resolveChance}, which is where the item-side numbers live. If a future pack
+     * starts chancing fluid outputs the
+     * shape to add is this one, keyed on `FluidStack.class` and threaded through
+     * `DumpCommand.flatFluids`; nothing here needs to change to make room for it.
+     */
+    static float[] itemOutputChances(Object wrapper, List<List<Object>> outSlots) {
+        return chances(wrapper, outSlots, IO_OUTPUT);
+    }
+
+    /**
+     * The shared reader behind both sides. `ioType` is the enum's name, "INPUT" or "OUTPUT".
+     *
+     * READ OFF `finalOrderedComponents` RATHER THAN `MachineRecipe#getCraftingRequirements`,
+     * because it is filtered and bucketed the same way the wrapper's own `getIngredients`
+     * filters and buckets. Both walk `getCraftingRequirements()` in list order, drop anything
+     * whose `provideJEIComponent()` is null, and split what is left by `getActionType()` and
+     * by the JEI requirement class, so the ItemStack sublist under a given IO type is in the
+     * order JEI is handed it. Read out of the bytecode of ModularMachinery-CE-2.2.2, not
+     * assumed. The raw requirement list is in declaration order and mixes both sides with
+     * energy and fluids, so lining it up with one side's slots would mean reimplementing that
+     * filtering and hoping it stays in step.
+     *
+     * THE TWO FILTERS ARE NOT QUITE IDENTICAL, and the difference is why the content check
+     * below is not optional. `getIngredients` also skips `RequirementEnergy` outright, which
+     * `reloadWrapper` does not; it costs nothing here only because energy's JEI class is not
+     * `ItemStack`, so the ItemStack sublists still agree. That is a coincidence of this MM
+     * version rather than a contract, and it is exactly the kind of extra filter that would
+     * shift the whole list by one in the next.
+     *
+     * INDEX CORRESPONDENCE IS VERIFIED BY CONTENT, NOT ASSUMED. Position i of the ItemStack
+     * list for this IO type should describe slot i, and when it does not, because a future MM
+     * filters one more case or an addon injects a requirement, the answer silently shifts by
+     * one. On the input side that marks the WRONG ingredient permanent and invents a free
+     * recipe; on the output side it hangs a 0.001 yield on the wrong product and inflates
+     * every plan through it a thousandfold. Neither fails loudly. So each candidate is checked
+     * against the slot it claims to describe, and a mismatch falls back to the default of 1.0
+     * instead of guessing.
+     */
+    private static float[] chances(Object wrapper, List<List<Object>> slots, String ioType) {
         resolveChance();
         if (wrapperClass == null || wrapper == null
-                || !wrapperClass.isInstance(wrapper) || itemSlots.isEmpty()) {
+                || !wrapperClass.isInstance(wrapper) || slots.isEmpty()) {
             return null;
         }
         try {
@@ -218,15 +322,15 @@ final class ModularMachineryBridge {
             if (!(raw instanceof Map)) {
                 return null;
             }
-            List<?> reqs = inputItemRequirements((Map<?, ?>) raw);
-            if (reqs == null || reqs.size() < itemSlots.size()) {
+            List<?> reqs = itemRequirements((Map<?, ?>) raw, ioType);
+            if (reqs == null || reqs.size() < slots.size()) {
                 return null;
             }
-            float[] out = new float[itemSlots.size()];
+            float[] out = new float[slots.size()];
             for (int i = 0; i < out.length; i++) {
                 out[i] = 1.0f;
                 Object req = reqs.get(i);
-                if (!requirementItem.isInstance(req) || !describes(req, itemSlots.get(i))) {
+                if (!requirementItem.isInstance(req) || !describes(req, slots.get(i))) {
                     continue;
                 }
                 Object chance = chanceField.get(req);
@@ -235,7 +339,14 @@ final class ModularMachineryBridge {
                     // Out of range is refused rather than clamped, matching
                     // `hei_dump._consume_chance`: a negative chance would price an
                     // ingredient NEGATIVE downstream, which is arbitrage rather than a
-                    // mispriced route.
+                    // mispriced route. On the output side a negative or above-one yield is
+                    // worse still, because the yield lands in a DIVISOR.
+                    //
+                    // ZERO STAYS IN RANGE ON BOTH SIDES. On an input it is the catalyst case
+                    // #175 exists for. On an output it would mean a recipe that never yields
+                    // the stack, which the reader's [0.0, 1.0] contract admits and which the
+                    // reference pack does not contain (see `resolveChance` for the census).
+                    // Refusing it would silently restore the every-run yield #223 is about.
                     if (c >= 0.0f && c <= 1.0f) {
                         out[i] = c;
                     }
@@ -247,10 +358,17 @@ final class ModularMachineryBridge {
         }
     }
 
-    /** The INPUT-side ItemStack requirement list out of the wrapper's ordered map, or null. */
-    private static List<?> inputItemRequirements(Map<?, ?> byIoType) {
+    /**
+     * The ItemStack requirement list for one IO type out of the wrapper's ordered map.
+     *
+     * Package-visible so `SchemaEightTest` can drive it with a hand-built map. It is the one
+     * piece of this reader that needs no Modular Machinery to exercise, and it is where the
+     * `IO_INPUT` / `IO_OUTPUT` keys are actually matched, so leaving it private would leave
+     * the string comparison that selects a whole side of the dump entirely unasserted.
+     */
+    static List<?> itemRequirements(Map<?, ?> byIoType, String ioType) {
         for (Map.Entry<?, ?> e : byIoType.entrySet()) {
-            if (e.getKey() == null || !"INPUT".equals(e.getKey().toString())
+            if (e.getKey() == null || !ioType.equals(e.getKey().toString())
                     || !(e.getValue() instanceof Map)) {
                 continue;
             }

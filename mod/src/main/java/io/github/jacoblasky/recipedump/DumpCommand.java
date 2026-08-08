@@ -270,6 +270,15 @@ public class DumpCommand extends CommandBase {
         if (!TinkersCastingBridge.available()) {
             reply(sender, "  no cast retention: " + TinkersCastingBridge.absence());
         }
+        // THE ONE READER BEHIND BOTH `p` AND `q` FROM MODULAR MACHINERY, announced separately
+        // from the machine-name line above because it resolves different classes and can fail
+        // on its own. When it does, this dump has no catalysts AND no chance outputs, which on
+        // the reference pack is thousands of missing facts rather than a rounding error, so
+        // silence here is the difference between a plan that is right and one that understates
+        // every run through a chance recipe by up to 1000x. #175, #223.
+        if (!ModularMachineryBridge.chancesAvailable()) {
+            reply(sender, "  no recipe chances: " + ModularMachineryBridge.chanceAbsence());
+        }
         if (traceNbt) {
             // Say it up front either way. The trace being DEFAULT is the surprising half
             // now, and a player who does not know it is being written cannot choose to
@@ -664,7 +673,7 @@ public class DumpCommand extends CommandBase {
             List<String> modIds = activeModIds();
             writeSummary(new File(dir, SUMMARY_FILE), perCategory, categoryMod,
                          recipes, failed, skips.size(), sink.names().size(), namesFailed,
-                         sink.catalystSlots(), modIds);
+                         sink.catalystSlots(), sink.chanceOutputs(), modIds);
             writeCatalysts(new File(dir, "catalysts.json"), catalysts);
             int ores = writeOreDict(new File(dir, "oredict.json"));
             writeNames(new File(dir, "names.json"), sink.names());
@@ -819,7 +828,7 @@ public class DumpCommand extends CommandBase {
 
         List<List<Object>> itemInSlots = collected.rawInputs(ItemStack.class);
         String itemIn = stackSlots(itemInSlots, sink, consumeChances(wrapper, itemInSlots));
-        String itemOut = flatStacks(collected.rawOutputs(ItemStack.class), sink);
+        String itemOut = flatOutputs(collected.rawOutputs(ItemStack.class), sink, wrapper);
         String fluidIn = fluidSlots(collected.rawInputs(FluidStack.class));
         String fluidOut = flatFluids(collected.rawOutputs(FluidStack.class));
 
@@ -856,8 +865,49 @@ public class DumpCommand extends CommandBase {
         return ModularMachineryBridge.itemInputChances(wrapper, itemSlots);
     }
 
-    /** Nested: list of slots, each slot a list of interchangeable stacks. */
-    private static String stackSlots(List<List<Object>> slots, KeySink sink, float[] chances) {
+    /**
+     * The item outputs, each carrying how often a run YIELDS it. Issue #223.
+     *
+     * THE MIRROR OF {@link #consumeChances} AND NOT A COPY OF IT. `p` scales a cost the run
+     * spends; `q` scales the yield, which downstream appears in a DIVISOR, so a recipe that
+     * yields its product 10% of the time needs ten times the runs and ten times every input
+     * those runs consume. The reference pack's fractional output chances reach 0.001, so the
+     * multiplier this recovers reaches 1000x; the census is on `ModularMachineryBridge`.
+     *
+     * ONE SLOT LIST, PASSED TO BOTH HALVES, and that is the whole reason this method exists
+     * rather than two statements in `encode`. The chance array is positional, so the list it
+     * is DERIVED from and the list it is WRITTEN against must be the same object; two locals
+     * spelled `rawOutputs` and `rawInputs` one letter apart, either of which type-checks in
+     * either position, is a shift of the entire dump that no test on this classpath could
+     * catch. Here there is nothing to mismatch. DO NOT re-split this into a chance lookup and
+     * a separate `flatStacks` call at the call site.
+     *
+     * ONE SOURCE, UNLIKE THE INPUT SIDE. {@link TinkersCastingBridge} answers a question about
+     * a cast that SURVIVES its recipe, which is an input fact and has no output analogue, so
+     * asking it here would only ever return the same 1.0 an absent array already means.
+     *
+     * ONLY ITEM OUTPUTS, NEVER FLUIDS, and that limit is measured rather than assumed.
+     * {@link ModularMachineryBridge#itemOutputChances} carries the fluid census and the
+     * method that produced it. No emptiness guard either, unlike `consumeChances`, which needs
+     * one only because it asks a second source first: the bridge already answers null for an
+     * empty slot list, and a second spelling of that rule is a place for the two to drift.
+     */
+    private static String flatOutputs(List<List<Object>> slots, KeySink sink,
+                                      IRecipeWrapper wrapper) {
+        return flatStacks(slots, sink, ModularMachineryBridge.itemOutputChances(wrapper, slots));
+    }
+
+    /**
+     * Nested: list of slots, each slot a list of interchangeable stacks.
+     *
+     * Package-visible, not private, for the same reason `writeSummary` is: `SchemaEightTest`
+     * calls this and {@link #flatStacks} with real ItemStacks and asserts the bytes each
+     * writes, so the rule that `p` belongs to inputs and `q` to outputs is held to the actual
+     * emitter rather than to two mocks agreeing with each other. Neither method can be reached
+     * with a non-default chance through `encode`, because the only source of one is a bridge
+     * that needs Modular Machinery on the classpath. #223.
+     */
+    static String stackSlots(List<List<Object>> slots, KeySink sink, float[] chances) {
         StringBuilder sb = new StringBuilder("[");
         boolean firstSlot = true;
         int index = -1;
@@ -875,7 +925,7 @@ public class DumpCommand extends CommandBase {
             }
             List<String> alts = new ArrayList<String>();
             for (Object o : slot) {
-                String s = stack(o, sink, chance);
+                String s = inputStack(o, sink, chance);
                 if (s != null) {
                     alts.add(s);
                 }
@@ -892,14 +942,34 @@ public class DumpCommand extends CommandBase {
         return sb.append(']').toString();
     }
 
-    /** Flat: outputs collapse to one stack per slot; alternatives do not matter. */
-    private static String flatStacks(List<List<Object>> slots, KeySink sink) {
+    /**
+     * Flat: outputs collapse to one stack per slot; alternatives do not matter.
+     *
+     * TWO LISTS OF DIFFERENT LENGTHS, WALKED TOGETHER. `chances` is aligned to the RAW slot
+     * list, because that is the list Modular Machinery's requirements correspond to one for
+     * one, while `out` holds only the slots that produced a stack. So the index used to read a
+     * chance is counted over `slots` and never over `out`; taking it from the emitted list
+     * would move every `q` after the first empty slot onto the wrong product. #223.
+     *
+     * Package-visible for the reason given on {@link #stackSlots}.
+     */
+    static String flatStacks(List<List<Object>> slots, KeySink sink, float[] chances) {
         List<String> out = new ArrayList<String>();
+        int index = -1;
         for (List<Object> slot : slots) {
+            index++;
+            float chance = chances == null || index >= chances.length ? 1.0f : chances[index];
             for (Object o : slot) {
-                String s = stack(o, sink);
+                String s = outputStack(o, sink, chance);
                 if (s != null) {
                     out.add(s);
+                    // COUNTED HERE, ON THE EMISSION, not beside the chance lookup as the
+                    // input side counts. A slot that yields no serializable stack writes no
+                    // `q` into the file, and this number's job is to be checkable against
+                    // what the file actually contains.
+                    if (chance != 1.0f && sink != null) {
+                        sink.recordChanceOutput();
+                    }
                     break;
                 }
             }
@@ -945,20 +1015,33 @@ public class DumpCommand extends CommandBase {
     }
 
     /**
-     * For OUTPUTS, which have no consume chance and must never acquire one.
+     * An INPUT stack, whose only chance is `p`: how much of itself a run spends. #175.
      *
-     * Kept as an overload rather than a `1.0f` at the call site so the absence is a statement
-     * instead of a magic argument: `p` answers "how much of this input does a run spend", and
-     * an output is not spent by its own recipe. A chance on the output side is a different
-     * question entirely -- how often the recipe YIELDS it -- which is #223 and wants its own
-     * field, because writing it here would read as "this output is a catalyst" to every
-     * consumer of `p`.
+     * TWO NAMED ENTRY POINTS RATHER THAN ONE FOUR-ARGUMENT CALL, so that no call site is able
+     * to put a yield in `p` or a consumption in `q`. That mistake has no compile error and no
+     * test that would fail on shape: an output carrying `p` parses cleanly and reads as "this
+     * output is a catalyst" to every consumer, which is the wrong answer stated confidently.
+     * Before #223 the same guarantee was a two-argument overload documenting that outputs must
+     * never acquire a `p`; the pair below keeps it now that outputs carry a chance of their
+     * own. DO NOT collapse these into one method taking both numbers.
      */
-    private static String stack(Object o, KeySink sink) {
-        return stack(o, sink, 1.0f);
+    private static String inputStack(Object o, KeySink sink, float chance) {
+        return stack(o, sink, chance, 1.0f);
     }
 
-    private static String stack(Object o, KeySink sink, float chance) {
+    /**
+     * An OUTPUT stack, whose only chance is `q`: how often a run yields it. #223.
+     *
+     * `q` IS NOT `p` AND MUST NOT BE WRITTEN AS ONE. `p` says a run may not SPEND this input,
+     * which makes the recipe cheaper; `q` says a run may not PRODUCE this output, which makes
+     * it dearer by landing in a divisor. See {@link #inputStack} for why they are separate
+     * methods rather than one.
+     */
+    private static String outputStack(Object o, KeySink sink, float yieldChance) {
+        return stack(o, sink, 1.0f, yieldChance);
+    }
+
+    private static String stack(Object o, KeySink sink, float chance, float yieldChance) {
         if (!(o instanceof ItemStack)) {
             return null;
         }
@@ -981,10 +1064,15 @@ public class DumpCommand extends CommandBase {
         // from growing by a field that would be constant on all but ~14,400 lines. It also
         // means a schema-7 dump is byte-identical to a schema-6 one wherever nothing is a
         // catalyst, so a diff between the two shows exactly the recipes this issue changed.
+        //
+        // `q` FOLLOWS THE SAME RULE FOR THE SAME REASONS. #223. A schema-8 dump is
+        // byte-identical to a schema-7 one wherever nothing is chance-yielded, so the diff
+        // between them is exactly the outputs #223 changed and nothing else.
         return "{\"i\":\"" + safe(id.toString()) + "\",\"m\":" + meta
                 + ",\"c\":" + stack.getCount()
                 + (nbt == null ? "" : ",\"n\":\"" + nbt + "\"")
-                + (chance == 1.0f ? "" : ",\"p\":" + chance) + "}";
+                + (chance == 1.0f ? "" : ",\"p\":" + chance)
+                + (yieldChance == 1.0f ? "" : ",\"q\":" + yieldChance) + "}";
     }
 
     /**
@@ -1019,6 +1107,21 @@ public class DumpCommand extends CommandBase {
          */
         private int catalystSlots;
 
+        /**
+         * Output stacks this dump wrote a non-default `q` onto. #223.
+         *
+         * COUNTED FOR THE SAME REASON {@link #catalystSlots} IS, and the reason is sharper
+         * here: a chance output that reads as guaranteed does not merely misprice one
+         * ingredient, it divides the whole plan by a yield up to a thousand times too high.
+         * A reader that stopped resolving emits no `q` at all, which is byte-for-byte what a
+         * pack with no chance outputs emits, and the only symptom is that plans quietly
+         * understate the runs they need.
+         *
+         * COUNTS EMITTED STACKS, not slots examined, which is what makes it checkable: it is
+         * exactly how many `q` fields recipes.ndjson contains.
+         */
+        private int chanceOutputs;
+
         KeySink(boolean traceNbt) {
             this.trace = traceNbt ? new LinkedHashMap<String, String>() : null;
         }
@@ -1029,6 +1132,14 @@ public class DumpCommand extends CommandBase {
 
         int catalystSlots() {
             return catalystSlots;
+        }
+
+        void recordChanceOutput() {
+            chanceOutputs++;
+        }
+
+        int chanceOutputs() {
+            return chanceOutputs;
         }
 
         Map<String, String> names() {
@@ -1546,13 +1657,30 @@ public class DumpCommand extends CommandBase {
      *   7  an item input stack may carry `p`, the probability a run SPENDS it, absent meaning
      *      1.0. Written for Tinkers casts that survive and Modular Machinery's `setChance`.
      *      See #175.
+     *   8  an item output stack may carry `q`, the probability a run YIELDS it, absent
+     *      meaning 1.0; summary.json gains `chance_outputs`. See #223.
      *
-     * SEVEN IS AN ADDED FIELD, SO A SCHEMA-6 READER IS NOT WRONG, ONLY OLDER, and the bump is
-     * still right. `p` is absent wherever it would be 1.0, so a 6 reader sees exactly the
-     * dump it saw before on every non-catalyst line and never misparses one. What it cannot
-     * do is tell a genuinely permanent catalyst from an unmarked one, which is a difference
-     * in what the plan COSTS rather than in what it parses -- and the number's job is to let
-     * a reader say "this dump knows something I do not" rather than to gate a crash.
+     * SEVEN AND EIGHT ARE ADDED FIELDS, SO AN OLDER READER IS NOT WRONG, ONLY OLDER, and the
+     * bumps are still right. Both are absent wherever they would be 1.0, so an older reader
+     * sees exactly the dump it saw before on every unmarked line and never misparses one.
+     * What it cannot do is tell a genuinely permanent catalyst from an unmarked one, or a 0.1%
+     * yield from a guaranteed one, which is a difference in what the plan COSTS rather than in
+     * what it parses -- and the number's job is to let a reader say "this dump knows something
+     * I do not" rather than to gate a crash.
+     *
+     * `q` IS A SEPARATE FIELD FROM `p` AND MUST STAY ONE. `p` answers "how much of this input
+     * does a run spend"; `q` answers "how often does a run yield this output". `stack` already
+     * refuses to conflate them from the emitting end, and the reader halves are two functions
+     * over one validator in `sources/hei_dump.py` for the same reason. They also differ in
+     * which direction a missing value is safe: an absent `p` overstates a price, which is
+     * harmless, while an absent `q` leaves a 0.1% recipe reading as guaranteed, which is the
+     * defect #223 exists to fix.
+     *
+     * EIGHT IS THE SAME KIND OF BUMP AND NOT THE SAME SIZE OF ERROR. `q` is likewise absent
+     * at 1.0, so a 7 reader parses an 8 dump unchanged. What it silently loses is larger than
+     * what a 6 reader loses on `p`: an unread `p` overstates one ingredient's cost by at most
+     * its own price, while an unread `q` divides the entire plan by a yield that can be a
+     * thousand times too high, and every input of every run under it goes with it. #223.
      *
      * ONE NUMBER FOR FIVE CHANGES, DELIBERATELY. They shipped in one jar because the
      * expensive step is a launch of the game, not the code, and five increments on one
@@ -1586,7 +1714,7 @@ public class DumpCommand extends CommandBase {
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
      */
-    static final int SCHEMA = 7;
+    static final int SCHEMA = 8;
 
     /**
      * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194
@@ -1757,6 +1885,10 @@ public class DumpCommand extends CommandBase {
      * @param names       entries names.json is about to receive, so a reader can tell a
      *                    truncated names.json from a short one
      * @param namesFailed keys this dump has no display name for at all. #194
+     * @param catalystSlots  input slots that got a non-default `p`. #175
+     * @param chanceOutputs  output stacks that got a non-default `q`. #223. A SECOND NUMBER
+     *                    rather than a sum with the one above, because the two sides fail
+     *                    independently and a total of zero would not say which reader broke.
      * @param modIds      the modids of every loaded mod, or null when Forge would not
      *                    say -- in which case NEITHER field is written, because a reader
      *                    must be able to tell "not recorded" from a recorded number. #194
@@ -1770,7 +1902,7 @@ public class DumpCommand extends CommandBase {
                              Map<String, String> categoryMod,
                              int recipes, int threw, int skipLines,
                              int names, int namesFailed, int catalystSlots,
-                             List<String> modIds) {
+                             int chanceOutputs, List<String> modIds) {
         try (Writer w = new BufferedWriter(new OutputStreamWriter(
                 Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             // Stamp what produced this. Without it a dump is undatable: the only signal
@@ -1799,6 +1931,12 @@ public class DumpCommand extends CommandBase {
             // pack that genuinely has no catalysts, and the only symptom is that plans get
             // slowly more expensive. #175
             w.write(",\n \"catalyst_slots\": " + catalystSlots);
+            // THE SAME MEASUREMENT ON THE OTHER SIDE, and unconditional for the same reason.
+            // A schema-8 dump saying 0 has looked and found no chance output; a schema-7 dump
+            // says nothing and could be either. Nearly every output chance in the reference
+            // pack is fractional, so a 0 from THIS pack means the reader broke rather than
+            // that the pack is clean. #223
+            w.write(",\n \"chance_outputs\": " + chanceOutputs);
             // OMITTED ENTIRELY when Forge would not answer, rather than written as 0 or
             // null. The fields exist to let a reader tell a five-jar dump from a full-pack
             // one, and a recorded zero is a claim about the jar set; absence is the honest

@@ -373,7 +373,10 @@ public class SolverTest {
 
         PlanResult plan = solver(g).build().solve(g.keyId("mod:planks"), 5);
         assertEquals(Long.valueOf(2), plan.tree.runs);   // ceil(5 / 4)
-        assertEquals(Long.valueOf(4), plan.tree.perRun);
+        assertEquals(Double.valueOf(4.0), plan.tree.perRun);
+        // #223 writes the ratio only when the expected yield is below the nominal one, and
+        // a certain recipe is exactly the case where it must stay absent.
+        assertNull("a certain recipe must not carry a yield_chance", plan.tree.yieldChance);
         assertEquals("two runs need two logs", 2, plan.tree.children.get(0).need);
     }
 
@@ -529,7 +532,19 @@ public class SolverTest {
 
         String json = PlanJson.toJson(solver(g).build().solve(g.keyId("mod:planks"), 1));
         assertTrue(json, json.contains("\"target\": \"mod:planks\""));
+        // `4` AND NOT `4.0`, WHICH IS THE OPPOSITE OF WHAT THIS ASSERTED BEFORE #252's RULE.
+        // A certain recipe writes an INTEGER token: `expected_yield` returns an int when every
+        // contributing slot is certain, and an always-double emitter would rewrite `per_run`
+        // in every fixture for no behavioural reason -- measured on the python side at 17 of
+        // 24 files and 1,407 lines, with not one plan different. `PlanJson.writePerRun` carries
+        // the rule; this is the certain half of it and `ChanceOutputTest` has the fractional
+        // half. Both spellings parse to the same double, so `JsonCompare` cannot tell them
+        // apart and only an assertion on the TEXT can.
         assertTrue(json, json.contains("\"per_run\": 4"));
+        assertTrue("a certain recipe must not write a decimal point",
+                !json.contains("\"per_run\": 4.0"));
+        assertTrue("a certain recipe must not carry a yield_chance",
+                !json.contains("\"yield_chance\""));
         // QUOTED ON BOTH SIDES. A bare `from_stock` is a substring of `used_from_stock`,
         // which is always present, so the unquoted check passes on a plan that wrongly
         // emitted the field and fails on one that correctly did not.
