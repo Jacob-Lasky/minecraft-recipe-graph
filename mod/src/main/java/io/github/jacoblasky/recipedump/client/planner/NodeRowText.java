@@ -559,6 +559,23 @@ public final class NodeRowText {
         if (node.runs() <= 0) {
             return null;
         }
+        // NOTHING TO SAY ON A ONE-FOR-ONE CRAFT, AND THE SCREENSHOT IS WHAT SETTLED IT (#252).
+        // "1 run, 1 per run" is the default every reader already assumes, and it is not rare:
+        // measured across the committed fixtures, 400 of 1,406 craft nodes are exactly this
+        // case, 28.4%, and 18 of the 22 in `plan-cycle`. The first shot of this render was a
+        // panel of rows all saying it, with the machine name cut off the end to make room.
+        //
+        // WIDTH IS THE COST, NOT TIDINESS. `fit` cuts the meta run from the right, so a phrase
+        // carrying no information does not merely fail to help, it evicts `machineBit`, which
+        // is what a reader scans for. No test caught this because every part was individually
+        // correct and the defect only exists in aggregate, which is the #190 fluid-adjacency
+        // lesson in a new place: some things are only visible in a picture.
+        boolean singleRun = node.runs() == 1L;
+        boolean unitYield = node.perRun() == 0.0 || node.perRun() == 1.0;
+        boolean certain = !(node.yieldChance() > 0.0 && node.yieldChance() < 1.0);
+        if (singleRun && unitYield && certain) {
+            return null;
+        }
         StringBuilder sb = new StringBuilder();
         sb.append(quantityPlain(node.runs())).append(node.runs() == 1L ? " run" : " runs");
         if (node.perRun() > 0.0) {
@@ -580,9 +597,13 @@ public final class NodeRowText {
      * which is the defect a #190 screenshot caught on fluids and is invisible in a diff.
      */
     private static String amount(double value) {
-        // THE SAME PREDICATE THE EMITTER USES, on purpose. See `Quantities.isWhole`: if the
-        // wire and the row disagree about which values are whole, one panel measures the same
-        // number two ways and both halves pass their own tests.
+        // `Quantities.isWhole` RATHER THAN A LOCAL COMPARISON, because the emitter has to ask
+        // the same question about the same number to choose `4` or `4.0` on the wire, and the
+        // agreed rule for #223 is that integral values are written as integers. THE EMITTER
+        // DOES NOT CALL THIS YET: `plan.PlanJson` still writes every `per_run` as a double,
+        // which is what `PerRunRoundTripTest.anIntegralPerRunStaysAnIntegerOnTheWire` is red
+        // against. The predicate lives here so there is one definition to adopt rather than a
+        // second one to write, and so the row and the wire cannot drift once it is.
         if (Quantities.isWhole(value)) {
             return quantityPlain((long) value);
         }

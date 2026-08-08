@@ -532,12 +532,35 @@ public class NodeRowTextTest {
     }
 
     @Test
-    public void aSingleRunIsSingular() {
-        // A branch I wrote and had not asserted. "1 runs" is the kind of thing that survives
-        // review because it is beneath notice and then reads as sloppy on every one-run row.
+    public void aOneForOneCraftSaysNothingAboutItsYield() {
+        // FOUND BY LOOKING AT THE SHOT, not by a test. "1 run, 1 per run" is the default and
+        // it is 28.4% of committed craft nodes, 400 of 1,406, so on a real panel it was most
+        // rows, and `fit` was cutting the machine name off the end to make room for it.
         String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(1.0), null));
+        assertFalse("a one-for-one craft must not spend row width saying so: " + meta,
+                    meta.contains("run"));
+    }
+
+    @Test
+    public void aBatchYieldIsWorthSayingEvenOnASingleRun() {
+        // The boundary of the rule above: one run that makes 64 is NOT the default and is the
+        // difference between needing one craft and needing sixty-four.
+        String meta = NodeRowText.meta(yieldNode(1L, Double.valueOf(64.0), null));
         assertTrue(meta, meta.contains("1 run"));
-        assertFalse(meta, meta.contains("1 runs"));
+        assertTrue(meta, meta.contains("64 per run"));
+        // AND IT IS SINGULAR. This is the only surviving row shape with a run count of one,
+        // since the one-for-one case is now suppressed, so the plural rule is asserted here
+        // rather than in a test of its own.
+        assertFalse("a single run must not read as `1 runs`: " + meta, meta.contains("1 runs"));
+    }
+
+    @Test
+    public void aRareYieldIsSaidEvenWhenTheRunCountIsOne() {
+        // The other boundary: a single run that pays out one time in a thousand is the whole
+        // point of #223 and must survive the suppression rule.
+        String meta = NodeRowText.meta(
+                yieldNode(1L, Double.valueOf(1.0), Double.valueOf(0.001)));
+        assertTrue(meta, meta.contains("yields 0.1% of the time"));
     }
 
     @Test
