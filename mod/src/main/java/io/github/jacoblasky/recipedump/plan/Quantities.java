@@ -6,9 +6,28 @@ package io.github.jacoblasky.recipedump.plan;
  * ONE SPELLING, AND THE DRIFT IT PREVENTS IS NOT HYPOTHETICAL (#252). Two callers decide
  * something from this predicate and they must agree:
  *
- *   - `plan.PlanJson.writeQuantity` picks the JSON token, `4` or `4.0`, which the 21 plan
- *     fixtures freeze byte for byte across 1,406 `per_run` occurrences.
- *   - `client.planner.NodeRowText.amount` picks the drawn string, `4` or `0.004`.
+ *   - `plan.PlanJson.writePerRun` uses it as ONE OF TWO CLAUSES when picking the JSON token
+ *     `4` or `4.0`, which the plan fixtures freeze byte for byte.
+ *   - `client.planner.NodeRowText.amount` uses it ALONE when picking the drawn string, `4` or
+ *     `0.004`.
+ *
+ * THE EMITTER DOES NOT DECIDE ON THIS PREDICATE ALONE, AND THE JAVADOC SAID IT DID UNTIL #223
+ * CORRECTED IT. The wire rule is `isWhole(perRun) && node.yieldChance == null`, because
+ * `Recipe.expected_yield` returns an int only when every contributing slot is CERTAIN and
+ * refuses `float(total).is_integer()` in as many words: two slots of 4 at a chance of 0.5 sum
+ * to exactly 4.0, and that is still an expectation that must not masquerade as a guaranteed
+ * count. On that recipe python writes `4.0` and this predicate alone would write `4`. Here
+ * `isWhole` is the CAST GUARD rather than the rule: absence of a chance is not proof of
+ * wholeness on hand-written JSON, and a `per_run` of 0.5 with no `yield_chance` would cast to
+ * a long and write `0`, which is data loss rather than a display defect.
+ *
+ * THE RENDER SIDE DELIBERATELY DOES NOT TAKE THE NARROW CLAUSE, and that asymmetry is the
+ * point rather than an oversight. An expected four and a certain four DRAW THE SAME, because
+ * certainty reaches the reader through the `yields ...% of the time` phrase beside the number
+ * rather than through the number's own formatting. Adding `yieldChance == null` there would
+ * print `4.0` in a row that already says how often the recipe works, which is noise. Two
+ * callers, one predicate, two rules built on it -- which is exactly what this javadoc is for
+ * and exactly what goes stale silently.
  *
  * If those two ever disagree about which values are whole, the wire says one thing and the row
  * beside it says another, on the same number, with both halves individually passing their own

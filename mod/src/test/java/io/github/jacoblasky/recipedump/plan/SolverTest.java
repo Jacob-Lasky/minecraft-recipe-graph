@@ -532,10 +532,17 @@ public class SolverTest {
 
         String json = PlanJson.toJson(solver(g).build().solve(g.keyId("mod:planks"), 1));
         assertTrue(json, json.contains("\"target\": \"mod:planks\""));
-        // `4.0` AND NOT `4`: #223 made `per_run` a double on both sides, because a chance
-        // recipe yields a fraction of an item per run. Pinned with the decimal point so a
-        // silent narrowing back to a long fails here rather than only on a chance graph.
-        assertTrue(json, json.contains("\"per_run\": 4.0"));
+        // `4` AND NOT `4.0`, WHICH IS THE OPPOSITE OF WHAT THIS ASSERTED BEFORE #252's RULE.
+        // A certain recipe writes an INTEGER token: `expected_yield` returns an int when every
+        // contributing slot is certain, and an always-double emitter would rewrite `per_run`
+        // in every fixture for no behavioural reason -- measured on the python side at 17 of
+        // 24 files and 1,407 lines, with not one plan different. `PlanJson.writePerRun` carries
+        // the rule; this is the certain half of it and `ChanceOutputTest` has the fractional
+        // half. Both spellings parse to the same double, so `JsonCompare` cannot tell them
+        // apart and only an assertion on the TEXT can.
+        assertTrue(json, json.contains("\"per_run\": 4"));
+        assertTrue("a certain recipe must not write a decimal point",
+                !json.contains("\"per_run\": 4.0"));
         assertTrue("a certain recipe must not carry a yield_chance",
                 !json.contains("\"yield_chance\""));
         // QUOTED ON BOTH SIDES. A bare `from_stock` is a substring of `used_from_stock`,
