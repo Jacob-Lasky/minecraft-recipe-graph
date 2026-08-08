@@ -668,50 +668,67 @@ public class NodeRowTextTest {
      * commit, rather than widening the assertion.
      */
     @Test
-    public void theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond() {
+    public void theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy() {
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
 
-        // THE THRESHOLD, NOT A COMFORTABLE SUBSET. An earlier version of this ran against
-        // `yieldNode`'s own five-character "Thing" and passed at every depth while the
-        // percentage was in fact cut from every real row; a case picked for convenience is
-        // immune to the defect. Its replacement used labels up to 21 characters and still
-        // proved less than its name claimed, because the fixtures carry 29 and 32.
+        // THE COLUMN IS DERIVED, NOT WRITTEN DOWN, and two wrong literals are why. The first
+        // version of this test measured against `yieldNode`'s five-character "Thing" and passed
+        // everywhere while the number was cut from every real row. The second hardcoded a
+        // 53/45-character column, which was wrong twice over -- `GAP` is 3 and not 2, and the
+        // BADGE is subtracted from every full-width tree row -- so it asserted a boundary the
+        // panel does not have and passed by agreeing with its own arithmetic. A literal goes
+        // stale silently; `columnAtDepth` below calls the same constants and the same
+        // `badgeWidthFor` that `PlannerWidgets.row` does, so it moves when the panel moves.
         //
-        // So this asserts BOTH SIDES of the measured boundary. The label column is 53
-        // characters at depth 0 and 45 at the indent cap; the meta is 16 and the separator 3,
-        // so 45 - 19 = 26 is the longest label that keeps the percentage at every depth.
-        for (int depth = 0; depth <= 8; depth++) {
+        // What the real column leaves for the yield, after a 3-character separator and this
+        // 16-character meta: 18 characters at depth 0, 14 at depth 4, 10 at the indent cap.
+        for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH; depth++) {
             String fitted = NodeRowText.fit(
-                    "Twenty Six Characters Here" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                    "Iron Ingot" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
                     columnAtDepth(depth));
-            assertTrue("26 chars must survive at depth " + depth + ": " + fitted,
-                       fitted.contains("0.1%"));
+            assertTrue("a 10-character label must keep the yield at depth " + depth + ": "
+                       + fitted, fitted.contains("0.1%"));
         }
 
-        // AND THE LIMIT, NAMED RATHER THAN LEFT FOR A SCREENSHOT TO FIND. These two are real
-        // labels from the reference plans, and they lose the percentage at the indent cap by 3
-        // and 6 characters. Measured over the committed fixtures: 12 of 769 rows in
-        // `plan-fluid-chain` and 1 of 52 in `plan-truncated`, about 1.6%.
+        // AND THE LIMIT, WHICH IS THE HONEST HALF. `Everwatching Eye` is the longest label in
+        // the reference plans that keeps the yield at all, and it keeps it only while the row
+        // is shallow; at the indent cap even that is cut. Measured over the committed fixtures,
+        // the yield is lost on 574 of 769 rows in `plan-fluid-chain` (74.6%) and 35 of 52 in
+        // `plan-truncated` (67.3%).
         //
-        // THIS IS NOT A TODO. The row cannot carry a 32-character label, a run count and a
-        // percentage at once, and the only way to make it would be evicting something else --
-        // which is the trade #232 is under a hard no-eviction constraint against. A future
-        // change that shortens the phrase should move these numbers and update them here.
-        for (String tooLong : new String[] {"[fluid] Molten Aluminum Brass",
-                                            "Universal Constellation Princess"}) {
-            String fitted = NodeRowText.fit(
-                    tooLong + NodeRowText.SEPARATOR + NodeRowText.meta(node), columnAtDepth(8));
-            assertFalse("this label is known NOT to fit; if it now does, the width changed and"
-                        + " the 1.6% above is stale: " + fitted, fitted.contains("0.1%"));
-        }
+        // THAT IS NOT AN ARGUMENT AGAINST THIS FORM, and the alternative is what settles it:
+        // `yields 0.1% of the time` is 23 characters against this 4, so it is lost on strictly
+        // more rows, and before #252 the number was drawn on none at all. A row that sometimes
+        // shows the yield beats a row that never rendered one. Buying the rest means evicting
+        // the badge or the machine, which is the trade #232 is constrained against.
+        String shallow = NodeRowText.fit(
+                "Everwatching Eye" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                columnAtDepth(0));
+        assertTrue("16 characters still fits at depth 0: " + shallow, shallow.contains("0.1%"));
+        String deep = NodeRowText.fit(
+                "Everwatching Eye" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                columnAtDepth(PlannerWidgets.MAX_INDENT_DEPTH));
+        assertFalse("...and is known NOT to fit at the indent cap; if it now does, the column"
+                    + " widened and the percentages above are stale: " + deep,
+                    deep.contains("0.1%"));
     }
 
     /**
-     * The label column at one indent depth, from `PlannerWidgets.row`'s own arithmetic:
-     * `PANEL_WIDTH - PADDING * 2`, less the indent, `ICON + GAP` and `QTY + GAP`.
+     * The label column at one indent depth, computed the way `PlannerWidgets.row` computes it.
+     *
+     * CALLS THE PRODUCTION CONSTANTS AND `badgeWidthFor` RATHER THAN RESTATING THEM. The badge
+     * is the piece a hand-written version forgets: `badgeWidthFor` reserves it on every
+     * full-width tree row, cap included, and `aFullWidthTreeRowStillCarriesItsBadgeEvenAtTheIn`
+     * `dentCap` pins that. Omitting it overstates the label column by 93px, which is 16
+     * characters and the whole of the disagreement this test was re-pinned to settle.
      */
     private static int columnAtDepth(int depth) {
-        return 400 - 6 * 2 - (Math.min(depth, 8) * 6 + (10 + 2) + (52 + 2));
+        int x = Math.min(depth, PlannerWidgets.MAX_INDENT_DEPTH) * PlannerWidgets.INDENT
+                + PlannerWidgets.ICON + PlannerWidgets.GAP
+                + PlannerWidgets.QTY + PlannerWidgets.GAP;
+        int badge = PlannerWidgets.badgeWidthFor(PlannerWidgets.CONTENT_WIDTH, x);
+        return Math.max(PlannerWidgets.GAP, PlannerWidgets.CONTENT_WIDTH - x
+                        - (badge > 0 ? badge + PlannerWidgets.GAP : 0));
     }
 
     @Test

@@ -629,14 +629,19 @@ public final class NodeRowText {
             // `theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond`, which measures
             // both against real label lengths rather than a short synthetic one.
             //
-            // THIS FIXES 98.4% OF ROWS, NOT ALL OF THEM, AND THE REMAINDER IS NAMED. The label
-            // column is 45 characters at the indent cap and this meta is 16, so a label past 26
-            // characters still loses the percentage: 12 of 769 rows in `plan-fluid-chain` and 1
-            // of 52 in `plan-truncated`, about 1.6%, on names like `[fluid] Molten Aluminum
-            // Brass` (29) and `Universal Constellation Princess` (32). The row cannot carry a
-            // 32-character label, a run count and a percentage at once, and buying the last
-            // 1.6% means evicting something else. Anyone shortening this phrase further should
-            // move that number and update it here and in the test.
+            // THIS DOES NOT FIT ON MOST ROWS, AND THE NUMBER IS HERE RATHER THAN FLATTERING.
+            // The label column is 37 characters at depth 0 and 29 at the indent cap -- the
+            // badge takes 93px of every full-width tree row -- so after a 3-character separator
+            // this 16-character meta leaves 18 characters of label at the top and 10 at the
+            // bottom. Measured over the committed fixtures, the yield is cut from 574 of 769
+            // rows in `plan-fluid-chain` (74.6%) and 35 of 52 in `plan-truncated` (67.3%).
+            //
+            // IT IS STILL THE BEST FORM AVAILABLE, which is the argument for shipping it. The
+            // prose it replaced is 23 characters against this 4, so it was lost on strictly
+            // more rows, and before #252 the number was drawn on NONE. Buying the remainder
+            // means evicting the badge or the machine, which is the trade #232 is under a hard
+            // no-eviction constraint against. Anyone shortening this further should move these
+            // percentages and update them here and in the test.
             sb.append(", ").append(percent(chance));
         }
         return sb.toString();
