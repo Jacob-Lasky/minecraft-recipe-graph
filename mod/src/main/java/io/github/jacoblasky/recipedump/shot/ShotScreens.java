@@ -97,6 +97,9 @@ public final class ShotScreens {
      */
     private static volatile String pendingReport;
 
+    /** See {@link #declaredReport()}. Survives a pass, unlike {@link #pendingReport}. */
+    private static volatile String declaredReport;
+
     /**
      * See {@link #reportFail}. Non-null means a verdict arrived and it was NO.
      *
@@ -192,9 +195,17 @@ public final class ShotScreens {
      * BECAUSE A PROBE THAT SAYS NOTHING LOOKS EXACTLY LIKE A PROBE THAT WAS NEVER RUN. On
      * 2026-08-03 the AE2 probe produced a full verdict on three runs and, on a fourth with no
      * relevant change, produced its "placed" line and then nothing at all -- and the log of
-     * that run is indistinguishable from a build where the screen had been deleted. I could
-     * not reproduce it, which is precisely why silence must not be an available outcome: a
-     * flake that reports nothing gets read as a clean run by whoever greps for a failure.
+     * that run is indistinguishable from a build where the screen had been deleted.
+     *
+     * THIS COMMENT USED TO SAY THAT FLAKE WAS UNREPRODUCIBLE. IT WAS NOT, AND THE CAUSE IS
+     * WORTH MORE THAN THE GUARD. It reproduced later the same day: the probe waits twenty
+     * SERVER ticks while the harness counts RENDER frames, two clocks nothing keeps in step, so
+     * the capture can fire mid-probe. That run reached "server tick 5/20". `Ae2ProbeShot` now
+     * holds the capture instead of betting on a frame count -- see {@link #holdCapture} -- and
+     * "I could not reproduce it" turned out to mean "I had not yet found the race".
+     *
+     * The guard stays, because it is what caught the race rather than letting the run pass:
+     * a flake that reports nothing gets read as a clean run by whoever greps for a failure.
      *
      * So the screen says up front that a verdict is owed, and {@link ShotHarness} treats a
      * capture with a verdict still outstanding as a failed run rather than a successful one.
@@ -215,6 +226,21 @@ public final class ShotScreens {
      */
     public static void expectReport(String what) {
         pendingReport = what;
+        declaredReport = what;
+    }
+
+    /**
+     * What this screen declared it would report, whether or not it has yet.
+     *
+     * SO THAT A PASS CAN BE STATED RATHER THAN INFERRED FROM SILENCE. {@link #pendingReport} is
+     * cleared by a pass, which makes a screen that passed indistinguishable from one that never
+     * declared anything -- so the only evidence of a successful guard was the ABSENCE of a `!!`
+     * line, and a reader had to know that to read the log. Absence carrying the meaning is the
+     * shape of defect this whole class exists to remove; leaving it in the guard's own output
+     * was not defensible.
+     */
+    public static String declaredReport() {
+        return declaredReport;
     }
 
     /**
@@ -372,6 +398,7 @@ public final class ShotScreens {
         noScreenExpected = false;
         settleRequest = 0;
         pendingReport = null;
+        declaredReport = null;
         failedVerdict = null;
         try {
             opener.open(arg);

@@ -93,6 +93,30 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void aPassIsStillDistinguishableFromHavingDeclaredNothing() {
+        // WITHOUT THIS THE GUARD'S OWN OUTPUT RELIED ON AN ABSENCE. `reportPass` clears
+        // `pendingReport`, so after a pass the state is identical to a screen that never
+        // declared a verdict at all, and the only evidence the guard had run was that it
+        // printed nothing. `declaredReport` survives the pass so the harness can say so.
+        ShotScreens.register("test-declared", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+
+        assertNull(ShotScreens.open("test-declared"));
+        assertNull("a screen that declared nothing has nothing to report",
+                ShotScreens.declaredReport());
+
+        assertNull(ShotScreens.open("test-declared"));
+        ShotScreens.expectReport("a verdict");
+        ShotScreens.reportPass();
+        assertNull(ShotScreens.pendingReport());
+        assertEquals("the declaration must outlive the pass that discharged it",
+                "a verdict", ShotScreens.declaredReport());
+    }
+
+    @Test
     public void aScreenThatContradictsItselfFailsRatherThanPasses() {
         // A screen reporting both is a screen with a defect, and the two ways to resolve that
         // are not symmetric: failing closed costs a re-run, passing closed publishes a green

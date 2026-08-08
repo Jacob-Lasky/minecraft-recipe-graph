@@ -698,6 +698,15 @@ public final class ShotHarness {
             return code == EXIT_OK ? EXIT_NO_VERDICT : code;
         }
         String failure = ShotScreens.failedVerdict();
+        if (failure == null && ShotScreens.declaredReport() != null) {
+            // SAY THE PASS RATHER THAN LEAVE SILENCE TO MEAN IT. The `!!` lines below are the
+            // only output this guard used to produce, so a screen that passed and a screen that
+            // never declared anything left an identical log, and reading the guard as having
+            // run required knowing that absence was the signal. That is the same defect this
+            // class exists to remove, sitting in the guard's own reporting.
+            log("the screen reported '" + ShotScreens.declaredReport() + "': PASS");
+            return code;
+        }
         if (failure != null) {
             log("!! the screen's verdict was NO: " + failure + ". The PNG is this run's and the "
                     + "run still failed, which is the screen reporting a finding rather than "

@@ -79,11 +79,11 @@ names another item.
 -Dmcrecipedump.shotWorld=ae2`. Measured at 177 s and 189 s on a warm cache with one Java file
 changed -- above the table below because of the world load, and because both runs shared Tower
 with other builds. Without `shotWorld` it refuses and says so, because a
-grid exists only on the server. It also declares its own settle window through
-`ShotScreens.requestSettleFrames`, since it waits twenty SERVER ticks for AE2 to connect its
-nodes and the default twenty RENDER frames is shorter than that -- a screen that needs time
-says so in code rather than in an incantation the next person has to know to type. See the AE2
-bullet under Limits for what its verdict does and does not establish.
+grid exists only on the server. It **holds the capture** until it has reported, rather than
+asking for more settle frames: it waits twenty SERVER ticks while the harness counts RENDER
+frames, and those are different clocks. A frame count is a bet on their ratio, and the bet lost
+on 2026-08-03 -- a run was captured at "server tick 5/20", produced no verdict, and exited
+non-zero. See the AE2 bullet under Limits for what its verdict does and does not establish.
 
 `dump` is the only entry that runs a COMMAND rather than opening a GUI, and the only one that
 opens no `GuiScreen` at all: `harness/shot.sh dump dump -Dmcrecipedump.shotWorld=dump`. It

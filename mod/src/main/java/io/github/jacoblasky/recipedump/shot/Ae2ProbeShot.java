@@ -111,21 +111,39 @@ final class Ae2ProbeShot {
         if (server == null) {
             throw new IllegalStateException("ae2-probe needs the integrated server");
         }
-        // DECLARED, not left to the command line. Twenty server ticks is about a second and
-        // the default settle is under one on this rasteriser, so without this the run
-        // captures and exits before the verdict is logged -- and a log with no verdict line
-        // reads as "did not run", which is indistinguishable from "found nothing".
-        ShotScreens.requestSettleFrames(150);
-        // The debt this screen owes. See `ShotScreens.expectReport` for the run that made it
-        // necessary: a probe that logs nothing is indistinguishable from one never run.
+        // The debt this screen owes, DECLARED FIRST because everything below reads it: the hold
+        // waits on it, and the Ticker can discharge it on its very first server tick. See
+        // `ShotScreens.expectReport` for the run that made it necessary.
         //
-        // BOTH OF THESE MUST PRECEDE THE `register` BELOW, AND THAT ORDER IS LOAD-BEARING. The
-        // Ticker runs on the SERVER thread and can fail on its very first tick -- `place` does
-        // exactly that when a block is missing. Registering first leaves a window in which the
-        // probe calls `reportFail`, clearing a debt that has not been declared yet, and then
-        // this line re-arms it: the run would then report "the screen never reported" and throw
-        // away the real reason, which is the failure mode this whole guard exists to prevent.
+        // IT MUST PRECEDE THE `register` BELOW AND THAT ORDER IS LOAD-BEARING. The Ticker runs on
+        // the SERVER thread and can fail immediately -- `place` does exactly that when a block is
+        // missing. Registering first leaves a window in which the probe calls `reportFail`,
+        // clearing a debt that has not been declared yet, and then this line re-arms it: the run
+        // would report "the screen never reported" and throw away the real reason, which is the
+        // failure mode this whole guard exists to prevent.
         ShotScreens.expectReport("ae2-probe verdict");
+
+        // A HOLD, NOT A FRAME COUNT, AND THE FRAME COUNT WAS MEASURED FAILING. This screen waits
+        // twenty SERVER ticks; the harness captures after N RENDER frames. Those are different
+        // clocks and nothing keeps them in step, so any N is a bet on their ratio. 150 was the
+        // bet and it lost on 2026-08-03: a run reached "server tick 5/20" and was captured and
+        // exited, producing the "placed" line and then nothing -- which is exactly the flake
+        // `ShotScreens.expectReport` documents as unreproducible. It was not unreproducible. It
+        // was a race, and it reproduces whenever the client renders fast relative to the server.
+        //
+        // So the harness is ASKED to wait instead, until this screen has actually reported.
+        // `-Dmcrecipedump.shotTimeoutSeconds` is the backstop, so a probe that never answers
+        // still fails on the clock rather than hanging. See `ShotScreens.Hold`.
+        ShotScreens.holdCapture(new ShotScreens.Hold() {
+            @Override
+            public boolean busy() {
+                return ShotScreens.pendingReport() != null;
+            }
+        });
+        // STILL A SETTLE, because the hold governs the VERDICT and this governs the PICTURE:
+        // ModularUI animates the panel open and a capture on the opening frame catches a fade.
+        // Modest now that it is no longer carrying the verdict's timing as well.
+        ShotScreens.requestSettleFrames(20);
 
         // A SERVER TICK SUBSCRIBER, NOT ONE SCHEDULED TASK, because the grid does not exist
         // in the tick the blocks are placed. AE2 creates a tile's grid node lazily on its
