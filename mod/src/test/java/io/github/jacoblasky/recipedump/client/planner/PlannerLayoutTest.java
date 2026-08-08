@@ -5,6 +5,8 @@ import io.github.jacoblasky.recipedump.plan.Pins;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
@@ -30,6 +32,47 @@ import org.junit.Test;
  * gets immediately.
  */
 public class PlannerLayoutTest {
+
+    /**
+     * A SHOPPING ROW KEEPS THE QUANTITY A CLICK WOULD HAVE TO ACT ON. #251.
+     *
+     * `addEntries` built `new Line(key, text, colour)` and dropped everything else, so the row
+     * was identifiable (#236 resolves an icon from the key) while the number was gone. That is
+     * why #251 could not simply be wired up at `rowList`: the aggregate `need` that makes the
+     * issue's option 3 correct is discarded one layer above the place the click attaches.
+     *
+     * THE AGGREGATE IS THE POINT, not merely that a number survives. `_need_entry`'s docstring
+     * states the division of labour where the data is produced -- "The tree is the diagnosis;
+     * this is what gets acted on while gathering" -- so a shopping row's `need` is the total the
+     * plan wants, and a tree node's is one parent's share. #251's two rejected options both
+     * route through `PlanSelection.selectedNode` and read the per-occurrence number, which is
+     * one defect with two spellings rather than two objections.
+     *
+     * ONE ROW, ONE ACTION. A wrapped row produces several lines and only the first carries the
+     * row, so a player never gets two clickable things that mean one thing.
+     */
+    @Test
+    public void aShoppingLineCarriesTheRowItCameFromAndItsAggregateNeed() {
+        PlanView.EntryRow row = PlanFixtures.load("plan-cycle").shoppingList().get(0);
+        List<PlannerWidgets.Line> lines = new java.util.ArrayList<PlannerWidgets.Line>();
+        PlannerWidgets.addEntries(lines, "shopping list",
+                                  java.util.Collections.singletonList(row),
+                                  NodeStatus.INK_MUTED, 240);
+
+        PlannerWidgets.Line header = lines.get(0);
+        assertNull("a header is not about one item, so it carries no row", header.row);
+
+        PlannerWidgets.Line first = lines.get(1);
+        assertSame("the first line of a row must carry that row", row, first.row);
+        assertEquals("and the quantity a click acts on is the row's own aggregate",
+                     row.need(), first.row.need());
+
+        for (int i = 2; i < lines.size(); i++) {
+            assertNull("a continuation line must not be separately actionable",
+                       lines.get(i).row);
+        }
+    }
+
 
     private static PlanBook emptyBook() {
         return new PlanBook();

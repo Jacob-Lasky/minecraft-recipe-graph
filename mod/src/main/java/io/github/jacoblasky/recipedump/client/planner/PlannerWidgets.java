@@ -1256,7 +1256,10 @@ public final class PlannerWidgets {
             boolean first = true;
             for (String text : NodeRowText.entryLine(row, ambiguous.contains(row.label()),
                                                      widthPx)) {
-                lines.add(new Line(first ? row.key() : "", text, colour));
+                // THE ROW GOES ON THE FIRST LINE ONLY, beside the key, and for the same reason
+                // the key does: a row that wraps is one row, and hanging an action off its
+                // continuation would give the player two clickable things that mean one thing.
+                lines.add(new Line(first ? row.key() : "", text, colour, first ? row : null));
                 first = false;
             }
         }
@@ -1307,7 +1310,29 @@ public final class PlannerWidgets {
         final String text;
         final int colour;
 
+        /**
+         * The shopping row this line came from, or null for a header or a machine line. #251.
+         *
+         * THE KEY SURVIVED TO THE ROW AND THE QUANTITY DID NOT, which is the whole reason this
+         * field exists. `rowList` already had `key` and used it to resolve an icon, so a row was
+         * IDENTIFIABLE (#236) while the number a click would have to act on was dropped one
+         * layer up in `addEntries`. That is the same aggregate-versus-occurrence confusion #251
+         * is about, one layer above the place it was filed.
+         *
+         * IT IS THE ROW AND NOT A `need` LONG, deliberately. A bare quantity would be usable by
+         * a caller that had lost track of which surface it came from, and the point of option 3
+         * is that this quantity is only correct ON THIS SURFACE: a shopping row's `need` is the
+         * total the plan wants, where a tree node's is one parent's share. Carrying the row
+         * keeps the number attached to the thing that makes it right.
+         */
+        final PlanView.EntryRow row;
+
         Line(String key, String text, int colour) {
+            this(key, text, colour, null);
+        }
+
+        Line(String key, String text, int colour, PlanView.EntryRow row) {
+            this.row = row;
             // "" AND NEVER NULL, because `rowList` asks `isEmpty()` once per row per frame and a
             // `EntryRow` key comes out of gson. The same asymmetry `ClickableGroup`'s own key
             // guard names: a null there is an NPE inside a draw, not a missing icon.
