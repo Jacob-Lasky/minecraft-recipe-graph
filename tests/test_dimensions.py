@@ -476,9 +476,20 @@ class TheTollBreaksTheTieTest(unittest.TestCase):
         self.assertLess(costs[OVERWORLD_IRON], costs[NETHER_IRON])
 
     def test_the_toll_is_exactly_what_separates_them(self):
+        """AND IT IS ASSERTED AGAINST A LITERAL, NOT AGAINST THE CONSTANT ITSELF.
+
+        Written as `difference == cost.OVERWORLD_TOLL` this test is PARAMETERISED ON THE
+        THING IT TESTS: set the constant to 0.0 and both ores price at 1.0, the difference
+        is 0.0, and the assertion passes while the defect is fully restored. Caught by
+        reverting the behaviour and watching which tests stayed green -- this one did.
+
+        A separation of exactly 5.0 is what the shipped constant means, so 5.0 is what the
+        assertion says. If the constant moves deliberately this test fails and is updated
+        deliberately, which is the point of pinning a magnitude anywhere.
+        """
         _solver, costs = self._solver(tied_iron_graph())
-        self.assertAlmostEqual(costs[NETHER_IRON] - costs[OVERWORLD_IRON],
-                               cost.OVERWORLD_TOLL, places=6)
+        self.assertAlmostEqual(costs[NETHER_IRON] - costs[OVERWORLD_IRON], 5.0, places=6)
+        self.assertAlmostEqual(cost.OVERWORLD_TOLL, 5.0, places=6)
 
     def test_the_planner_picks_the_overworld_ore(self):
         """The assertion the issue is actually about. `pick_alternative` ranks on
@@ -536,9 +547,9 @@ class TheTollBreaksTheTieTest(unittest.TestCase):
         g.dimension_ores = {NETHER_IRON: [-1, "the_nether"]}
         gates = dimensions.gates_for(g, {".": 2})
         costs = cost.estimate(g, machine_states=SMELT_STATES, dimension_gates=gates)
-        self.assertAlmostEqual(
-            costs[NETHER_IRON],
-            cost.BASE_RAW_COST + cost.DIMENSION_COST + cost.OVERWORLD_TOLL, places=6)
+        # Literals, for the reason on `test_the_toll_is_exactly_what_separates_them`: written
+        # against the constants this passes with the toll zeroed, which is the defect.
+        self.assertAlmostEqual(costs[NETHER_IRON], 1.0 + 800.0 + 5.0, places=6)
 
     def test_stock_still_beats_the_toll(self):
         """`min` is still `min`, exactly as for the gate."""
@@ -552,6 +563,48 @@ class TheTollBreaksTheTieTest(unittest.TestCase):
         del g.offworld_ores
         costs = cost.estimate(g, machine_states=SMELT_STATES)
         self.assertAlmostEqual(costs[NETHER_IRON], cost.BASE_RAW_COST, places=6)
+
+
+class TheRawFloorIsOneDefinitionTest(unittest.TestCase):
+    """`cost.raw_floor`, extracted because `_seed` applies it twice and Java twice more.
+
+    THE FOUR COMBINATIONS ARE ASSERTED DIRECTLY rather than only through `_seed`, because
+    the helper is a CONTRACT BETWEEN TWO LANGUAGES: `Cost.rawFloor` must return the same
+    double for the same inputs, and `tests/fixtures/plan/` only catches a divergence that
+    happens to reach a fixture's chosen route. A key gated but not tolled, or tolled but
+    not gated, may not appear in any fixture at all.
+
+    LITERALS, NOT THE CONSTANTS, for the reason on `test_the_toll_is_exactly_what_separates
+    _them`: written as `BASE_RAW_COST + DIMENSION_COST` these pass with either constant
+    zeroed, which is the whole failure mode this file exists to catch.
+    """
+
+    def test_an_ordinary_leaf_pays_neither(self):
+        self.assertAlmostEqual(cost.raw_floor("mod:rock", {}, frozenset()), 1.0, places=6)
+
+    def test_a_gated_ore_pays_the_trip(self):
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {"mod:ore": "Sedna"}, frozenset()), 801.0, places=6)
+
+    def test_a_tolled_ore_pays_the_portal(self):
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {}, frozenset(["mod:ore"])), 6.0, places=6)
+
+    def test_an_unvisited_off_world_ore_pays_both(self):
+        """The two terms coexist; neither absorbs the other. See `dimensions` for why."""
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {"mod:ore": "Sedna"}, frozenset(["mod:ore"])),
+            806.0, places=6)
+
+    def test_the_two_seed_rules_charge_a_key_identically(self):
+        """WHY THE HELPER EXISTS. The leaf rule ASSIGNS and the world-ore rule takes a MIN,
+        so a key reached by both must get the same number from each or the order of the two
+        loops decides the price. One definition makes that true by construction; this pins
+        it so a future edit to one call site cannot quietly diverge."""
+        g = tied_iron_graph()
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        # NETHER_IRON is a world ore AND an unproduced leaf, so both rules reach it.
+        self.assertAlmostEqual(costs[NETHER_IRON], 6.0, places=6)
 
 
 class TheOrderingIsTheClaimTest(unittest.TestCase):

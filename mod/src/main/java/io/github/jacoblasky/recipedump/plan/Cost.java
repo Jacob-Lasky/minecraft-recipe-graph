@@ -757,6 +757,30 @@ public strictfp final class Cost {
     }
 
     /** Starting costs, before any recipe is considered. Shared by both relaxation passes. */
+    /**
+     * What "you go and get this" costs: a raw leaf, plus whatever stands between. Mirrors
+     * `cost.raw_floor` in python, which is the oracle this file is held to.
+     *
+     * <p>ONE DEFINITION, BECAUSE {@code seed} APPLIES IT IN TWO PLACES. The leaf rule and the
+     * world-ore rule must charge a key identically -- the first assigns, the second takes a
+     * min, and a key reached by both has to get the same number from each or the order of the
+     * two loops silently decides the price. Two hand-maintained copies here plus two in python
+     * is four chances to drift, and drift is a repricing nobody sees.
+     *
+     * <p>OPERAND ORDER IS PART OF THE CONTRACT. `tests/fixtures/plan/` freezes prices computed
+     * in python and this side is asserted against them bit-for-bit, so {@code a + b + c} may
+     * not become {@code a + c + b}. See the class comment above.
+     *
+     * <p>THE TWO TERMS ARE DIFFERENT CLAIMS AND BOTH CAN APPLY. The gate says you have never
+     * been to the dimension and lifts the moment you go (#112); the toll says a portal is on
+     * the route and never lifts (#248). An ore in an unvisited dimension pays both.
+     */
+    private static double rawFloor(RecipeGraph graph, long[] gated, int key) {
+        return BASE_RAW_COST
+                + (Bits.get(gated, key) ? DIMENSION_COST : 0.0)
+                + (graph.isOffworldOre(key) ? OVERWORLD_TOLL : 0.0);
+    }
+
     static double[] seed(RecipeGraph graph, CostInputs in) {
         double[] cost = new double[graph.keyCount()];
         Arrays.fill(cost, Double.POSITIVE_INFINITY);
@@ -821,9 +845,7 @@ public strictfp final class Cost {
                 for (int p = recipes.altStart(slot); p < recipes.altEnd(slot); p++) {
                     int alt = recipes.altKeyAt(p);
                     if (Double.isInfinite(cost[alt]) && !Bits.get(produced, alt)) {
-                        cost[alt] = BASE_RAW_COST
-                                + (Bits.get(gated, alt) ? DIMENSION_COST : 0.0)
-                                + (graph.isOffworldOre(alt) ? OVERWORLD_TOLL : 0.0);
+                        cost[alt] = rawFloor(graph, gated, alt);
                     }
                 }
             }
@@ -856,10 +878,7 @@ public strictfp final class Cost {
                 // asymmetry the python `_seed` has and for the same reason: where an ore
                 // generates is pack data settled at build time, and where the player has been
                 // is per-save.
-                double floor = BASE_RAW_COST
-                        + (Bits.get(gated, key) ? DIMENSION_COST : 0.0)
-                        + (graph.isOffworldOre(key) ? OVERWORLD_TOLL : 0.0);
-                cost[key] = Math.min(cost[key], floor);
+                cost[key] = Math.min(cost[key], rawFloor(graph, gated, key));
             }
         }
 

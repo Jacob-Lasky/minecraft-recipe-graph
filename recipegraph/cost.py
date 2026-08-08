@@ -1129,6 +1129,31 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
     return _relax(graph, cost, passes, machine_states, machine_entry)
 
 
+def raw_floor(key, gates, tolled):
+    """What "you go and get this" costs: a raw leaf, plus whatever stands between.
+
+    ONE DEFINITION, BECAUSE `_seed` APPLIES IT IN TWO PLACES AND JAVA IN TWO MORE. The leaf
+    rule and the world-ore rule must charge a key identically -- the first assigns, the
+    second `min`s, and a key reached by both has to get the same number from each or the
+    order of the two loops silently decides the price. Four hand-maintained copies of one
+    three-term sum is four chances to drift, and drift here is a repricing nobody sees.
+    Java mirrors this as `Cost.rawFloor` for the same reason.
+
+    OPERAND ORDER IS PART OF THE CONTRACT, not formatting. `tests/fixtures/plan/` freezes
+    prices computed here and the Java port is asserted against them bit-for-bit, so
+    `a + b + c` may not become `a + c + b`. See the class comment on `Cost.java`.
+
+    THE TWO TERMS ARE DIFFERENT CLAIMS AND BOTH CAN APPLY. `gates` says you have never been
+    to the dimension and lifts the moment you go (#112). `tolled` says a portal is on the
+    route and never lifts (#248). An ore in an unvisited dimension pays both; one in a
+    dimension you have been to a thousand times pays only the toll; an overworld ore pays
+    neither. Folding either into the other loses one of the two statements.
+    """
+    return (BASE_RAW_COST
+            + (DIMENSION_COST if key in gates else 0.0)
+            + (OVERWORLD_TOLL if key in tolled else 0.0))
+
+
 def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
           emc_available=None, craftables=None, raw=None):
     """Starting costs, before any recipe is considered. Shared by both relaxation passes.
@@ -1209,9 +1234,7 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
         for ing in r.inputs:
             for alt in ing.alternatives:
                 if alt not in cost and alt not in produced:
-                    cost[alt] = (BASE_RAW_COST
-                                 + (DIMENSION_COST if alt in gates else 0.0)
-                                 + (OVERWORLD_TOLL if alt in tolled else 0.0))
+                    cost[alt] = raw_floor(alt, gates, tolled)
 
     # AND EVERY WORLD ORE, WHETHER OR NOT SOMETHING PRODUCES IT. The loop above prices a
     # leaf as obtainable only when NO recipe outputs it, which quietly assumes the only way
@@ -1274,10 +1297,7 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # OVERWORLD_TOLL = 806, still far below `UNSOURCED_COST` and the `unavailable` wall, and
     # `tests/test_dimensions.py` asserts that band rather than leaving it to the reader.
     for key in graph.world_ores:
-        floor = (BASE_RAW_COST
-                 + (DIMENSION_COST if key in gates else 0.0)
-                 + (OVERWORLD_TOLL if key in tolled else 0.0))
-        cost[key] = min(cost.get(key, math.inf), floor)
+        cost[key] = min(cost.get(key, math.inf), raw_floor(key, gates, tolled))
 
     # AND EVERY KEY THE TRANSMUTATION NETWORK CAN MAKE, for the same reason and by the same
     # mechanism as the world ores above: it counts as produced, so the leaf rule never sees
