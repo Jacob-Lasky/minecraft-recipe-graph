@@ -71,8 +71,17 @@ final class BrowseShot {
         // by looking. The log line is what says the run had a graph at all.
         ShotHarness.log("graph: " + facts.recipes() + " recipes from " + path
                 + " (dumped from " + facts.instanceDir() + ")");
+        java.util.List<String> live = io.github.jacoblasky.recipedump.DumpCommand.activeModIds();
+        GraphFacts.PackCheck check = facts.checkAgainst(
+                io.github.jacoblasky.recipedump.DumpCommand.modDigest(live),
+                live == null ? 0 : live.size());
+        // THE VERDICT GOES IN THE LOG TOO. The harness runs a FIVE-jar dev set against an
+        // oracle built from the full pack, so the honest answer here is MISMATCH -- and a
+        // reviewer seeing red in the screenshot needs the log line to tell that apart from a
+        // real defect. See harness/README.md.
+        ShotHarness.log("graph: pack check " + check.verdict() + " -- " + check.detail());
         BrowseScreen.openPanel(GraphWidgets.graphPanel(
-                facts, path, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH)));
+                facts, path, check, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH)));
     }
 
     /**

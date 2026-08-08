@@ -64,7 +64,8 @@ public final class GraphWidgets {
      * caller draws a not-yet panel for that case; this asserts nothing about it.
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    public static ModularPanel graphPanel(GraphFacts facts, String path, BrowseActions nav) {
+    public static ModularPanel graphPanel(GraphFacts facts, String path,
+                                          GraphFacts.PackCheck check, BrowseActions nav) {
         PlannerWidgets.Group body = new PlannerWidgets.Group();
         body.pos(PADDING, PADDING);
         body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
@@ -72,6 +73,18 @@ public final class GraphWidgets {
         int y = 0;
         body.child(BrowseTabs.strip(BrowseTabs.Tab.GRAPH, nav, CONTENT_WIDTH).pos(0, y));
         y += ROW_HEIGHT + 1;
+
+        // THE VERDICT FIRST, AND EVERYTHING BELOW IT IS THE EVIDENCE FOR IT. An earlier cut of
+        // this screen showed the file, the instance, the build and the totals and stopped --
+        // which are the INPUTS to "is this graph stale", not the answer. A player who is not
+        // already suspicious will not diff two hex strings, and the one who is suspicious is
+        // the one who least needed the screen.
+        body.child(PlannerWidgets.line(verdictLine(check), CONTENT_WIDTH, verdictColour(check))
+                           .pos(0, y));
+        y += LINE;
+        body.child(PlannerWidgets.line(check == null ? "" : check.detail(), CONTENT_WIDTH,
+                                       NodeStatus.INK_MUTED).pos(0, y));
+        y += LINE + 1;
 
         // THE FILE FIRST, because it is the only line a player can act on: it is the thing they
         // would replace. `GraphSource` puts it under `<config>/mcrecipedump/`, which is a
@@ -112,6 +125,52 @@ public final class GraphWidgets {
 
     private static List<GraphFacts.Source> sources(GraphFacts facts) {
         return facts == null ? new ArrayList<GraphFacts.Source>() : facts.sources();
+    }
+
+
+    /**
+     * The verdict, as a word a reader cannot misread.
+     *
+     * A DISTINCT WORD PER STATE AND NOT ONLY A COLOUR, which is the redundant-channel rule this
+     * UI already follows for the state chips and the tab strip. It matters most here: the three
+     * states are "fine", "your plans are wrong" and "I did not check", and a colour-only signal
+     * would make the third indistinguishable from the first in a greyscale screenshot -- which
+     * is exactly the "looks fine but means never checked" failure the third state exists to
+     * prevent.
+     *
+     * `UNCHECKED` RATHER THAN `UNKNOWN`, because the reader is being told something about what
+     * the TOOL did, not about the pack. "Unknown" invites "unknown to whom".
+     */
+    static String verdictLine(GraphFacts.PackCheck check) {
+        if (check == null) {
+            return "pack: UNCHECKED";
+        }
+        switch (check.verdict()) {
+            case MATCHES:
+                return "pack: OK";
+            case DIFFERS:
+                return "pack: MISMATCH -- plans from this graph are suspect";
+            default:
+                return "pack: UNCHECKED";
+        }
+    }
+
+    /**
+     * Green, red, amber. AMBER AND NOT MUTED for `CANNOT_TELL`: muted is what this panel uses
+     * for supporting detail, so a muted verdict would read as an aside rather than as a gap.
+     */
+    static int verdictColour(GraphFacts.PackCheck check) {
+        if (check == null) {
+            return NodeStatus.INK_WARN;
+        }
+        switch (check.verdict()) {
+            case MATCHES:
+                return NodeStatus.INK_OK;
+            case DIFFERS:
+                return NodeStatus.INK_NEED;
+            default:
+                return NodeStatus.INK_WARN;
+        }
     }
 
     static String pathLine(String path) {

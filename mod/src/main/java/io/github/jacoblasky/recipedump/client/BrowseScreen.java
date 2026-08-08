@@ -7,6 +7,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.ModularScreen;
 import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 
+import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.browse.BrowseTabs;
 import io.github.jacoblasky.recipedump.client.browse.GraphWidgets;
@@ -142,8 +143,16 @@ public final class BrowseScreen {
         if (tab == BrowseTabs.Tab.GRAPH) {
             String path = GraphService.get().source() == null
                     ? "" : GraphService.get().source().getPath();
-            return avoidedByJei(
-                    GraphWidgets.graphPanel(GraphFacts.of(graph), path, navFor(tab)));
+            GraphFacts facts = GraphFacts.of(graph);
+            // THE LIVE HALF IS MEASURED HERE AND THE VERDICT IS DECIDED IN `plan/`. Reading the
+            // running mod list needs Forge, which `plan/` may not touch and `tools/ci-java.sh`
+            // could not run; the comparison itself is pure and belongs where every branch of it
+            // is testable. `activeModIds` answers null outside a running Forge, which is a
+            // "cannot tell" rather than a pack with no mods -- see its own note.
+            java.util.List<String> live = DumpCommand.activeModIds();
+            GraphFacts.PackCheck check = facts.checkAgainst(
+                    DumpCommand.modDigest(live), live == null ? 0 : live.size());
+            return avoidedByJei(GraphWidgets.graphPanel(facts, path, check, navFor(tab)));
         }
         return avoidedByJei(SourcesWidgets.sourcesPanel(
                 ScenarioService.get().sources(), navFor(tab)));

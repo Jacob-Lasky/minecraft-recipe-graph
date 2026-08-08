@@ -1,6 +1,8 @@
 package io.github.jacoblasky.recipedump.plan;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
@@ -121,5 +123,97 @@ public class GraphFactsTest {
         GraphFacts facts = GraphFacts.of(new GraphBuilder().build());
         assertEquals(0, facts.recipes());
         assertTrue(facts.sources().isEmpty());
+    }
+
+    // -- is this graph for this pack? ----------------------------------------------------------
+
+    private static RecipeGraph stamped(String digest, int count) {
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "a", "cat.one", "hei_dump");
+        b.dumpModDigest(digest);
+        b.dumpModCount(count);
+        return b.build();
+    }
+
+    @Test
+    public void aGraphBuiltFromTheRunningJarSetMatches() {
+        GraphFacts.PackCheck check = GraphFacts.of(stamped("abc123", 410))
+                .checkAgainst("abc123", 410);
+        assertEquals(GraphFacts.Verdict.MATCHES, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("410"));
+    }
+
+    @Test
+    public void aDifferentJarSetIsAMismatchThatNamesBothCounts() {
+        // `_refuse_the_wrong_pack` warns that a dump from a smaller jar set "produces a graph
+        // that looks entirely normal and is missing whole mods". The counts are what let a
+        // player see WHICH DIRECTION they are wrong in, which is the actionable half.
+        GraphFacts.PackCheck check = GraphFacts.of(stamped("abc123", 367))
+                .checkAgainst("def456", 410);
+        assertEquals(GraphFacts.Verdict.DIFFERS, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("367"));
+        assertTrue(check.detail(), check.detail().contains("410"));
+    }
+
+    @Test
+    public void aDumpWithNoRecordedDigestCannotTellAndSaysWhy() {
+        // THE STATE THAT MUST NEVER RENDER AS AGREEMENT. `dump_meta` says the CLI check is
+        // "silent whenever it cannot compare", which is a safe default for a command and not
+        // for a screen: a screen has no equivalent of silence, so whatever is drawn here gets
+        // read as a pass. A pre-schema-6 dump records no digest, and the reader has to be told
+        // that the check did not happen AND what to do about it.
+        GraphFacts.PackCheck check = GraphFacts.of(stamped(null, 0)).checkAgainst("abc123", 410);
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL, check.verdict());
+        assertNotEquals("it must not read as a match", GraphFacts.Verdict.MATCHES,
+                        check.verdict());
+        assertTrue(check.detail(), check.detail().contains("redump"));
+    }
+
+    @Test
+    public void anUnreadableLiveModListCannotTellAndSaysSoDifferently() {
+        // `DumpCommand.activeModIds` answers null outside a running Forge -- the unit tests and
+        // any tooling. That is a different gap from an old dump and the reader is told which:
+        // one is fixed by redumping, the other is not fixed by the player at all.
+        GraphFacts.PackCheck check = GraphFacts.of(stamped("abc123", 410)).checkAgainst(null, 0);
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("mod list"));
+        assertNotEquals("the two cannot-tell reasons must be distinguishable",
+                        GraphFacts.of(stamped(null, 0)).checkAgainst("abc", 1).detail(),
+                        check.detail());
+    }
+
+    @Test
+    public void anEmptyDigestIsTreatedAsAbsentRatherThanAsAValueToCompare() {
+        // An empty string would compare unequal to a real digest and report MISMATCH, which is
+        // a confident wrong answer where the truth is "nothing recorded".
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL,
+                     GraphFacts.of(stamped("", 0)).checkAgainst("abc123", 410).verdict());
+        assertEquals(GraphFacts.Verdict.CANNOT_TELL,
+                     GraphFacts.of(stamped("abc123", 410)).checkAgainst("", 410).verdict());
+    }
+
+    @Test
+    public void everyVerdictCarriesANonEmptyReason() {
+        // The panel draws `detail()` unconditionally under the verdict word. A blank line there
+        // would be the screen going quiet at the moment it has something to say.
+        GraphFacts.PackCheck[] all = {
+            GraphFacts.of(stamped("a", 1)).checkAgainst("a", 1),
+            GraphFacts.of(stamped("a", 1)).checkAgainst("b", 2),
+            GraphFacts.of(stamped(null, 0)).checkAgainst("b", 2),
+            GraphFacts.of(stamped("a", 1)).checkAgainst(null, 0),
+        };
+        for (GraphFacts.PackCheck check : all) {
+            assertFalse(check.verdict().toString(), check.detail().isEmpty());
+        }
+    }
+
+    @Test
+    public void theRecordedStampSurvivesTheReadRatherThanBeingDropped() {
+        // The reader half: `dump_mod_digest` and `dump_mod_count` are written by
+        // `model.Graph.save` and were not read by the Java reader at all until #255. A field
+        // that is never read renders as CANNOT_TELL, which is read as "nothing is wrong".
+        GraphFacts facts = GraphFacts.of(stamped("deadbeef", 410));
+        assertEquals("deadbeef", facts.modDigest());
+        assertEquals(410, facts.modCount());
     }
 }

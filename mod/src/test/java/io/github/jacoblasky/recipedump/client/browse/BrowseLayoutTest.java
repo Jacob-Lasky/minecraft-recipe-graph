@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.client.browse;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.util.LinkedHashMap;
@@ -80,7 +81,12 @@ public class BrowseLayoutTest {
     }
 
     private static ModularPanel laidOutGraph(GraphFacts facts, String path) {
-        ModularPanel panel = GraphWidgets.graphPanel(facts, path, BrowseActions.NONE);
+        return laidOutGraph(facts, path, facts.checkAgainst("live-digest", 410));
+    }
+
+    private static ModularPanel laidOutGraph(GraphFacts facts, String path,
+                                             GraphFacts.PackCheck check) {
+        ModularPanel panel = GraphWidgets.graphPanel(facts, path, check, BrowseActions.NONE);
         HeadlessLayout.layOut(panel);
         return panel;
     }
@@ -302,5 +308,45 @@ public class BrowseLayoutTest {
         // blank, which reads as "nowhere".
         String line = GraphWidgets.instanceLine(GraphFacts.of(new GraphBuilder().build()));
         assertTrue(line, line.contains("not recorded"));
+    }
+
+    @Test
+    public void everyPackVerdictLaysOutAndSaysSomethingDifferent() {
+        // ALL THREE STATES, because the longest of them -- the MISMATCH line, which carries
+        // "plans from this graph are suspect" -- is the one that can overflow, and it is also
+        // the one a reader most needs to be able to read in full.
+        GraphFacts facts = GraphFacts.of(graph("mod:a", "mod:b"));
+        GraphFacts.PackCheck[] checks = {
+            facts.checkAgainst(null, 0),
+            facts.checkAgainst("x", 410),
+            facts.checkAgainst("y", 1),
+        };
+        List<String> lines = new ArrayList<String>();
+        for (GraphFacts.PackCheck check : checks) {
+            ModularPanel panel = laidOutGraph(facts, LONG_PATH, check);
+            assertNothingOverflowsSideways(panel);
+            assertChromeStaysInside(panel);
+            lines.add(GraphWidgets.verdictLine(check));
+        }
+        // The three must be distinguishable as TEXT, not only as colour -- a greyscale
+        // screenshot is the case where "UNCHECKED" being mistaken for "OK" costs the most.
+        for (int i = 0; i < lines.size(); i++) {
+            for (int j = i + 1; j < lines.size(); j++) {
+                if (checks[i].verdict() != checks[j].verdict()) {
+                    assertNotEquals(lines.get(i), lines.get(j));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void anUncheckedPackNeverDrawsTheSameWordAsAMatchingOne() {
+        // The single assertion that would have caught rendering "cannot compare" as agreement,
+        // which is the failure the third verdict exists to prevent.
+        GraphFacts facts = GraphFacts.of(graph("mod:a"));
+        assertNotEquals(GraphWidgets.verdictLine(facts.checkAgainst("d", 1)),
+                        GraphWidgets.verdictLine(facts.checkAgainst(null, 0)));
+        assertNotEquals(GraphWidgets.verdictColour(facts.checkAgainst("d", 1)),
+                        GraphWidgets.verdictColour(facts.checkAgainst(null, 0)));
     }
 }

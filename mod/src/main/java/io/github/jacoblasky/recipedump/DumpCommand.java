@@ -1730,7 +1730,13 @@ public class DumpCommand extends CommandBase {
      * nothing" are different facts and the reader distinguishes them; an empty list would
      * write `mod_count: 0`, which is a measurement nobody took.
      */
-    static List<String> activeModIds() {
+    /**
+     * PUBLIC FOR THE GRAPH SCREEN (#255), which compares the running jar set against the one
+     * the loaded graph records. That check is stronger in game than the CLI's equivalent:
+     * `index._refuse_the_wrong_pack` compares two artifacts, and this compares a graph against
+     * the pack it is actually being used in. Null still means "could not ask", never "no mods".
+     */
+    public static List<String> activeModIds() {
         try {
             List<String> ids = new ArrayList<String>();
             for (net.minecraftforge.fml.common.ModContainer mod
@@ -1769,7 +1775,8 @@ public class DumpCommand extends CommandBase {
      * a different input domain from the NBT discriminator and reusing the function does not
      * touch schema 4's frozen key format -- `canonical` is what that format is, not `fnv`.
      */
-    static String modDigest(List<String> modIds) {
+    /** PUBLIC FOR THE GRAPH SCREEN (#255); see {@link #activeModIds}. Null in, null out. */
+    public static String modDigest(List<String> modIds) {
         if (modIds == null) {
             return null;
         }

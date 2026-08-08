@@ -175,6 +175,8 @@ public final class RecipeGraph {
     private final int dumpSchema;
     private final String dumpVersion;
     private final String instanceDir;
+    private final String dumpModDigest;
+    private final int dumpModCount;
 
     private FluidNames fluidNames;
 
@@ -220,7 +222,8 @@ public final class RecipeGraph {
                 StringTable provenanceKinds, KeyIndex damageable, int[] maxDamage,
                 KeyIndex emcKeys, long[] emcValue, Blueprints blueprints, IconAtlas icons,
                 Multiblocks multiblocks, int dumpSchema,
-                String dumpVersion, String instanceDir) {
+                String dumpVersion, String instanceDir, String dumpModDigest,
+                int dumpModCount) {
         this.keys = keys;
         this.displayNames = displayNames;
         this.nameId = nameId;
@@ -264,6 +267,8 @@ public final class RecipeGraph {
         this.dumpSchema = dumpSchema;
         this.dumpVersion = dumpVersion;
         this.instanceDir = instanceDir;
+        this.dumpModDigest = dumpModDigest;
+        this.dumpModCount = dumpModCount;
     }
 
     // -- keys ---------------------------------------------------------------------------
@@ -1276,6 +1281,24 @@ public final class RecipeGraph {
 
     public String instanceDir() {
         return instanceDir;
+    }
+
+    /**
+     * The digest of the jar set the dump SAW, or null when the dump predates schema 6.
+     *
+     * NULL IS "CANNOT COMPARE" AND NEVER "NO MODS". `dump_meta`'s docstring says the CLI check
+     * is "silent whenever it cannot compare", which is a safe default for a command and NOT a
+     * safe one for a screen -- a screen has no equivalent of silence, so whatever is drawn for
+     * this case is read as a pass. See {@code plan.GraphFacts.PackCheck}, which turns it into a
+     * third visible verdict rather than letting it render as agreement.
+     */
+    public String dumpModDigest() {
+        return dumpModDigest;
+    }
+
+    /** How many jars the dump saw, or 0 when the dump predates schema 6. */
+    public int dumpModCount() {
+        return dumpModCount;
     }
 
     /**
