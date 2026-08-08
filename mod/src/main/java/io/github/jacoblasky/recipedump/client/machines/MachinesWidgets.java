@@ -389,7 +389,15 @@ public final class MachinesWidgets {
         body.pos(PADDING, PADDING);
         body.size(rowWidth, LINE + 1 + listHeight);
         body.child(PlannerWidgets.heading("Filter by mod", rowWidth).pos(0, 0));
-        body.child(list.pos(0, LINE + 1));
+        // POSITIONED AS A STATEMENT, NOT CHAINED INTO `child`. `list` is a RAW `ListWidget`
+        // (the same raw construction `choiceList` uses), and on a raw receiver javac erases the
+        // self-type that `pos` returns, handing back `IPositioned` -- which `child(IWidget)`
+        // will not take. `plannerPanel` chains the identical call successfully only because
+        // `tree` hands it back as `ListWidget<?, ?>`, where the wildcard capture keeps the
+        // self-type. Two lines here rather than a cast, because a cast would compile and say
+        // nothing about why it was needed.
+        list.pos(0, LINE + 1);
+        body.child(list);
 
         return ModularPanel.defaultPanel("mcrecipedump_machines_mods", MOD_PICKER_WIDTH,
                                          LINE + 1 + listHeight + PADDING * 2)
@@ -471,7 +479,15 @@ public final class MachinesWidgets {
         body.child(PlannerWidgets.heading(candidatesHeading(candidates.size()), rowWidth)
                            .pos(0, y));
         y += LINE;
-        body.child(list.pos(0, y));
+        // POSITIONED AS A STATEMENT, NOT CHAINED INTO `child`. `list` is a RAW `ListWidget`
+        // (the same raw construction `choiceList` uses), and on a raw receiver javac erases the
+        // self-type that `pos` returns, handing back `IPositioned` -- which `child(IWidget)`
+        // will not take. `plannerPanel` chains the identical call successfully only because
+        // `tree` hands it back as `ListWidget<?, ?>`, where the wildcard capture keeps the
+        // self-type. Two lines here rather than a cast, because a cast would compile and say
+        // nothing about why it was needed.
+        list.pos(0, y);
+        body.child(list);
         y += listHeight;
         body.size(rowWidth, y);
 

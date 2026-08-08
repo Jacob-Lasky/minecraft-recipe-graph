@@ -241,9 +241,32 @@ public class MachineTableTest {
                 .toggleState(MachineInfo.BUILDABLE);
         MachineTable.Filter fixed = table.reconcile(impossible);
         assertEquals(null, fixed.mod());
+        // THE CHIP THE READER JUST CLICKED SURVIVES, and this is the assertion that pins the
+        // one place this port deliberately differs from `MACHINES_JS`. That function judges
+        // both axes against a single snapshot taken while the doomed mod was still selected,
+        // so `buildable` reads as zero and gets cleared too -- throwing away the very click
+        // that caused the reconcile. Re-narrowing after the mod is dropped is what keeps it.
         assertTrue("the state the reader just chose survives",
                    fixed.state(MachineInfo.BUILDABLE));
         assertEquals(2, table.rows(fixed).size());
+    }
+
+    @Test
+    public void clearingTheModIsWhatRescuesTheChipRatherThanLuck() {
+        // The guard on the divergence above: if `reconcile` ever goes back to one snapshot,
+        // the assertion in the previous test could still pass for a filter whose state happens
+        // to be non-zero under the mod. This case has BUILDABLE at exactly zero for `Alpha`
+        // and non-zero once `Alpha` is gone, so it can only pass by re-narrowing.
+        MachineTable table = table();
+        assertEquals("Alpha must have no buildable categories, or this proves nothing",
+                     0, table.narrowed(MachineTable.Filter.NONE.withMod("Alpha"))
+                             .state(MachineInfo.BUILDABLE));
+        assertEquals("and the pack as a whole must have some",
+                     2, table.narrowed(MachineTable.Filter.NONE).state(MachineInfo.BUILDABLE));
+        MachineTable.Filter fixed = table.reconcile(MachineTable.Filter.NONE
+                .withMod("Alpha")
+                .toggleState(MachineInfo.BUILDABLE));
+        assertTrue(fixed.state(MachineInfo.BUILDABLE));
     }
 
     @Test

@@ -105,10 +105,16 @@ public class MachinesLayoutTest {
     }
 
     @Test
-    public void nothingOverflowsThePanelUnderAnyFilter() {
+    public void nothingOverflowsThePanelSidewaysUnderAnyFilter() {
         // #125 measured that ModularUI neither clamps nor clips a child wider than its parent:
         // it overflows and nothing reports it. This is the report. The fixture carries a
         // 67-character title and a five-figure recipe count precisely so this can fail.
+        //
+        // HORIZONTAL ONLY, WHICH IS `PlannerLayoutTest`'S CHOICE AND IT IS NOT AN OVERSIGHT.
+        // A `ListWidget`'s children are laid out in its CONTENT space, so with 28 rows of 22px
+        // in a 150px viewport most of them legitimately sit below the panel -- that is what
+        // scrolling means, and asserting otherwise fails on correct code. The vertical claim
+        // worth making is about the chrome, and it is made in the next test.
         MachineTable table = MachineTables.wide();
         for (MachineTable.Filter filter : filters(table)) {
             ModularPanel panel = laidOut(table, filter);
@@ -119,8 +125,39 @@ public class MachinesLayoutTest {
                            area.ex() <= bounds.ex());
                 assertTrue(area + " overflows the panel's left edge at " + bounds.x(),
                            area.x() >= bounds.x());
-                assertTrue(area + " overflows the panel's bottom edge at " + bounds.ey(),
+            }
+        }
+    }
+
+    @Test
+    public void theChromeAroundTheListStaysInsideThePanelVertically() {
+        // THE HALF THE HORIZONTAL SWEEP CANNOT MAKE, and the one `machinesPanel` does real
+        // arithmetic for: the list takes whatever height is left after the heading, the chips,
+        // the mod button, the caveat line and the footer, so an off-by-one in that subtraction
+        // draws the FOOTER past the bottom of the panel -- and per #125 nothing reports it.
+        // The caveat line is the moving part, because it appears only when a scenario input
+        // was unread, which changes the footer's y by a whole line.
+        //
+        // EVERY WIDGET THAT IS NOT INSIDE THE SCROLLING LIST, found by excluding the list's own
+        // descendants rather than by naming the five widgets -- a named list would silently
+        // stop covering a sixth.
+        MachineTable table = MachineTables.wide();
+        for (MachineTable.Filter filter : filters(table)) {
+            ModularPanel panel = laidOut(table, filter);
+            Area bounds = panel.getArea();
+            ListWidget<?, ?> list = findList(panel);
+            List<IWidget> scrolled = HeadlessLayout.flatten(list);
+            for (IWidget widget : HeadlessLayout.flatten(panel)) {
+                if (scrolled.contains(widget)) {
+                    continue;
+                }
+                Area area = widget.getArea();
+                assertTrue(widget.getClass().getSimpleName() + " " + area
+                           + " overflows the panel's bottom edge at " + bounds.ey(),
                            area.ey() <= bounds.ey());
+                assertTrue(widget.getClass().getSimpleName() + " " + area
+                           + " starts above the panel's top edge at " + bounds.y(),
+                           area.y() >= bounds.y());
             }
         }
     }

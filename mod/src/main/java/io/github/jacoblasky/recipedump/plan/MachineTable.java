@@ -459,6 +459,23 @@ public final class MachineTable {
         Filter out = filter;
         if (out.mod() != null && narrowed.mod(out.mod()) == 0) {
             out = out.withMod(null);
+            // RE-NARROWED BEFORE THE STATES ARE JUDGED, AND THIS DIVERGES FROM `MACHINES_JS`
+            // DELIBERATELY. That function takes ONE snapshot and tests both axes against it, so
+            // the state counts it reads were computed while the doomed mod was still selected
+            // -- and they are therefore zero for exactly the chip the reader just clicked.
+            // Picking `buildable` while filtered to a mod that has none clears the mod AND the
+            // chip in the browser, which throws away the click that caused the reconcile and
+            // dumps the reader back to the unfiltered table.
+            //
+            // Clearing the mod WIDENS the result, so re-narrowing here can only turn zeroes
+            // into positives; the chip then survives and the reader gets what they asked for.
+            // It is still one pass, which is the property the loop-free shape depends on:
+            // nothing cleared below can make anything else newly impossible.
+            //
+            // NOT A BUG FIX PORTED BACK TO PYTHON, because #19 Phase 6 deletes that page. If
+            // this port is ever the follower again, `MACHINES_JS.reconcile` is the thing that
+            // has to move.
+            narrowed = narrowed(out);
         }
         for (int state = 0; state < MachineInfo.STATE_COUNT; state++) {
             if (out.state(state) && narrowed.state(state) == 0) {
