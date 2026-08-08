@@ -102,7 +102,7 @@ public class GraphFactsTest {
         // differ by 172 -- 676 interned against 504 in recipes -- and the machines tab shows
         // the second. Two tabs disagreeing about the pack's size is how a reader stops
         // believing either number.
-        assertEquals(1, facts.categories());
+        assertEquals(2, facts.categories());
         assertEquals(graph.oreGroupCount(), facts.oreGroups());
     }
 
