@@ -155,6 +155,23 @@ public final class ScenarioInputs {
         }
 
         /**
+         * Key id -&gt; the evidence sentence for why it costs nothing.
+         *
+         * EXPOSED FOR THE SOURCES SCREEN (#255), which is a view of exactly this. Same argument
+         * as {@link #machineStates}: resolving free sources a second time on the production
+         * path would be code the golden gate never touches, and a screen that listed a
+         * different set of free things from the one the solver priced against is a screen that
+         * explains the wrong plan.
+         *
+         * UNMODIFIABLE, because this hands out the live map rather than a copy. `freeSources`
+         * is read by `solverFor` on every solve, so a caller that cleared it would silently
+         * reprice the pack.
+         */
+        public Map<Integer, String> freeSources() {
+            return java.util.Collections.unmodifiableMap(freeSources);
+        }
+
+        /**
          * What two scenarios must agree on to share one cost table.
          *
          * KEYED ON WHAT `Cost.estimate` IS ACTUALLY HANDED, not on a hand-maintained list of

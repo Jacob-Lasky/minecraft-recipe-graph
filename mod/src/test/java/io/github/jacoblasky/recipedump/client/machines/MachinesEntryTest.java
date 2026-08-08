@@ -18,7 +18,7 @@ import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphDocuments;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.GraphSource;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
 
 /**
@@ -43,7 +43,7 @@ public class MachinesEntryTest {
         saved = System.getProperty(GraphSource.PROPERTY);
         System.clearProperty(GraphSource.PROPERTY);
         GraphService.get().reset();
-        MachinesService.get().reset();
+        ScenarioService.get().reset();
         ScenarioSource.resetReaders();
     }
 
@@ -55,7 +55,7 @@ public class MachinesEntryTest {
             System.setProperty(GraphSource.PROPERTY, saved);
         }
         GraphService.get().reset();
-        MachinesService.get().reset();
+        ScenarioService.get().reset();
         ScenarioSource.resetReaders();
     }
 
@@ -64,16 +64,16 @@ public class MachinesEntryTest {
     }
 
     private static PlannerState state() {
-        return MachinesEntry.stateFor(GraphService.get(), MachinesService.get());
+        return MachinesEntry.stateFor(GraphService.get(), ScenarioService.get());
     }
 
     private static void awaitTable() throws Exception {
         long deadline = System.currentTimeMillis() + 60_000L;
-        while (MachinesService.get().state() == MachinesService.State.BUILDING
-                || MachinesService.get().state() == MachinesService.State.IDLE) {
+        while (ScenarioService.get().state() == ScenarioService.State.BUILDING
+                || ScenarioService.get().state() == ScenarioService.State.IDLE) {
             if (System.currentTimeMillis() > deadline) {
                 throw new AssertionError("the table never resolved: "
-                        + MachinesService.get().describe());
+                        + ScenarioService.get().describe());
             }
             Thread.sleep(5L);
         }
@@ -99,7 +99,7 @@ public class MachinesEntryTest {
         System.setProperty(GraphSource.PROPERTY,
                            new File(folder.getRoot(), "absent.json").getPath());
         GraphService.get().startLoad(null);
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         assertEquals(PlannerState.Kind.FAILED, state().kind());
         assertTrue(state().message(), state().message().contains("absent.json"));
     }
@@ -110,7 +110,7 @@ public class MachinesEntryTest {
         // real for a moment. "reading machines..." is true a moment early; "nothing yet" would
         // be false, and it is the sentence a player reads as "this tool has no answer".
         loadGraph();
-        assertEquals(MachinesService.State.IDLE, MachinesService.get().state());
+        assertEquals(ScenarioService.State.IDLE, ScenarioService.get().state());
         PlannerState state = state();
         assertNotNull(state);
         assertEquals(PlannerState.Kind.LOADING, state.kind());
@@ -119,11 +119,11 @@ public class MachinesEntryTest {
     @Test
     public void onceTheTableIsBuiltThereIsNoStatePanelAtAll() throws Exception {
         loadGraph();
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         awaitTable();
-        assertEquals(MachinesService.State.DONE, MachinesService.get().state());
+        assertEquals(ScenarioService.State.DONE, ScenarioService.get().state());
         assertNull("a usable table must draw the table, not a message", state());
-        assertNotNull(MachinesService.get().table());
+        assertNotNull(ScenarioService.get().table());
     }
 
     @Test
@@ -132,12 +132,12 @@ public class MachinesEntryTest {
         // version that re-resolved would spend a worker thread per redraw, and the redraws
         // happen on every filter click.
         loadGraph();
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         awaitTable();
-        long generation = MachinesService.get().generation();
-        MachinesService.get().ensure();
+        long generation = ScenarioService.get().generation();
+        ScenarioService.get().ensure();
         assertEquals("ensure must not restart a resolve for the same graph",
-                     generation, MachinesService.get().generation());
+                     generation, ScenarioService.get().generation());
     }
 
     @Test
@@ -145,14 +145,14 @@ public class MachinesEntryTest {
         // The inputs move while the player plays: a table held from before they placed the
         // machine they were looking up still says they cannot use it.
         loadGraph();
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         awaitTable();
-        long generation = MachinesService.get().generation();
-        MachinesService.get().rebuild();
+        long generation = ScenarioService.get().generation();
+        ScenarioService.get().rebuild();
         awaitTable();
         assertTrue("rebuild must produce a new answer",
-                   MachinesService.get().generation() > generation);
-        assertEquals(MachinesService.State.DONE, MachinesService.get().state());
+                   ScenarioService.get().generation() > generation);
+        assertEquals(ScenarioService.State.DONE, ScenarioService.get().state());
     }
 
     @Test
@@ -160,7 +160,7 @@ public class MachinesEntryTest {
         // THE FAILURE PATH, DRIVEN THROUGH A REAL SEAM. `PlannerService.liveScenario` asks
         // every `ScenarioSource` for its status and `liveDocument` does not catch, so a reader
         // that throws -- which is what a broken AE2 read looks like -- propagates into
-        // `MachinesService.build`. That is the only way this state is reachable in production
+        // `ScenarioService.build`. That is the only way this state is reachable in production
         // and therefore the only honest way to test it.
         //
         // WITHOUT THE CATCH the worker thread dies with the service still BUILDING, and the
@@ -172,11 +172,11 @@ public class MachinesEntryTest {
                 throw new IllegalStateException("the grid exploded");
             }
         });
-        MachinesService.get().rebuild();
+        ScenarioService.get().rebuild();
         awaitTable();
 
-        assertEquals(MachinesService.State.FAILED, MachinesService.get().state());
-        assertNull("a failed resolve holds no table", MachinesService.get().table());
+        assertEquals(ScenarioService.State.FAILED, ScenarioService.get().state());
+        assertNull("a failed resolve holds no table", ScenarioService.get().table());
         PlannerState state = state();
         assertNotNull(state);
         assertEquals(PlannerState.Kind.FAILED, state.kind());
@@ -198,18 +198,18 @@ public class MachinesEntryTest {
                 throw new IllegalStateException("the grid exploded");
             }
         });
-        MachinesService.get().rebuild();
+        ScenarioService.get().rebuild();
         awaitTable();
-        assertEquals(MachinesService.State.FAILED, MachinesService.get().state());
+        assertEquals(ScenarioService.State.FAILED, ScenarioService.get().state());
 
         ScenarioSource.resetReaders();
         // `ensure` AND NOT `rebuild`, because `ensure` is what the screen calls on open and it
         // must not treat FAILED as "already answered". A version that returned early on any
         // non-BUILDING state would strand the player on the error permanently.
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         awaitTable();
-        assertEquals(MachinesService.State.DONE, MachinesService.get().state());
-        assertNotNull(MachinesService.get().table());
+        assertEquals(ScenarioService.State.DONE, ScenarioService.get().state());
+        assertNotNull(ScenarioService.get().table());
         assertNull(state());
     }
 
@@ -224,23 +224,23 @@ public class MachinesEntryTest {
         // graph then landed and nothing ever asked for a table.
         //
         // NO GRAPH HAS BEEN LOADED IN THIS TEST AT ALL, which is the case under test.
-        assertEquals(MachinesService.State.IDLE, MachinesService.get().state());
-        assertFalse("there is no graph, so there is no table", MachinesService.get().ensure());
+        assertEquals(ScenarioService.State.IDLE, ScenarioService.get().state());
+        assertFalse("there is no graph, so there is no table", ScenarioService.get().ensure());
         assertEquals("and the service must still be startable",
-                     MachinesService.State.IDLE, MachinesService.get().state());
+                     ScenarioService.State.IDLE, ScenarioService.get().state());
     }
 
     @Test
     public void aGraphArrivingAfterAFruitlessEnsureStillProducesATable() throws Exception {
         // The other half, in the order the player actually hits it: ask before the graph is
         // there, then let it arrive. Without the fix above this ends on FAILED forever.
-        assertFalse(MachinesService.get().ensure());
+        assertFalse(ScenarioService.get().ensure());
         loadGraph();
-        assertEquals(MachinesService.State.IDLE, MachinesService.get().state());
-        assertTrue(MachinesService.get().ensure());
+        assertEquals(ScenarioService.State.IDLE, ScenarioService.get().state());
+        assertTrue(ScenarioService.get().ensure());
         awaitTable();
-        assertEquals(MachinesService.State.DONE, MachinesService.get().state());
-        assertNotNull(MachinesService.get().table());
+        assertEquals(ScenarioService.State.DONE, ScenarioService.get().state());
+        assertNotNull(ScenarioService.get().table());
         assertNull("and the screen stops showing a not-yet panel", state());
     }
 }

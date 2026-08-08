@@ -11,6 +11,7 @@ import com.cleanroommc.modularui.widget.sizer.Area;
 import com.cleanroommc.modularui.widgets.ListWidget;
 
 import io.github.jacoblasky.recipedump.HeadlessLayout;
+import io.github.jacoblasky.recipedump.client.browse.BrowseActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
 import io.github.jacoblasky.recipedump.plan.MachineInfo;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
@@ -31,7 +32,8 @@ public class MachinesLayoutTest {
 
     private static ModularPanel laidOut(MachineTable table, MachineTable.Filter filter) {
         ModularPanel panel =
-                MachinesWidgets.machinesPanel(table, filter, MachinesActions.NONE);
+                MachinesWidgets.machinesPanel(table, filter, MachinesActions.NONE,
+                                              BrowseActions.NONE);
         HeadlessLayout.layOut(panel);
         return panel;
     }

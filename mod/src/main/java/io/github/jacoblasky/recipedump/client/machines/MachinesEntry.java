@@ -2,7 +2,7 @@ package io.github.jacoblasky.recipedump.client.machines;
 
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 
 /**
  * Which window the machines screen should open, from what the services can answer with.
@@ -27,13 +27,13 @@ public final class MachinesEntry {
     }
 
     /**
-     * The not-yet state to draw, or null when {@link MachinesService#table} is usable.
+     * The not-yet state to draw, or null when {@link ScenarioService#table} is usable.
      *
      * THE GRAPH PROBLEM OUTRANKS THE MACHINES ONE, per `PlannerEntry.stateFor`: a player whose
      * `graph.json` is missing has one thing to fix, and reporting "reading machines failed"
      * underneath would send them to the item instead of to the file.
      */
-    public static PlannerState stateFor(GraphService graphs, MachinesService machines) {
+    public static PlannerState stateFor(GraphService graphs, ScenarioService machines) {
         switch (graphs.state()) {
             case MISSING:
             case FAILED:

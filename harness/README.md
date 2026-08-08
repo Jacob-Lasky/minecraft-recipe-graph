@@ -163,6 +163,13 @@ Under `prodclient` they get a real graph either way now: `stage-instance.sh` ins
 not the no-graph panel. `RECIPEGRAPH_GRAPH=` (empty) stages none and shoots the panel;
 `RECIPEGRAPH_GRAPH=<path>` stages that one instead.
 
+`sources` and `graph` (#255) are the other two browse screens. Both need a real graph for the
+same reason `machines` does, and `graph` needs it more sharply than any other shot here: that
+screen's entire subject is the IDENTITY of the graph being read, so a fixture would photograph
+an invented instance path -- which is not a weaker artifact than the real one, it is a
+misleading one, because the invented thing is exactly what a reviewer checks. `graph` needs only
+the graph loaded; `sources` also waits for the scenario resolve, so it is the slower of the two.
+
 `flow-hit`, `jei-keybind`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen
 in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the

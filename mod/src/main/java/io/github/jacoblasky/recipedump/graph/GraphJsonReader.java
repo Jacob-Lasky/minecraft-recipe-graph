@@ -107,6 +107,16 @@ public final class GraphJsonReader {
                 builder.dumpVersion(nextStringOrNull(reader));
             } else if (field.equals("instance_dir")) {
                 builder.instanceDir(nextStringOrNull(reader));
+            } else if (field.equals("dump_mod_digest")) {
+                // THE FIELD NAMES ARE A CROSS-LANGUAGE CONTRACT, written by `model.Graph.save`
+                // and read here. `tests/test_graph_identity_wording.py` pins the two spellings
+                // together, because a rename on the Python side would land here as a graph that
+                // simply never reports a digest -- which renders as "cannot tell" and is read
+                // as "nothing is wrong".
+                builder.dumpModDigest(nextStringOrNull(reader));
+            } else if (field.equals("dump_mod_count")) {
+                builder.dumpModCount(reader.peek() == JsonToken.NULL
+                        ? zeroAfterNull(reader) : reader.nextInt());
             } else {
                 // Unknown top-level section. Skipped rather than rejected: the dump format is
                 // free to grow, and a reader that refuses to load a graph carrying a field it
