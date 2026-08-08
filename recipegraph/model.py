@@ -28,7 +28,27 @@ WILDCARD_META = 32767
 
 
 def norm_key(item_id, meta=0):
-    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard."""
+    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard.
+
+    THE `minecraft:` DEFAULT BELOW IS FOR IDS THAT COME FROM THE RUNNING GAME, AND IT IS THE
+    WRONG DEFAULT FOR A RECIPE JSON. DO NOT teach this function the recipe file's namespace,
+    and DO NOT delete the fallback as "dead" -- both were considered and both are wrong. See
+    #227.
+
+    Every caller but one hands this a FULLY QUALIFIED registry id, because every one of them
+    is reading a name the RUNNING GAME wrote down: `sources/hei_dump` off JEI's stacks,
+    `sources/catalysts`, `sources/damageable` and `sources/oredict` off the same dump,
+    `names` off the AE2 `items.csv`, and `multiblocks` and `explore` off ids already in the
+    graph. For those an unqualified id really is a vanilla one, so the fallback is right and
+    is what keeps a bare `stone` from becoming a keyless string.
+
+    The one caller that does NOT is `sources/jar_json`, because Forge resolves an unqualified
+    id in a recipe file against THE FILE'S OWN DOMAIN (`JsonContext.appendModId`), not against
+    `minecraft`. That caller qualifies the id itself in `jar_json.qualify` before it gets here.
+    Moving that logic into this function would need a namespace argument on every call site
+    that has no namespace to give, and would silently re-point the dump readers the day one of
+    them saw a bare id.
+    """
     if item_id is None:
         return None
     item_id = str(item_id).strip()
@@ -273,6 +293,48 @@ def storage_form_material(ore):
     if ore.lower().startswith(STORAGE_FORM_PREFIX) and len(ore) > len(STORAGE_FORM_PREFIX):
         return ore[len(STORAGE_FORM_PREFIX):]
     return None
+
+
+def canonical_item_key(raw):
+    """A raw `mod:name[:meta][#digest]` id from a NAME source -> the key this graph uses.
+
+    THE ONE SPELLING OF "PARSE A META OFF AN ID AND CANONICALISE IT", shared by the two
+    sources that name items: `names.load_items_csv` for the pack's `items.csv` and
+    `sources/dump_names` for the mod's `names.json`. Issue #253.
+
+    IT EXISTS BECAUSE THE TWO DISAGREED AND THE DISAGREEMENT WAS INVISIBLE. `load_items_csv`
+    split the meta and ran it through `norm_key`, so a 32767 row became `mod:thing:*`;
+    `dump_names` used the mod's string verbatim, so the SAME item arrived as the literal
+    `mod:thing:32767`. Every recipe spells it `:*`, so the second spelling named a key
+    nothing produces and nothing consumes. Measured on the reference dump: **2,672 keys**,
+    every one of them meta 32767, every one existing only as a label -- 0 produced, 0
+    consumed. 172 of them looked like a pricing defect because `Graph.producers` widens
+    `:meta` to `:*` and therefore found them a producer they had no price for (#253).
+
+    ZERO COLLISIONS when they are merged, which is why this is a straight fix and not a
+    policy question: in all 2,672 cases the canonical `:*` target was ABSENT from the name
+    map, so every label is GAINED by the key that actually has the recipe and none is
+    overwritten or lost.
+
+    NEGATIVE METAS ARE ACCEPTED because `items.csv` carries them and this must not narrow
+    what that reader already took; `split_key` deliberately does not, since a key is not a
+    raw id and nothing writes a negative one.
+
+    A `#digest` SUFFIX IS PRESERVED AND NOT PARSED. Only `names.json` carries them, the
+    digest is appended last (see `split_discriminator`), and the meta sits before it.
+    """
+    if not raw:
+        return raw
+    stem, disc = split_discriminator(str(raw))
+    parts = stem.split(":")
+    meta = 0
+    if len(parts) >= 3 and parts[-1].lstrip("-").isdigit():
+        meta = int(parts[-1])
+        stem = ":".join(parts[:-1])
+    key = norm_key(stem, meta)
+    if key and disc:
+        return "%s#%s" % (key, disc)
+    return key
 
 
 def split_discriminator(key):

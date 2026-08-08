@@ -134,7 +134,7 @@ Two recipe sources:
 
 | Source | Coverage | Needs |
 | --- | --- | --- |
-| `jar_json` | ~10,300 crafting-table recipes from `assets/*/recipes/*.json` in every mod jar, including Forge `_constants.json` `#name` references (38 jars use them) | nothing |
+| `jar_json` | ~8,500 crafting-table recipes from `assets/*/recipes/*.json` in every mod jar, including Forge `_constants.json` `#name` references (38 jars use them). Honours Forge `conditions` and resolves an unqualified item id against the recipe file's own namespace, so it does not emit recipes the game never registered (#227) | nothing |
 | `hei_dump` | **everything** — machine recipes, NuclearCraft chemistry, Modular Machinery, inscribers, centrifuges | the `/recipedump` mod in `mod/` |
 
 **The offline source alone is not enough for machine chains.** 1.12.2 furnace recipes

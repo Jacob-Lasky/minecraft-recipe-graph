@@ -63,10 +63,30 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     mods_dir = os.path.join(instance_dir, "mods")
     if os.path.isdir(mods_dir):
         n = 0
-        for recipe in jar_json.extract(mods_dir):
+        # `extract` reports its own counters through `on_progress`, and the LAST call is the
+        # one that carries the totals. Captured rather than recomputed, so the number said out
+        # loud is the number the walk actually used (#227).
+        jar_stats = {}
+        for recipe in jar_json.extract(mods_dir, lambda _name, s: jar_stats.update(s)):
             g.add(recipe)
             n += 1
         say("jar_json: %d crafting recipes from mod jars" % n)
+        # SAID EVERY RUN, INCLUDING WHEN ALL THREE ARE 0. These count recipes this source threw
+        # away, and a line that appears only when it is non-zero cannot distinguish "nothing
+        # was dropped" from "nobody looked" -- which is the whole reason #227 could not reuse
+        # #119's numbers. `unevaluable` is separate from `unmet` on purpose: the first is a gap
+        # in what this source can see, the second is a fact about the pack.
+        #
+        # THE MODID COUNT NAMES ITS OWN DENOMINATOR, per this repo's rule that an unqualified
+        # count is how "410 jars" got quoted in four places and matched nothing. It is a
+        # CANDIDATE set -- `assets/<ns>/` directory names unioned with `mcmod.info` modids --
+        # so it is larger than the jar count on purpose and is not a loaded-mod census.
+        say("jar_json: forge:mod_loaded resolved against %d modid candidates "
+            "(assets/<ns>/ names unioned with mcmod.info, over-covering deliberately); "
+            "%d recipes dropped with conditions unmet, %d dropped with conditions this "
+            "source cannot evaluate offline"
+            % (jar_stats.get("modids", 0), jar_stats.get("cond_unmet", 0),
+               jar_stats.get("cond_unevaluable", 0)))
         # Forge loads `mods/<mcversion>/` too and `extract` does not, so SAY what was skipped
         # rather than leaving a future recipe-bearing subdirectory to vanish in silence.
         for sub, jars, recipes in jar_json.unread_subdir_jars(mods_dir):

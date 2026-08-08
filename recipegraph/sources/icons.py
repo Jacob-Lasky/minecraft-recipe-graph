@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 
+from ..model import canonical_item_key
 from . import dump_meta
 
 
@@ -67,7 +68,11 @@ def load(path):
         if (isinstance(at, list) and len(at) == 3
                 and all(isinstance(v, int) and v >= 0 for v in at)
                 and at[0] < len(pages) and at[1] < cols and at[2] < cols):
-            placed[str(key)] = at
+            # CANONICALISED, matching `sources/dump_names` and `sources/emc` (#253). Zero of
+            # the reference dump's 35,619 placements need it today; the join this map makes
+            # is key-to-sprite, so a spelling the graph does not use costs an icon rather
+            # than a price, and it fails as a blank square nobody files a bug about.
+            placed[canonical_item_key(key)] = at
     if not placed:
         return {}
     return {"icon": icon, "cols": cols, "pages": pages, "keys": placed}

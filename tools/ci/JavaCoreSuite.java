@@ -29,6 +29,20 @@ import org.junit.runner.notification.RunListener;
  * command line in `tools/ci-java.sh` where a human reads it rather than being inferred from
  * output nobody checks.
  *
+ * A SKIP IS NOT THE ONLY WAY A TEST FAILS TO RUN, AND THE OTHER WAY IS BIGGER. Everything above
+ * guards the tests this runner was HANDED. It says nothing about the ones it was not, and that
+ * is most of them: `ci-java.sh` compiles two packages, so a green banner here is a claim about a
+ * minority of the suite that reads like a claim about the port. #243 moved values four
+ * `client/planner` assertions depend on, this job reported `324 run, 0 failed`, and not one of
+ * those four assertions is inside it. So `--scope` and `--not-run` (#244) make the closing lines
+ * of the run state the fraction they cover.
+ *
+ * NEITHER IS COMPUTED HERE, because neither can be. This runner sees the classes it was given
+ * and has no view of the tree they were selected from, so `ci-java.sh` measures both against the
+ * real tree at run time and passes the sentences in. That is also why they are text rather than
+ * numbers: a count written into this file would be a number to maintain, which is the failure
+ * `--not-run` exists to report.
+ *
  * A CLASS THAT RAN NOTHING ALSO FAILS THE RUN, because "the suite stopped collecting" looks
  * identical to "the suite is fast" -- #86's `unittest.main()` mid-file ran 31 of 77 tests and
  * complained about none of it.
@@ -63,22 +77,25 @@ public final class JavaCoreSuite {
     public static void main(String[] args) {
         Set<String> allowedSkips = new LinkedHashSet<String>();
         List<String> classNames = new ArrayList<String>();
+        String scope = null;
+        String notRun = null;
+        int expectAssertions = -1;
         for (int i = 0; i < args.length; i++) {
             if ("--allow-skip".equals(args[i])) {
-                // SAID, not thrown. A trailing `--allow-skip` used to walk off the end of the
-                // array and die with a bare ArrayIndexOutOfBoundsException, which in a CI log
-                // reads as a broken runner rather than as a malformed invocation.
-                if (i + 1 >= args.length) {
-                    System.err.println("!! --allow-skip needs a Class.method after it");
-                    System.exit(2);
-                }
-                allowedSkips.add(args[++i]);
+                allowedSkips.add(valueAfter(args, ++i, "a Class.method"));
+            } else if ("--scope".equals(args[i])) {
+                scope = valueAfter(args, ++i, "a short label for the banner");
+            } else if ("--not-run".equals(args[i])) {
+                notRun = valueAfter(args, ++i, "a sentence naming what this run leaves out");
+            } else if ("--expect-assertions".equals(args[i])) {
+                expectAssertions = number(valueAfter(args, ++i, "a count"), "--expect-assertions");
             } else {
                 classNames.add(args[i]);
             }
         }
         if (classNames.isEmpty()) {
             System.err.println("usage: JavaCoreSuite [--allow-skip Class.method ...] "
+                    + "[--scope <label>] [--not-run <text>] [--expect-assertions <n>] "
                     + "<test class> ...");
             System.exit(2);
         }
@@ -148,8 +165,71 @@ public final class JavaCoreSuite {
             System.out.println("!! the run collected nothing");
             bad = true;
         }
-        System.out.println(bad ? "== java core FAILED ==" : "== java core green ==");
+        // THE `--not-run` SENTENCE QUOTES AN ASSERTION COUNT THAT `ci-java.sh` GOT BY GREPPING
+        // `@Test`, WHICH IS A PROXY FOR WHAT JUNIT ACTUALLY RUNS. The two agree on this tree
+        // today and stop agreeing the moment anything uses `@RunWith(Parameterized)`, inherits a
+        // test method, or carries an `@Ignore`. This is the check that notices, and it is the
+        // whole reason the figure is allowed into output at all: without it the note would be a
+        // number nobody re-derives, which is the defect #244 is about, one level down.
+        if (expectAssertions >= 0 && expectAssertions != result.getRunCount()) {
+            System.out.println("!! THE ASSERTION COUNTER HAS STOPPED MATCHING THIS TREE: "
+                    + "tools/ci-java.sh counted " + expectAssertions + " @Test in the files it "
+                    + "compiled and JUnit ran " + result.getRunCount() + ".");
+            System.out.println("   A static `@Test` grep cannot see a parameterized runner, an "
+                    + "inherited test method or an @Ignore, so the assertion figures in the NOT "
+                    + "RUN line below are now wrong. Fix the counter or drop the figures; do "
+                    + "not adjust this number to match.");
+            bad = true;
+        }
+        // IMMEDIATELY ABOVE THE BANNER, AND NOT AT THE TOP OF THE JOB. The counts line and the
+        // verdict are the two lines anyone reads; a caveat printed before a screen of compiler
+        // output has scrolled off by the time the reader forms an opinion. On a green run this
+        // sits between "324 run, 0 failed" and the verdict, which is the whole point.
+        if (notRun != null) {
+            printLabelled("NOT RUN: ", notRun);
+        }
+        String verdict = bad ? "== java core FAILED" : "== java core green";
+        System.out.println(scope == null ? verdict + " ==" : verdict + " (" + scope + ") ==");
         System.exit(bad ? 1 : 0);
+    }
+
+    /**
+     * The argument after a flag, or a legible exit.
+     *
+     * SAID, not thrown. A trailing `--allow-skip` used to walk off the end of the array and die
+     * with a bare ArrayIndexOutOfBoundsException, which in a CI log reads as a broken runner
+     * rather than as a malformed invocation. Shared by all three flags so the next one cannot
+     * reintroduce that by forgetting the guard.
+     */
+    private static String valueAfter(String[] args, int index, String what) {
+        if (index >= args.length) {
+            System.err.println("!! " + args[index - 1] + " needs " + what + " after it");
+            System.exit(2);
+        }
+        return args[index];
+    }
+
+    /** A flag's integer argument, or a legible exit rather than a NumberFormatException trace. */
+    private static int number(String text, String flag) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException notANumber) {
+            System.err.println("!! " + flag + " needs a number, got: " + text);
+            System.exit(2);
+            return -1;
+        }
+    }
+
+    /** `label` then `body`, with continuation lines indented to line up under the first. */
+    private static void printLabelled(String label, String body) {
+        StringBuilder pad = new StringBuilder();
+        for (int i = 0; i < label.length(); i++) {
+            pad.append(' ');
+        }
+        String[] lines = body.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            System.out.println((i == 0 ? label : pad.toString()) + lines[i]);
+        }
     }
 
     /** Counts what the default listener throws away. */
