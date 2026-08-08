@@ -134,7 +134,7 @@ Two recipe sources:
 
 | Source | Coverage | Needs |
 | --- | --- | --- |
-| `jar_json` | ~10,300 crafting-table recipes from `assets/*/recipes/*.json` in every mod jar, including Forge `_constants.json` `#name` references (38 jars use them) | nothing |
+| `jar_json` | ~8,500 crafting-table recipes from `assets/*/recipes/*.json` in every mod jar, including Forge `_constants.json` `#name` references (38 jars use them). Honours Forge `conditions` and resolves an unqualified item id against the recipe file's own namespace, so it does not emit recipes the game never registered (#227) | nothing |
 | `hei_dump` | **everything** — machine recipes, NuclearCraft chemistry, Modular Machinery, inscribers, centrifuges | the `/recipedump` mod in `mod/` |
 
 **The offline source alone is not enough for machine chains.** 1.12.2 furnace recipes
@@ -285,7 +285,7 @@ curl -s --get localhost:8765/api/sweep \
   --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0'
 ```
 
-Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores emc icon damaged unsourced provenance`,
 combined with `and or not`, the six comparisons, and
 `startswith endswith contains matches lower upper len`. `GET /api` prints the list, so it
 does not have to be remembered. A `limit` of 0 lifts the cap, `matched` always reports the
@@ -621,10 +621,20 @@ recipegraph machines --set nuclearcraft_crystallizer=have   # toggle by hand
 ```
 
 Every recipe carries its JEI category, and a category is a machine — so machine
-availability is a constraint on recipe choice rather than a guess. Three states: `have`
+availability is a constraint on recipe choice rather than a guess. **Four** states: `have`
 (placed in the world, or the item in stock), `buildable` (the machine is craftable),
-`unavailable`. Placed machines are read out of the world save during `have`, so this is
-evidence rather than configuration; manual overrides always win.
+`unidentified` (no block could be matched to the category at all) and `no route` (identified,
+and nothing can obtain it). Placed machines are read out of the world save during `have`, so
+this is evidence rather than configuration; manual overrides always win.
+
+**`unidentified` is a separate state and not a flavour of `no route`.** Folding the two was
+tried and was catastrophic: on the reference pack 360 of 521 categories could not be
+name-matched to a machine item, and every one of them was then priced as unusable — 40% of the
+graph walled off. A JEI title is often the recipe TYPE rather than the machine ("Casting" is
+done in a Casting Table), so title matching will always miss some, and an unidentified machine
+must cost more than one you can demonstrably build and far less than one proven out of reach.
+The two also read differently to a player: "we could not work out which block this is" is not
+"you cannot use this".
 
 `buildable` is not one price. Two machines you have to build are rarely comparable, and on
 the reference pack they are wildly incomparable: over the 380 buildable categories whose
@@ -664,6 +674,38 @@ priced, so a plan tells you to build a Chemical Reactor without telling you what
 needs. Tracked in [#86](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/86);
 you build a machine once rather than once per craft, so folding it into per-item totals is a
 different calculation from the ranking above and not a matter of adding the numbers up.
+
+### In game — the calculator item
+
+The same two questions, without leaving Minecraft. Craft the **Recipe Calculator** (a JEC
+calculator, an AE2 calculation processor, a 1k ME storage component and a wireless receiver —
+each component does the job it is named for) and:
+
+| gesture | window |
+| --- | --- |
+| right-click | the **planner**: the crafting tree, the shopping list, the TODO panel, the flow diagram, and a recipe picker that writes a pin the solver honours |
+| **shift**-right-click | the **machines table**: all 503 categories with their verdicts, filtered by state and by mod, and a per-category detail view listing every candidate block |
+
+**Shift rather than a second item, and from the item rather than from inside the planner.** The
+planner shows one of four not-yet panels until a graph is read and something is planned; the
+machines table needs only the graph. Reaching it through the planner would make it unreachable
+during the graph load and unreachable when nothing has been planned — which is exactly when a
+player is asking "what can I even build with".
+
+The table's filters narrow each other: switching on `no route` re-counts the mod list to that
+state and sinks the mods with nothing in it, and a selection that stops matching anything is
+cleared rather than left over an empty table. Clicking a row opens the detail view; clicking a
+candidate block there plans one of it. A row marked `(manual)` is a verdict you set by hand,
+which outranks every automatic one.
+
+The verdicts are only as good as what the mod could read, and the panel says so rather than
+implying otherwise: `verdicts computed without: have, placed` means no ME network reader and no
+world scan, so **every machine reads as buildable rather than owned**. That line names only the
+inputs a machine verdict actually uses, which is a shorter list than the planner's.
+
+Both windows need [ModularUI](https://github.com/CleanroomMC/ModularUI) 3.1.5. The shipped jar
+declares no dependency on it, so a pack without it still loads the mod and still dumps; the
+item says what is missing instead of opening an empty window.
 
 ### Gaps — what the dump could not read
 

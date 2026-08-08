@@ -69,7 +69,26 @@ public class CalculatorItem extends Item {
     public ActionResult<ItemStack> onItemRightClick(World world, EntityPlayer player,
                                                     EnumHand hand) {
         if (world.isRemote) {
-            RecipeDumpMod.proxy.openPlanner(player);
+            // SNEAK OPENS THE MACHINES TABLE (#254). One item, two windows, chosen by the
+            // modifier a 1.12.2 player already uses for "the other thing this does".
+            //
+            // FROM THE ITEM RATHER THAN FROM INSIDE THE PLANNER, and that is a correctness
+            // decision rather than a convenience. The planner shows one of four not-yet panels
+            // until a graph is read and a plan is solved; the machines table needs only the
+            // graph. Reaching it through the planner would make it unreachable during the
+            // 5.47 s load and unreachable when nothing has been planned -- both cases in which
+            // it can answer perfectly well, and the second of which is when a player is most
+            // likely to be asking "what can I even build with".
+            //
+            // WHEN #255 ADDS SOURCES AND COVERAGE they do NOT each take a modifier; three
+            // windows behind three chords is undiscoverable. The shared nav strip is built
+            // then, on the screens themselves, and nothing decided here has to be undone --
+            // this stays the way into the group.
+            if (player.isSneaking()) {
+                RecipeDumpMod.proxy.openMachines(player);
+            } else {
+                RecipeDumpMod.proxy.openPlanner(player);
+            }
         }
         // SUCCESS on both sides so the arm swings; the item is not consumed and nothing is
         // placed, so there is no state for the two sides to disagree about.

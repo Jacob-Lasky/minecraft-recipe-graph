@@ -252,7 +252,7 @@ def derive_inputs(graph, sc):
         # it the dict is what keeps `vanilla_water` on its documented default of true. A
         # scenario spelling the defaults out by hand would stop tracking a change to them.
         "free": generators_mod.resolve(placed, have, sc["source_overrides"]),
-        "tokens": tokens_mod.resolve(sc["token_overrides"]),
+        "tokens": tokens_mod.resolve(sc["token_overrides"], graph),
         "gates": dimensions_mod.gates_for(graph, sc["visited_dimensions"]),
         "targets": machines_mod.build_targets(info),
         "emc_available": projecte_mod.available(graph, sc["emc_knowledge"]),

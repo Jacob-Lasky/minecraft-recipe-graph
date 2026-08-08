@@ -19,6 +19,7 @@ The three things that make this non-trivial, and how each is handled:
 import collections
 import math
 
+from . import provenance
 from .cost import input_cost, recipe_cost
 from .defaults import DEFAULT_MAX_NODES
 from .machines import is_hand_crafting
@@ -803,6 +804,25 @@ class Solver:
                 node["unsourced"] = True
                 node["note"] = ("the pack defines this item and nothing in the dump makes "
                                 "it; it comes from a mechanic no recipe can describe")
+            elif key in self.g.pack_authored_declared:
+                # THE FOURTH POPULATION, AND IT IS THE ONE THAT IS NOT UNSOURCED. #171.
+                #
+                # These keys used to reach the branch above, because until `provenance` was
+                # read the graph had no way to tell "nothing explains this" from "the pack
+                # explains it and the dump could not carry the explanation". They are excluded
+                # from `pack_authored_unsourced` now, so this branch is what they reach
+                # instead, and the badge follows the price exactly as it does above:
+                # `cost._seed` charges them `PROVENANCE_COST` rather than `UNSOURCED_COST`,
+                # so `node["unsourced"]` is deliberately NOT set.
+                #
+                # SAYING WHERE IT COMES FROM IS THE WHOLE POINT, and it is why this cannot
+                # simply drop the note along with the badge. The reader is still going to see
+                # this key on a shopping list with no route under it -- there is no recipe, so
+                # nothing changed about the plan's shape -- and "no known source" was at least
+                # an explanation. Replacing it with silence would be a regression in the one
+                # place a reader looks; `provenance.KIND_NOTE` replaces it with the answer.
+                node["provenance"] = self.g.pack_authored_declared[key]
+                node["note"] = provenance.note_for(node["provenance"])
             self.leaf_totals[key] += remainder
             return node
 
@@ -1208,6 +1228,15 @@ class Solver:
         row = self._entry(key, qty)
         if self.g.reachable_form(key) or key in self.g.pack_authored_unsourced:
             row["unsourced"] = True
+        # AND WHERE THE PACK SAYS IT COMES FROM, WHICH IS NOT A THIRD SPELLING OF THE MARK
+        # ABOVE BUT ITS COMPLEMENT. #171. A declared key is excluded from
+        # `pack_authored_unsourced` and `reachable_form` is None for it, so neither predicate
+        # fires and the row would otherwise carry nothing at all -- which is a REGRESSION on
+        # the shopping list, the one surface where "no known source" was doing useful work.
+        # This is the list a player takes into the world, so it is the best place in the tool
+        # to say "solve its puzzle" rather than the worst place to say nothing.
+        elif key in self.g.pack_authored_declared:
+            row["provenance"] = self.g.pack_authored_declared[key]
         return row
 
     def solve(self, key, qty=1):
@@ -1218,6 +1247,14 @@ class Solver:
         everywhere else, including on the other four `_entry` lists, where it would
         contradict the row it sat on. Readers must treat its absence as false rather than
         expecting the key.
+
+        `provenance` IS OPTIONAL ON THE SAME TWO SURFACES AND IS THE COMPLEMENT OF IT, not a
+        second flavour. #171: the pack declares how you get this key -- `puzzle`, `loot_table`
+        or `quest` -- so the tool CAN say how, and `unsourced` is deliberately absent on the
+        same node. THE TWO ARE MUTUALLY EXCLUSIVE BY CONSTRUCTION, because
+        `Graph.pack_authored_unsourced` excludes everything `pack_authored_declared` holds; a
+        reader seeing both on one row is looking at a bug, not at a case to handle. Absent
+        wherever the pack declares nothing, which is almost every key.
 
         FIVE OF THESE LISTS ARE ORDERED BY `Counter.most_common()`, AND THAT ORDER IS PART OF
         THE CONTRACT, NOT AN ACCIDENT OF THE IMPLEMENTATION. `most_common` sorts by count

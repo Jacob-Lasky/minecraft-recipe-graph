@@ -64,7 +64,7 @@ curl -s --get $B/api/sweep \
   --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0' | jq
 ```
 
-Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores emc icon damaged unsourced provenance`,
 joined by `and or not`, the six comparisons, and
 `startswith endswith contains matches lower upper len`. **`GET /api` FIRST, do not guess a
 field name** -- it prints the whole vocabulary, and a wrong name is a 400 that lists the real
@@ -218,9 +218,28 @@ transformer, so it adds dev-workspace failure surface for provably zero recipe b
 never stage the dump mod's own jar into the pack -- two jars declaring modid `mcrecipedump` is a
 duplicate-mod startup failure.
 
-**What survives untouched:** `jar_json` really does supply 802 produced keys the client's own
-HEI dump lacks, including `advancedrocketry:lathe`. That is a possible DUMP gap and it is worth
-more than the parity question ever was.
+**THE "802 KEYS, POSSIBLE DUMP GAP" THIS FILE CARRIED IS ALSO MEASURED FALSE, AND IT POINTED
+THE WRONG WAY.** Re-measured in #227 with both arms at the same stage and a planted-removal
+control in each direction: the gap is **190, not 802**, and the dump is not under-supplying --
+`jar_json` was over-supplying. At least 170 of the 190 were keys the running game does not have,
+from two `jar_json` defects now fixed (#249, an unqualified id defaulting to `minecraft:`
+instead of the recipe file's namespace; #250, Forge `conditions` never read) plus the pack's own
+CraftTweaker deletions, which this source cannot see and which are why `hei_dump` is
+authoritative. **The method and every number live in #227's comment; do not restate them here,
+because two copies is two places for the next correction to miss.**
+
+**AND THIS FILE'S FLAGSHIP EXAMPLE WAS WRONG IN THE OPPOSITE DIRECTION.** The dump **HAS**
+`advancedrocketry:lathe`, produced by `compactmachines3.MultiblockMiniaturization`. What is
+missing is its CRAFTING recipe, because the pack deletes it in
+`scripts/AdvancedRocketryGating.zs:292`, and `ToolTips2.zs:772` tags the item "Non-rods recipes
+are caused by a bug and do not work". `advancedrocketry:rollingmachine` is the same story at
+`:167`. Anyone reading the old line went looking for a dump defect that does not exist. Before
+quoting a missing key as evidence against the dump, grep the pack's scripts for it.
+
+**The 22,188 `no outputs` skips are not a dump gap either.** `DumpCommand.encode` returns null
+only when JEI's own `getIngredients` reported zero item AND zero fluid outputs, so the dump
+cannot discard an output it was handed; the losses are upstream, at the JEI wrapper. Census and
+sample are in #227.
 
 **THE DENOMINATOR, PINNED, because "410" was quoted repeatedly and matched nothing:** 367
 top-level jars in `mods/` (what `jar_json` walks), 370 distinct modids in `mcmod.info`, 22 jars
@@ -713,6 +732,30 @@ lives in the blueprint's NBT, so the fix is dump-side.
 become cards below 700px, ordered by the `c-` classes on each cell. Those classes are the
 contract between the row template and the card CSS, and `tests/test_server.py` asserts it
 in both directions; add a cell and you add a class.
+
+**That is a statement about a five-column HTML table, NOT about the machines table as such,
+and #254 built the same information into a 400px ModularUI panel.** Read the sentence above
+as a reason to reject the in-game screen and you will reject a screen that exists and works.
+What made it fit is the same move the phone breakpoint makes: stop being a table. The in-game
+row is TWO lines -- verdict, name and recipe count on the first, the evidence sentence
+indented under it -- which is the card layout with a fixed left column rather than a fifth
+column. Three things follow, and all three are the kind of decision that looks arbitrary once
+the reason is stripped off:
+
+* **Column widths are derived from the data on screen, never typed in.** `MachineLabels
+  .widestLabel` sizes the verdict column from the vocabulary and `MachinesWidgets
+  .recipeColumnWidth` sizes the count column from the visible rows, because filtering to
+  `no route` leaves three categories carrying two recipes each and a column sized for the
+  pack's five-figure maximum wastes 30 of 388 pixels. A hand-written width is how the badge
+  column once came out reading `no known...`.
+* **The evidence stays on the row and costs half the visible rows** -- seven instead of
+  thirteen. `machines_page` calls that column "the only reason anyone opens this page after
+  the first time", and the filters are what cut 503 rows down to the handful anyone reads.
+* **There is no text filter in game and that is deliberate.** `TextFieldWidget` appears
+  nowhere in `mod/src/main/java`, so a filter box would be the mod's first keyboard input,
+  with focus handling, the `e`-closes-the-inventory collision, and a headless harness whose
+  typing path has never been demonstrated. The state chips answer the question the screen is
+  for and the mod picker answers the axis a player knows by name.
 
 The two phone blocks sit LAST in `render.CSS` and in `server.HOME_CSS` because they win by
 cascade order. They use different breakpoints on purpose, 640 and 700, and the comment

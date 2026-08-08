@@ -3,7 +3,7 @@
 import os
 import sys
 
-from . import dimensions, multiblocks, notproduction, tokens
+from . import dimensions, multiblocks, notproduction, provenance, tokens
 from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
@@ -63,10 +63,30 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     mods_dir = os.path.join(instance_dir, "mods")
     if os.path.isdir(mods_dir):
         n = 0
-        for recipe in jar_json.extract(mods_dir):
+        # `extract` reports its own counters through `on_progress`, and the LAST call is the
+        # one that carries the totals. Captured rather than recomputed, so the number said out
+        # loud is the number the walk actually used (#227).
+        jar_stats = {}
+        for recipe in jar_json.extract(mods_dir, lambda _name, s: jar_stats.update(s)):
             g.add(recipe)
             n += 1
         say("jar_json: %d crafting recipes from mod jars" % n)
+        # SAID EVERY RUN, INCLUDING WHEN ALL THREE ARE 0. These count recipes this source threw
+        # away, and a line that appears only when it is non-zero cannot distinguish "nothing
+        # was dropped" from "nobody looked" -- which is the whole reason #227 could not reuse
+        # #119's numbers. `unevaluable` is separate from `unmet` on purpose: the first is a gap
+        # in what this source can see, the second is a fact about the pack.
+        #
+        # THE MODID COUNT NAMES ITS OWN DENOMINATOR, per this repo's rule that an unqualified
+        # count is how "410 jars" got quoted in four places and matched nothing. It is a
+        # CANDIDATE set -- `assets/<ns>/` directory names unioned with `mcmod.info` modids --
+        # so it is larger than the jar count on purpose and is not a loaded-mod census.
+        say("jar_json: forge:mod_loaded resolved against %d modid candidates "
+            "(assets/<ns>/ names unioned with mcmod.info, over-covering deliberately); "
+            "%d recipes dropped with conditions unmet, %d dropped with conditions this "
+            "source cannot evaluate offline"
+            % (jar_stats.get("modids", 0), jar_stats.get("cond_unmet", 0),
+               jar_stats.get("cond_unevaluable", 0)))
         # Forge loads `mods/<mcversion>/` too and `extract` does not, so SAY what was skipped
         # rather than leaving a future recipe-bearing subdirectory to vanish in silence.
         for sub, jars, recipes in jar_json.unread_subdir_jars(mods_dir):
@@ -169,7 +189,7 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # is a report about what the curated defaults will demote rather than a baked verdict.
     # It is said at build time anyway because this is the log a human reads once per redump,
     # and a rule that has drifted away from the pack shows up as a count that moved.
-    demotions = g.mark_non_production(tokens.resolve())
+    demotions = g.mark_non_production(tokens.resolve(graph=g))
     for line in notproduction.report(demotions):
         say("not production -- " + line)
 
@@ -210,6 +230,18 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     else:
         say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
             "dimension is not priced, which is the pre-#112 behaviour")
+
+    # HOW THE PACK SAYS YOU GET AN ITEM, when no recipe in the dump can say it. #171.
+    #
+    # AFTER the oredict and the drop pass, because the count this reports is measured through
+    # `pack_authored_declared`, which reads `ores_of` and the finished recipe set.
+    #
+    # The assignment drops the memos both of those properties build; that is
+    # `Graph.declared_provenance`'s setter and not something a caller has to remember.
+    declared = provenance.load(instance_dir)
+    g.declared_provenance = declared
+    reached = len(g.pack_authored_declared)
+    say(provenance.report(declared, reached))
 
     _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say)
 
@@ -740,7 +772,7 @@ def coverage(g, token_kinds=None):
         by_source[r.source] = by_source.get(r.source, 0) + 1
         by_cat[r.category] = by_cat.get(r.category, 0) + 1
     if token_kinds is None:
-        token_kinds = tokens.resolve()
+        token_kinds = tokens.resolve(graph=g)
     demotions = g.mark_non_production(token_kinds)
     return {
         "recipes": len(g.recipes),

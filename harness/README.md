@@ -84,6 +84,22 @@ rather than asserted: `harness/shot.sh 'flow:plan-in-stock@0.5'`. A malformed zo
 instead of falling back to 1.0, because a silently ignored zoom renders a screenshot that
 looks entirely correct and is of the wrong thing.
 
+`machines`, `machines-mods` and `machines-detail` (#254) all take an optional argument and all
+three **need a real graph**: `machines:no_route` opens the table with that chip switched on,
+`machines-detail:tconstruct.smeltery` opens one category, and both default to something the
+data chooses (no filter; the busiest category) rather than to a hardcoded uid that stops
+existing when the pack changes.
+
+Unlike `planner`, these have **no fixture fallback and do not fake one.** A plan tree is a small
+document that can be frozen in `tests/fixtures/plan/`; a machines table is a verdict on all 503
+categories resolved from placed blocks and stock against a 121 MB graph, and a six-category
+stand-in would photograph a screen no player will ever see -- the columns are sized from the
+data, so it would not even have the right geometry. Without `RECIPEGRAPH_ORACLE` these shoot the
+"no graph.json, looked in ..." panel and SUCCEED, which is the picture a new player sees and is
+worth having. **So check which one a PR's screenshot actually is**: the two are easy to tell
+apart full size and easy to confuse in a thumbnail, and the run logs `machines: <what happened>`
+either way.
+
 `flow-hit`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen in that shape
 owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the

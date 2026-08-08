@@ -28,7 +28,27 @@ WILDCARD_META = 32767
 
 
 def norm_key(item_id, meta=0):
-    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard."""
+    """Canonical item key. Accepts meta as int, str, None, or the 32767 wildcard.
+
+    THE `minecraft:` DEFAULT BELOW IS FOR IDS THAT COME FROM THE RUNNING GAME, AND IT IS THE
+    WRONG DEFAULT FOR A RECIPE JSON. DO NOT teach this function the recipe file's namespace,
+    and DO NOT delete the fallback as "dead" -- both were considered and both are wrong. See
+    #227.
+
+    Every caller but one hands this a FULLY QUALIFIED registry id, because every one of them
+    is reading a name the RUNNING GAME wrote down: `sources/hei_dump` off JEI's stacks,
+    `sources/catalysts`, `sources/damageable` and `sources/oredict` off the same dump,
+    `names` off the AE2 `items.csv`, and `multiblocks` and `explore` off ids already in the
+    graph. For those an unqualified id really is a vanilla one, so the fallback is right and
+    is what keeps a bare `stone` from becoming a keyless string.
+
+    The one caller that does NOT is `sources/jar_json`, because Forge resolves an unqualified
+    id in a recipe file against THE FILE'S OWN DOMAIN (`JsonContext.appendModId`), not against
+    `minecraft`. That caller qualifies the id itself in `jar_json.qualify` before it gets here.
+    Moving that logic into this function would need a namespace argument on every call site
+    that has no namespace to give, and would silently re-point the dump readers the day one of
+    them saw a bare id.
+    """
     if item_id is None:
         return None
     item_id = str(item_id).strip()
@@ -273,6 +293,48 @@ def storage_form_material(ore):
     if ore.lower().startswith(STORAGE_FORM_PREFIX) and len(ore) > len(STORAGE_FORM_PREFIX):
         return ore[len(STORAGE_FORM_PREFIX):]
     return None
+
+
+def canonical_item_key(raw):
+    """A raw `mod:name[:meta][#digest]` id from a NAME source -> the key this graph uses.
+
+    THE ONE SPELLING OF "PARSE A META OFF AN ID AND CANONICALISE IT", shared by the two
+    sources that name items: `names.load_items_csv` for the pack's `items.csv` and
+    `sources/dump_names` for the mod's `names.json`. Issue #253.
+
+    IT EXISTS BECAUSE THE TWO DISAGREED AND THE DISAGREEMENT WAS INVISIBLE. `load_items_csv`
+    split the meta and ran it through `norm_key`, so a 32767 row became `mod:thing:*`;
+    `dump_names` used the mod's string verbatim, so the SAME item arrived as the literal
+    `mod:thing:32767`. Every recipe spells it `:*`, so the second spelling named a key
+    nothing produces and nothing consumes. Measured on the reference dump: **2,672 keys**,
+    every one of them meta 32767, every one existing only as a label -- 0 produced, 0
+    consumed. 172 of them looked like a pricing defect because `Graph.producers` widens
+    `:meta` to `:*` and therefore found them a producer they had no price for (#253).
+
+    ZERO COLLISIONS when they are merged, which is why this is a straight fix and not a
+    policy question: in all 2,672 cases the canonical `:*` target was ABSENT from the name
+    map, so every label is GAINED by the key that actually has the recipe and none is
+    overwritten or lost.
+
+    NEGATIVE METAS ARE ACCEPTED because `items.csv` carries them and this must not narrow
+    what that reader already took; `split_key` deliberately does not, since a key is not a
+    raw id and nothing writes a negative one.
+
+    A `#digest` SUFFIX IS PRESERVED AND NOT PARSED. Only `names.json` carries them, the
+    digest is appended last (see `split_discriminator`), and the meta sits before it.
+    """
+    if not raw:
+        return raw
+    stem, disc = split_discriminator(str(raw))
+    parts = stem.split(":")
+    meta = 0
+    if len(parts) >= 3 and parts[-1].lstrip("-").isdigit():
+        meta = int(parts[-1])
+        stem = ":".join(parts[:-1])
+    key = norm_key(stem, meta)
+    if key and disc:
+        return "%s#%s" % (key, disc)
+    return key
 
 
 def split_discriminator(key):
@@ -624,6 +686,24 @@ class Graph:
         # the answer in graph.json is what stops that search being born with this bug.
         # Empty on any graph built before #168, which behaves exactly as before.
         self.shadow_ores = {}
+        # item key -> how the PACK says you get it, when no recipe in the dump does:
+        # `provenance.PUZZLE`, `LOOT_TABLE` or `QUEST`. PACK DATA, read back from scripts and
+        # the quest book, never curated -- see `provenance` for the reader and the 53-of-285
+        # measurement. The static half of #171's failure mode 1, on exactly the footing
+        # `dimension_ores` is on: what the pack hands out cannot change without the pack
+        # changing, so this is built once and serves every inventory.
+        #
+        # Empty on any graph built before #171's second pass, which behaves exactly as
+        # before: every one of these keys stays in `pack_authored_unsourced` at
+        # `UNSOURCED_COST`. That is the pre-existing answer and not a broken one, which is
+        # why an old graph needs no rebuild to keep working.
+        #
+        # A PROPERTY RATHER THAN A PLAIN FIELD, because `pack_authored_unsourced` EXCLUDES it
+        # and memoises. `index.build` assigns this after that property may already have been
+        # read, so a plain field would leave the build serving the pre-exclusion set to
+        # everything downstream -- including the graph it then writes out. The setter below
+        # drops the memo, so the invalidation cannot be forgotten by a future caller.
+        self._declared_provenance = {}
         # item key -> maxDamage, for items whose META IS DURABILITY rather than a subtype.
         # From the item registry via the dump, because nothing structural can tell 46 damage
         # values of one Iron Axe from 9 genuinely distinct `chisel:lapis` blocks -- see
@@ -704,6 +784,7 @@ class Graph:
         self._live_keys = None
         self._unsourced_keys = None
         self._pack_authored_unsourced = None
+        self._pack_authored_declared = None
         self._produced_in_name_only = None
         self._variant_index = None
         self._variant_subsumption = None
@@ -717,6 +798,24 @@ class Graph:
         # has to be re-marked, not left holding a verdict about a producer set that is gone.
         self._non_production_signature = None
         self._non_production_counts = None
+
+    @property
+    def declared_provenance(self):
+        """`{item key: provenance kind}` the PACK declares. See `provenance` for the reader.
+
+        A PROPERTY ONLY SO THE SETTER CAN DROP ONE MEMO; reading it is a plain field read.
+        `pack_authored_unsourced` excludes these keys and caches its answer on first use, and
+        `index.build` assigns this after that cache may already be warm -- so the invalidation
+        has to live with the assignment rather than at the one call site that happens to need
+        it today. `load` sets it before anything reads either, and pays a no-op clear.
+        """
+        return self._declared_provenance
+
+    @declared_provenance.setter
+    def declared_provenance(self, value):
+        self._declared_provenance = value or {}
+        self._pack_authored_unsourced = None
+        self._pack_authored_declared = None
 
     def mark_non_production(self, token_kinds):
         """Set `Recipe.not_production` for this token map, once, and report the counts.
@@ -1205,12 +1304,27 @@ class Graph:
             to fix the markers, which is the #117/#168 lesson repeating: an over-broad rule
             costs more real items than it fixes fake ones.
 
-        WHAT SURVIVES BOTH IS 283 KEYS, and the retention test is what makes the filter
+        A THIRD EXCLUSION, AND IT IS THE ONLY ONE THAT READS POSITIVE EVIDENCE. The two above
+        say "this key is not what it looks like"; `declared_provenance` says "the pack states
+        how you get this, and no recipe could have carried it". `provenance` reads the pack's
+        own scripts and quest book, and the load-bearing case is `recipes.addHidden*`: the
+        pack registers 82 puzzle rewards as REAL crafting recipes and hides them from JEI on
+        purpose, so a JEI dump cannot see them BY CONSTRUCTION. `contenttweaker:curious_bullet`
+        is #171's own example of failure mode 1 and the pack says outright where it comes from.
+
+        Measured on the reference oracle: 53 of the 285 keys that survive the two exclusions
+        above are declared, and 0 of the 37 curated `DEFAULT_TOKENS` are. That emptiness is
+        the safety property rather than a pleasing statistic -- a wrong entry here would let a
+        JEI tooltip out of this set and back to `BASE_RAW_COST`, which is the whole defect --
+        and `tests/test_provenance.py` asserts it against the real pack.
+
+        WHAT SURVIVES ALL THREE IS 232 KEYS, and the retention test is what makes the filter
         trustworthy rather than merely narrow: all 37 hand-verified `DEFAULT_TOKENS` are
-        inside it and none of the controls are. It is still not a marker DETECTOR -- 246 of
-        the 283 are uncurated and some are genuine puzzle rewards -- which is exactly why
-        the price is `UNSOURCED_COST` and not a token kind. "The tool cannot explain how you
-        get this" is true of every one of them; "this is a loot drop" is not.
+        inside it and none of the controls are. It is still not a marker DETECTOR -- 195 of
+        the 232 are uncurated and some are genuine puzzle rewards the pack handed out by a
+        route `provenance` cannot read -- which is exactly why the price is `UNSOURCED_COST`
+        and not a token kind. "The tool cannot explain how you get this" is true of every one
+        of them; "this is a loot drop" is not.
 
         SO CURATION STILL DECIDES, AND DETECTION ONLY NARROWS. `tokens.candidates` offers
         this same population for a human to classify, and a curated token overrides this
@@ -1218,10 +1332,61 @@ class Graph:
         precisely so it wins.
         """
         if self._pack_authored_unsourced is None:
-            packs = tuple("%s:" % ns for ns in tokens.TOKEN_NAMESPACES)
             self._pack_authored_unsourced = frozenset(
                 key for key in self.live_keys
-                if str(key).startswith(packs)
+                if key not in self._declared_provenance
+                and self._is_pack_authored_unexplained(key))
+        return self._pack_authored_unsourced
+
+    @property
+    def pack_authored_declared(self):
+        """`{key: provenance kind}` for the keys `pack_authored_unsourced` would hold if the
+        pack had not explained them. 53 on the reference oracle, against that set's 232.
+
+        THE OTHER HALF OF ONE PREDICATE, WHICH IS WHY IT IS HERE AND NOT IN `provenance`.
+        Both properties run the same five clauses -- pack namespace, no producer, no
+        `reachable_form`, no oredict, not a damage variant -- and differ only in which side of
+        `declared_provenance` they take. Splitting them any other way would let the two drift
+        into disagreeing about a key that is in neither or both.
+
+        AND IT IS NOT `set(declared_provenance)`, WHICH IS THE MISTAKE THAT LOOKS RIGHT. The
+        pack declares 896 keys and 843 of them are items the graph already makes: 397 price
+        below `LOOT_COST` and `ae2stuff:adv_wireless_kit` prices at 380,435. Pricing every
+        declaration would tell the model that a quest awarding a thing IS a route to it, which
+        is a claim no pack source makes -- measured, it moves 301 keys off their real prices
+        and drags a further 20 UP through the fixpoint. What the pack declaring something
+        proves is only that the item is obtainable, and that is only news for the keys the
+        graph had no explanation for at all.
+
+        SO THE CLAUSES ARE NOT NEGOTIABLE HERE EITHER. A declared key with a producer is
+        priced by its producer; a declared world ore is priced by mining; a declared damage
+        variant is priced by its undamaged base. Every one of those is a better answer than
+        "the pack hands it out", and this property is what keeps them.
+        """
+        if self._pack_authored_declared is None:
+            self._pack_authored_declared = {
+                key: kind for key, kind in (self._declared_provenance or {}).items()
+                if self._is_pack_authored_unexplained(key)}
+        return self._pack_authored_declared
+
+    def _is_pack_authored_unexplained(self, key):
+        """The five clauses `pack_authored_unsourced` and `pack_authored_declared` share.
+
+        ONE SPELLING, because the two properties partition its result on
+        `declared_provenance` and a key that fell out of both would be silently unpriced by
+        either rule. See `pack_authored_unsourced` for what each clause is for and the
+        measurement that bought it.
+
+        `live_keys` IS A CLAUSE HERE AND NOT A LOOP BOUND, WHICH IS THE DIFFERENCE THAT BIT.
+        `pack_authored_unsourced` gets liveness by iterating `live_keys`, so it never needed to
+        say so; `pack_authored_declared` iterates the PACK'S map, which names items no recipe
+        touches. Without this clause 54 dead keys -- `a_smithys_tablet`, `toy_sword` -- went
+        from infinity to a gate price, inventing a number for items that cannot appear in any
+        plan. Measured on the reference oracle before the clause was added.
+        """
+        packs = tuple("%s:" % ns for ns in tokens.TOKEN_NAMESPACES)
+        return (key in self.live_keys
+                and str(key).startswith(packs)
                 # `producers`, NOT `by_output`, AND THE INVERTED CLAUSE BELOW IS WHY.
                 # `unsourced_keys` tests `not by_output.get(key)` and gets away with it
                 # because its SECOND clause calls `reachable_form`, which widens through
@@ -1237,7 +1402,6 @@ class Graph:
                 and not self.reachable_form(key)
                 and not self.ores_of(key)
                 and self.damage_base(key) == key)
-        return self._pack_authored_unsourced
 
     @property
     def produced_in_name_only(self):
@@ -1913,6 +2077,7 @@ class Graph:
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
             "shadow_ores": self.shadow_ores,
+            "declared_provenance": self.declared_provenance,
             "max_damage": self.max_damage,
             "machine_names": self.machine_names,
             "blueprint_machines": self.blueprint_machines,
@@ -2007,6 +2172,13 @@ class Graph:
         # keys every fixture to that count, so the whole golden set would go stale without a
         # rebuild having happened.
         g.shadow_ores = d.get("shadow_ores") or {}
+        # Absent before #171's second pass; empty means "the pack declares nothing", which is
+        # the pre-#171 behaviour and NOT "the pack declares nothing exists". DO NOT re-derive
+        # it here from `instance_dir`, for exactly the reason spelled out for `shadow_ores`
+        # above and one more of its own: the instance directory is a path recorded in the
+        # graph, so a `load` that read it would give two different answers for one graph.json
+        # depending on whether that directory still exists on the machine doing the loading.
+        g.declared_provenance = d.get("declared_provenance") or {}
         # All five absent before schema 5, and every one of them means "the feature is off"
         # rather than "something is broken": no meta collapse, no blueprint names, no EMC
         # route, no icons. A graph built from an older dump goes on working unchanged, which

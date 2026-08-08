@@ -772,7 +772,7 @@ class State:
             self.placed, self.have, self.source_overrides)
         # Resolved once per load for the same reason the source overrides are: re-reading
         # per request would let two plans in one session disagree about what a token is.
-        self.token_kinds = tokens_mod.for_path(self.tokens_path)
+        self.token_kinds = tokens_mod.for_path(self.tokens_path, self.graph)
         # Resolved here rather than per plan for the same reason the sources are: a pin
         # that has lapsed onto its category must read the same on the chooser page as it
         # behaves in the tree, and re-reading per request lets those two disagree.

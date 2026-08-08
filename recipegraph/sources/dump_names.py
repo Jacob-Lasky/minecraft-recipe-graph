@@ -18,6 +18,7 @@ it is applied with setdefault, leaving any name already loaded in place.
 import json
 import os
 
+from ..model import canonical_item_key
 from ..names import clean_label
 from . import dump_meta
 
@@ -83,5 +84,17 @@ def load_with_count(path):
         # fallbacks; an item losing its only index entry has none. See #52.
         label = clean_label(value)
         if label:
-            out[str(key)] = label
+            # CANONICALISED, NOT VERBATIM, AND THAT IS #253. The mod writes the meta as the
+            # game stores it, so the any-damage wildcard arrives as the literal `:32767`
+            # while every recipe -- and `items.csv`, which has always run through
+            # `norm_key` -- spells the same item `:*`. 2,672 keys on the reference dump
+            # landed under a spelling nothing produces and nothing consumes, and 172 of
+            # them read as a PRICING defect because `Graph.producers` widens `:meta` to
+            # `:*` and so found them a producer for a key no price is ever written under.
+            #
+            # `setdefault`, matching the "loses to nothing" rule this file already states:
+            # two raw keys can now canonicalise onto one, and the first name wins rather
+            # than the last. Zero of the 2,672 actually collide -- the `:*` target was
+            # absent in every case -- so this is a guard on the shape, not a live tiebreak.
+            out.setdefault(canonical_item_key(key), label)
     return out, len(doc)
