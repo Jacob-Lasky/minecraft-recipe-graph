@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
+import io.github.jacoblasky.recipedump.plan.Provenance;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,8 +21,16 @@ import java.util.List;
  */
 public final class NodeRowText {
 
-    /** The separator the web UI uses between meta parts, in the one place it is spelled. */
-    static final String SEPARATOR = " · ";
+    /**
+     * The separator the web UI uses between meta parts, in the one place it is spelled.
+     *
+     * PUBLIC FOR `client.browse` (#255), because the graph screen joins its fingerprint figures
+     * the same way the planner joins its footer, and a second separator spelled next door would
+     * be two conventions on one 400px panel a player sees both halves of. The reason it is one
+     * place is unchanged: this glyph is the browser's, and the two front ends look wrong beside
+     * each other the moment one of them picks a dash.
+     */
+    public static final String SEPARATOR = " · ";
 
     /**
      * Minecraft's default font advance, in pixels, for ordinary ASCII: a 5px glyph plus 1px.
@@ -246,6 +255,11 @@ public final class NodeRowText {
             // `why` is set only on the infinite-sources list, whose rows are by definition
             // sourced. The `else` keeps that true here rather than restating it.
             parts.add(NodeStatus.UNSOURCED_BADGE);
+        } else if (row.provenance() != null && !row.provenance().isEmpty()) {
+            // THE COMPLEMENT OF THE BADGE ABOVE, NOT A SECOND ONE. #171/#262: the pack says
+            // how you get this, so "no known source" would be a lie and silence would be a
+            // regression -- `render._rows` puts the same word on the same row in the browser.
+            parts.add(Provenance.badgeFor(row.provenance()));
         }
         if (row.tokenKind() != null && !row.tokenKind().isEmpty()) {
             parts.add(NodeStatus.tokenBadge(row.tokenKind()));

@@ -186,6 +186,155 @@ else:
 PY
 }
 
+# A PROBE THAT PLANS NEEDS A `graph.json`, AND NOTHING WAS PUTTING ONE HERE.
+#
+# The mod reads it from `config/mcrecipedump/graph.json` inside the game directory, and until
+# #240 nothing staged one, so every screen that SOLVES rather than photographing reached the
+# planner and got "no graph.json. looked in: /instance/config/mcrecipedump/graph.json". That
+# cost a full pack boot to find, because it presents as a screen-level verdict rather than as a
+# setup error: `jei-keybind` correctly hovered the item, correctly resolved its key, and then
+# had nothing to plan against.
+#
+# DO NOT PIN A FILENAME HERE. The first version of this defaulted to `graph-s7.json` and was
+# stale within the same afternoon, because master bumped `DumpCommand.SCHEMA` to 8 underneath
+# it. The default is now "the graph with the highest `dump_schema` in the build directory",
+# which tracks the jar without naming a file, and the choice is LOGGED with its schema and
+# version so a mismatch is visible in the run rather than inferred from a wrong plan.
+#
+# NEWEST-BY-MTIME WOULD BE WRONG, and it is the obvious alternative. `/coding/.recipegraph-build`
+# is shared by a dozen agents, and the newest file there right now is `graph-oracle-248.json`,
+# which is schema 5 -- three behind the jar. Recency says who wrote last, not who wrote for
+# this jar.
+#
+# WHY THE SCHEMA MATTERS AT ALL: `GraphJsonReader` is deliberately tolerant and skips sections
+# it does not know, so an old graph LOADS. What it does not do is warn, and a schema that
+# changed how keys are spelled -- schema 4 did, see `DumpCommand`'s "THIS FORMAT IS PART OF
+# SCHEMA 4" -- then answers `keyId` -1 for keys the pack really has, which reads as "that item
+# is not in the pack" rather than as a version mismatch. `RECIPEGRAPH_GRAPH` names one
+# explicitly when a run wants a specific graph.
+#
+# ABSENT IS NOT FATAL, because the eleven screens that photograph a fixture do not need it and
+# a 120 MB copy is not free. It says so instead, which is what the failing run needed.
+#
+# `${RECIPEGRAPH_GRAPH-...}` AND NOT `:-`, SO AN EMPTY VALUE MEANS "STAGE NOTHING". That is the
+# escape hatch for the case #254 wants: `machines` deliberately photographs the "no graph.json"
+# panel, because that is the picture a new player sees. With `:-` an empty value falls back to
+# the default and there is no way to ask for no graph at all except by naming a path that does
+# not exist, which reads as a mistake rather than as an intent.
+# THE JAR'S OWN SCHEMA, read out of the source rather than out of the built jar. It is a
+# compile-time constant in the same tree, so it cannot drift from the jar this branch builds,
+# and reading it here turns "compare these two numbers yourself" into a check that fires. The
+# previous version of this printed both numbers and asked the reader to compare them, which is
+# the same shape as every other thing on this host that reports success and means nothing.
+jar_schema() {
+    sed -n 's/.*static final int SCHEMA = \([0-9]*\);.*/\1/p' \
+        "$(dirname "$0")/../../mod/src/main/java/io/github/jacoblasky/recipedump/DumpCommand.java"
+}
+
+# Prints "PATH<tab>SCHEMA<tab>NOTE" for the chosen graph, or nothing when no candidate has a
+# `dump_schema`. Nothing rather than an error, so the caller's own "no graph" message is the
+# one that reaches the log.
+#
+# THE TIE-BREAK IS NEWEST-MTIME AND IT IS NOT DECORATION. Four of the six graphs in this
+# directory are `dump_schema=5` today, so the moment the highest schema is one of those --
+# which is as soon as anyone dumps a second graph at the current schema -- this rule decides
+# what the pack boots with. SAME-SCHEMA GRAPHS ARE NOT INTERCHANGEABLE: `graph-oracle-248.json`
+# carries `offworld_ores` and `graph-oracle.json` does not, and that field is what #248's
+# dimension toll rests on, so the loser of a tie can be a graph whose planner cannot express
+# the thing under test. A tie is therefore REPORTED, naming what lost, rather than resolved
+# silently.
+select_graph() {
+    python3 - "$LOCAL_BUILD" <<'PYEOF'
+import glob, os, re, sys
+
+# SCANNED IN CHUNKS RATHER THAN PARSED. Each candidate is ~120 MB and `prodshot.sh` runs the
+# mod-only path before EVERY run, so `json.load` on six of them to read six integers would put
+# a minute of array I/O in front of every shot. `dump_schema` is a top-level scalar written by
+# `DumpCommand`, so a regex over a sliding window finds it without building the document.
+PATTERN = re.compile(rb'"dump_schema"\s*:\s*(\d+)')
+WINDOW = 1 << 20
+
+
+def schema_of(path):
+    with open(path, "rb") as fh:
+        tail = b""
+        while True:
+            chunk = fh.read(WINDOW)
+            if not chunk:
+                return None
+            found = PATTERN.search(tail + chunk)
+            if found:
+                return int(found.group(1))
+            # Carry enough to catch a match split across the boundary.
+            tail = chunk[-64:]
+
+
+found = []
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "graph-*.json"))):
+    try:
+        schema = schema_of(path)
+    except OSError:
+        continue
+    if schema is not None:
+        found.append((schema, os.path.getmtime(path), path))
+
+if not found:
+    sys.exit(0)
+
+# Sorted rather than a running maximum, so the losers of a tie are still in hand for the note.
+found.sort(key=lambda row: (row[0], row[1]), reverse=True)
+schema, _, winner = found[0]
+tied = [os.path.basename(row[2]) for row in found[1:] if row[0] == schema]
+note = "sole candidate at that schema" if not tied else (
+    "TIE at dump_schema=%d, newest mtime won over %s" % (schema, ", ".join(tied)))
+print("%s\t%d\t%s" % (winner, schema, note))
+PYEOF
+}
+
+selected=$(select_graph)
+GRAPH_SCHEMA=$(printf '%s' "$selected" | cut -f2)
+GRAPH_NOTE=$(printf '%s' "$selected" | cut -f3)
+GRAPH_JSON="${RECIPEGRAPH_GRAPH-$(printf '%s' "$selected" | cut -f1)}"
+
+install_graph() {
+    dest="$INSTANCE/config/mcrecipedump"
+    if [ -z "$GRAPH_JSON" ]; then
+        rm -f "$dest/graph.json"
+        echo "stage-instance: RECIPEGRAPH_GRAPH is empty; staged no graph, so screens that" \
+             "SOLVE will shoot the 'no graph.json' panel"
+        return 0
+    fi
+    if [ ! -f "$GRAPH_JSON" ]; then
+        echo "stage-instance: no graph at $GRAPH_JSON; screens that SOLVE will report" \
+             "'no graph.json'. Point RECIPEGRAPH_GRAPH at one." >&2
+        return 0
+    fi
+    # SAY WHICH GRAPH AND WHETHER IT FITS THE JAR, on every run and not only when it changes,
+    # because the `cmp` shortcut below returns before the copy and a run that skipped the copy
+    # still needs to say what it is booting with.
+    want=$(jar_schema)
+    if [ -n "$GRAPH_SCHEMA" ] && [ -n "$want" ] && [ "$GRAPH_SCHEMA" != "$want" ]; then
+        echo "stage-instance: !! $(basename "$GRAPH_JSON") is dump_schema=$GRAPH_SCHEMA and" \
+             "this tree's DumpCommand.SCHEMA is $want. GraphJsonReader is tolerant and will" \
+             "LOAD it, so nothing downstream will complain -- but a schema that changed how" \
+             "keys are spelled makes keyId answer -1 for keys the pack really has, which" \
+             "reads as 'that item is not in the pack'. Dump a current graph, or name one" \
+             "with RECIPEGRAPH_GRAPH." >&2
+    fi
+    echo "stage-instance: graph is $(basename "$GRAPH_JSON")" \
+         "(dump_schema=${GRAPH_SCHEMA:-unknown}, jar wants ${want:-unknown};" \
+         "${GRAPH_NOTE:-named explicitly})"
+    mkdir -p "$dest"
+    # `cmp` first: this is 120 MB onto the array, and `prodshot.sh` calls the mod-only path
+    # before every run.
+    if cmp -s "$GRAPH_JSON" "$dest/graph.json"; then
+        echo "stage-instance: graph.json already matches $(basename "$GRAPH_JSON")"
+        return 0
+    fi
+    cp "$GRAPH_JSON" "$dest/graph.json"
+    echo "stage-instance: installed graph.json ($(wc -c < "$dest/graph.json") bytes)"
+}
+
 # EVERYTHING THAT TOUCHES `$INSTANCE` LIVES IN HERE, so that it can be covered by exactly one
 # gate acquisition. One, and not one per step: a run that released between the delete and the
 # copy would hand another agent a half-built instance, which is the same defect as #265 with a
@@ -193,6 +342,7 @@ PY
 stage_instance() {
     if [ "$MOD_ONLY" -eq 1 ]; then
         install_mod
+        install_graph
         return 0
     fi
 
@@ -200,6 +350,7 @@ stage_instance() {
         stage_from_amp
         build_instance
         install_mod
+        install_graph
     fi
     apply_headless_overrides
 

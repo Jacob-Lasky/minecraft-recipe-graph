@@ -47,9 +47,47 @@ cp $SHOTS/machines-mods.png docs/shots/machines-mod-picker.png
 # when the pack changes, and the shot would then photograph an empty panel and still exit 0.
 RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines-detail machines-detail
 cp $SHOTS/machines-detail.png docs/shots/machines-detail.png
+
+# The planner opened DURING the graph read, and the same window once the graph lands (#201).
+# TWO RUNS, AND THE PAIR IS THE ARTIFACT: either picture on its own is exactly what the
+# BROKEN build produces too, because the bug was that the second state never arrived.
+# `planner-recovery:recovered` states its criteria and fails the run if they do not hold, so
+# a green exit here is a behavioural claim and not only a picture.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:loading planner-loading
+cp $SHOTS/planner-loading.png docs/shots/planner-during-load.png
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:recovered planner-recovered
+cp $SHOTS/planner-recovered.png docs/shots/planner-after-load.png
 ```
 
-**Check which picture you got.** Without `RECIPEGRAPH_ORACLE` the three `machines` shots
+**`planner-recovery` needs the oracle and says so by failing.** Every other screen degrades
+into a picture of the no-graph panel without `$RECIPEGRAPH_ORACLE`, which is a legitimate
+subject. This one cannot: with no file the load resolves MISSING synchronously and there is no
+wait to photograph, so the run reports that rather than producing a plausible picture of
+something else.
+
+```bash
+# The other two browse tabs (#255). Both need the oracle; `graph` is the faster.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh sources sources
+cp $SHOTS/sources.png docs/shots/browse-free.png
+
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh graph graph
+cp $SHOTS/graph.png docs/shots/browse-graph.png
+```
+
+**The `graph` shot shows `pack: UNCHECKED`, and that is correct.** I predicted MISMATCH here and
+the run disproved it: the oracle graph is **schema 5**, and the jar-set stamp arrived in schema
+6, so there is no recorded digest to compare against and the honest verdict is "cannot tell"
+rather than "differs". The run logs it either way --
+`graph: pack check CANNOT_TELL -- this dump predates the mod-set stamp; redump to fix` -- and
+that line is what tells a harness artefact apart from a real finding.
+
+A `pack: OK` in a harness shot would be the suspicious result, since the dev set is five jars.
+
+Its whole subject is which graph is being read, so the other useful check is that the instance
+path in the picture is the pack you expect -- which is also the check a fixture could have
+faked, and the reason there is no fixture.
+
+**Check which picture you got.** Without `RECIPEGRAPH_ORACLE` the `machines`, `sources` and `graph` shots
 succeed and photograph the "no graph.json, looked in ..." panel instead of the table. That is
 a legitimate picture and it is also easy to mistake for the real one in a PR thumbnail. The
 run logs `machines: <what happened>`; read that line before attaching the file.
@@ -93,6 +131,7 @@ cp $SHOTS/after.png docs/shots/plan-after-pin.png
 | `recipe-picker-pinned.png` | The same picker over a pin file written by `recipegraph/pins.py`. The mod matched it by FINGERPRINT, not by id, and moved it up under the in-use row. This is the cross-language claim as a picture: the file was built by Python's own `pins.make`, so the mod is not agreeing with itself. |
 | `recipe-picker-no-graph.png` | No graph loaded. The picker says which of the three reasons it has nothing to offer, rather than showing an empty box. |
 | `plan-before-pin.png` / `plan-after-pin.png` | One hopper, planned twice against the real pack. Iron Ingot goes from Smelting to a Crafting route, the row says `pinned`, and the subtree under it is different. The pin is the only thing that changed. |
+| `planner-during-load.png` / `planner-after-load.png` | The calculator used a second after joining, and the same window a few seconds later, with nothing touched in between (#201). The first is the wait; the second is the plan the window replayed when the graph landed. Before #201 the second picture did not exist -- the window showed the first one until the player closed it and used the item again -- so this pair is the artifact and either half alone is equally consistent with the bug. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
 
 `planner-live` is the only shot that SOLVES. `planner`, `planner-menu`, `planner-todo` and

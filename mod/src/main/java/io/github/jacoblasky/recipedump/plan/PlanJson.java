@@ -102,6 +102,9 @@ public final class PlanJson {
                 if (entry.unsourced != null) {
                     w.name("unsourced").value(entry.unsourced.booleanValue());
                 }
+                if (entry.provenance != null) {
+                    w.name("provenance").value(entry.provenance);
+                }
                 w.endObject();
             }
         }
@@ -174,6 +177,9 @@ public final class PlanJson {
         }
         if (node.unsourced != null) {
             w.name("unsourced").value(node.unsourced.booleanValue());
+        }
+        if (node.provenance != null) {
+            w.name("provenance").value(node.provenance);
         }
         if (node.children != null) {
             w.name("children").beginArray();

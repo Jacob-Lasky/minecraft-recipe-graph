@@ -1,10 +1,13 @@
 package io.github.jacoblasky.recipedump.client;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+
+import java.util.Collections;
 
 import org.junit.After;
 import org.junit.Before;
@@ -13,6 +16,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
+import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
 import io.github.jacoblasky.recipedump.common.GraphDocuments;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.GraphSource;
@@ -46,6 +50,7 @@ public class PlannerEntryTest {
         System.clearProperty(GraphSource.PROPERTY);
         GraphService.get().reset();
         PlannerService.get().reset();
+        clearTheStaticWaits();
     }
 
     @After
@@ -57,6 +62,20 @@ public class PlannerEntryTest {
         }
         GraphService.get().reset();
         PlannerService.get().reset();
+        clearTheStaticWaits();
+    }
+
+    /**
+     * Both waits are static holders shared by every test in this JVM, and they mean different
+     * things -- see {@code PlannerEntry.waitingTarget}. A target left held here would make the
+     * next case's first tick plan something it never asked for; a stock snapshot left in
+     * `LiveStock` would make {@code PlannerStock.hold} run a plan immediately that this file
+     * expects to see waiting.
+     */
+    private static void clearTheStaticWaits() {
+        PlannerEntry.forgetTheWaitingTarget();
+        PlannerStock.forgetWaiting();
+        LiveStock.forget();
     }
 
     private void loadGraph() throws Exception {
@@ -232,5 +251,152 @@ public class PlannerEntryTest {
         book.setTodo("mod:plate", 1L);
         PlannerEntry.startPlan(book);
         assertEquals(PlannerService.State.IDLE, PlannerService.get().state());
+    }
+
+    // -- #201: the planner opened DURING the graph read ----------------------------------------
+
+    /**
+     * THE BUG. A planner opened inside the 5.47 s graph read has to end up showing the plan.
+     *
+     * WHY {@link #beforeAnyLoadItReadsAsLoadingRatherThanFailed} DID NOT CATCH THIS, which is
+     * the whole reason this case exists rather than an assertion added to that one. That test
+     * covers the state being CHOSEN -- "with no graph, say loading rather than failed" -- and
+     * it is right and it stays. It says nothing about RECOVERY, and recovery is where all three
+     * of #201's pieces meet: `planWhenStockIsRead` dropped the target, no plan meant no plan
+     * generation, and the window rebuilds on a counter. Each piece was individually correct.
+     *
+     * IT ENTERS BY THE PRODUCTION DOOR, not by the holder. {@code planWhenStockIsRead} is what
+     * `open` and `openOn` both call, and its no-graph path reaches no `Minecraft`, so the wait
+     * really is started the way a right-click starts it.
+     */
+    @Test
+    public void aPlannerOpenedBeforeTheGraphLandsPlansOnceItHas() throws Exception {
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 4L);
+
+        // A second after joining: the read is in flight and the window says so.
+        assertEquals(PlannerState.Kind.LOADING, state().kind());
+        PlannerEntry.planWhenStockIsRead(book, "mod:plate");
+        assertEquals("planning against no graph would set FAILED and draw a wait in red",
+                     PlannerService.State.IDLE, PlannerService.get().state());
+        assertEquals("the target must be KEPT rather than dropped, or there is nothing to"
+                     + " replay when the graph lands",
+                     "mod:plate", PlannerEntry.waitingTarget());
+
+        // The graph lands. The next client tick of the open window is this call.
+        loadGraph();
+        // `canAsk` false is the disconnected client and the screenshot harness: there is
+        // nobody to ask for stock, so the plan runs now rather than waiting for a reply that
+        // cannot come. It is the one argument this test supplies instead of reading; see
+        // `PlannerEntry.resumeWhenTheGraphLands(boolean, boolean)`.
+        assertTrue("the graph landed and the window never replayed the target it was opened"
+                   + " for -- this is #201, and the window stays on 'loading' for ever",
+                   PlannerEntry.resumeWhenTheGraphLands(true, false));
+        awaitPlan();
+
+        assertEquals(PlannerService.State.DONE, PlannerService.get().state());
+        assertEquals("the plan must be for the target the window was opened for",
+                     "mod:plate", PlannerService.get().targetKey());
+        assertEquals("and for the quantity that target's TODO asked for",
+                     4L, PlannerService.get().targetQty());
+        assertNull("the window must now draw the tree rather than any not-yet panel", state());
+    }
+
+    /**
+     * The keybind's target survives the wait too, and it is the case a book cannot recover.
+     *
+     * `openOn` is handed a key by `PlanTarget` off whatever JEI was pointing at, and that key
+     * is nowhere in the plan book -- so a repair that re-derived the target from the book when
+     * the graph landed would silently plan the wrong thing here and look right everywhere else.
+     */
+    @Test
+    public void theKeybindsTargetIsTheOneReplayedAndNotTheBooksFirstEntry() throws Exception {
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:ingot", 7L);
+        PlannerEntry.planWhenStockIsRead(book, "mod:plate");
+        assertEquals("mod:plate", PlannerEntry.waitingTarget());
+
+        loadGraph();
+        assertTrue(PlannerEntry.resumeWhenTheGraphLands(true, false));
+        awaitPlan();
+        assertEquals("the target the player named, not the book's first entry",
+                     "mod:plate", PlannerService.get().targetKey());
+        assertEquals("an item that is not on the TODO is planned singly",
+                     1L, PlannerService.get().targetQty());
+    }
+
+    /**
+     * The replayed plan still waits for the ME network to be read.
+     *
+     * THE WAY THIS FIX COULD REINTRODUCE #191. The two waits are separate holders on purpose --
+     * see `PlannerEntry.waitingTarget` -- and they resolve in a fixed order: the graph first,
+     * then the stock. A recovery that planned the moment the graph landed would price the tree
+     * against the assumption that the player owns nothing, which is the confidently-wrong plan
+     * `ScenarioSource` exists to prevent, arriving through a door that did not exist before.
+     */
+    @Test
+    public void theReplayedPlanStillWaitsForTheStockRead() throws Exception {
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        PlannerEntry.planWhenStockIsRead(book, "mod:plate");
+        loadGraph();
+
+        assertTrue(PlannerEntry.resumeWhenTheGraphLands(true, true));
+        assertEquals("with a server to ask, the replayed plan waits for the reply",
+                     PlannerService.State.IDLE, PlannerService.get().state());
+
+        PlannerStock.accept(StockSnapshot.of(
+                Collections.singletonMap("mod:ingot", Long.valueOf(64L))).serializeNBT());
+        awaitPlan();
+        assertEquals("and the reply is what sets it going",
+                     PlannerService.State.DONE, PlannerService.get().state());
+        assertEquals("mod:plate", PlannerService.get().targetKey());
+    }
+
+    @Test
+    public void aNewerQuestionReplacesTheOneStillWaitingOnTheGraph() {
+        // The player used the keybind and then the calculator while the read was still going.
+        // Answering the one they moved on from would throw away the one they are looking at --
+        // the same rule `PlannerStock.waiting` states, reached for the same reason.
+        PlanBook book = new PlanBook();
+        PlannerEntry.planWhenStockIsRead(book, "mod:plate");
+        PlannerEntry.planWhenStockIsRead(book, "mod:ingot");
+        assertEquals("mod:ingot", PlannerEntry.waitingTarget());
+    }
+
+    @Test
+    public void nothingIsHeldWhenThereIsNothingToPlan() {
+        // An empty book names no target, so there is no question to replay. Holding a null
+        // would make the first tick after the graph landed run a plan for nothing.
+        PlannerEntry.planWhenStockIsRead(new PlanBook(), null);
+        assertNull(PlannerEntry.waitingTarget());
+        assertFalse("nothing was waiting, so no tick may claim a wait ended",
+                    PlannerEntry.resumeWhenTheGraphLands(true, false));
+    }
+
+    @Test
+    public void aTickBeforeTheGraphLandsDoesNothingAtAll() {
+        // The common case by a very wide margin: every tick of the five-second wait. It must
+        // not plan, and it must not forget what it is holding.
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        PlannerEntry.planWhenStockIsRead(book, "mod:plate");
+        assertFalse(PlannerEntry.resumeWhenTheGraphLands(false, false));
+        assertFalse(PlannerEntry.resumeWhenTheGraphLands(false, false));
+        assertEquals("mod:plate", PlannerEntry.waitingTarget());
+        assertEquals(PlannerService.State.IDLE, PlannerService.get().state());
+    }
+
+    @Test
+    public void aGraphThatIsAlreadyReadyIsNotWaitedFor() throws Exception {
+        // The ordinary path, and the one a wait must not slow down: with a graph in hand the
+        // target goes straight through to the stock ask and nothing is held for a later tick.
+        loadGraph();
+        PlanBook book = new PlanBook();
+        book.setTodo("mod:plate", 1L);
+        assertEquals("mod:plate",
+                     PlannerEntry.holdUntilTheGraphLands(book, "mod:plate", true));
+        assertNull("a graph in hand means there is nothing to wait for",
+                   PlannerEntry.waitingTarget());
     }
 }

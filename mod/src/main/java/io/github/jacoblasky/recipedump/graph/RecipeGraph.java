@@ -129,6 +129,25 @@ public final class RecipeGraph {
     private final int[] dimensionOreNameId;
     private final StringTable dimensionNames;
 
+    /**
+     * item key -&gt; how the PACK says you get it, when no recipe in the dump does. #171/#262.
+     *
+     * PACK DATA READ BACK FROM `graph.json`, on exactly the footing {@link #dimensionOres} is
+     * on: what the pack hands out cannot change without the pack changing, so `index.build`
+     * reads the scripts and the quest book once and everything downstream reads the answer.
+     * DO NOT re-derive it here from {@link #instanceDir} -- python's `Graph.load` refuses that
+     * by name, because the instance directory is a path recorded INSIDE the graph and a
+     * loader that read it would give two answers for one file depending on the machine.
+     *
+     * EMPTY ON EVERY GRAPH BUILT BEFORE #171's SECOND PASS, which behaves exactly as before:
+     * every one of these keys stays in {@link io.github.jacoblasky.recipedump.plan.Unsourced}'s
+     * pack-authored set at `UNSOURCED_COST`. That is the pre-existing answer and not a broken
+     * one, which is why an old graph needs no rebuild.
+     */
+    private final KeyIndex declaredProvenance;
+    private final int[] declaredProvenanceKind;
+    private final StringTable provenanceKinds;
+
     // -- schema 5 per-item facts, all five of them optional -------------------------------
     //
     // EVERY ONE MEANS "THE FEATURE IS OFF" WHEN ABSENT, never "something is broken": no meta
@@ -157,6 +176,8 @@ public final class RecipeGraph {
     private final int dumpSchema;
     private final String dumpVersion;
     private final String instanceDir;
+    private final String dumpModDigest;
+    private final int dumpModCount;
 
     private FluidNames fluidNames;
 
@@ -198,10 +219,13 @@ public final class RecipeGraph {
                 long[] offworldOres, long[] liveKeys, long[] reshapedOnly,
                 Csr catalysts, StringTable categoryMods, int[] categoryModId,
                 KeyIndex dimensionOres, int[] dimensionOreDimId, int[] dimensionOreNameId,
-                StringTable dimensionNames, KeyIndex damageable, int[] maxDamage,
+                StringTable dimensionNames,
+                KeyIndex declaredProvenance, int[] declaredProvenanceKind,
+                StringTable provenanceKinds, KeyIndex damageable, int[] maxDamage,
                 KeyIndex emcKeys, long[] emcValue, Blueprints blueprints, IconAtlas icons,
                 Multiblocks multiblocks, int dumpSchema,
-                String dumpVersion, String instanceDir) {
+                String dumpVersion, String instanceDir, String dumpModDigest,
+                int dumpModCount) {
         this.keys = keys;
         this.displayNames = displayNames;
         this.nameId = nameId;
@@ -233,6 +257,9 @@ public final class RecipeGraph {
         this.dimensionOreDimId = dimensionOreDimId;
         this.dimensionOreNameId = dimensionOreNameId;
         this.dimensionNames = dimensionNames;
+        this.declaredProvenance = declaredProvenance;
+        this.declaredProvenanceKind = declaredProvenanceKind;
+        this.provenanceKinds = provenanceKinds;
         this.damageable = damageable;
         this.maxDamage = maxDamage;
         this.emcKeys = emcKeys;
@@ -243,6 +270,8 @@ public final class RecipeGraph {
         this.dumpSchema = dumpSchema;
         this.dumpVersion = dumpVersion;
         this.instanceDir = instanceDir;
+        this.dumpModDigest = dumpModDigest;
+        this.dumpModCount = dumpModCount;
     }
 
     // -- keys ---------------------------------------------------------------------------
@@ -777,6 +806,29 @@ public final class RecipeGraph {
         return dimensionOres.size();
     }
 
+    /**
+     * How the PACK says you get this key, or null when it declares nothing. #171/#262.
+     *
+     * NULL IS THE ANSWER FOR ALMOST EVERY KEY and means "the pack said nothing", never "the
+     * pack said this is unobtainable". Mirrors `Graph.declared_provenance.get(key)` in python,
+     * which the two provenance predicates in
+     * {@link io.github.jacoblasky.recipedump.plan.Unsourced} partition on.
+     *
+     * THE RAW DECLARATION AND NOT THE PRICED SET, which is the mistake that looks right. The
+     * pack declares 896 keys on the reference oracle and 843 of them are items the graph
+     * already makes; pricing all of them off this map moves 301 keys off their real prices.
+     * `Unsourced.isPackAuthoredDeclared` is what narrows it to the 53 the graph could not
+     * explain at all -- DO NOT price, badge or note a key straight off this accessor.
+     */
+    public String declaredProvenance(int keyId) {
+        int slot = declaredProvenance.slotOf(keyId);
+        return slot < 0 ? null : provenanceKinds.get(declaredProvenanceKind[slot]);
+    }
+
+    public int declaredProvenanceCount() {
+        return declaredProvenance.size();
+    }
+
     // -- schema 5 per-item facts -----------------------------------------------------------
 
     /**
@@ -1264,6 +1316,24 @@ public final class RecipeGraph {
     }
 
     /**
+     * The digest of the jar set the dump SAW, or null when the dump predates schema 6.
+     *
+     * NULL IS "CANNOT COMPARE" AND NEVER "NO MODS". `dump_meta`'s docstring says the CLI check
+     * is "silent whenever it cannot compare", which is a safe default for a command and NOT a
+     * safe one for a screen -- a screen has no equivalent of silence, so whatever is drawn for
+     * this case is read as a pass. See {@code plan.GraphFacts.PackCheck}, which turns it into a
+     * third visible verdict rather than letting it render as agreement.
+     */
+    public String dumpModDigest() {
+        return dumpModDigest;
+    }
+
+    /** How many jars the dump saw, or 0 when the dump predates schema 6. */
+    public int dumpModCount() {
+        return dumpModCount;
+    }
+
+    /**
      * Fluid display names recovered from the containers each fluid is bottled in.
      *
      * DERIVED AT RUNTIME rather than baked into the graph file, matching `Graph.fluid_names`:
@@ -1314,6 +1384,8 @@ public final class RecipeGraph {
                 + Sizes.bytes(categoryModId)
                 + dimensionOres.retainedBytes() + Sizes.bytes(dimensionOreDimId)
                 + Sizes.bytes(dimensionOreNameId) + dimensionNames.retainedBytes()
+                + declaredProvenance.retainedBytes()
+                + Sizes.bytes(declaredProvenanceKind) + provenanceKinds.retainedBytes()
                 + multiblocks.retainedBytes()
                 // Zero until something asks for a fluid's name. Counted rather than assumed
                 // away, because a running GUI derives it on the first fluid it renders and a

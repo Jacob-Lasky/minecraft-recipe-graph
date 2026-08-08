@@ -152,6 +152,44 @@ public class NodeStatusTest {
                      NodeStatus.colour(plain), NodeStatus.colour(unsourced));
     }
 
+    /**
+     * #171/#262: the pack SAYS where this comes from, so "no known source" would be a lie.
+     *
+     * WHY THE PANEL NEEDS THIS AT ALL. The two marks are the two halves of one predicate --
+     * `Solver.expand` writes exactly one of them -- so a renderer that knew only `unsourced`
+     * draws a plain NEED row for a key the tool can explain, which is the same silent drift
+     * the test above records: the browser shows the word and the panel does not.
+     * `present.status_badge` orders its branches this way and `provenance.KIND_BADGE` is
+     * where the words come from.
+     */
+    @Test
+    public void aDeclaredLeafNamesThePackSAnswerRatherThanSayingNothingIsKnown() {
+        PlanNode plain = node(NodeStatus.RAW, null, false);
+        assertEquals("puzzle", NodeStatus.badge(declared("puzzle")));
+        assertEquals("go get", NodeStatus.badge(declared("loot_table")));
+        assertEquals("quest reward", NodeStatus.badge(declared("quest")));
+        // A kind this build has never heard of still says SOMETHING, because a blank badge is
+        // indistinguishable from a rendering bug.
+        assertEquals("declared", NodeStatus.badge(declared("some_future_kind")));
+        assertEquals("still something you have to go and obtain, so the colour does not move",
+                     NodeStatus.colour(plain), NodeStatus.colour(declared("puzzle")));
+    }
+
+    @Test
+    public void theDeclarationOutranksTheUnsourcedMark() {
+        // The combination cannot occur -- a declared key is excluded from the pack-authored
+        // unsourced set by construction -- but a caller passing both must get ONE answer, and
+        // naming the puzzle beats saying nothing is known. Same order as `present.status_badge`.
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.RAW);
+        json.addProperty("unsourced", true);
+        json.addProperty("provenance", "puzzle");
+        assertEquals("puzzle", NodeStatus.badge(PlanJson.readNode(json)));
+    }
+
     @Test
     public void aTokenKindOutranksTheUnsourcedMark() {
         // `present.status_badge`'s documented order. The combination cannot occur -- `expand`
@@ -274,6 +312,16 @@ public class NodeStatusTest {
 
     private static PlanNode node(String status, String tokenKind) {
         return node(status, tokenKind, false);
+    }
+
+    private static PlanNode declared(String kind) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.RAW);
+        json.addProperty("provenance", kind);
+        return PlanJson.readNode(json);
     }
 
     private static PlanNode node(String status, String tokenKind, boolean unsourced) {

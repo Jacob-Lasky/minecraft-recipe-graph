@@ -982,6 +982,49 @@ public strictfp final class Cost {
             cost[key] = Math.max(current, UNSOURCED_COST);
         }
 
+        // AND THE KEYS THE PACK EXPLAINS, which is the one rule in this cascade that says a key
+        // is obtainable on POSITIVE evidence rather than on the absence of a producer. #171.
+        //
+        // AFTER the three unsourced populations and BEFORE the tokens, which is the only
+        // position that is correct, and both neighbours are load-bearing:
+        //
+        //   * AFTER, because these keys are no longer IN `Unsourced.packAuthored` -- that set
+        //     excludes them -- so the loop above cannot reach them and the order is a statement
+        //     of intent rather than an override. Were the exclusion ever relaxed, running after
+        //     is what keeps this the answer: an item the pack explains must not be priced as
+        //     one it cannot.
+        //   * BEFORE, because a curated token still wins. A key that is BOTH a declared reward
+        //     and a hand-verified placeholder is a placeholder: `Solver.expand` returns at the
+        //     token branch, so the price has to agree with the display about which answer a
+        //     reader gets. Measured empty on the reference oracle -- 0 of the 37 curated tokens
+        //     are declared -- so this is the ordering that stays right if the pack ever
+        //     changes, not one the pack currently exercises.
+        //
+        // `Unsourced.packAuthoredDeclared` AND NOT THE RAW `declaredProvenance` MAP, which is
+        // the mistake that looks right and was measured wrong: the pack declares 896 keys and
+        // 843 are items the graph already makes. That class carries the measurement.
+        //
+        // ASSIGNMENT, NOT `min`, AND THIS IS THE ONE RULE HERE THAT RAISES A LEAF. These keys
+        // are leaves, so the leaf rule has already given them `BASE_RAW_COST`, and `min` would
+        // leave them there -- which is #171's failure mode 1 exactly: a puzzle reward priced
+        // level with cobblestone.
+        //
+        // SAME GUARD AS THE TOKEN LOOP BELOW, and the same `isInfinite` reading of python's
+        // `cost.get(key, BASE_RAW_COST)` default that the sweep above needs: anything already
+        // under a raw leaf is stock, an infinite generator or a learned EMC item, and each is a
+        // stronger claim about THIS world than the pack's declaration. Mirrors `cost._seed`.
+        long[] declared = Unsourced.packAuthoredDeclared(graph);
+        for (int key = 0; key < cost.length; key++) {
+            if (!Bits.get(declared, key)) {
+                continue;
+            }
+            double current = Double.isInfinite(cost[key]) ? BASE_RAW_COST : cost[key];
+            if (current < BASE_RAW_COST) {
+                continue;
+            }
+            cost[key] = provenanceCost(graph.declaredProvenance(key));
+        }
+
         // And LAST, the placeholders, because this is the one seed that RAISES a price. Every
         // rule above answers "how cheaply can this be had"; a token answers "what does the
         // player have to go and do", and the generic leaf rule has already given it 1.0.
@@ -1037,6 +1080,55 @@ public strictfp final class Cost {
             cost[key] = CRAFTABLE_COST;
         }
         return cost;
+    }
+
+    /**
+     * What a key the PACK explains costs, when the dump could not carry the explanation. #171.
+     *
+     * Mirrors `cost.PROVENANCE_COST` in python, whose comment carries the argument in full.
+     *
+     * NO NEW CONSTANT, AND THAT IS THE ARGUMENT RATHER THAN THRIFT. Each of these three claims
+     * is one this class has already priced, so inventing a fourth number would assert a
+     * difference nothing measured:
+     *
+     * <ul>
+     * <li>A PUZZLE IS A GATE. `addPuzzleShapeless` grants a gamestage and re-registers the
+     *     recipe behind it, so the item is locked until you solve the puzzle and freely
+     *     craftable after -- verbatim {@code GATE_COST}'s own definition, "a lock with a key
+     *     somewhere in the story". It is also why these must come DOWN off
+     *     {@code UNSOURCED_COST}: 41 of the 53 sat at 2,000, above the 1,000 a locked chapter
+     *     costs, so the model ranked an item the pack tells you how to get BELOW one it merely
+     *     gates.</li>
+     * <li>A QUEST REWARD IS THE SAME LOCK, handed out for progress you make. #95 is not
+     *     violated: this is not a second statement sharing one figure, it is the same statement
+     *     arriving from a second source.</li>
+     * <li>A LOOT-TABLE ENTRY IS LOOT. `addItemEntry` puts the item in a table you farm, which
+     *     is {@code LOOT_COST}'s own definition, "found by playing".</li>
+     * </ul>
+     *
+     * THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE:
+     *
+     * <pre>BASE_RAW_COST &lt; LOOT_COST &lt;= provenanceCost(*) &lt;= GATE_COST &lt; UNSOURCED_COST</pre>
+     *
+     * Every one of these is BELOW {@code UNSOURCED_COST} and that inequality is the whole
+     * feature. An item the pack explains must not cost more than one it does not, and it did.
+     *
+     * NOT WEIGHTED BY LOOT-TABLE WEIGHT, which the python reader deliberately discards. A
+     * rarity is not a price, and turning one into a price is {@code EMC_COST}'s rejected
+     * scaling argument arriving at a second door.
+     *
+     * AN UNRECOGNISED KIND FALLS BACK TO {@code UNSOURCED_COST}, which is the pre-#171 price,
+     * so a graph carrying a fourth kind this build has never heard of degrades to today's
+     * behaviour rather than to a cheap one. DO NOT make this throw or return a raw leaf.
+     */
+    static double provenanceCost(String kind) {
+        if (Provenance.PUZZLE.equals(kind) || Provenance.QUEST.equals(kind)) {
+            return GATE_COST;
+        }
+        if (Provenance.LOOT_TABLE.equals(kind)) {
+            return LOOT_COST;
+        }
+        return UNSOURCED_COST;
     }
 
     static double tokenCost(int kind) {

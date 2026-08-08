@@ -118,6 +118,10 @@ public class PlanFixtureTest {
         node.dimension = "The End";
         node.tokenKind = Tokens.kindName(Tokens.GATE);
         node.unsourced = Boolean.TRUE;
+        // #171/#262. Set beside `unsourced` even though `Solver.expand` writes exactly one of
+        // them on a real node, for the reason `interchangeable` is set beside `pinned` above:
+        // this node is not a plan, it is the enumeration of every field the writer can emit.
+        node.provenance = Provenance.PUZZLE;
         return node;
     }
 
@@ -127,6 +131,7 @@ public class PlanFixtureTest {
         entry.tokenKind = Tokens.kindName(Tokens.GATE);
         entry.emc = 2048L;
         entry.unsourced = Boolean.TRUE;
+        entry.provenance = Provenance.PUZZLE;
         return entry;
     }
 

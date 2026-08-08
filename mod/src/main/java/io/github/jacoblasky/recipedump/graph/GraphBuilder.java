@@ -39,6 +39,16 @@ public final class GraphBuilder {
             StringTable.builder(4096, 131072, true, true);
     private final StringTable.Builder dimensionNames =
             StringTable.builder(64, 2048, true, true);
+    /**
+     * The three words `declared_provenance` uses, interned rather than stored per key.
+     *
+     * A TABLE FOR THREE STRINGS IS NOT OVERBUILT, it is what makes the kind column an
+     * {@code int[]} instead of 896 references into the JSON parser's char buffer -- the same
+     * bargain {@link #dimensionNames} makes for eleven dimension names. It is also what keeps
+     * an unrecognised fourth kind cheap, since it costs one entry rather than a branch.
+     */
+    private final StringTable.Builder provenanceKinds =
+            StringTable.builder(8, 128, true, true);
 
     private final IntArray kinds = new IntArray();
     private final IntArray nameId = new IntArray();
@@ -83,6 +93,9 @@ public final class GraphBuilder {
     // See `offworldOre`.
     private final IntArray offworldOreKey = new IntArray();
 
+    private final KeyIndex.Builder declaredProvenanceKey = new KeyIndex.Builder();
+    private final IntArray declaredProvenanceKind = new IntArray();
+
     private final KeyIndex.Builder damageableKey = new KeyIndex.Builder();
     private final IntArray maxDamage = new IntArray();
     private final KeyIndex.Builder emcKey = new KeyIndex.Builder();
@@ -105,6 +118,8 @@ public final class GraphBuilder {
     private int dumpSchema;
     private String dumpVersion;
     private String instanceDir;
+    private String dumpModDigest;
+    private int dumpModCount;
 
     public GraphBuilder() {
         this(1 << 16, 1 << 20, 1 << 12, 1 << 18, 1 << 12, 1 << 16);
@@ -291,6 +306,18 @@ public final class GraphBuilder {
         offworldOreKey.add(keyId);
     }
 
+    /**
+     * What the PACK says hands this key out, when no recipe in the dump can say it. #171/#262.
+     *
+     * `kind` is one of {@link io.github.jacoblasky.recipedump.plan.Provenance}'s three words,
+     * and is NOT validated here on purpose: a graph carrying a kind this build has never heard
+     * of must still load and must degrade to the pre-#171 price. See `GraphJsonReader`.
+     */
+    public void declaredProvenance(int keyId, String kind) {
+        declaredProvenanceKey.add(keyId);
+        declaredProvenanceKind.add(provenanceKinds.add(kind));
+    }
+
     // -- schema 5 per-item facts ------------------------------------------------------------
 
     /** `stemKeyId` is the UNDAMAGED item key, which is what the registry reports against. */
@@ -323,6 +350,23 @@ public final class GraphBuilder {
 
     public void dumpVersion(String version) {
         this.dumpVersion = version;
+    }
+
+    /**
+     * The digest of the jar set the dump SAW, as `model.Graph.dump_mod_digest` writes it.
+     *
+     * READ SO THE MOD CAN ANSWER "IS THIS GRAPH FOR THIS PACK" (#255). `index._refuse_the_wrong`
+     * `_pack` already makes that comparison on the CLI side, where it can only compare a dump
+     * against a graph file. In game the check is stronger, because the mod is running inside
+     * the pack and can compare the graph against reality.
+     */
+    public void dumpModDigest(String digest) {
+        this.dumpModDigest = digest;
+    }
+
+    /** How many jars the dump saw. Zero when the dump predates schema 6. */
+    public void dumpModCount(int count) {
+        this.dumpModCount = count;
     }
 
     public void instanceDir(String dir) {
@@ -405,6 +449,11 @@ public final class GraphBuilder {
         long[] reshapedOnly = buildReshapedOnly(store, byOutput, keyCount);
 
         int[] dimensionOrder = dimensionOreKey.permutation();
+        // THE KIND COLUMN MOVES WITH ITS KEYS, and getting this wrong is silent: a graph
+        // whose declared keys were sorted while their kinds stayed put would price a puzzle
+        // reward as a loot drop and still load, answer and render perfectly. See
+        // {@link #permute}, which says the same thing about every other paired column here.
+        int[] provenanceOrder = declaredProvenanceKey.permutation();
         int[] damageOrder = damageableKey.permutation();
         int[] emcOrder = emcKey.permutation();
 
@@ -419,10 +468,14 @@ public final class GraphBuilder {
                 permute(dimensionOreDimId, dimensionOrder),
                 permute(dimensionOreNameId, dimensionOrder),
                 dimensionNames.build(),
+                declaredProvenanceKey.build(provenanceOrder),
+                permute(declaredProvenanceKind, provenanceOrder),
+                provenanceKinds.build(),
                 damageableKey.build(damageOrder), permute(maxDamage, damageOrder),
                 emcKey.build(emcOrder), permute(emcValue, emcOrder),
                 blueprints.build(), icons.build(),
-                multiblocks.build(), dumpSchema, dumpVersion, instanceDir);
+                multiblocks.build(), dumpSchema, dumpVersion, instanceDir,
+                dumpModDigest, dumpModCount);
     }
 
     /**

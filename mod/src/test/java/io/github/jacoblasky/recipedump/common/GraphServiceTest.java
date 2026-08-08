@@ -281,4 +281,91 @@ public class GraphServiceTest {
         assertNotNull(service.graph());
         service.onLoad(null);
     }
+
+    // -- the counter an open window watches (#201) ----------------------------------------
+
+    /**
+     * Every outcome of a load moves {@link GraphService#generation}, and none of them moves it
+     * back.
+     *
+     * WHY THE COUNTER IS PART OF THIS CLASS'S CONTRACT AND NOT AN IMPLEMENTATION DETAIL.
+     * `PlannerScreen.stamp` sums it with two other counters and rebuilds the planner window
+     * when the sum changes, so a transition that fails to bump this is a window that never
+     * notices the transition -- which is #201 exactly: a planner opened during the 5.47 s read
+     * showed "reading graph.json" until the player closed it, because nothing it watched said
+     * anything about the graph.
+     *
+     * EVERY OUTCOME, and FAILED is the one worth naming: MISSING is decided synchronously,
+     * before any window can be opened against it, while a parse error arrives seconds later
+     * under a window that is already showing a progress bar.
+     */
+    @Test
+    public void everyLoadOutcomeMovesTheCounterAndNoneMovesItBack() throws Exception {
+        GraphService service = GraphService.get();
+        long start = service.generation();
+
+        service.startLoad(folder.getRoot());
+        assertEquals(GraphService.State.MISSING, service.state());
+        long missing = service.generation();
+        assertTrue("MISSING must be noticeable; " + start + " -> " + missing,
+                   missing > start);
+
+        service.reset();
+        long afterReset = service.generation();
+        assertTrue("reset must move FORWARD -- a counter that returns to a value an open"
+                   + " window has already recorded as drawn leaves that window frozen on a"
+                   + " graph that has been dropped; " + missing + " -> " + afterReset,
+                   afterReset > missing);
+
+        System.setProperty(GraphSource.PROPERTY,
+                write("broken.json", "{\"dump_schema\":5,\"names\":{").getPath());
+        service.startLoad(null);
+        long loading = service.generation();
+        assertTrue("starting a load is itself something new to say; " + afterReset + " -> "
+                   + loading, loading > afterReset);
+        assertEquals(GraphService.State.FAILED, settle());
+        assertTrue("a load that stops five seconds in must move the window off a progress"
+                   + " bar that is never going to finish; " + loading + " -> "
+                   + service.generation(), service.generation() > loading);
+
+        service.reset();
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        long beforeReady = service.generation();
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        assertTrue("READY is the transition #201 is about; " + beforeReady + " -> "
+                   + service.generation(), service.generation() > beforeReady);
+    }
+
+    /**
+     * The counter is bumped LAST, after the graph and after the state it describes.
+     *
+     * Same discipline as the `graph`-before-`state` note on the class, extended by one field:
+     * a reader that sees a new number must see everything behind it. The listener runs before
+     * READY is published, so it is the one place in the process that can observe the ordering
+     * from the inside.
+     */
+    @Test
+    public void theCounterIsBumpedAfterTheStateItDescribes() throws Exception {
+        System.setProperty(GraphSource.PROPERTY,
+                write("graph.json", GraphDocuments.TINY).getPath());
+        final GraphService service = GraphService.get();
+        final long before = service.generation();
+        final java.util.concurrent.atomic.AtomicLong duringListener =
+                new java.util.concurrent.atomic.AtomicLong(-1L);
+        service.onLoad(new GraphService.Listener() {
+            @Override
+            public void graphLoaded(io.github.jacoblasky.recipedump.graph.RecipeGraph graph) {
+                duringListener.set(service.generation());
+            }
+        });
+        service.startLoad(null);
+        assertEquals(GraphService.State.READY, settle());
+        service.onLoad(null);
+
+        assertEquals("the READY bump must not be visible to the listener, which runs before"
+                     + " READY is published", service.generation() - 1L,
+                     duringListener.get());
+    }
 }

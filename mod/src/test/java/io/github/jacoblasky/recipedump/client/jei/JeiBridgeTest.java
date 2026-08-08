@@ -60,8 +60,11 @@ public class JeiBridgeTest {
     public void withNoRuntimeEverythingAnswersInsteadOfThrowing() {
         RecipeGraph graph = new GraphBuilder().build();
         assertFalse(JeiBridge.isAvailable());
+        assertNull(JeiBridge.hovered());
         assertNull(JeiBridge.ingredientUnderMouse());
-        assertEquals(-1, JeiBridge.keyUnderMouse(graph));
+        assertEquals(-1, JeiBridge.keyIdFor(new ItemStack(Items.STICK), null));
+        // The search box is the same contract: no runtime is a no, not a throw (#240).
+        assertFalse(JeiBridge.filterTo("@minecraft hopper"));
         assertFalse(JeiBridge.showRecipesFor(new ItemStack(Items.STICK)));
         assertFalse(JeiBridge.showRecipesFor(0, graph));
     }

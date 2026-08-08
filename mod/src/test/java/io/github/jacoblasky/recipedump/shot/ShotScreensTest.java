@@ -189,6 +189,38 @@ public class ShotScreensTest {
         assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("ae2-probe"));
     }
 
+    /**
+     * #201's artifact is two runs of one screen, so the name has to survive a rename.
+     *
+     * WORTH ITS THREE LINES BECAUSE OF WHAT A MISSING SCREEN LOOKS LIKE FROM THE OUTSIDE. A
+     * shot run against an unregistered name exits non-zero with no PNG -- which is also what a
+     * boot that died and a boot that measured somebody else's jar look like. This is the cheap
+     * one of the three to rule out, and ruling it out here means it never has to be ruled out
+     * by launching a client.
+     */
+    @Test
+    public void thePlannerRecoveryScreenIsReachableByName() {
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-recovery"));
+    }
+
+    @Test
+    public void theJeiKeybindProbeIsReachableByName() {
+        // Same reasoning again, and it is the only assertion about `JeiKeybindShot` that a
+        // JUnit JVM can make: everything else in that class needs a JEI runtime, a world and a
+        // real cursor. If this name is dropped from the registry the probe silently stops
+        // existing and every run that asked for it fails on the NAME rather than on the
+        // gesture, which reads as a typo (#240).
+        //
+        // AND THE NAME IS WHY `ShotScreens` REPEATS THE LITERAL RATHER THAN READING A CONSTANT
+        // OFF THE SHOT. `JeiKeybindShot` names `GuiInventory` and `Minecraft`, so referring to
+        // a field on it from the registry's static initialiser would load LWJGL and throw
+        // NoClassDefFoundError in every test in this file. The duplication is the price of the
+        // registry staying loadable headlessly, and this assertion is what makes it safe.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("jei-keybind"));
+    }
+
     @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");

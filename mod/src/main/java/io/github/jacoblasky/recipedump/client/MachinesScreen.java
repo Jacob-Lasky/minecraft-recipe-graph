@@ -8,13 +8,14 @@ import com.cleanroommc.modularui.screen.ModularScreen;
 import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
+import io.github.jacoblasky.recipedump.client.browse.BrowseTabs;
 import io.github.jacoblasky.recipedump.client.machines.LiveMachinesActions;
 import io.github.jacoblasky.recipedump.client.machines.MachinesEntry;
 import io.github.jacoblasky.recipedump.client.machines.MachinesWidgets;
 import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
 
 /**
@@ -63,7 +64,7 @@ public final class MachinesScreen {
      * it -- a missed update, which is the failure that matters.
      */
     public static void open() {
-        MachinesService.get().ensure();
+        ScenarioService.get().ensure();
         ClientGUI.open(new MachinesWindow(new LiveMachinesActions(), stamp()));
     }
 
@@ -72,7 +73,7 @@ public final class MachinesScreen {
      *
      * BOTH, AND LEAVING THE GRAPH OUT IS A BUG I SHIPPED AND CAUGHT IN REVIEW. The window is
      * routinely opened during the 5.47 s graph read -- that is most of the time a player is
-     * likely to press the key impatiently -- and while the graph is loading `MachinesService`
+     * likely to press the key impatiently -- and while the graph is loading `ScenarioService`
      * has nothing to say, so its generation does not move. Watching it alone left the window
      * latched on "loading graph" with no path out, which is #201's exact shape one screen over.
      *
@@ -87,7 +88,7 @@ public final class MachinesScreen {
      * needs to recover which one moved.
      */
     private static long stamp() {
-        return MachinesService.get().generation() * 31L
+        return ScenarioService.get().generation() * 31L
                 + GraphService.get().state().ordinal();
     }
 
@@ -116,7 +117,8 @@ public final class MachinesScreen {
 
     private static ModularPanel panelFor(MachineTable table, LiveMachinesActions actions) {
         MachineTable.Filter filter = actions.filterFor(table);
-        ModularPanel panel = MachinesWidgets.machinesPanel(table, filter, actions);
+        ModularPanel panel = MachinesWidgets.machinesPanel(
+                table, filter, actions, BrowseScreen.navFor(BrowseTabs.Tab.MACHINES));
         actions.attachTo(panel);
         return avoidedByJei(panel);
     }
@@ -182,8 +184,8 @@ public final class MachinesScreen {
             // FAILED resolve, and a tick hook calling it unguarded would relaunch a worker
             // thread every time one failed, forever. IDLE is only ever true before the first
             // start, so this fires at most once per window.
-            if (MachinesService.get().state() == MachinesService.State.IDLE) {
-                MachinesService.get().ensure();
+            if (ScenarioService.get().state() == ScenarioService.State.IDLE) {
+                ScenarioService.get().ensure();
             }
             long now = stamp();
             if (stale || now != drawn) {
@@ -208,11 +210,11 @@ public final class MachinesScreen {
             @Override
             public ModularPanel apply(ModularGuiContext context) {
                 PlannerState state = MachinesEntry.stateFor(GraphService.get(),
-                                                            MachinesService.get());
+                                                            ScenarioService.get());
                 if (state != null) {
                     return avoidedByJei(MachinesWidgets.statePanel(state));
                 }
-                return panelFor(MachinesService.get().table(), actions);
+                return panelFor(ScenarioService.get().table(), actions);
             }
         };
     }

@@ -11,6 +11,7 @@ import com.cleanroommc.modularui.widget.AbstractScrollWidget;
 import com.cleanroommc.modularui.widget.scroll.HorizontalScrollData;
 import com.cleanroommc.modularui.widget.scroll.VerticalScrollData;
 
+import io.github.jacoblasky.recipedump.client.ScreenCursor;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.graph.IntArray;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
@@ -363,9 +364,13 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      * where the node already is instead, and a node that is not on screen is skipped loudly
      * rather than probed at the wrong place.
      *
+     * THE GUI-TO-DISPLAY CONVERSION IS {@link ScreenCursor}'S AND MUST STAY THERE (#240).
      * `Mouse.setCursorPosition` takes DISPLAY pixels with the origin at the BOTTOM left, while
      * everything here is GUI pixels from the top left. Two conversions, either of which puts
-     * the cursor somewhere plausible and blames the canvas for the probe's own error.
+     * the cursor somewhere plausible and blames the canvas for the probe's own error -- and
+     * this file had them written out three times, in the three methods below, where nothing
+     * could assert them. DO NOT inline the arithmetic back: `ScreenCursorTest` asserts the y
+     * flip as a fact with no window, which is the only place in this project that can.
      */
     public boolean parkCursorOverBox(int index) {
         FlowLayout.Box box = laid.boxes.get(index);
@@ -377,25 +382,26 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
                 || screenX >= getArea().width || screenY >= getArea().height) {
             return false;
         }
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
-        int scale = new net.minecraft.client.gui.ScaledResolution(mc).getScaleFactor();
-        int guiX = getArea().x + screenX;
-        int guiY = getArea().y + screenY;
-        // Y IS FLIPPED: LWJGL's origin is the bottom left of the display, a GUI y of 0 is the
-        // top. Get it wrong and the cursor lands on the vertical mirror of the intended node.
-        org.lwjgl.input.Mouse.setCursorPosition(guiX * scale, mc.displayHeight - guiY * scale);
+        ScreenCursor.park(getArea().x + screenX, getArea().y + screenY);
         return true;
     }
 
-    /** Where the probe thinks everything is, for when the probe itself is the thing wrong. */
+    /**
+     * Where the probe thinks everything is, for when the probe itself is the thing wrong.
+     *
+     * THE RAW LWJGL PAIR IS PART OF THE LINE, not a redundant echo of `gui=`. This exists to
+     * be read when the two answers disagree, and "the raw y is what I set and the gui y is
+     * the mirror of it" is the reading that names the conversion rather than the canvas.
+     */
     public String cursorDiagnostic() {
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
-        net.minecraft.client.gui.ScaledResolution res =
-                new net.minecraft.client.gui.ScaledResolution(mc);
-        int guiX = org.lwjgl.input.Mouse.getX() / res.getScaleFactor();
-        int guiY = (mc.displayHeight - org.lwjgl.input.Mouse.getY()) / res.getScaleFactor();
-        return "mouseRaw=" + org.lwjgl.input.Mouse.getX() + "," + org.lwjgl.input.Mouse.getY()
-                + " scale=" + res.getScaleFactor()
+        int scale = ScreenCursor.scale();
+        int displayHeight = ScreenCursor.displayHeight();
+        int rawX = org.lwjgl.input.Mouse.getX();
+        int rawY = org.lwjgl.input.Mouse.getY();
+        int guiX = ScreenCursor.toGuiX(rawX, scale);
+        int guiY = ScreenCursor.toGuiY(rawY, scale, displayHeight);
+        return "mouseRaw=" + rawX + "," + rawY
+                + " scale=" + scale
                 + " gui=" + guiX + "," + guiY
                 + " area=" + getArea().x + "," + getArea().y
                 + " " + getArea().width + "x" + getArea().height
@@ -407,11 +413,8 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
 
     /** What the layout says is under the cursor right now, as a box index or -1. */
     public int boxAtCursor() {
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
-        net.minecraft.client.gui.ScaledResolution res =
-                new net.minecraft.client.gui.ScaledResolution(mc);
-        int guiX = org.lwjgl.input.Mouse.getX() / res.getScaleFactor();
-        int guiY = (mc.displayHeight - org.lwjgl.input.Mouse.getY()) / res.getScaleFactor();
+        int guiX = ScreenCursor.guiX();
+        int guiY = ScreenCursor.guiY();
         return boxAt(toLayoutX(guiX - getArea().x), toLayoutY(guiY - getArea().y));
     }
 

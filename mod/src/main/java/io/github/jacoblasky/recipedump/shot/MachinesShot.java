@@ -6,7 +6,7 @@ import io.github.jacoblasky.recipedump.client.machines.MachinesEntry;
 import io.github.jacoblasky.recipedump.client.machines.MachinesWidgets;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 import io.github.jacoblasky.recipedump.plan.MachineInfo;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
 
@@ -151,7 +151,7 @@ final class MachinesShot {
             ShotHarness.log("machines: " + GraphService.get().describe());
             return null;
         }
-        final MachinesService machines = MachinesService.get();
+        final ScenarioService machines = ScenarioService.get();
         machines.ensure();
         // THROUGH `ShotWaits` AND NOT A LOOP HERE. This was a third hand-rolled bounded poll
         // until #254's review, and `LivePlanShot.awaitGraph`'s own comment already said why
@@ -161,8 +161,8 @@ final class MachinesShot {
                 new ShotWaits.Busy() {
                     @Override
                     public boolean busy() {
-                        return machines.state() == MachinesService.State.BUILDING
-                                || machines.state() == MachinesService.State.IDLE;
+                        return machines.state() == ScenarioService.State.BUILDING
+                                || machines.state() == ScenarioService.State.IDLE;
                     }
                 })) {
             return null;
@@ -177,18 +177,40 @@ final class MachinesShot {
      * THE THREE ENTRY POINTS ALL NEED THIS AND ALL THREE HAD IT INLINE, which is three places
      * for the failure path to get a different answer -- and the failure path is the one that
      * runs on every CI machine, because none of them has the oracle.
+     *
+     * IT SAYS WHICH OF THE TWO PICTURES IT TOOK, AND THAT LINE IS THE POINT (#240). Both
+     * outcomes are legitimate and both exit 0: this file's own README paragraph says the
+     * not-yet panel is "the picture a new player sees and is worth having", so failing the run
+     * on it would delete a deliberate capability. But `prodshot.sh: OK in 927s` reads
+     * identically either way, and the README already warns the two are "easy to tell apart
+     * full size and easy to confuse in a thumbnail". A reviewer holding a PNG and a log should
+     * not have to squint at the image to learn which one they were sent.
+     *
+     * DO NOT reduce this to the `machines: <describe>` lines above it. Those say what the
+     * SERVICES think; this says what the CAMERA got, and the whole failure being closed is one
+     * where the services were fine and the picture was of the empty state.
      */
     private static MachineTable resolveOrExplain() {
         MachineTable table = resolve();
         if (table == null) {
-            MachinesScreen.openPanel(MachinesWidgets.statePanel(state()));
+            // ONCE, not once per use: `stateFor` reads two services and a second call can
+            // legitimately answer differently, which would put one reason on the screen and a
+            // different one in the log -- the exact confusion this line exists to remove.
+            PlannerState why = state();
+            MachinesScreen.openPanel(MachinesWidgets.statePanel(why));
+            ShotHarness.log("machines: CAPTURED THE NOT-YET PANEL, not the table -- "
+                    + why.message() + ". Stage a graph, or set RECIPEGRAPH_GRAPH to a path,"
+                    + " if the table was what you wanted.");
+            return null;
         }
+        ShotHarness.log("machines: CAPTURED THE TABLE, " + table.allRows().size()
+                + " categories");
         return table;
     }
 
     /** The not-yet panel to draw when {@link #resolve} came back with nothing. */
     private static PlannerState state() {
-        PlannerState state = MachinesEntry.stateFor(GraphService.get(), MachinesService.get());
+        PlannerState state = MachinesEntry.stateFor(GraphService.get(), ScenarioService.get());
         // NEVER NULL HERE BY CONSTRUCTION -- `resolve` only returns null when the graph or the
         // resolve failed, both of which `stateFor` answers for. Guarded anyway, because a null
         // handed to `statePanel` would NPE inside a panel build, which `WidgetTree` swallows

@@ -88,6 +88,8 @@ public final class GraphJsonReader {
                 readDimensionOres(reader, builder);
             } else if (field.equals("offworld_ores")) {
                 readOffworldOres(reader, builder);
+            } else if (field.equals("declared_provenance")) {
+                readDeclaredProvenance(reader, builder);
             } else if (field.equals("multiblocks")) {
                 readMultiblocks(reader, builder);
             } else if (field.equals("max_damage")) {
@@ -107,6 +109,16 @@ public final class GraphJsonReader {
                 builder.dumpVersion(nextStringOrNull(reader));
             } else if (field.equals("instance_dir")) {
                 builder.instanceDir(nextStringOrNull(reader));
+            } else if (field.equals("dump_mod_digest")) {
+                // THE FIELD NAMES ARE A CROSS-LANGUAGE CONTRACT, written by `model.Graph.save`
+                // and read here. `tests/test_graph_identity_wording.py` pins the two spellings
+                // together, because a rename on the Python side would land here as a graph that
+                // simply never reports a digest -- which renders as "cannot tell" and is read
+                // as "nothing is wrong".
+                builder.dumpModDigest(nextStringOrNull(reader));
+            } else if (field.equals("dump_mod_count")) {
+                builder.dumpModCount(reader.peek() == JsonToken.NULL
+                        ? zeroAfterNull(reader) : reader.nextInt());
             } else {
                 // Unknown top-level section. Skipped rather than rejected: the dump format is
                 // free to grow, and a reader that refuses to load a graph carrying a field it
@@ -357,6 +369,31 @@ public final class GraphJsonReader {
             }
             reader.endArray();
             builder.offworldOre(key);
+        }
+        reader.endObject();
+    }
+
+    /**
+     * `{item key: kind}` for everything the PACK declares it hands out. #171/#262.
+     *
+     * THE KEY IS INTERNED EVEN WHEN NO RECIPE MENTIONS IT, and that is not an accident of
+     * `builder.key`. The pack's map names 896 keys on the reference oracle and 46 of them are
+     * items no recipe touches; `Unsourced` requires liveness as a CLAUSE precisely so those
+     * fall out of both provenance sets, and it can only test that for a key the graph has an
+     * id for. Interning one costs a slot in the key table and leaves it out of `liveKeys`,
+     * which is the same answer python gives for a key absent from `Graph.live_keys`.
+     *
+     * THE KIND IS READ AS AN OPAQUE STRING, matching `Graph.load`, which does no validation
+     * either. A pack declaring a fourth kind must degrade to `UNSOURCED_COST` and the generic
+     * wording -- see {@link io.github.jacoblasky.recipedump.plan.Provenance#noteFor} -- rather
+     * than fail a graph load over a section the planner can survive without.
+     */
+    private static void readDeclaredProvenance(JsonReader reader, GraphBuilder builder)
+            throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            int key = builder.key(reader.nextName());
+            builder.declaredProvenance(key, reader.nextString());
         }
         reader.endObject();
     }
