@@ -23,6 +23,17 @@ not the mod version. Bump it in DumpCommand.java and here together:
   7  an item input stack may carry `p`, the probability a run SPENDS it. Absent means 1.0,
      so every non-catalyst line is byte-identical to schema 6. Written for Tinkers casts
      that survive and Modular Machinery's `setChance` (#175)
+  8  an output stack may carry `q`, the probability a run YIELDS it. Absent means 1.0, so
+     every certain output is byte-identical to schema 7. Modular Machinery's `setChance`
+     applies to outputs too and the pack makes 835 such calls, 834 of them fractional (#223)
+
+SCHEMA 8 IS SCHEMA 7'S MIRROR AND SHARES ITS COST: a wrong price, not a misparse. `q` is a
+SEPARATE FIELD FROM `p` and must stay one. `p` answers "how much of this input does a run
+spend"; `q` answers "how often does a run yield this output". A reader that took a yield for a
+consume chance would mark the output a catalyst, and one that took a consume chance for a yield
+would divide by it. The two fields also differ in which direction a missing value is safe:
+absent `p` overstates a price, which is harmless, while absent `q` leaves a 0.1% recipe reading
+as guaranteed, which is the defect. Only the number can say which a dump carries.
 
 SCHEMA 7 IS THE FIRST BUMP WHOSE COST IS A WRONG PRICE RATHER THAN A MISPARSE, which is why
 it is a bump at all. `_consume_chance` already defaulted an absent `p` to 1.0 long before any
@@ -56,7 +67,7 @@ try:
 except ImportError:  # run directly as a script; see ae2_inventory's module docstring
     from nbt_digest import DIGEST_FORMAT_SCHEMA
 
-SCHEMA = 7
+SCHEMA = 8
 
 #: The directory `/recipedump` writes into, relative to the pack's `minecraft/` dir.
 #:
@@ -177,6 +188,15 @@ def read(dump_dir):
         # resolving. The failure has no other symptom: the dump parses, the graph builds, and
         # plans just get quietly more expensive.
         "catalyst_slots": _count(doc, "catalyst_slots"),
+        # Schema 8: output stacks the dump wrote a non-default `q` onto. #223.
+        #
+        # NONE AND ZERO ARE DIFFERENT ANSWERS here for the same reason they are one line up,
+        # and the evidence is sharper still. The pack makes 835 `setChance` calls against
+        # `addItemOutput` and 834 of them are fractional, so a schema-8 dump reporting zero
+        # has not found a pack without chance outputs, it has found a bridge that stopped
+        # resolving. Every plan through such a recipe then understates its runs, and its
+        # inputs, by up to 1000x, with no other symptom.
+        "chance_outputs": _count(doc, "chance_outputs"),
     }
 
 

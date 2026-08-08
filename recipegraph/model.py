@@ -449,15 +449,30 @@ def merge_slots(inputs, key_of):
 
 class Recipe:
     __slots__ = ("rid", "source", "category", "outputs", "inputs", "machine",
-                 "transfer", "variant", "not_production")
+                 "transfer", "variant", "not_production", "yield_chance")
 
     def __init__(self, rid, source, outputs, inputs, category="crafting", machine=None,
-                 transfer=False, variant=False):
+                 transfer=False, variant=False, yield_chance=None):
         self.rid = rid
         self.source = source          # which extractor produced this
         self.category = category      # JEI category / recipe kind
         self.outputs = outputs        # [(key, qty)]
         self.inputs = inputs          # [Ingredient]
+        # How often a run actually YIELDS each output, aligned index-for-index with
+        # `outputs`, or None when every output is certain. Issue #223. Read it through
+        # `yield_of`, never by indexing, so the None case stays in one place.
+        #
+        # A PARALLEL LIST RATHER THAN A THIRD TUPLE ELEMENT, AND THE REASON IS MEASURED.
+        # `outputs` is unpacked as `for key, qty in ...` at 23 sites outside the test suite;
+        # widening the tuple breaks every one of them for a field 23 of them do not want.
+        # The input side could hang `p` on `Ingredient` because that is a class with room
+        # for an attribute, and an output has never been more than a pair.
+        #
+        # AND NOT A DICT KEYED BY OUTPUT KEY, which is the obvious cheaper spelling and
+        # cannot express the data: `Solver._craft_node` already SUMS the quantities of two
+        # slots naming the same key, so two slots yielding one key at different chances is
+        # representable in `outputs` and would be silently collapsed by a mapping.
+        self.yield_chance = yield_chance
         self.machine = machine        # display name of the machine, if any
         # True for container fill/empty pseudo-recipes: they MOVE a fluid rather than
         # create it. Treating them as production makes every fluid free to anyone who
@@ -482,12 +497,48 @@ class Recipe:
         # without answering them.
         self.not_production = None
 
+    def yield_of(self, index):
+        """How often output `index` is actually produced, 0.0 to 1.0. See #223.
+
+        The single reader of `yield_chance`, so "no chances recorded" and "a chance of 1.0"
+        are one answer to every caller and no call site has to hold the None case.
+        """
+        chances = self.yield_chance
+        if not chances or index >= len(chances):
+            return 1.0
+        return chances[index]
+
+    def expected_yield(self, key):
+        """Units of `key` one run produces ON AVERAGE, across every slot that makes it.
+
+        THE SUM IS OVER SLOTS AND THE CHANCE IS PER SLOT, which is the whole reason
+        `yield_chance` is a list. A recipe emitting the same key twice at different chances
+        is one expectation, and reading a single chance for the key would be wrong for both
+        halves of it.
+
+        Returns 0.0 for a key this recipe does not make, and callers must handle that rather
+        than dividing by it: a recipe whose only slot for `key` has a chance of 0.0 yields it
+        never, and no number of runs produces one.
+        """
+        total = 0.0
+        for index, (out, qty) in enumerate(self.outputs):
+            if out == key:
+                total += qty * self.yield_of(index)
+        return total
+
     def to_json(self):
         return {
             "id": self.rid,
             "src": self.source,
             "cat": self.category,
-            "out": [{"key": k, "qty": q} for k, q in self.outputs],
+            "out": [{"key": k, "qty": q,
+                     # OMITTED AT CERTAINTY, matching the dump's own `q` and `p`. The
+                     # reference graph holds 117,685 recipes and all but a few thousand
+                     # outputs are certain, so writing the field unconditionally costs
+                     # megabytes to say nothing. It also keeps a graph built from a
+                     # schema-7 dump byte-identical here.
+                     **({"q": self.yield_of(i)} if self.yield_of(i) != 1.0 else {})}
+                    for i, (k, q) in enumerate(self.outputs)],
             "in": [i.to_json() for i in self.inputs],
             **({"machine": self.machine} if self.machine else {}),
             **({"xf": 1} if self.transfer else {}),
@@ -496,12 +547,17 @@ class Recipe:
 
     @staticmethod
     def from_json(d):
+        outs = d["out"]
+        chances = [o.get("q", 1.0) for o in outs]
         return Recipe(
             d["id"], d["src"],
-            [(o["key"], o["qty"]) for o in d["out"]],
+            [(o["key"], o["qty"]) for o in outs],
             [Ingredient.from_json(i) for i in d["in"]],
             d.get("cat", "crafting"), d.get("machine"), bool(d.get("xf")),
             bool(d.get("var")),
+            # None rather than a list of ones, so `yield_of` short-circuits and so a graph
+            # from a pre-#223 dump holds no extra list per recipe.
+            None if all(c == 1.0 for c in chances) else chances,
         )
 
 

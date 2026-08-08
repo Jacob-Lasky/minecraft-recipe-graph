@@ -782,9 +782,17 @@ def category_entry_cost(category, machine_states=None, machine_entry=None):
             else UNGATED_MACHINE_COST)
 
 
-def _scaled_qty(key, qty):
-    """Quantity in normalised units: 1 item, or 1 bucket of fluid."""
-    q = max(qty, 1) * (FLUID_SCALE if key.startswith(FLUID_PREFIX) else 1.0)
+def _scaled_qty(key, qty, chance=1.0):
+    """Quantity in normalised units: 1 item, or 1 bucket of fluid.
+
+    `chance` is #223's output yield probability, and it belongs HERE rather than at the call
+    site so the floor below governs it. A recipe yielding its product 0.1% of the time really
+    does produce a tenth of a percent of an item per run, and dividing by that is correct; a
+    chance of 0.0 is a recipe that never yields it at all, and dividing by THAT manufactures
+    an infinitely cheap resource out of a typo. The existing floor already exists for the
+    sub-millibucket case and catches this one by construction.
+    """
+    q = max(qty, 1) * chance * (FLUID_SCALE if key.startswith(FLUID_PREFIX) else 1.0)
     # A sub-millibucket output would divide by ~0 and manufacture a free resource.
     return max(q, FLUID_SCALE)
 
@@ -1326,7 +1334,7 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                     ingredients += c * ing.consume_chance
             if math.isinf(ingredients):
                 continue
-            for key, qty in r.outputs:
+            for out_index, (key, qty) in enumerate(r.outputs):
                 # A container transfer never makes its fluid cheaper: emptying a can you own
                 # is not production. THROUGH `Graph.real_production`, which is the predicate
                 # the solver walks -- if these disagree the ranker prices a route the solver
@@ -1344,7 +1352,25 @@ def _relax(graph, cost, passes, machine_states, machine_entry):
                 # to 8e-5 and 126 items (diamond, coal, string, redstone) priced under 0.1.
                 # That is how "one iron ingot" came out as "smelt a Spawner Shard", which
                 # needs a Pristine Matter run, which needs bee drones. See issue #29.
-                per_unit = base + retained + ingredients / _scaled_qty(key, qty)
+                #
+                # #223: THE CHANCE SCALES THE YIELD, WHICH IS THE DIVISOR, so a recipe that
+                # produces its output 10% of the time costs ten times as much per unit of it.
+                # The pack makes 834 fractional `addItemOutput` declarations spanning 0.99
+                # down to 0.001, so this is up to a 1000x correction and it only ever moves
+                # prices UP.
+                #
+                # DELIBERATELY NOT APPLIED TO `base`, and that is the same decision the
+                # paragraph above makes for a large batch rather than a new one. A 1% yield
+                # genuinely needs ~100 runs and therefore ~100 machine-runs, so the strictly
+                # correct per-unit machine cost is `base / (qty * chance)`. `base` is already
+                # charged once per unit rather than once per batch, precisely so a big output
+                # cannot make an unavailable machine free, and dividing it here would be that
+                # same collapse arriving through the other term. Leaving it undivided
+                # UNDERSTATES the machine cost of a chance recipe, which is the conservative
+                # direction: it can make a chance route look cheaper than it is, never a
+                # certain route look dearer than it is.
+                per_unit = (base + retained
+                            + ingredients / _scaled_qty(key, qty, r.yield_of(out_index)))
                 if per_unit < cost.get(key, math.inf) - 1e-9:
                     cost[key] = per_unit
                     changed += 1

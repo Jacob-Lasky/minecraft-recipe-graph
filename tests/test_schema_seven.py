@@ -22,36 +22,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from recipegraph.sources import dump_meta, hei_dump  # noqa: E402
 
 
-class SchemaStampTest(unittest.TestCase):
-    """The literal, and it is a tripwire rather than a restatement.
+class SchemaSevenIsNoLongerTheCurrentSchemaTest(unittest.TestCase):
+    """THE LITERAL MOVED TO `test_schema_eight.py`, WHICH IS THE CONVENTION HERE.
 
-    Moving `dump_meta.SCHEMA` has to be a decision: the number tells a reader whether its own
-    recomputation still agrees with the dump, so a bump arriving as a side effect of an
-    unrelated edit is a lie told to every downstream consumer. `tests/test_catalysts.py` pins
-    it against `DumpCommand.java`, so the two languages cannot drift; this pins that either
-    moving alone was intentional.
-
-    INHERITED FROM `test_schema_six.py`, which inherited it from `test_schema_five.py`. The
-    newest schema's file owns this assertion. When 8 arrives, move it again.
+    The newest schema's file owns the tripwire, exactly as this file took it from
+    `test_schema_six.py` and that one took it from five. What stays here is schema 7's own
+    field, `p`, which did not go anywhere at 8 and is still read the same way. #223 added `q`
+    beside it rather than instead of it, and the tests below that distinguish the two are the
+    reason a reader cannot start taking one for the other.
     """
 
-    def test_the_python_side_expects_seven(self):
-        self.assertEqual(dump_meta.SCHEMA, 7)
-
-
-class TheCurrentSchemaReadsCleanTest(unittest.TestCase):
-
-    def test_a_seven_dump_is_reported_as_current(self):
+    def test_seven_is_now_read_as_an_older_dump(self):
         said = dump_meta.describe({"present": True, "mod_version": "0.10.0",
                                    "schema": 7, "mod_count": 367})
-        self.assertIn("schema 7", said)
-        self.assertNotIn("newer fields", said)
+        self.assertIn("newer fields", said,
+                      "a schema-7 dump is now behind the reader and should be invited to "
+                      "re-dump, not reported as current")
 
-    def test_an_eight_dump_is_reported_as_newer_than_this_reader(self):
-        # The direction that matters most for a field like `p`: a dump that knows something
-        # this reader does not must say so rather than being read as merely fine.
-        said = dump_meta.describe({"present": True, "mod_version": "9.9.9", "schema": 8})
-        self.assertIn("NEWER", said)
+    def test_and_it_is_not_the_loud_digest_warning(self):
+        # 8 did not move DIGEST_FORMAT_SCHEMA, so a schema-7 dump's discriminated keys are
+        # still this reader's keys and its stock still matches. Crying wolf here is what
+        # trains the warning away before the one time it matters.
+        said = dump_meta.describe({"present": True, "mod_version": "0.10.0", "schema": 7})
+        self.assertNotIn("OLDER THAN THE DIGEST FORMAT", said)
+
+        # That a schema-7 dump still yields its `catalyst_slots` is asserted by
+        # `TheCatalystCountIsReadBackTest` below, whose fixtures already say `"schema": 7`
+        # and are now testing exactly that: an older dump keeps the answer it recorded.
 
 
 class ABackLevelDumpIsPricedWrongAndNotMisparsedTest(unittest.TestCase):

@@ -419,7 +419,14 @@ class Solver:
         be sized and quietly measures something else.
         """
         slots = self._merge_slots(recipe)
-        per_run = sum(qty for out, qty in recipe.outputs if out == key)
+        # #223: THE EXPECTED YIELD, NOT THE NOMINAL ONE, AND UNLIKE THE CONSUME CHANCE BELOW
+        # THIS ONE DOES BELONG IN THE SHAPE. The paragraph below excludes `p` because a slot's
+        # consume chance does not change what the offer COSTS. A yield chance does: two
+        # recipes that both say "1 iron" are not the same offer when one of them delivers it
+        # 1% of the time, and reporting that pair as an arbitrary tie would call a hundredfold
+        # difference a coin toss. Inert on every graph built before schema 8, where every
+        # chance is 1.0 and this is the sum it always was.
+        per_run = recipe.expected_yield(key)
         # THE CONSUME CHANCE IS DELIBERATELY NOT PART OF THE SHAPE. A shape is what two
         # recipes have to share to count as the same OFFER for #181's tie reporting, and
         # folding `chance` in would split ties that a player would call identical. It is also
@@ -1018,8 +1025,31 @@ class Solver:
         # makes `animus:kama_bound#fd1adc426e12` and yields per that key, so reading `key`
         # would silently fall back to a per-run of 1 and plan the wrong number of runs.
         made = variant or key
-        per_run = next((q for k, q in recipe.outputs if k == made), 1) or 1
-        runs = -(-remainder // per_run)  # ceil
+        # THE SUM ACROSS EVERY SLOT THAT MAKES IT, WHICH THIS USED TO GET WRONG. It read
+        # `next(...)`, the FIRST matching slot, while `_shape` twenty lines up already summed
+        # them, so the ranker and the expander disagreed about how much a run produces on the
+        # 618 reference-graph recipes that name one output key more than once. TechReborn's
+        # Industrial Grinder is the population: four secondary slots, one key, quantities like
+        # 45/23/15/6, of which `next` saw 45. That is #29's ranker-versus-solver divergence in
+        # miniature, and `Recipe.expected_yield` is now the one spelling both sides call.
+        #
+        # AND IT IS THE EXPECTED YIELD, so #223's chance is folded in: a slot that delivers
+        # 10% of the time contributes a tenth of its quantity to what a run is worth.
+        per_run = recipe.expected_yield(made)
+        # Nominal is what the recipe SAYS it makes; expected is what it makes on average. The
+        # ratio is the only honest single number for "how often does this work", and it is
+        # reported below so a plan can say so rather than quietly presenting an expectation as
+        # a certainty.
+        nominal = sum(qty for out, qty in recipe.outputs if out == made)
+        if per_run <= 0.0:
+            # A recipe that never yields the key is not a way to obtain it, and dividing by
+            # zero here would report one run for any demand. No such recipe exists in the
+            # reference pack (all 835 `addItemOutput` chances are above zero, 834 of them
+            # fractional), so this is a guard against a future dump rather than a live case;
+            # falling back to the nominal yield keeps the plan finite and visibly wrong rather
+            # than infinite and invisible.
+            per_run = nominal or 1
+        runs = math.ceil(remainder / per_run)
         node = dict(base)
         node.update({
             "status": STATUS_PARTIAL if from_stock else STATUS_CRAFT,
@@ -1027,6 +1057,9 @@ class Solver:
             "category": recipe.category,
             "runs": runs,
             "per_run": per_run,
+            # OMITTED AT CERTAINTY so every plan of a pre-#223 graph is unchanged, and so the
+            # field's presence is itself the signal a renderer keys on.
+            **({"yield_chance": per_run / nominal} if nominal and per_run < nominal else {}),
             # OF THE KEY THE RECIPE ACTUALLY MAKES. For a substitution that is the variant,
             # and counting the bare key's producers would report 0 -- "there was no other
             # way to do this" -- on a node that is one of several ways.
