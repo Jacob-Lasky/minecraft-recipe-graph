@@ -128,8 +128,12 @@ def _result_outputs(node, default_ns=None):
 def parse_recipe_json(doc, rid, constants=None, default_ns=None):
     """One recipe document -> Recipe, or None if unsupported/undecodable.
 
-    `default_ns` is the namespace of the file this document was read from;
-    `qualify` explains why an unqualified id must not fall back to `minecraft`.
+    DELIBERATELY DOES NOT LOOK AT `doc["conditions"]`; ask `condition_verdict` FIRST. A
+    recipe whose conditions are unmet is one Forge never registers, so parsing it yields a
+    recipe the game does not have -- but the verdict needs the pack's modid set, which is a
+    property of the whole `mods/` directory and not of one document, and folding it in here
+    would collapse "Forge refused this" and "this parser could not read it" into one None.
+    `extract` keeps them apart because it counts them separately. See #227.
     """
     if not isinstance(doc, dict):
         return None
@@ -182,6 +186,138 @@ def parse_recipe_json(doc, rid, constants=None, default_ns=None):
     return Recipe(rid, "jar_json", outputs, slots, category=cat, machine=title)
 
 
+MET, UNMET, UNEVALUABLE = "met", "unmet", "unevaluable"
+
+# The ONLY condition type this evaluates on its own. `forge:and`, `forge:or` and `forge:not`
+# are handled too, but they decide nothing by themselves -- they are combinators over this one
+# -- and `forge:false` is a constant. Everything else is counted and dropped; `condition_verdict`
+# says why the line is drawn here.
+MOD_LOADED = "forge:mod_loaded"
+
+
+def _leaf_verdict(node, modids):
+    """One condition node -> True / False / None, where None means "cannot tell offline"."""
+    if not isinstance(node, dict):
+        return None
+    ctype = node.get("type")
+    if ctype == MOD_LOADED:
+        modid = node.get("modid")
+        # A `forge:mod_loaded` with no modid is FALSE, not unreadable, and that is a decision
+        # rather than a fallthrough: Forge fails to deserialise the condition and skips the
+        # whole recipe file, so "the game does not have this recipe" is the fact, which is
+        # exactly what UNMET means here. Returning None would file a real outcome under
+        # "could not tell" and quietly inflate the number that invites someone to look.
+        return bool(modid) and modid in modids
+    if ctype == "forge:false":
+        return False
+    if ctype == "forge:not":
+        # THE BRANCH THAT CHANGES AN OUTCOME. Botania's cocoon recipe is `forge:not` over an
+        # absent `gardenofglass`, so it resolves TRUE and Forge really does register it: a
+        # reader that dropped anything carrying a `conditions` block would delete a live recipe.
+        inner = _leaf_verdict(node.get("value"), modids)
+        return None if inner is None else not inner
+    if ctype in ("forge:and", "forge:or"):
+        values = node.get("values")
+        if not isinstance(values, list) or not values:
+            return None
+        parts = [_leaf_verdict(v, modids) for v in values]
+        # SHORT-CIRCUIT BEFORE GIVING UP: `and` with one false leaf is false whatever the
+        # unreadable leaves say, and `or` with one true leaf is true.
+        #
+        # ON THIS PACK THIS BUYS ACCURACY, NOT RECIPES, AND THE COMMENT SAYS SO RATHER THAN
+        # OVERSELLING IT. Measured over its 520 `forge:and` and 58 `forge:or`: short-circuiting
+        # changes the verdict on 54 `forge:and` and on ZERO `forge:or`. Every one of those 54
+        # is `unevaluable` -> `unmet`, so the recipe is dropped either way and what moves is
+        # which counter it lands in -- 54 outcomes reported as facts instead of as mysteries,
+        # which is the whole point of keeping the two counts apart. The `or` arm is the one
+        # that could keep a recipe, and nothing in this pack exercises it yet; it is here
+        # because the day something does, the alternative silently deletes a live recipe.
+        if ctype == "forge:and":
+            if any(p is False for p in parts):
+                return False
+            return None if any(p is None for p in parts) else True
+        if any(p is True for p in parts):
+            return True
+        return None if any(p is None for p in parts) else False
+    return None
+
+
+def condition_verdict(doc, modids):
+    """Would Forge register this recipe? `met` / `unmet` / `unevaluable`. Issue #227.
+
+    ONLY `forge:mod_loaded` IS EVALUATED, AND THAT LINE IS DELIBERATE. It is the one condition
+    whose meaning is fixed by Forge and whose answer is fully determined by the jars on disk,
+    which is all this source can see. The pack's other types are not: `minecraft:item_exists`
+    asks whether a mod registered an item under a config it read at runtime,
+    `tconstruct:is_option_enabled` and `tconstruct:is_pulse_loaded` read Tinkers' own config,
+    `teslacorelib:ore_dict` reads an ore dictionary that CraftTweaker rewrites during load.
+    Guessing any of them means inventing a recipe the player does not have, which is the exact
+    harm #227 measured.
+
+    `zerocore:modloaded` is NOT treated as an alias of `forge:mod_loaded` even though it looks
+    like one (2 uses, both `modid=tesla`). A third-party type that happens to share a shape is
+    not the same contract, and mapping it by eye is how a reader starts asserting things about
+    mods nobody checked. It falls to `unevaluable` and is counted like the rest.
+
+    UNEVALUABLE IS RETURNED, NOT FOLDED INTO `unmet`. The caller drops both, but only one of
+    them is a fact. On the reference pack that is 73 unmet against 2,012 unevaluable, and a
+    build that says "2,012 I could not evaluate" invites someone to look where "2,085 unmet"
+    closes the question falsely.
+    """
+    conds = doc.get("conditions") if isinstance(doc, dict) else None
+    if not conds:
+        return MET
+    if isinstance(conds, dict):
+        conds = [conds]
+    if not isinstance(conds, list):
+        return UNEVALUABLE
+    # Forge ANDs the top-level list, so one false entry settles it however unreadable the rest.
+    verdicts = [_leaf_verdict(c, modids) for c in conds]
+    if any(v is False for v in verdicts):
+        return UNMET
+    return UNEVALUABLE if any(v is None for v in verdicts) else MET
+
+
+def loaded_modids(mods_dir):
+    """Every modid the pack plausibly loads, for `forge:mod_loaded`. Issue #227.
+
+    TWO SIGNALS, UNIONED, BECAUSE NEITHER IS COMPLETE ALONE. `mcmod.info` is the declared
+    answer, but #208 counted 22 jars with none usable out of the 367 in the reference
+    CLIENT instance -- they declare through their MANIFEST instead -- so a mcmod.info-only
+    set would call a loaded mod absent. The `assets/<ns>/` directory names cover those, and
+    over-cover slightly, since a jar may ship compat assets under another mod's namespace.
+    (Name the denominator whenever you quote that 22: the server pack this is usually pointed
+    at holds 364 jars, not 367.)
+
+    THE UNION IS THE SAFE DIRECTION AND THAT IS WHY IT IS A UNION. Over-counting loaded mods
+    can only make `forge:mod_loaded` answer true where it should answer false, which KEEPS a
+    recipe; under-counting DELETES one that the game has. Given the choice, this source would
+    rather leave a recipe the dump will overrule than remove one nothing else supplies.
+    """
+    modids = set()
+    for name in sorted(os.listdir(mods_dir)):
+        if not name.lower().endswith(".jar"):
+            continue
+        try:
+            zf = zipfile.ZipFile(os.path.join(mods_dir, name))
+        except (zipfile.BadZipFile, OSError):
+            continue
+        with zf:
+            for entry in zf.namelist():
+                ns = asset_namespace(entry)
+                if ns:
+                    modids.add(ns)
+            try:
+                doc = json.loads(zf.read("mcmod.info").decode("utf-8", "replace"))
+            except (KeyError, ValueError, OSError):
+                continue
+            entries = doc.get("modList") if isinstance(doc, dict) else doc
+            for mod in entries if isinstance(entries, list) else []:
+                if isinstance(mod, dict) and mod.get("modid"):
+                    modids.add(str(mod["modid"]))
+    return modids
+
+
 def unread_subdir_jars(mods_dir):
     """`[(subdir, jars, recipe_json)]` for jars `extract` does NOT read, worst first.
 
@@ -230,9 +366,9 @@ def _is_recipe_entry(entry):
 def asset_namespace(entry):
     """`assets/<ns>/...` -> `<ns>`, or None. The one place that shape is spelled.
 
-    Sibling of `_is_recipe_entry` and here for the same reason it gives: `extract` asks this
-    question in three places -- the constants pass, the recipe pass and the id it qualifies
-    (#227) -- and three copies of `entry.split("/")[1]` is how two readers stop agreeing
+    Sibling of `_is_recipe_entry` and here for the same reason it gives: `extract` needs the
+    namespace to qualify an unqualified id (#227), `loaded_modids` needs it to know which mods
+    the pack ships, and a third copy of `entry.split("/")[1]` is how two readers stop agreeing
     about what a namespace is.
     """
     if not entry.startswith("assets/"):
@@ -246,12 +382,21 @@ def extract(mods_dir, on_progress=None):
 
     Immediate subdirectories are NOT read; `unread_subdir_jars` reports them and says why.
 
+    `stats` carries THREE reasons a document produced nothing, not one, because they mean
+    different things to whoever reads the build output (#227): `skipped` is this parser
+    failing to read a document, `cond_unmet` is Forge declining to register it, and
+    `cond_unevaluable` is a condition this source cannot decide offline. Collapsing the last
+    two would report a guess as a fact. `modids` is not a drop reason -- it is the
+    denominator `cond_unmet` was judged against, carried so the build can name it.
     """
     jars = sorted(
         os.path.join(mods_dir, f) for f in os.listdir(mods_dir) if f.lower().endswith(".jar")
     )
-    stats = {"jars": 0, "files": 0, "recipes": 0, "skipped": 0}
-
+    # A whole-directory pass before the first recipe, because `forge:mod_loaded` asks about the
+    # pack and not about the jar the question was found in.
+    modids = loaded_modids(mods_dir)
+    stats = {"jars": 0, "files": 0, "recipes": 0, "skipped": 0,
+             "modids": len(modids), "cond_unmet": 0, "cond_unevaluable": 0}
     for jar in jars:
         stats["jars"] += 1
         if on_progress:
@@ -289,6 +434,15 @@ def extract(mods_dir, on_progress=None):
                     doc = json.loads(zf.read(entry).decode("utf-8", "replace"))
                 except (ValueError, OSError):
                     stats["skipped"] += 1
+                    continue
+                # BEFORE PARSING, because an unmet condition means Forge never registered this
+                # and the parse would only produce a recipe the game does not have.
+                verdict = condition_verdict(doc, modids)
+                if verdict == UNMET:
+                    stats["cond_unmet"] += 1
+                    continue
+                if verdict == UNEVALUABLE:
+                    stats["cond_unevaluable"] += 1
                     continue
                 rid = "%s!%s" % (os.path.basename(jar), entry)
                 recipe = parse_recipe_json(doc, rid, constants.get(ns), ns)

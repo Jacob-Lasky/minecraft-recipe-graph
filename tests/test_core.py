@@ -217,6 +217,163 @@ class TestJarJsonNamespace(unittest.TestCase):
         self.assertIsNone(jar_json.asset_namespace("assets//recipes/x.json"))
 
 
+class TestJarJsonConditions(unittest.TestCase):
+    """#227: Forge does not register a recipe whose `conditions` are unmet.
+
+    Three arms, all pinned: met keeps, unmet drops, unevaluable drops AND is counted
+    separately, because "I could not tell" reported as "it was false" is the shape of claim
+    this issue exists to stop.
+
+    ASSERTED AGAINST STRING LITERALS, NOT AGAINST `jar_json.MET` AND FRIENDS, AND THAT IS NOT
+    AN OVERSIGHT. Written the DRY way these tests are vacuous: the verdict and the expectation
+    both come from the same constant, so they move together. Proven rather than asserted --
+    collapsing all three constants to one value left 81 of 82 tests green, and only the one
+    asserting on integer counters noticed. The three values are documented contract in
+    `condition_verdict`'s own docstring, so a literal is what pins them.
+    """
+
+    PACK = frozenset(["botania", "thaumcraft", "tconstruct", "appliedenergistics2"])
+
+    def test_absent_conditions_are_met(self):
+        self.assertEqual(jar_json.condition_verdict({"type": "x"}, self.PACK), "met")
+
+    def test_mod_loaded_is_met_when_the_mod_is_there(self):
+        doc = {"conditions": [{"type": "forge:mod_loaded", "modid": "thaumcraft"}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "met")
+
+    def test_mod_loaded_is_unmet_when_the_mod_is_absent(self):
+        # Fluid Craft for AE2-2.6.6-r.jar!assets/ae2fc/recipes/trio_interface.json, verbatim.
+        # `mekeng` is in neither the pack's jars nor the dump, so Forge never registered this
+        # and the graph must not carry `ae2fc:trio_interface` as craftable.
+        doc = {"type": "minecraft:crafting_shapeless",
+               "conditions": [{"type": "forge:mod_loaded", "modid": "mekeng"}],
+               "ingredients": [{"item": "#appliedenergistics2:interface"}],
+               "result": {"item": "ae2fc:trio_interface"}}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unmet")
+
+    def test_unevaluable_condition_is_not_reported_as_unmet(self):
+        # ExtendedCrafting...jar!assets/extendedcrafting/recipes/table_elite.json, verbatim.
+        # Whether the item was registered depends on a config read at runtime.
+        doc = {"conditions": [{"type": "minecraft:item_exists",
+                               "item": "extendedcrafting:table_elite"}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unevaluable")
+
+    def test_forge_not_over_an_absent_mod_is_met(self):
+        """Botania r1.10-364.4.jar!assets/botania/recipes/cocoon.json, verbatim.
+
+        The pack's only composite that resolves TRUE. A reader that dropped anything carrying
+        a `conditions` block would delete this recipe, which Forge really does register.
+        """
+        doc = {"conditions": [{"type": "forge:not",
+                               "value": {"type": "forge:mod_loaded",
+                                         "modid": "gardenofglass"}}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "met")
+
+    def test_and_is_decided_by_one_false_leaf_despite_an_unreadable_one(self):
+        doc = {"conditions": [{"type": "forge:and", "values": [
+            {"type": "forge:mod_loaded", "modid": "mekeng"},
+            {"type": "minecraft:item_exists", "item": "x:y"}]}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unmet")
+
+    def test_or_is_decided_by_one_true_leaf_despite_an_unreadable_one(self):
+        doc = {"conditions": [{"type": "forge:or", "values": [
+            {"type": "forge:mod_loaded", "modid": "botania"},
+            {"type": "minecraft:item_exists", "item": "x:y"}]}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "met")
+
+    def test_and_stays_unevaluable_when_no_leaf_settles_it(self):
+        doc = {"conditions": [{"type": "forge:and", "values": [
+            {"type": "forge:mod_loaded", "modid": "botania"},
+            {"type": "minecraft:item_exists", "item": "x:y"}]}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK),
+                         "unevaluable")
+
+    def test_forge_false_is_unmet(self):
+        doc = {"conditions": [{"type": "forge:false"}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unmet")
+
+    def test_not_over_an_unreadable_leaf_stays_unevaluable(self):
+        # Negating a thing you cannot read does not make it readable.
+        doc = {"conditions": [{"type": "forge:not",
+                               "value": {"type": "minecraft:item_exists", "item": "x:y"}}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK),
+                         "unevaluable")
+
+    def test_a_bare_dict_of_conditions_is_read_as_one(self):
+        doc = {"conditions": {"type": "forge:mod_loaded", "modid": "mekeng"}}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unmet")
+
+    def test_a_malformed_conditions_field_is_unevaluable_not_met(self):
+        # MET would be the dangerous reading: it registers a recipe on the strength of a
+        # field nobody could parse. Same direction as `hei_dump._consume_chance`.
+        for junk in ("yes", 1, [{"no_type": True}], [None]):
+            self.assertEqual(jar_json.condition_verdict({"conditions": junk}, self.PACK),
+                             "unevaluable", junk)
+
+    def test_a_composite_with_no_values_is_unevaluable(self):
+        for node in ({"type": "forge:and"}, {"type": "forge:or", "values": []}):
+            self.assertEqual(jar_json.condition_verdict({"conditions": [node]}, self.PACK),
+                             "unevaluable", node)
+
+    def test_mod_loaded_with_no_modid_is_unmet_not_a_crash(self):
+        doc = {"conditions": [{"type": "forge:mod_loaded"}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unmet")
+
+    def test_loaded_modids_reads_assets_when_mcmod_info_is_absent(self):
+        """#208 counted 22 pack jars with no usable `mcmod.info`, declaring through their
+        MANIFEST instead. An mcmod.info-only reading calls those mods absent, which would
+        make `forge:mod_loaded` DELETE recipes the game has."""
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with zipfile.ZipFile(os.path.join(tmp, "nomcmod.jar"), "w") as zf:
+                zf.writestr("assets/silentmod/recipes/x.json", "{}")
+                zf.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+            with zipfile.ZipFile(os.path.join(tmp, "declared.jar"), "w") as zf:
+                zf.writestr("mcmod.info", json.dumps(
+                    {"modList": [{"modid": "declaredonly"}]}))
+            # Not a zip at all: must be skipped, not raise.
+            with open(os.path.join(tmp, "broken.jar"), "w") as fh:
+                fh.write("not a zip")
+            ids = jar_json.loaded_modids(tmp)
+        self.assertIn("silentmod", ids)
+        self.assertIn("declaredonly", ids)
+
+    def test_a_lookalike_type_is_not_treated_as_mod_loaded(self):
+        # `zerocore:modloaded` has the same shape and is NOT the same contract; guessing it
+        # would be this source asserting something about a mod nobody checked.
+        doc = {"conditions": [{"type": "zerocore:modloaded", "modid": "botania"}]}
+        self.assertEqual(jar_json.condition_verdict(doc, self.PACK), "unevaluable")
+
+    def test_extract_counts_the_two_drop_reasons_apart(self):
+        """The counters are the deliverable, not a debug aid: they are what lets a reader
+        tell "nothing was dropped" from "nobody looked"."""
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "probe.jar")
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("mcmod.info", json.dumps([{"modid": "probe"}]))
+                zf.writestr("assets/probe/recipes/kept.json", json.dumps({
+                    "type": "minecraft:crafting_shapeless",
+                    "ingredients": [{"item": "stick"}], "result": {"item": "kept"}}))
+                zf.writestr("assets/probe/recipes/unmet.json", json.dumps({
+                    "type": "minecraft:crafting_shapeless",
+                    "conditions": [{"type": "forge:mod_loaded", "modid": "nosuchmod"}],
+                    "ingredients": [{"item": "stick"}], "result": {"item": "unmet"}}))
+                zf.writestr("assets/probe/recipes/unknown.json", json.dumps({
+                    "type": "minecraft:crafting_shapeless",
+                    "conditions": [{"type": "minecraft:item_exists", "item": "a:b"}],
+                    "ingredients": [{"item": "stick"}], "result": {"item": "unknown"}}))
+            stats = {}
+            got = list(jar_json.extract(tmp, lambda _n, s: stats.update(s)))
+        self.assertEqual([r.outputs for r in got], [[("probe:kept", 1)]])
+        self.assertEqual(stats["cond_unmet"], 1)
+        self.assertEqual(stats["cond_unevaluable"], 1)
+        # The parse-failure counter must NOT have absorbed either of them.
+        self.assertEqual(stats["skipped"], 0)
+        # And the namespace fix reaches through `extract`, not only `parse_recipe_json`.
+        self.assertEqual(got[0].inputs[0].alternatives, ["probe:stick"])
+
+
 def _graph():
     g = Graph()
     g.names = {
