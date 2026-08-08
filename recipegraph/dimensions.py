@@ -107,7 +107,7 @@ import json
 import os
 import re
 
-from .model import is_world_ore_group, mod_of, norm_key
+from .model import canonical_item_key, is_world_ore_group, mod_of
 
 # The overworld is where you already are, so it can never gate anything. Named rather than
 # filtered by id at each call site, because "0 is not a gate" is a fact about the world and
@@ -224,12 +224,13 @@ def parse_world_gen(text):
         matched = _JER_DIM.match(dim)
         if not matched:
             continue
-        # JEResources always writes the meta, including `:0`; the graph omits a zero meta.
-        # `norm_key` is the one definition of that rule, so the id is split off its last
-        # colon-separated field only when that field is actually a number -- `minecraft:air`
-        # with no meta at all would otherwise lose its path.
-        head, _, tail = block.rpartition(":")
-        key = norm_key(head, tail) if head and tail.isdigit() else norm_key(block)
+        # `model.canonical_item_key`, NOT a local copy of its three lines. JEResources writes
+        # a raw `mod:name:meta` id -- always with the meta, including `:0`, which the graph
+        # omits -- and that is exactly the shape #253 gave one spelling to. A hand-rolled
+        # split here was equivalent on today's file and is the second spelling #263 removed:
+        # it would take a `:32767` to the literal rather than to `:*`, and this file having
+        # none of those today is not a property anyone should have to re-verify.
+        key = canonical_item_key(block)
         if key:
             out.setdefault(key, {})[int(matched.group(1))] = matched.group(2)
     return out

@@ -167,8 +167,9 @@ class ReadingTheObservedWorldgenTest(unittest.TestCase):
         self.assertEqual(observed()["mod:no_meta"], {427: "divinerpg:vethea"})
 
     def test_a_zero_meta_is_dropped_to_match_the_graph(self):
-        """JEResources always writes `:0`; `model.norm_key` says a zero meta is not part
-        of the key, and the two spellings have to meet."""
+        """JEResources always writes `:0`; the graph omits a zero meta, and the two
+        spellings have to meet. Done by `model.canonical_item_key`, which is the ONE
+        spelling of this since #253."""
         self.assertIn("minecraft:iron_ore", observed())
         self.assertNotIn("minecraft:iron_ore:0", observed())
 
@@ -179,21 +180,22 @@ class ReadingTheObservedWorldgenTest(unittest.TestCase):
         """#253/#263: the two sources that name items disagreed about the any-damage
         wildcard, and the fix was ONE spelling -- `:*`, never the literal `:32767`.
 
-        This reader goes through `model.norm_key`, so it lands on the right side of that by
-        construction rather than by care. Pinned anyway, because it is a DATA CONTRACT
-        between a parser and the graph's key vocabulary: a future edit here that split the
-        meta by hand would reintroduce exactly the phantom-key class #263 removed, and no
-        other test in this file would notice. The reference pack happens to contain zero
-        wildcard rows, so nothing else can catch it either.
+        This reader goes through `model.canonical_item_key`, which IS that one spelling, so
+        it cannot drift from the other five readers that use it. Pinned because it is a DATA
+        CONTRACT between a parser and the graph's key vocabulary: an edit that split the meta
+        by hand would reintroduce exactly the phantom-key class #263 removed. The reference
+        pack contains zero wildcard rows, so neither the golden set nor any other test in
+        this file could catch that -- which is precisely why it is asserted here.
         """
         parsed = dimensions.parse_world_gen(
             '[{"block": "mod:thing:32767", "dim": "Dim -1: the_nether"}]')
         self.assertEqual(parsed, {"mod:thing:*": {-1: "the_nether"}})
 
     def test_an_id_with_no_meta_at_all_keeps_its_whole_path(self):
-        """The `tail.isdigit()` guard. Splitting on the last colon unconditionally would
-        turn `mod:no_meta` into `mod` with a meta of `no_meta`, which `norm_key` coerces to
-        0 -- so the ore would come back as the mod id and silently match nothing."""
+        """An id with no meta at all must keep its whole path. Splitting on the last colon
+        unconditionally turns `mod:no_meta` into `mod` with a meta of `no_meta`, coerced to
+        0, so the ore comes back as the mod id and silently matches nothing.
+        `canonical_item_key` gets this right; a hand-rolled split is where it goes wrong."""
         self.assertIn("mod:no_meta", observed())
         self.assertNotIn("mod", observed())
 
