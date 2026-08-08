@@ -36,6 +36,7 @@ in `notproduction.py`, which is the one consumer of both.
 
 import json
 import os
+import re
 
 # The kinds, and what each one asks of the player. Ordered from "go do something in the
 # world" to "this is not an ingredient at all", which is the order the plan panel lists
@@ -71,6 +72,14 @@ TOKEN_NAMESPACES = ("contenttweaker",)
 # slots. `chapter_3` and `chapter_7` are deliberately ABSENT: the pack defines the item but
 # no recipe references it, and asserting an id nothing uses is how a list starts drifting
 # from the pack it describes.
+#
+# THIS IS NOT THE EFFECTIVE MAP AND HAS NOT BEEN SINCE #171. `complete_families` derives the
+# other members of any numbered family below -- the pack uses `hunter_level_3/5/9/12/13/17/
+# 19/40/50` and `chapter_9`, ten GATE ids nobody curated -- so `resolve` returns 47 entries
+# on the reference pack against the 37 written here. DO NOT "fix" that by pasting the ten in:
+# this list drifting is the defect, and a rule that completes a family a human already
+# verified is what stops it drifting again. Read `complete_families` before adding an id that
+# only differs from one above by its number.
 DEFAULT_TOKENS = {
     # Loot. Recipe counts are from the reference pack; the two Jake reported are the second
     # and fifth largest, which is why the repetition was so visible.
@@ -194,29 +203,117 @@ def save_overrides(path, added=None, disabled=()):
     return doc
 
 
-def resolve(overrides=None):
+# The trailing counter that makes an id one of a FAMILY: `chapter_9`, `hunter_level_40`.
+# The separator is captured rather than assumed, so `chapter_9` and a hypothetical `chapter9`
+# are different families and neither completes the other.
+_FAMILY = re.compile(r"^(.*?)([_-]?)(\d+)$")
+
+
+def _family(key):
+    """`(namespace, stem, separator)` for an id ending in a counter, else None."""
+    namespace, _, ident = str(key).partition(":")
+    m = _FAMILY.match(ident)
+    return (namespace, m.group(1), m.group(2)) if m else None
+
+
+def complete_families(known, graph):
+    """`known`, plus the members of its own numbered families the pack also uses. #171.
+
+    THE CURATED LIST HAS DRIFTED AND THIS IS THE PROOF, not a guess at what might be missing.
+    `DEFAULT_TOKENS` declares `hunter_level_1`, `_20` and `_30` and `chapter_1/2/4/5/6/8`; the
+    reference pack also uses `hunter_level_3/5/9/12/13/17/19/40/50` and `chapter_9`, every one
+    of them a locked progression gate consumed by real recipes and priced at `BASE_RAW_COST`
+    until #243, and at `UNSOURCED_COST` after it. Ten ids, all GATE, none curated.
+
+    DERIVED RATHER THAN LISTED, WHICH IS THE WHOLE POINT. Writing those ten into
+    `DEFAULT_TOKENS` fixes today's drift and guarantees tomorrow's, which is exactly the
+    failure the list is currently demonstrating -- #171 asks for something that "detects the
+    shape rather than enumerates the members", and a family whose other members are already
+    hand-verified is the narrowest such shape available.
+
+    THREE CLAUSES, AND EACH ONE DECLINES A WAY THIS COULD GO WRONG:
+
+      * THE FAMILY MUST ALREADY BE CURATED. The stem comes from a hand-verified id, so this
+        can only ever complete a claim a human already made. It never invents a family, which
+        is what keeps it off `1_in_200`, `level15` and the rest of the pack's numbered ids --
+        real markers all, and not this function's business to guess at.
+      * THE FAMILY MUST AGREE WITH ITSELF. A stem whose curated members carry two different
+        kinds is skipped rather than resolved by majority or by first-seen. Nothing in the
+        pack does this today; a list that grew one is a list saying it does not know.
+      * THE KEY MUST BE ONE THE GRAPH CANNOT EXPLAIN, via `pack_authored_unsourced`. This is
+        the #117/#168 guard: an over-broad rule costs more real items than it fixes fake ones,
+        and calling a produced item a placeholder hides a genuine crafting route. Measured on
+        the reference oracle the guard changes nothing -- all 10 pass it either way -- so it
+        is here for the pack that has a `chapter_10` you can actually craft.
+
+    AND IT AGREES WITH THE CURATOR ON A CASE IT WAS NEVER SHOWN, which is the strongest
+    evidence available that this rule is right rather than merely convenient. `DEFAULT_TOKENS`
+    records `chapter_3` and `chapter_7` as "deliberately ABSENT: the pack defines the item but
+    no recipe references it, and asserting an id nothing uses is how a list starts drifting".
+    Both are named in items.csv and neither is live, so `pack_authored_unsourced` excludes them
+    through `live_keys` and this function declines them for the curator's own stated reason
+    without being told the reason. A heuristic reproducing a judgement call it never saw is
+    worth more than one that reproduces the cases it was fitted to.
+
+    `graph` of None returns `known` untouched: a caller with no graph in hand cannot apply the
+    third clause, and widening without it is the over-broad rule above.
+    """
+    if graph is None:
+        return known
+    families = {}
+    for key, kind in known.items():
+        family = _family(key)
+        if family:
+            families.setdefault(family, set()).add(kind)
+    if not families:
+        return known
+    out = dict(known)
+    for key in graph.pack_authored_unsourced:
+        if key in out:
+            continue
+        kinds = families.get(_family(key) or ())
+        if kinds and len(kinds) == 1:
+            out[key] = next(iter(kinds))
+    return out
+
+
+def resolve(overrides=None, graph=None):
     """{key: kind} for this world: the curated map plus the user's, minus their removals.
 
     The ONE place the effective map is assembled, so the solver, the CLI listing and the
     candidate scan cannot disagree about what counts as a token.
+
+    FAMILY COMPLETION RUNS BETWEEN THE ADDITIONS AND THE REMOVALS, and both neighbours are
+    deliberate. After the user's additions, so a family they declare completes exactly as a
+    curated one does; before their removals, so `disabled` can take out a DERIVED id as well
+    as a curated one. A user who has looked at `contenttweaker:hunter_level_9` and decided it
+    is not a gate must be able to say so, and a rule that re-added it every load would be a
+    curated list they cannot edit.
     """
     out = dict(DEFAULT_TOKENS)
     overrides = overrides or {}
     for key, kind in (overrides.get("tokens") or {}).items():
         if kind in KINDS:
             out[str(key)] = kind
+    out = complete_families(out, graph)
     for key in overrides.get("disabled") or ():
         out.pop(str(key), None)
     return out
 
 
-def for_path(path):
+def for_path(path, graph=None):
     """The effective `{key: kind}` for an overrides file path. The one composition.
 
     Both the CLI and the server need "load the file, merge it over the defaults", and two
     copies of that is two places to update when resolution grows a step.
+
+    PASS THE GRAPH WHENEVER THERE IS ONE. Without it `complete_families` cannot apply its
+    third clause and returns the map unwidened, which is the pre-#171 answer and not a wrong
+    one -- but two callers resolving the same overrides file with and without a graph would
+    disagree about what a token is, which is the drift this function exists to prevent.
+    `tests/test_tokens.py` pins the callers that have a graph to passing it.
     """
-    return resolve(load_overrides(path))
+    return resolve(load_overrides(path), graph)
 
 
 def group(entries):
@@ -262,7 +359,10 @@ def candidates(graph, known=None, limit=40):
 
     Returns `[(key, display name, recipes needing it)]`.
     """
-    known = resolve() if known is None else known
+    # `graph=graph`, so the offer excludes what family completion already claimed. A
+    # candidate list re-offering `hunter_level_9` after the map derived it as a GATE is
+    # asking a human to curate an answer the tool already has. #171.
+    known = resolve(graph=graph) if known is None else known
     eligible = graph.pack_authored_unsourced
     out = []
     for key, recipes in graph.by_input.items():

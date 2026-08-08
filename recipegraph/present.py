@@ -15,11 +15,16 @@ DO NOT add a local status->colour dict to a renderer. Add the case here.
 """
 
 from . import pins
+from . import provenance
 from .htmlutil import script_json
 from .machines import BUILDABLE, HAVE, STATES, UNAVAILABLE, UNKNOWN
 from .solve import (STATUS_CRAFT, STATUS_CYCLE, STATUS_DEPTH, STATUS_EMC, STATUS_HAVE,
                     STATUS_PARTIAL, STATUS_RAW, STATUS_SOURCE, STATUS_TOKEN)
-from .tokens import KIND_BADGE
+# ALIASED, because `provenance` has a `KIND_BADGE` too and they are different
+# vocabularies for different claims -- a placeholder standing in for an instruction
+# against a real item whose route the dump could not carry. A bare `KIND_BADGE` in a
+# file that imports both reads as whichever one the reader happened to meet first.
+from .tokens import KIND_BADGE as TOKEN_KIND_BADGE
 
 # The oredict node the solver emits from `resolve_ore`, which is a string rather than a
 # STATUS_* constant there because it is a display distinction, not a resolution outcome.
@@ -152,8 +157,8 @@ SHADOW_TITLE = ("a second id for the same ore -- the pack generates the other on
                 "which is the row ranked above this")
 
 
-def status_badge(status, token_kind=None, unsourced=False):
-    """`(text, css class)` for a node's badge, refined by token kind or by `unsourced`.
+def status_badge(status, token_kind=None, unsourced=False, provenance_kind=None):
+    """`(text, css class)` for a node's badge, refined by token kind, `unsourced` or provenance.
 
     One status covers every pack placeholder, because they behave identically to the solver:
     no recipe, not stock, stop here. They do not read identically to a player, though, so
@@ -172,10 +177,23 @@ def status_badge(status, token_kind=None, unsourced=False):
     token branch first, and `tests/test_unsourced.ScopeTest` pins that -- but the order has
     to be unambiguous for a caller that passes both, and "go get" is the more specific
     instruction of the two.
+
+    `provenance_kind` IS THE COMPLEMENT OF `unsourced`, NOT ANOTHER FLAVOUR OF IT. #171: the
+    pack declares how you get the item, so the tool CAN say how and the "no known source"
+    wording would be a lie. `Solver.expand` sets exactly one of the two -- a declared key is
+    excluded from `pack_authored_unsourced` by construction -- so the branches below cannot
+    both fire, and the order between them is stated only so a caller passing both is not
+    silently resolved. The more specific claim wins again: naming the puzzle beats saying
+    nothing is known.
+
+    STILL NO NEW COLOUR, for the reason above: it remains something you have to go and
+    obtain. What changed is that this time the tool can tell you where to look.
     """
     text, cls = STATUS_LABEL.get(status, (status, "muted"))
-    if status == STATUS_TOKEN and token_kind in KIND_BADGE:
-        return KIND_BADGE[token_kind], cls
+    if status == STATUS_TOKEN and token_kind in TOKEN_KIND_BADGE:
+        return TOKEN_KIND_BADGE[token_kind], cls
+    if provenance_kind:
+        return provenance.badge_for(provenance_kind), cls
     if unsourced:
         return UNSOURCED_BADGE, cls
     return text, cls

@@ -64,7 +64,7 @@ curl -s --get $B/api/sweep \
   --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0' | jq
 ```
 
-Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores emc icon damaged unsourced provenance`,
 joined by `and or not`, the six comparisons, and
 `startswith endswith contains matches lower upper len`. **`GET /api` FIRST, do not guess a
 field name** -- it prints the whole vocabulary, and a wrong name is a 400 that lists the real

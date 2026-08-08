@@ -35,6 +35,7 @@ import math
 import os
 
 from . import multiblocks as multiblocks_mod
+from . import provenance
 from . import tokens
 from .defaults import DEFAULT_COST_CACHE
 from .model import FLUID_PREFIX
@@ -481,6 +482,51 @@ OVERWORLD_TOLL = 5.0
 # #181 and no constant can reach it.
 UNSOURCED_COST = 2000.0
 
+# What a key the PACK explains costs, when the dump could not carry the explanation. #171.
+#
+# `Graph.declared_provenance` is the set, and `provenance` is the reader: the pack registers
+# 82 puzzle rewards with `recipes.addHidden*`, which is a REAL recipe hidden from JEI on
+# purpose, plus 249 loot-table entries and 660 quest rewards. None of that can reach a graph
+# built from a JEI dump, so 53 keys on the reference oracle carried `UNSOURCED_COST` -- the
+# graph saying "I cannot explain this" about an item the pack explains in a file the build
+# already reads for `dimensions.load_planet_defs`.
+#
+# NO NEW CONSTANT, AND THAT IS THE ARGUMENT RATHER THAN THRIFT. Each of these three claims is
+# one this file has already priced, so inventing a fourth number would assert a difference
+# nothing measured:
+#
+#   * A PUZZLE IS A GATE. `addPuzzleShapeless` grants a gamestage and re-registers the recipe
+#     behind it, so the item is locked until you solve the puzzle and freely craftable after.
+#     That is verbatim GATE_COST's own definition, "a lock with a key somewhere in the story",
+#     and it is why these must come DOWN off UNSOURCED_COST rather than stay: 41 of the 53
+#     sat at 2,000, above the 1,000 a locked chapter costs, so the model ranked an item the
+#     pack tells you how to get BELOW one it merely gates.
+#   * A QUEST REWARD IS THE SAME LOCK. It is handed out for completing something, which is
+#     progress you make rather than an afternoon you spend, so it shares GATE_COST for the
+#     same reason chapters do -- and #95 is not violated, because this is not a second
+#     statement sharing one figure, it is the same statement arriving from a second source.
+#   * A LOOT-TABLE ENTRY IS LOOT. `addItemEntry` puts the item in a table you farm, which is
+#     LOOT_COST's own definition, "found by playing".
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, as everywhere else in this file:
+#
+#     BASE_RAW_COST < LOOT_COST <= PROVENANCE_COST[*] <= GATE_COST < UNSOURCED_COST
+#
+# Every one of these is BELOW `UNSOURCED_COST` and that inequality is the whole feature. An
+# item the pack explains must not cost more than one it does not, and it did.
+#
+# WHAT IT DOES NOT CLAIM: that the item is routable. There is still no recipe in the graph, so
+# `Solver.expand` still stops here and still puts the key on the shopping list. This decides
+# which band the stop sits in and what the note says, not whether a route exists.
+#
+# NOT WEIGHTED BY LOOT-TABLE WEIGHT, which the parser deliberately discards. A rarity is not a
+# price, and turning one into a price is `EMC_COST`'s rejected scaling argument arriving at a
+# second door: the estimate is a ranking whose units are already a mixture, and feeding a
+# three-order-of-magnitude spread into it would let one unlucky drop outrank a machine wall.
+PROVENANCE_COST = {provenance.PUZZLE: GATE_COST,
+                   provenance.QUEST: GATE_COST,
+                   provenance.LOOT_TABLE: LOOT_COST}
+
 # Keyed by the kind rather than by the token, which is the honest granularity available. A
 # per-token number would be more truthful still -- Chapter 1 and a Sedna trip are not the
 # same afternoon -- and it needs a curated figure per id that nobody has measured. The kind
@@ -686,6 +732,35 @@ CRAFTABLE_COST = 0.25
 #     landing correctly, and it is the exact plan #248 was filed about. #246 did not cause it;
 #     it made a pre-existing tie visible by moving the block price out of the way.
 #
+# #171's SECOND PASS DECLINES A BUMP, and the reasoning is recorded here rather than left out
+# because a declined bump is exactly as easy to get wrong as a taken one -- see #211's accident
+# above, which #193 then refused to rely on.
+#
+# THE RULE IS: bump the moment two graphs with IDENTICAL FILES would price differently.
+# `Graph.declared_provenance` and `pack_authored_declared` are a new GRAPH FIELD, written by
+# `index.build` and absent from every graph.json on disk. On a graph without it both new rules
+# are no-ops, and that is MEASURED rather than argued: the full price digest over the reference
+# oracle is byte-identical before and after this change, 162,469 keys, sha256
+# 21c81c61607c2efc49f8bc1d2e6b5becd694b6fe87aa9f7c59d519abcf3e1cd2, computed by running
+# `estimate` under each tree in a separate process against the same oracle.
+#
+# A graph that DOES carry the field is a new file, whose size and mtime `fingerprint` already
+# hashes -- so the cache is invalidated by the file, exactly as FORMULA_VERSION 16 argued for
+# the `p` field. There is no input for which a stale cache could serve a wrong price, which is
+# the only thing this counter is for.
+#
+# IF A LATER CHANGE GIVES `declared_provenance` A DEFAULT DERIVED IN `load` rather than read
+# from the file -- which `Graph.load` refuses, and says why -- that stops being true and this
+# number has to move.
+#
+# AND FAMILY COMPLETION DECLINES IT FOR THE OPPOSITE REASON, which is worth stating beside the
+# first because the two look alike and are not. `tokens.complete_families` DOES move prices on
+# today's oracle -- 13 keys, ten of them the derived GATE ids -- and still needs no bump,
+# because what moved is `token_kinds`, and `fingerprint` HASHES that. The map goes from 37
+# entries to 47, so the stamp differs and the cache invalidates itself.
+#
+# SO THE ASYMMETRY IS THE POINT: a rule whose input this function already hashes needs no bump,
+# and a rule reading something off the GRAPH does.
 # 19: an off-world TOLL is seeded beside the dimension gate, and JEResources is read as a
 #     second source for both (#248).
 #
@@ -1403,6 +1478,57 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
             if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
                 continue
             cost[key] = max(cost.get(key, BASE_RAW_COST), UNSOURCED_COST)
+
+    # AND THE KEYS THE PACK EXPLAINS, which is the one rule in this cascade that says a key is
+    # obtainable on POSITIVE evidence rather than on the absence of a producer. #171.
+    #
+    # AFTER the three unsourced populations and BEFORE the tokens, which is the only position
+    # that is correct, and both neighbours are load-bearing:
+    #
+    #   * AFTER, because these keys are no longer IN `pack_authored_unsourced` --
+    #     `Graph.pack_authored_unsourced` excludes them -- so the loop above cannot reach them
+    #     and the order is a statement of intent rather than an override. Were the exclusion
+    #     ever relaxed, running after is what keeps this the answer: an item the pack explains
+    #     must not be priced as one it cannot.
+    #   * BEFORE, because a curated token still wins. A key that is BOTH a declared reward and
+    #     a hand-verified placeholder is a placeholder: `Solver.expand` returns at the token
+    #     branch, so the price has to agree with the display about which answer a reader gets.
+    #     Measured empty on the reference oracle -- 0 of the 37 `DEFAULT_TOKENS` are declared,
+    #     which is `provenance`'s safety property -- so this is the ordering that stays right
+    #     if the pack ever changes, not one the pack currently exercises.
+    #
+    # `Graph.pack_authored_declared` AND NOT `declared_provenance`, WHICH IS THE MISTAKE THAT
+    # LOOKS RIGHT AND WAS MEASURED WRONG. The pack declares 896 keys; 843 of them are items the
+    # graph already makes. Walking the raw map re-prices those on the strength of a quest
+    # awarding one -- `ae2stuff:adv_wireless_kit` goes from a 380,435 craft to 1,000, and
+    # `minecraft:cobblestone` is a quest reward too. Measured over the reference oracle, the
+    # raw map moves 301 keys off their real prices and drags a further 20 UP through the
+    # fixpoint. A quest handing you a thing is not a route to it; what a declaration proves is
+    # that the item is OBTAINABLE, and that is only news for a key nothing explained.
+    #
+    # So the population is the 53 keys that would be in `pack_authored_unsourced` if the pack
+    # had said nothing -- same five clauses, opposite side of the declaration -- and a declared
+    # key with a producer, an oredict group or an undamaged base keeps the better answer it
+    # already had.
+    #
+    # ASSIGNMENT, NOT `min`, AND THIS IS THE ONE RULE HERE THAT RAISES A LEAF. These keys are
+    # leaves, so the rule above has already given them `BASE_RAW_COST`, and `min` would leave
+    # them there -- which is #171's failure mode 1 exactly: a puzzle reward priced level with
+    # cobblestone. What falls is the comparison against the arm where the pack went unread, in
+    # which the same key was `UNSOURCED_COST`.
+    #
+    # SAME GUARD AS THE TOKEN LOOP BELOW, for the same reason: anything already under a raw leaf
+    # is stock, an infinite generator or a learned EMC item, and each is a stronger claim about
+    # THIS world than the pack's declaration is. If you are holding one, how the pack hands them
+    # out is irrelevant.
+    #
+    # AN UNRECOGNISED KIND FALLS BACK TO `UNSOURCED_COST`, which is the pre-#171 price, so a
+    # `provenance` that grows a fourth kind without teaching this table about it degrades to
+    # today's behaviour rather than to a cheap one.
+    for key, kind in graph.pack_authored_declared.items():
+        if cost.get(key, BASE_RAW_COST) < BASE_RAW_COST:
+            continue
+        cost[key] = PROVENANCE_COST.get(kind, UNSOURCED_COST)
 
     # And LAST, the placeholders, because this is the one seed that RAISES a price. Every
     # rule above answers "how cheaply can this be had"; a token answers "what does the

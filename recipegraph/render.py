@@ -498,7 +498,8 @@ def _node_html(node, depth=0, back="", icon=None, marked=None):
     """
     marked = set() if marked is None else marked
     status = node.get("status", "craft")
-    label, cls = status_badge(status, node.get("token_kind"), node.get("unsourced"))
+    label, cls = status_badge(status, node.get("token_kind"), node.get("unsourced"),
+                              node.get("provenance"))
     kids = node.get("children") or []
     need_flag = 1 if _has_need(node) else 0
 
@@ -594,14 +595,25 @@ def _machines_html(machines):
             '</div>' % (len(machines), rows, note))
 
 
-def _unsourced_badge():
-    """The #136 badge for a shopping-list row, worded AND classed by `present`.
+def _row_badge(entry):
+    """The #136 or #171 badge for a shopping-list row, worded AND classed by `present`.
 
     Goes through `status_badge` rather than spelling `class="badge need"` here, so the row
     and the tree node cannot end up different colours for the same claim -- the exact split
     `present`'s module docstring exists to prevent.
+
+    BOTH MARKS, THROUGH ONE CALL, and that is #171 obeying the warning this function already
+    carried rather than repeating it. `Solver.shopping_row` sets `unsourced` on a key nothing
+    explains and `provenance` on a key the PACK explains, and they are mutually exclusive by
+    construction. Rendering only the first is how the row and the tree came to disagree the
+    last time: the tree node named the puzzle and the list a player actually carries said
+    nothing at all.
     """
-    text, cls = status_badge(STATUS_RAW, unsourced=True)
+    kind = entry.get("provenance")
+    if not kind and not entry.get("unsourced"):
+        return ""
+    text, cls = status_badge(STATUS_RAW, unsourced=entry.get("unsourced"),
+                             provenance_kind=kind)
     return ' <span class="badge %s">%s</span>' % (cls, _esc(text))
 
 
@@ -616,10 +628,10 @@ def _rows(entries, limit=200, icon=None):
            # rounding would misreport a partial-bucket step.
            " mB" if e.get("kind") == "fluid" else "",
            named(e, icon),
-           # `why` and the unsourced mark share the meta slot and cannot both apply: `why`
+           # `why` and the row badge share the meta slot and cannot both apply: `why`
            # is set only on the infinite-sources list, whose rows are by definition sourced.
            (' <span class="meta">%s</span>' % _esc(e["why"])) if e.get("why") else
-           _unsourced_badge() if e.get("unsourced") else "")
+           _row_badge(e))
         for e in entries[:limit]
     )
 
