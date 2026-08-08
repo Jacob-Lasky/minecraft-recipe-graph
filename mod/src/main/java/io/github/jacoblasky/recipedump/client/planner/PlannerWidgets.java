@@ -384,11 +384,21 @@ public final class PlannerWidgets {
          */
         private final String selectionKey;
 
-        ClickableGroup(Runnable onClick) {
+        /**
+         * PUBLIC FOR `client.machines`, which draws clickable rows that are not plan nodes.
+         *
+         * The machines table (#254) needs exactly this widget -- a click target the width of
+         * the row with no themed background -- and re-deriving it there would be a second
+         * answer to "how does a row get clicked" that the first bug found in either would
+         * only be fixed in one of. It passes no selection key, which is the "" case this
+         * class already documents and {@link PlanSelection#isSelected} already answers false
+         * for.
+         */
+        public ClickableGroup(Runnable onClick) {
             this(onClick, "");
         }
 
-        ClickableGroup(Runnable onClick, String selectionKey) {
+        public ClickableGroup(Runnable onClick, String selectionKey) {
             this.onClick = onClick;
             this.selectionKey = selectionKey == null ? "" : selectionKey;
         }
@@ -1398,13 +1408,31 @@ public final class PlannerWidgets {
      * window jump.
      */
     public static ModularPanel statePanel(PlannerState state) {
+        return statePanel(state, "Planner", "mcrecipedump_planner_state");
+    }
+
+    /**
+     * The same not-yet panel under another name, for a second screen with the same four states.
+     *
+     * PARAMETERISED RATHER THAN COPIED (#254). The machines table is opened before its own
+     * resolve finishes exactly as the planner is opened before the graph is read, and
+     * `PlannerState`'s class note is the reason both need this: "still loading" and "no graph
+     * found, here is why" are different sentences a reader has to be able to tell apart, and a
+     * second copy of this panel is a second place for one of them to go missing.
+     *
+     * THE EYEBROW IS AN ARGUMENT BECAUSE IT IS THE ONLY THING THAT DIFFERS, and it has to
+     * differ: a machines window whose one legible word is "Planner" tells the player they
+     * opened the wrong thing. The panel NAME differs too -- ModularUI keys panels by it, and
+     * two live panels sharing a name is not something this code should risk to save an
+     * argument.
+     */
+    public static ModularPanel statePanel(PlannerState state, String eyebrow, String panelName) {
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
-        body.child(line("Planner", CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, 0));
+        body.child(line(eyebrow, CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, 0));
         body.child(line(state.message(), CONTENT_WIDTH, state.colour()).pos(0, LINE + 1));
-        return ModularPanel.defaultPanel("mcrecipedump_planner_state",
-                                         PANEL_WIDTH, PANEL_HEIGHT).child(body);
+        return ModularPanel.defaultPanel(panelName, PANEL_WIDTH, PANEL_HEIGHT).child(body);
     }
 
     private static String footer(PlanView plan, PlanBook book) {
@@ -1600,8 +1628,9 @@ public final class PlannerWidgets {
         }
     }
 
+    /** PUBLIC FOR `client.machines`, for the reason on {@link #line}. */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    static TextWidget<?> heading(String text, int width) {
+    public static TextWidget<?> heading(String text, int width) {
         return line(text, width, NodeStatus.INK_CRAFT);
     }
 
@@ -1615,9 +1644,15 @@ public final class PlannerWidgets {
      *
      * `TextWidget.color(int)` rather than `IKey.color(int)`: the key's colour is a style on
      * the drawable, and the widget's own colour is what its theme lookup actually consults.
+     *
+     * PUBLIC FOR `client.machines` (#254), AND THE CUT IS WHY IT IS SHARED RATHER THAN COPIED.
+     * A second "one line of coloured text" helper next door would be a second place for the
+     * `fit` call to be forgotten, and forgetting it does not fail a layout test -- every row
+     * is still exactly `LINE` tall. It draws over the row beneath instead, which is only
+     * visible in a screenshot.
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    static TextWidget<?> line(String text, int width, int colour) {
+    public static TextWidget<?> line(String text, int width, int colour) {
         TextWidget widget = new TextWidget(IKey.str(NodeRowText.fit(text, width)));
         widget.color(colour);
         widget.size(width, LINE);

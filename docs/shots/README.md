@@ -29,7 +29,30 @@ cp $SHOTS/picker.png docs/shots/recipe-picker.png
 
 harness/shot.sh planner-recipes:plan-in-stock picker-nograph
 cp $SHOTS/picker-nograph.png docs/shots/recipe-picker-no-graph.png
+
+# The machines table (#254). ALL THREE NEED THE ORACLE and there is no fixture fallback:
+# a machines table is a verdict on all 503 categories, not a document that can be frozen.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines machines
+cp $SHOTS/machines.png docs/shots/machines-table.png
+
+# Filtered, because an unfiltered table opens on `have` -- the least informative rows in it.
+# The screen exists for `no route` and `buildable`, and a static shot cannot scroll to them.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines:unavailable machines-noroute
+cp $SHOTS/machines-noroute.png docs/shots/machines-no-route.png
+
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines-mods machines-mods
+cp $SHOTS/machines-mods.png docs/shots/machines-mod-picker.png
+
+# Defaults to the BUSIEST category rather than a named one: a hardcoded uid stops existing
+# when the pack changes, and the shot would then photograph an empty panel and still exit 0.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines-detail machines-detail
+cp $SHOTS/machines-detail.png docs/shots/machines-detail.png
 ```
+
+**Check which picture you got.** Without `RECIPEGRAPH_ORACLE` the three `machines` shots
+succeed and photograph the "no graph.json, looked in ..." panel instead of the table. That is
+a legitimate picture and it is also easy to mistake for the real one in a PR thumbnail. The
+run logs `machines: <what happened>`; read that line before attaching the file.
 
 **Pinning needs a pin file, and the honest way to make one is from the OTHER side.**
 `recipegraph/pins.py` writes the same format the mod reads, so building the file in Python
