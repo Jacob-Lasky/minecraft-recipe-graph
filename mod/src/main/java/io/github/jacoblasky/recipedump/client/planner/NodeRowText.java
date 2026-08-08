@@ -618,8 +618,17 @@ public final class NodeRowText {
             // UNAMBIGUOUS BECAUSE OF WHAT IT SITS NEXT TO: it always follows a run count, and
             // a proportion beside a count of runs has only one reading. DO NOT restore the
             // prose, and DO NOT restore `per_run` beside it, without re-running
-            // `theYieldSurvivesTheCutAtTheDepthsRealPlansReach`, which measures both against
-            // real label lengths rather than a short synthetic one.
+            // `theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond`, which measures
+            // both against real label lengths rather than a short synthetic one.
+            //
+            // THIS FIXES 98.4% OF ROWS, NOT ALL OF THEM, AND THE REMAINDER IS NAMED. The label
+            // column is 45 characters at the indent cap and this meta is 16, so a label past 26
+            // characters still loses the percentage: 12 of 769 rows in `plan-fluid-chain` and 1
+            // of 52 in `plan-truncated`, about 1.6%, on names like `[fluid] Molten Aluminum
+            // Brass` (29) and `Universal Constellation Princess` (32). The row cannot carry a
+            // 32-character label, a run count and a percentage at once, and buying the last
+            // 1.6% means evicting something else. Anyone shortening this phrase further should
+            // move that number and update it here and in the test.
             sb.append(", ").append(percent(chance));
         }
         return sb.toString();

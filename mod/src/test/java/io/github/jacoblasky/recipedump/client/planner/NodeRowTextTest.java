@@ -668,28 +668,50 @@ public class NodeRowTextTest {
      * commit, rather than widening the assertion.
      */
     @Test
-    public void theYieldSurvivesTheCutAtTheDepthsRealPlansReach() {
+    public void theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond() {
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
 
-        // REAL LABELS, AND THE FIRST VERSION OF THIS TEST IS WHY IT INSISTS ON THEM. It ran
-        // against `yieldNode`'s own five-character "Thing", where the row fits at every depth,
-        // so it passed while the percentage was in fact cut from every row in the pack. A case
-        // picked for convenience is immune to the defect. These three are lifted from the
-        // planner shot that exposed it, and 21 characters is an ordinary name here, not a
-        // worst case.
-        String[] labels = {"Nethengeic Rune", "Mildly Recursive Goo", "Strong Mythic Essence"};
-        for (String label : labels) {
-            String row = label + NodeRowText.SEPARATOR + NodeRowText.meta(node);
-            // The label column at depth d, from `PlannerWidgets.row`'s own arithmetic.
-            for (int depth = 0; depth <= 8; depth++) {
-                int indent = Math.min(depth, 8) * 6;      // MAX_INDENT_DEPTH * INDENT
-                int x = indent + (10 + 2) + (52 + 2);     // ICON + GAP, QTY + GAP
-                int labelWidth = 400 - 6 * 2 - x;         // PANEL_WIDTH - PADDING * 2
-                String fitted = NodeRowText.fit(row, labelWidth);
-                assertTrue(label + " at depth " + depth + " lost the yield from: " + fitted,
-                           fitted.contains("0.1%"));
-            }
+        // THE THRESHOLD, NOT A COMFORTABLE SUBSET. An earlier version of this ran against
+        // `yieldNode`'s own five-character "Thing" and passed at every depth while the
+        // percentage was in fact cut from every real row; a case picked for convenience is
+        // immune to the defect. Its replacement used labels up to 21 characters and still
+        // proved less than its name claimed, because the fixtures carry 29 and 32.
+        //
+        // So this asserts BOTH SIDES of the measured boundary. The label column is 53
+        // characters at depth 0 and 45 at the indent cap; the meta is 16 and the separator 3,
+        // so 45 - 19 = 26 is the longest label that keeps the percentage at every depth.
+        for (int depth = 0; depth <= 8; depth++) {
+            String fitted = NodeRowText.fit(
+                    "Twenty Six Characters Here" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
+                    columnAtDepth(depth));
+            assertTrue("26 chars must survive at depth " + depth + ": " + fitted,
+                       fitted.contains("0.1%"));
         }
+
+        // AND THE LIMIT, NAMED RATHER THAN LEFT FOR A SCREENSHOT TO FIND. These two are real
+        // labels from the reference plans, and they lose the percentage at the indent cap by 3
+        // and 6 characters. Measured over the committed fixtures: 12 of 769 rows in
+        // `plan-fluid-chain` and 1 of 52 in `plan-truncated`, about 1.6%.
+        //
+        // THIS IS NOT A TODO. The row cannot carry a 32-character label, a run count and a
+        // percentage at once, and the only way to make it would be evicting something else --
+        // which is the trade #232 is under a hard no-eviction constraint against. A future
+        // change that shortens the phrase should move these numbers and update them here.
+        for (String tooLong : new String[] {"[fluid] Molten Aluminum Brass",
+                                            "Universal Constellation Princess"}) {
+            String fitted = NodeRowText.fit(
+                    tooLong + NodeRowText.SEPARATOR + NodeRowText.meta(node), columnAtDepth(8));
+            assertFalse("this label is known NOT to fit; if it now does, the width changed and"
+                        + " the 1.6% above is stale: " + fitted, fitted.contains("0.1%"));
+        }
+    }
+
+    /**
+     * The label column at one indent depth, from `PlannerWidgets.row`'s own arithmetic:
+     * `PANEL_WIDTH - PADDING * 2`, less the indent, `ICON + GAP` and `QTY + GAP`.
+     */
+    private static int columnAtDepth(int depth) {
+        return 400 - 6 * 2 - (Math.min(depth, 8) * 6 + (10 + 2) + (52 + 2));
     }
 
     @Test
