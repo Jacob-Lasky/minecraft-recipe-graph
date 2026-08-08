@@ -189,6 +189,21 @@ public class ShotScreensTest {
         assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("ae2-probe"));
     }
 
+    /**
+     * #201's artifact is two runs of one screen, so the name has to survive a rename.
+     *
+     * WORTH ITS THREE LINES BECAUSE OF WHAT A MISSING SCREEN LOOKS LIKE FROM THE OUTSIDE. A
+     * shot run against an unregistered name exits non-zero with no PNG -- which is also what a
+     * boot that died and a boot that measured somebody else's jar look like. This is the cheap
+     * one of the three to rule out, and ruling it out here means it never has to be ruled out
+     * by launching a client.
+     */
+    @Test
+    public void thePlannerRecoveryScreenIsReachableByName() {
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-recovery"));
+    }
+
     @Test
     public void theJeiKeybindProbeIsReachableByName() {
         // Same reasoning again, and it is the only assertion about `JeiKeybindShot` that a

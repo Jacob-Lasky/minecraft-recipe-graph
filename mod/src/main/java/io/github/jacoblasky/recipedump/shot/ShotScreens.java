@@ -294,6 +294,15 @@ public final class ShotScreens {
                 LivePlanShot.open(arg);
             }
         });
+        // The only screen that photographs the planner RECOVERING rather than a finished
+        // state. See PlannerRecoveryShot: `:loading` and `:recovered` are one artifact in two
+        // runs, and the second one is a probe as well as a picture (#201).
+        register("planner-recovery", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerRecoveryShot.open(arg);
+            }
+        });
         register("planner-selected", new Opener() {
             @Override
             public void open(String arg) {

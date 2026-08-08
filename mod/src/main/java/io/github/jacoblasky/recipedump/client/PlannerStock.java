@@ -111,7 +111,25 @@ public final class PlannerStock {
      * Otherwise the ask goes out and the reply runs this.
      */
     public static void planWhenRead(Runnable plan) {
-        if (hold(plan, canAsk())) {
+        planWhenRead(plan, canAsk());
+    }
+
+    /**
+     * The same, told whether there is anyone to ask rather than working it out.
+     *
+     * SPLIT FROM {@link #canAsk} SO A WHOLE PATH THROUGH HERE CAN BE EXERCISED, which
+     * {@link #hold} on its own cannot give: `hold` is the decision, and a caller that wants to
+     * prove its plan RAN has to get past the ask as well. #201's recovery is exactly that
+     * caller -- `PlannerEntry.resumeWhenTheGraphLands` replays a target through this, and the
+     * assertion worth making about it is that a plan for that target finished, not that a
+     * boolean came back.
+     *
+     * `LiveStock.request` IS STILL BEHIND `hold`, so nothing here can put a megabyte of item
+     * list on the wire that the one-argument form would not have. The only line this hides from
+     * a caller is the connection check.
+     */
+    static void planWhenRead(Runnable plan, boolean canAsk) {
+        if (hold(plan, canAsk)) {
             LiveStock.request();
         }
     }
@@ -169,13 +187,18 @@ public final class PlannerStock {
     /**
      * True when there is a server to ask.
      *
-     * NOT REACHABLE FROM A TEST, which is why {@link #hold} takes the answer as an argument:
-     * loading `Minecraft` needs LWJGL and a JUnit classpath has none, so a method naming it
-     * throws `NoClassDefFoundError` before its first line. The null check on `mc` is still
-     * worth its line for the same reason the connection check is -- the screenshot harness
-     * runs with a client and no server.
+     * NOT REACHABLE FROM A TEST, which is why {@link #hold} and {@link #planWhenRead(Runnable,
+     * boolean)} both take the answer as an argument. MEASURED rather than assumed, 2026-08-08
+     * on this workspace's own test classpath: a JUnit case calling `Minecraft.getMinecraft()`
+     * dies with `NoClassDefFoundError: org/lwjgl/opengl/OpenGLException` before the method's
+     * first line, and so does anything that calls into this. RetroFuturaGradle puts the patched
+     * Minecraft on the test classpath and does NOT put LWJGL's natives-bearing half there, so
+     * the class links and its initialiser cannot run.
+     *
+     * The null check on `mc` is still worth its line for the same reason the connection check
+     * is -- the screenshot harness runs with a client and no server.
      */
-    private static boolean canAsk() {
+    static boolean canAsk() {
         Minecraft mc = Minecraft.getMinecraft();
         return mc != null && mc.getConnection() != null;
     }
