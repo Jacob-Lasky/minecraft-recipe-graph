@@ -6,7 +6,7 @@ import io.github.jacoblasky.recipedump.client.machines.MachinesEntry;
 import io.github.jacoblasky.recipedump.client.machines.MachinesWidgets;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
-import io.github.jacoblasky.recipedump.common.MachinesService;
+import io.github.jacoblasky.recipedump.common.ScenarioService;
 import io.github.jacoblasky.recipedump.plan.MachineInfo;
 import io.github.jacoblasky.recipedump.plan.MachineTable;
 
@@ -151,7 +151,7 @@ final class MachinesShot {
             ShotHarness.log("machines: " + GraphService.get().describe());
             return null;
         }
-        final MachinesService machines = MachinesService.get();
+        final ScenarioService machines = ScenarioService.get();
         machines.ensure();
         // THROUGH `ShotWaits` AND NOT A LOOP HERE. This was a third hand-rolled bounded poll
         // until #254's review, and `LivePlanShot.awaitGraph`'s own comment already said why
@@ -161,8 +161,8 @@ final class MachinesShot {
                 new ShotWaits.Busy() {
                     @Override
                     public boolean busy() {
-                        return machines.state() == MachinesService.State.BUILDING
-                                || machines.state() == MachinesService.State.IDLE;
+                        return machines.state() == ScenarioService.State.BUILDING
+                                || machines.state() == ScenarioService.State.IDLE;
                     }
                 })) {
             return null;
@@ -188,7 +188,7 @@ final class MachinesShot {
 
     /** The not-yet panel to draw when {@link #resolve} came back with nothing. */
     private static PlannerState state() {
-        PlannerState state = MachinesEntry.stateFor(GraphService.get(), MachinesService.get());
+        PlannerState state = MachinesEntry.stateFor(GraphService.get(), ScenarioService.get());
         // NEVER NULL HERE BY CONSTRUCTION -- `resolve` only returns null when the graph or the
         // resolve failed, both of which `stateFor` answers for. Guarded anyway, because a null
         // handed to `statePanel` would NPE inside a panel build, which `WidgetTree` swallows

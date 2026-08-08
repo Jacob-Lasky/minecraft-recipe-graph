@@ -1,5 +1,7 @@
 package io.github.jacoblasky.recipedump.client.machines;
 
+import io.github.jacoblasky.recipedump.client.browse.BrowseActions;
+import io.github.jacoblasky.recipedump.client.browse.BrowseTabs;
 import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
 import io.github.jacoblasky.recipedump.client.planner.NodeStatus;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
@@ -113,7 +115,7 @@ public final class MachinesWidgets {
      * the next click would toggle from another.
      */
     public static ModularPanel machinesPanel(MachineTable table, MachineTable.Filter filter,
-                                             MachinesActions actions) {
+                                             MachinesActions actions, BrowseActions nav) {
         MachineTable.Narrowed narrowed = table.narrowed(filter);
         List<MachineTable.Row> rows = table.rows(filter);
 
@@ -122,6 +124,15 @@ public final class MachinesWidgets {
         body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
 
         int y = 0;
+        // THE STRIP COSTS THIS PANEL ONE ROW OF TABLE, AND IT IS WORTH IT (#255). Until it
+        // existed nothing on any screen said there was anywhere else to go: the machines table
+        // was reachable only by knowing to hold shift, and the other two were not reachable at
+        // all. A screen a player cannot find is a screen that did not ship.
+        body.child(BrowseTabs.strip(BrowseTabs.Tab.MACHINES, nav, CONTENT_WIDTH).pos(0, y));
+        y += ROW_HEIGHT + 1;
+        // THE HEADING NO LONGER SAYS "Machines", because the lit tab above it does. Spending a
+        // second line on the screen's own name when it is already on screen would be the one
+        // luxury a 388px panel cannot afford twice.
         body.child(PlannerWidgets.heading(heading(table), CONTENT_WIDTH).pos(0, y));
         y += LINE + 1;
 
@@ -163,18 +174,23 @@ public final class MachinesWidgets {
     }
 
     /**
-     * `Machines -- 503 categories, 117,681 recipes`.
+     * `503 categories, 117,681 recipes`.
      *
      * BOTH TOTALS, because either alone flatters. 503 categories sounds small next to a pack
      * this size until the recipe figure says what they carry, and the recipe figure alone says
      * nothing about how many separate machines a player has to care about.
+     *
+     * NO LONGER PREFIXED "Machines --" SINCE #255 PUT A LIT TAB DIRECTLY ABOVE IT. The name was
+     * carrying the "which screen is this" job while nothing else could; the strip does it now,
+     * and repeating it would spend nine characters of a 64-character line saying what the line
+     * above already says.
      */
     static String heading(MachineTable table) {
         long recipes = 0;
         for (int count : table.recipeTotals()) {
             recipes += count;
         }
-        return "Machines -- " + NodeRowText.grouped(table.allRows().size()) + " categories, "
+        return NodeRowText.grouped(table.allRows().size()) + " categories, "
                 + NodeRowText.grouped(recipes) + " recipes";
     }
 
