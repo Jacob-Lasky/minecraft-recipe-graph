@@ -433,8 +433,15 @@ class Target(object):
 # back `have`, the ingots cover half of it and come back `partial`. One chest would give two
 # `partial` nodes and no `have` at all, which is what the coverage check caught -- an
 # `in-stock` fixture in which nothing is ever fully in stock.
+#
+# THE CRAFTABLE MOVED WITH THE ROUTE AT #246, and the generator's coverage check is what
+# caught it rather than a human noticing. `railcraft:ore_metal_poor` was the leaf back when a
+# stocked ingot made a Block of Iron cost 1.0 and the plan unpacked one instead of smelting;
+# with stock overlaid after the relaxation the hopper smelts `minecraft:iron_ore` and the poor
+# ore is not in the tree at all. Declaring a craftable the plan never reaches is a fixture that
+# passes forever while asserting nothing, which is exactly what the check refused to write.
 STOCKED = scenario(have={"minecraft:iron_ingot": 5, "minecraft:chest": 2},
-                   craftables=["railcraft:ore_metal_poor"])
+                   craftables=["minecraft:iron_ore"])
 
 # A placed cobblestone generator, spelled as `ae2_inventory.scan` records a tile entity:
 # registry id -> how many were seen. Proves the PLACED half of `generators.resolve`; the
@@ -492,7 +499,7 @@ TARGETS = [
             "a request for two has to cover the first and part of the second, so two "
             "sibling branches cannot both claim the same five ingots. The single-pass "
             "ordered walk in `Solver.take` is the only thing that gets this right, and "
-            "nothing else in this set exercises `used_from_stock` at all. The poor iron "
+            "nothing else in this set exercises `used_from_stock` at all. The iron "
             "ore at the bottom is declared AE2-autocraftable, which is a fourth path "
             "again: it comes back `have` with a note and contributes NOTHING to "
             "`used_from_stock`, because a craftable is not a finite pile and adding it to "

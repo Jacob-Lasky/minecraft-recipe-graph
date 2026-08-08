@@ -266,24 +266,35 @@ public class PlanJsonTest {
 
     @Test
     public void theMachinesToBuildListReadsBackWithItsReasons() {
-        PlanView plan = PlanFixtures.load("plan-in-stock");
-        // 4 before #172, 3 before #211/#169. Each drop is the plan getting SHORTER rather than
-        // losing information, and each has its own cause:
+        // `plan-in-stock` HELD THIS UNTIL #246 AND NOW HAS NO MACHINES AT ALL. Its history
+        // is worth keeping because every entry is the same shape -- a machine on the list for
+        // a reason that stopped being true -- and #246 is the fourth and largest:
         //
         //   #172        the Packager was only on the list because the plan routed through a
         //               cyclic recipe that needed it, and the ranking stopped picking that.
         //   #211/#169   Chiseling was only on it because a DISCARDED attempt entered it.
         //               `Solver.snapshot` did not carry `machinesNeeded`, which its own
         //               javadoc forbids, so every attempt the cycle guard threw away left its
-        //               machine behind. Nothing in this plan's tree is chiselled -- that is
-        //               what made the leak visible, and it is why a machine list is a weak
-        //               place to notice one.
-        assertEquals(2, plan.machinesToBuild().size());
+        //               machine behind.
+        //   #246        Casting and Smelting were on it because a stocked iron ingot made a
+        //               Block of Iron cost 1.0, so the plan unpacked a block rather than
+        //               smelting ore. Stock is overlaid after the relaxation now, the hopper
+        //               smelts, and the list is empty -- which is why this test had to move
+        //               rather than have its number edited down again.
+        //
+        // A machine list is a weak place to notice a leak and a weaker place to assert from,
+        // so this now reads a fixture NAMED for having machines.
+        PlanView plan = PlanFixtures.load("plan-machine-choice");
+        assertEquals(7, plan.machinesToBuild().size());
         PlanView.MachineRow first = plan.machinesToBuild().get(0);
-        assertEquals("tconstruct.casting_table", first.category());
-        assertEquals("Casting", first.machine());
-        assertEquals("craftable: tconstruct:casting", first.why());
+        assertEquals("nuclearcraft_chemical_reactor", first.category());
+        assertEquals("Chemical Reactor", first.machine());
+        assertEquals("craftable: nuclearcraft:chemical_reactor_idle", first.why());
         assertEquals("buildable", first.stateLabel());
+
+        // The plan this used to read still exists and still exercises the panel; what it no
+        // longer has is a machine, and saying so here is what stops someone moving it back.
+        assertTrue(PlanFixtures.load("plan-in-stock").machinesToBuild().isEmpty());
     }
 
     /**

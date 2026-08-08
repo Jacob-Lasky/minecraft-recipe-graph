@@ -26,22 +26,9 @@
   "exhausted": false,
   "from_emc": [],
   "from_sources": [],
-  "machines_to_build": [
-   {
-    "category": "tconstruct.casting_table",
-    "machine": "Casting",
-    "state": "buildable",
-    "why": "craftable: tconstruct:casting"
-   },
-   {
-    "category": "tconstruct.smeltery",
-    "machine": "Smelting",
-    "state": "buildable",
-    "why": "craftable: tconstruct:smeltery_controller"
-   }
-  ],
+  "machines_to_build": [],
   "max_nodes": 4000,
-  "nodes": 6,
+  "nodes": 4,
   "pins_overruled": {},
   "qty": 2,
   "shopping_list": [],
@@ -54,65 +41,30 @@
    "children": [
     {
      "alternatives": 172,
-     "category": "minecraft.crafting",
+     "category": "minecraft.smelting",
      "children": [
       {
-       "alternatives": 6,
-       "category": "tconstruct.casting_table",
-       "children": [
-        {
-         "alternatives": 114,
-         "category": "tconstruct.smeltery",
-         "children": [
-          {
-           "key": "railcraft:ore_metal_poor",
-           "kind": "item",
-           "label": "Poor Iron Ore",
-           "name": "Poor Iron Ore",
-           "need": 14,
-           "note": "AE2 can autocraft",
-           "status": "have"
-          }
-         ],
-         "key": "fluid:iron",
-         "kind": "fluid",
-         "label": "Molten Iron",
-         "machine": "Smelting",
-         "machine_state": "buildable",
-         "machine_why": "craftable: tconstruct:smeltery_controller",
-         "name": "[fluid] Molten Iron",
-         "need": 1296,
-         "per_run": 96,
-         "recipe": "hei:tconstruct.smeltery:129306",
-         "runs": 14,
-         "status": "craft"
-        }
-       ],
-       "key": "minecraft:iron_block",
+       "alt_count": 14,
+       "key": "minecraft:iron_ore",
        "kind": "item",
-       "label": "Block of Iron",
-       "machine": "Casting",
-       "machine_state": "buildable",
-       "machine_why": "craftable: tconstruct:casting",
-       "name": "Block of Iron",
-       "need": 1,
-       "per_run": 1,
-       "recipe": "hei:tconstruct.casting_table:141764",
-       "runs": 1,
-       "status": "craft"
+       "label": "Iron Ore",
+       "name": "Iron Ore",
+       "need": 5,
+       "note": "AE2 can autocraft",
+       "status": "have"
       }
      ],
      "from_stock": 5,
      "key": "minecraft:iron_ingot",
      "kind": "item",
      "label": "Iron Ingot",
-     "machine": "Crafting",
+     "machine": "Smelting",
      "machine_state": "have",
      "name": "Iron Ingot",
      "need": 10,
-     "per_run": 9,
-     "recipe": "hei:minecraft.crafting:247",
-     "runs": 1,
+     "per_run": 1,
+     "recipe": "hei:minecraft.smelting:31344",
+     "runs": 5,
      "status": "partial"
     },
     {
@@ -155,12 +107,12 @@
     "qty": 2
    }
   ],
-  "work": 8,
+  "work": 4,
   "work_budget": 80000
  },
  "scenario": {
   "craftables": [
-   "railcraft:ore_metal_poor"
+   "minecraft:iron_ore"
   ],
   "emc_knowledge": {},
   "have": {
@@ -178,5 +130,5 @@
    ".": 1
   }
  },
- "why": "Inventory is CONSUMED, not just checked: one hopper's worth of stock against a request for two has to cover the first and part of the second, so two sibling branches cannot both claim the same five ingots. The single-pass ordered walk in `Solver.take` is the only thing that gets this right, and nothing else in this set exercises `used_from_stock` at all. The poor iron ore at the bottom is declared AE2-autocraftable, which is a fourth path again: it comes back `have` with a note and contributes NOTHING to `used_from_stock`, because a craftable is not a finite pile and adding it to the pool would report a made-up number as drawn from stock. `craftables` is read by `expand`, `score_recipe`, `ore_backed`, `_alternative_rank` and `resolve_ore`, so a port that dropped it would still pass every other fixture in this set."
+ "why": "Inventory is CONSUMED, not just checked: one hopper's worth of stock against a request for two has to cover the first and part of the second, so two sibling branches cannot both claim the same five ingots. The single-pass ordered walk in `Solver.take` is the only thing that gets this right, and nothing else in this set exercises `used_from_stock` at all. The iron ore at the bottom is declared AE2-autocraftable, which is a fourth path again: it comes back `have` with a note and contributes NOTHING to `used_from_stock`, because a craftable is not a finite pile and adding it to the pool would report a made-up number as drawn from stock. `craftables` is read by `expand`, `score_recipe`, `ore_backed`, `_alternative_rank` and `resolve_ore`, so a port that dropped it would still pass every other fixture in this set."
 }

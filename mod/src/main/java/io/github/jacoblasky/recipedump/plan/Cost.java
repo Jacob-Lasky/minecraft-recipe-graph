@@ -635,8 +635,12 @@ public strictfp final class Cost {
                 in.passes(), in.states(), null, demoted);
         Map<Integer, int[]> machineItems = in.machineItems();
         if (machineItems == null || machineItems.isEmpty()) {
-            return new CostTable(firstPass, null, demoted);
+            return new CostTable(stockFloor(firstPass, in), null, demoted);
         }
+        // Entry costs come from the PRE-STOCK table on purpose: what a machine costs to build
+        // is a fact about the pack, not about one player's shelf, and a stocked zero here
+        // would make a machine look buildable-for-nothing because its parts happen to be in
+        // the network. Same propagation, one layer up.
         double[] entry = machineEntryCosts(graph, machineItems,
                 new CostTable(firstPass, null, demoted));
         // A SECOND CLEAN RELAXATION FROM THE SAME SEED, not a continuation of the first.
@@ -645,7 +649,30 @@ public strictfp final class Cost {
         double[] second = settleReshaped(graph,
                 relax(graph, seed.clone(), in.passes(), in.states(), entry, demoted),
                 in.passes(), in.states(), entry, demoted);
-        return new CostTable(second, entry, demoted);
+        return new CostTable(stockFloor(second, in), entry, demoted);
+    }
+
+    /**
+     * Overlay "you already own this" onto a settled table. #246, and the mirror of
+     * `cost._stock_floor`, whose docstring carries the argument in full.
+     *
+     * The short version: a stocked price answers "what does obtaining one cost me" and the
+     * relaxation asks "what does MAKING one cost". Those agree for a key you can only buy and
+     * differ for a key you can also build, and seeding conflated them. You cannot spend five
+     * ingots to manufacture ingots, so the discount must not reach a route that comes back to
+     * the discounted key -- and withholding it from the walk is the cheapest way to say so.
+     *
+     * `Math.min`, NEVER assignment: owning one must not RAISE a price that is somehow already
+     * below free. Nothing is today, but SOURCE_COST and the EMC band both sit under
+     * BASE_RAW_COST and in this file the ordering is the claim, not the magnitude.
+     */
+    static double[] stockFloor(double[] cost, CostInputs in) {
+        for (int key : in.stockKeys()) {
+            if (key >= 0 && key < cost.length) {
+                cost[key] = Math.min(cost[key], 0.0);
+            }
+        }
+        return cost;
     }
 
     /**
@@ -698,11 +725,15 @@ public strictfp final class Cost {
         double[] cost = new double[graph.keyCount()];
         Arrays.fill(cost, Double.POSITIVE_INFINITY);
 
-        // Anything in stock is free at the margin; that is what makes the solver prefer using
-        // what you already own without needing a separate rule for it.
-        for (int key : in.stockKeys()) {
-            cost[key] = 0.0;
-        }
+        // STOCK IS DELIBERATELY ABSENT HERE AND OVERLAID BY {@link #stockFloor} AFTER the
+        // relaxation. #246. It used to be seeded, with the comment "free at the margin", and
+        // that is the step the issue is about: a pile is a fact about a KEY, not an input to
+        // production economics, so letting it into the walk lets the discount propagate into
+        // everything derived from it. Nine free ingots made a Block of Iron cost 1.0, the
+        // solver unpacked a block rather than smelting ore, and the stock laundered itself
+        // into a route that regenerates the very thing it was. The python half carries the
+        // full argument on `cost._stock_floor`; both must move together or the golden plan
+        // fixtures diverge, which is the only thing that would catch it.
 
         // An infinite generator's output is near-free but NOT free. At zero the ranker cannot
         // see quantity and will happily plan a swimming pool; at SOURCE_COST it still beats

@@ -483,9 +483,15 @@ public class PlannerLayoutTest {
         int inner = PlannerWidgets.TODO_WIDTH - PlannerWidgets.PADDING * 2;
         // Recomposed rather than hardcoded, so this stays an identity between the two layers
         // instead of a number that has to be edited whenever a section's wording changes.
+        // `addSection` RETURNS EARLY ON AN EMPTY BODY, so the header is conditional and this
+        // recomposition has to be too. It was `1 + size`, which was right only while
+        // plan-in-stock had machines to build; at #246 its list went empty and the identity
+        // broke by exactly one row. Mirroring the production rule rather than the count keeps
+        // this an identity between the two layers instead of a number that rots.
+        List<String> machines = NodeRowText.machineLines(plan.machinesToBuild(), inner);
         int expected = 1 + 1 // "nothing on the list", "still needed for this plan:"
                 + 1          // "nothing outstanding": plan-in-stock has an empty shopping list
-                + 1 + NodeRowText.machineLines(plan.machinesToBuild(), inner).size()
+                + (machines.isEmpty() ? 0 : 1 + machines.size())
                 + 1 + NodeRowText.entryLines(plan.usedFromStock(), inner).size();
         assertEquals("every composed line must become a row", expected, rows);
     }
