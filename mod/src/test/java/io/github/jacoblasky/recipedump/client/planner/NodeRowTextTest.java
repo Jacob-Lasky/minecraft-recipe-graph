@@ -567,12 +567,25 @@ public class NodeRowTextTest {
 
     @Test
     public void aFractionalPerRunIsDrawnAtThePrecisionItCarries() {
-        // The companion to the percentage: `per_run` is the expected yield after #223 and is
-        // itself fractional, so the amount must not round to a whole number and imply the
-        // machine produces one each time.
+        // `per_run` is the expected yield after #223 and is itself fractional, so the amount
+        // must not round to a whole number and imply the machine produces one each time.
+        //
+        // ON A CERTAIN NODE, because a CHANCED one no longer draws `per_run` at all: it gives
+        // up its place to the percentage, which does not fit beside it at real label lengths.
+        // This still has to be asserted, because a certain recipe with a fractional expected
+        // yield is reachable -- `Recipe.expected_yield` refuses to call a sum of chanced slots
+        // whole even when it lands on an integer -- and it is the only case left that draws a
+        // fractional `per_run`. See `yieldBit` for the width measurement.
         String meta = NodeRowText.meta(
-                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+                yieldNode(1000L, Double.valueOf(0.004), null));
         assertTrue(meta, meta.contains("0.004 per run"));
+
+        // And the chanced node trades it away rather than drawing both.
+        String chanced = NodeRowText.meta(
+                yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
+        assertFalse("per_run must give up its place to the chance: " + chanced,
+                    chanced.contains("per run"));
+        assertTrue(chanced, chanced.contains(", 0.1%"));
     }
 
     @Test
@@ -625,32 +638,51 @@ public class NodeRowTextTest {
     @Test
     public void theYieldSurvivesTheCutAtTheDepthsRealPlansReach() {
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
-        String row = NodeRowText.label(node) + NodeRowText.SEPARATOR + NodeRowText.meta(node);
 
-        // The label column at depth d, from `PlannerWidgets.row`'s own arithmetic.
-        for (int depth = 0; depth <= 8; depth++) {
-            int indent = Math.min(depth, 8) * 6;      // MAX_INDENT_DEPTH * INDENT
-            int x = indent + (10 + 2) + (52 + 2);     // ICON + GAP, QTY + GAP
-            int labelWidth = 400 - 6 * 2 - x;         // PANEL_WIDTH - PADDING * 2
-            String fitted = NodeRowText.fit(row, labelWidth);
-            assertTrue("depth " + depth + " lost the yield from: " + fitted,
-                       fitted.contains("0.1%"));
+        // REAL LABELS, AND THE FIRST VERSION OF THIS TEST IS WHY IT INSISTS ON THEM. It ran
+        // against `yieldNode`'s own five-character "Thing", where the row fits at every depth,
+        // so it passed while the percentage was in fact cut from every row in the pack. A case
+        // picked for convenience is immune to the defect. These three are lifted from the
+        // planner shot that exposed it, and 21 characters is an ordinary name here, not a
+        // worst case.
+        String[] labels = {"Nethengeic Rune", "Mildly Recursive Goo", "Strong Mythic Essence"};
+        for (String label : labels) {
+            String row = label + NodeRowText.SEPARATOR + NodeRowText.meta(node);
+            // The label column at depth d, from `PlannerWidgets.row`'s own arithmetic.
+            for (int depth = 0; depth <= 8; depth++) {
+                int indent = Math.min(depth, 8) * 6;      // MAX_INDENT_DEPTH * INDENT
+                int x = indent + (10 + 2) + (52 + 2);     // ICON + GAP, QTY + GAP
+                int labelWidth = 400 - 6 * 2 - x;         // PANEL_WIDTH - PADDING * 2
+                String fitted = NodeRowText.fit(row, labelWidth);
+                assertTrue(label + " at depth " + depth + " lost the yield from: " + fitted,
+                           fitted.contains("0.1%"));
+            }
         }
     }
 
     @Test
-    public void theProseFormWouldNotHaveSurvivedIt() {
+    public void theRejectedFormsWouldNotHaveSurvivedIt() {
         // THE CONTROL, and without it the assertion above is a claim about nothing. It has to
         // be shown that the budget is tight enough for the wording to matter, or `0.1%`
         // surviving proves only that the row was never short of room.
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
-        String prose = NodeRowText.label(node) + NodeRowText.SEPARATOR
-                + NodeRowText.meta(node).replace(", 0.1%", ", yields 0.1% of the time");
-        int x = 8 * 6 + (10 + 2) + (52 + 2);
-        int labelWidth = 400 - 6 * 2 - x;
-        assertFalse("the abbreviation is not earning anything at this width: "
+        // BOTH REJECTED FORMS, at the SHALLOWEST depth, which is the strongest place to refuse
+        // them: if they lose the number where the row is widest they lose it everywhere. The
+        // first is the original prose. The second is the abbreviation with `per_run` still
+        // beside it, which is what this branch shipped before the shot came back byte-identical
+        // to the one before it -- the cut had landed before the part that differed.
+        String meta = NodeRowText.meta(node);
+        String prose = "Mildly Recursive Goo" + NodeRowText.SEPARATOR
+                + meta.replace(", 0.1%", ", 0.004 per run, yields 0.1% of the time");
+        String withPerRun = "Mildly Recursive Goo" + NodeRowText.SEPARATOR
+                + meta.replace(", 0.1%", ", 0.004 per run, 0.1%");
+        int labelWidth = 400 - 6 * 2 - ((10 + 2) + (52 + 2));
+        assertFalse("the original form, prose with per_run beside it: "
                     + NodeRowText.fit(prose, labelWidth),
                     NodeRowText.fit(prose, labelWidth).contains("0.1%"));
+        assertFalse("keeping per_run beside the chance is not what the width rules out: "
+                    + NodeRowText.fit(withPerRun, labelWidth),
+                    NodeRowText.fit(withPerRun, labelWidth).contains("0.1%"));
     }
 
     @Test

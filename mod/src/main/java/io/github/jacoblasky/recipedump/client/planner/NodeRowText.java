@@ -578,23 +578,42 @@ public final class NodeRowText {
         }
         StringBuilder sb = new StringBuilder();
         sb.append(quantityPlain(node.runs())).append(node.runs() == 1L ? " run" : " runs");
-        if (node.perRun() > 0.0) {
+        double chance = node.yieldChance();
+        boolean chanced = chance > 0.0 && chance < 1.0;
+        // `per_run` GIVES UP ITS PLACE TO THE CHANCE, and this is measured rather than a taste
+        // call (#252). All three parts plus a realistic label do not fit: at `PANEL_WIDTH` the
+        // label column is 53 characters at depth 0 and 45 at the indent cap, `1,000 runs, 0.004
+        // per run, 0.1%` is 31, and a 20-character name like `Mildly Recursive Goo` puts the
+        // row at 54. The percentage is then cut at EVERY depth, which is how the first two
+        // planner shots came back byte-identical: the cut landed before the part that differed.
+        //
+        // SO THE CHOICE IS WHICH TWO NUMBERS SURVIVE, NOT HOW TO PHRASE THREE. Dropping the
+        // per-run quantity takes the row to 16 characters of meta and the percentage then
+        // survives at every depth for every label in the reference plans. It is the right one
+        // to drop: on a chanced recipe `per_run` is already an EXPECTATION rather than a count
+        // -- `Solver` writes the expected yield there -- so it is the number least likely to be
+        // read literally, and it is recoverable as `need / runs`. How often the machine pays
+        // out is not recoverable from anything else on the row.
+        //
+        // A CERTAIN RECIPE KEEPS IT, because there is no chance competing for the width and
+        // `4 per run` is then a plain fact rather than an expectation.
+        if (node.perRun() > 0.0 && !chanced) {
             sb.append(", ").append(amount(node.perRun())).append(" per run");
         }
-        double chance = node.yieldChance();
-        if (chance > 0.0 && chance < 1.0) {
+        if (chanced) {
             // A BARE PERCENTAGE, AND THE FIRST SHOT OF THIS RENDER IS WHY (#252). The phrase
-            // was `yields 0.1% of the time`, which is 23 characters to carry 4 characters of
-            // content, and `fit` cuts the meta run from the right: on the planner shot at real
-            // indent depths the cut landed INSIDE the number, so rows read `1 run, 1,0...` and
-            // the yield -- the thing this issue exists to show -- was gone. Trading "the number
-            // is absent" for "the number is present and unreadable" is not a fix, and the
-            // second is worse because it looks like one.
+            // was `yields 0.1% of the time`, 23 characters carrying 4 of content, and `fit`
+            // cuts the meta run from the right, so on the shot the cut landed inside the run
+            // count and the yield was gone. Trading "the number is absent" for "the number is
+            // present and unreadable" is not a fix, and the second is worse because it looks
+            // like one. The abbreviation alone was NOT enough; see the width note above for
+            // the measurement and for why `per_run` gives up its place as well.
             //
-            // UNAMBIGUOUS BECAUSE OF WHAT IT SITS NEXT TO. It always follows a run count and a
-            // per-run quantity, and there is no other proportion on the row it could be read
-            // as. DO NOT restore the prose without re-measuring `theYieldSurvivesTheCutAt...`
-            // below, which pins the depth at which the percentage stops surviving.
+            // UNAMBIGUOUS BECAUSE OF WHAT IT SITS NEXT TO: it always follows a run count, and
+            // a proportion beside a count of runs has only one reading. DO NOT restore the
+            // prose, and DO NOT restore `per_run` beside it, without re-running
+            // `theYieldSurvivesTheCutAtTheDepthsRealPlansReach`, which measures both against
+            // real label lengths rather than a short synthetic one.
             sb.append(", ").append(percent(chance));
         }
         return sb.toString();
