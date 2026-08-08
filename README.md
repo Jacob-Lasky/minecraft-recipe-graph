@@ -692,7 +692,7 @@ The browse group is three tabs, and shift-right-click lands on the first:
 | --- | --- |
 | **Machines** | what can I build with? All 504 categories with their verdicts, filtered by state and by mod, and a per-category detail view listing every candidate block |
 | **Free** | why is *that* costing me nothing? Everything the planner will not charge for, with the evidence for each — a placed water source, a cobblestone generator, a curated default |
-| **Graph** | am I planning against the right graph? The file being read, the game instance the dump came from, the build that wrote it, and the totals as a fingerprint |
+| **Graph** | am I planning against the right graph? States a verdict — `pack: OK`, `pack: MISMATCH` or `pack: UNCHECKED` — then the evidence: the file being read, the instance the dump came from, the build that wrote it, and the totals |
 
 **One gesture and a tab strip, not three modifiers.** Three windows behind three chords is
 undiscoverable, and until the strip existed nothing on screen said there was anywhere else to
@@ -703,10 +703,21 @@ screen meant knowing to hold shift.
 complete is this graph" for whoever built it, and in game nobody is that person. The same
 numbers answer a question the browser never had to: `graph.json` is a file you copied into
 `config/mcrecipedump/` and it survives a pack update, so the live failure is a *stale* graph
-answering confidently for a pack that has moved. The tab leads with the instance path for
-exactly that comparison. The browser's twenty-five-biggest-categories table is dropped rather
-than ported — it is a maintainer's curiosity in a 1,424px table, and the machines tab already
-sorts by recipe count.
+answering confidently for a pack that has moved. The browser's twenty-five-biggest-categories
+table is dropped rather than ported — it is a maintainer's curiosity in a 1,424px table, and
+the machines tab already sorts by recipe count.
+
+**And it answers that question rather than handing you the inputs to it.** The dump records the
+jar set it saw; the mod is running inside the pack and can ask Forge what is actually loaded.
+Comparing the two is a check the CLI cannot make as well — `recipegraph build` compares a dump
+against a graph file, two artifacts, while in game one side is reality.
+
+**`UNCHECKED` is a third state and not a soft pass.** A dump written before schema 6 records no
+jar-set stamp, so there is nothing to compare. On the command line that check is simply silent,
+which is fine for a command; a screen has no equivalent of silence, and whatever it drew for
+that case would be read as "looks fine". So the three verdicts are three different words in
+three different colours, and the unchecked one says which half was missing — an old dump is
+fixed by redumping, an unreadable mod list is not something you can fix at all.
 
 **Free is read-only.** The web page can add a generator, switch one off and toggle the
 vanilla-water assumption; those write `source_overrides`, which the mod has no path for yet, so
