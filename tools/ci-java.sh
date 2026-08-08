@@ -31,11 +31,15 @@
 # WHAT IS LEFT IS NOT A CONSOLATION PRIZE. `graph/` and `plan/` import nothing but `java.*` and
 # gson: that is the graph reader, the solver, the cost model and every ordering contract the
 # golden fixtures freeze, which is to say all of the port that is about being RIGHT rather than
-# about being a Minecraft mod. It is a little over 40% of the suite; the run PRINTS the counts
-# rather than this comment carrying a number that has to be maintained to stay true. The purity
-# check below ASSERTS that boundary rather than assuming it, so the day someone imports
-# `net.minecraft` into `plan/` this job says exactly that instead of emitting forty "package
-# does not exist" errors.
+# about being a Minecraft mod. It is a minority of the suite, and the run PRINTS the fraction
+# rather than this comment carrying a number that has to be maintained to stay true. This
+# sentence carried one anyway until #244: "a little over 40%", which was approximately right
+# about the TEST count and noticeably wrong about the FILE count, and named neither, so it
+# could not be checked at all. Do not put the new figures here either.
+#
+# The purity check below ASSERTS that boundary rather than assuming it, so the day someone
+# imports `net.minecraft` into `plan/` this job says exactly that instead of emitting forty
+# "package does not exist" errors.
 #
 # WHAT THIS JOB DOES NOT COVER, stated here because a green tick that overstates itself is the
 # defect this repository has hit more than any other:
@@ -54,6 +58,17 @@
 #   - `tests/test_dist_jar.py`, which needs a built jar. It skips in the python job, which is
 #     what `tools/check.sh` builds a jar to prevent.
 #
+# AND THE RUN SAYS SO IMMEDIATELY ABOVE ITS VERDICT, because this header is read once and the
+# output is read every time (#244). See the counting block above `== run ==`.
+#
+# IT IS STILL ALLOWED TO EXIT 0, and that was a real design question rather than an oversight.
+# The alternative considered in #244 was a `--merge-gate` flag that fails on principle, to stop
+# this job ever being the last word before a merge. It is not here because nothing wraps this
+# script: CI runs it as one of three jobs, and a job engineered to go red would be muted within
+# a week, taking the compile and purity checks it also performs down with it. The green tick is
+# honest as long as it states its scope, and now it does. Revisit only if something starts
+# consuming this exit status as a merge condition.
+#
 # DO NOT "SIMPLIFY" THIS INTO A GRADLE INVOCATION without solving the pack-jar problem first;
 # it will fail on `checkPackJars` and the message will name a missing jar rather than the CI
 # design decision recorded above.
@@ -69,8 +84,14 @@ DEPS=$WORK/deps
 
 CORE_MAIN="mod/src/main/java/io/github/jacoblasky/recipedump/graph
 mod/src/main/java/io/github/jacoblasky/recipedump/plan"
-CORE_TEST="mod/src/test/java/io/github/jacoblasky/recipedump/graph
-mod/src/test/java/io/github/jacoblasky/recipedump/plan"
+# THE WHOLE TEST TREE, which `CORE_TEST` is a FRACTION OF and which the run now states rather
+# than leaving to this header (#244). `CORE_TEST` is built FROM it rather than beside it: the one
+# way the coverage arithmetic below can lie while everything still passes is the two of them
+# counting different trees, and deriving one from the other makes that structurally impossible
+# instead of merely checked.
+ALL_TEST=mod/src/test/java
+CORE_TEST="$ALL_TEST/io/github/jacoblasky/recipedump/graph
+$ALL_TEST/io/github/jacoblasky/recipedump/plan"
 # A file that MUST fail the purity check, so a rule that has stopped matching anything cannot
 # report the core as pure. A zero from a search is a claim about the search until the search has
 # been made to fail on purpose.
@@ -234,7 +255,85 @@ done
 classes=$(cd "$CLASSES" && find . -name '*Test.class' ! -name '*$*' \
     | sed 's|^\./||; s|\.class$||; s|/|.|g' | sort)
 [ -n "$classes" ] || die "no *Test.class in $CLASSES; nothing would have run"
-want=$(find $CORE_TEST -name '*Test.java' | wc -l)
+
+# -- the fraction, measured against the real tree ----------------------------------------------
+
+# WHAT THIS JOB LEAVES OUT, COUNTED AT RUN TIME AND PRINTED NEXT TO THE VERDICT (#244). The
+# header above already says which packages are excluded and why, but the header is read once and
+# the output is read every time. The output said `classes: 24, tests: 324 run, 0 failed` and
+# `java core green`, with nothing on either line to say that the count is a FRACTION. #243
+# shipped four stale assertions past exactly that: it moved values four `client/planner` tests
+# read, this job could not see any of them, and gradle caught them afterwards by luck.
+#
+# THE EXCLUDED COUNT IS NOT PINNED TO A NUMBER, deliberately, and this is the design question the
+# issue left open. Asserting "44 excluded" would fail on every legitimate test file anyone adds
+# under `client/`, and a check that fires on correct work gets edited until it stops rather than
+# read. What IS asserted below is the arithmetic and a non-empty exclusion, neither of which can
+# go stale and both of which catch what a pinned number cannot: a `find` that has stopped
+# matching the tree it is supposed to be measuring.
+# shellcheck disable=SC2086
+find $CORE_TEST -name '*Test.java' | sort > "$WORK/core-tests.txt"
+find "$ALL_TEST" -name '*Test.java' | sort > "$WORK/all-tests.txt"
+want=$(wc -l < "$WORK/core-tests.txt")
+total=$(wc -l < "$WORK/all-tests.txt")
+[ "$want" -gt 0 ] || die "no *Test.java under $CORE_TEST, so this job would compile nothing"
+# `-x -F` and not a substring match: one test file's path is a prefix of no other today, and
+# relying on that is how this quietly starts excluding a file it does run.
+grep -vxFf "$WORK/core-tests.txt" "$WORK/all-tests.txt" > "$WORK/not-run-tests.txt" || true
+not_run=$(wc -l < "$WORK/not-run-tests.txt")
+
+# Interpolated values sit at the END of their line on purpose: `die` prints the string as
+# written, so a long path spliced mid-sentence produces a 150-column line in a CI log.
+[ "$((want + not_run))" -eq "$total" ] || die "the two searches disagree: $want core test files
+   plus $not_run excluded is not the $total found under this root, so one of them is reading a
+   different tree than the other and the coverage line below would be arithmetic over nothing:
+   $ALL_TEST"
+# A ZERO HERE WOULD BE A CLAIM ABOUT THE SEARCH, not news about the suite, in the same way the
+# purity check's IMPURE_CONTROL is. This job cannot cover the whole tree while the pack-jar
+# problem at the top of this file is unsolved, so "nothing is excluded" means the search broke.
+[ "$not_run" -gt 0 ] || die "this job appears to run all $total test files, which cannot be true
+   while the pack jars named at the top of this file are unavailable to CI. The exclusion search
+   has stopped matching, so the banner would claim coverage that does not exist."
+
+# FILES ARE THE WRONG UNIT ON THEIR OWN, because a file is not a constant amount of checking.
+# "24 of 68 files" and "324 of 826 assertions" are the same defect stated at two resolutions, and
+# the second is the sharper one: it is the count of things that could have caught #243. Both are
+# printed, because a reader chasing a specific test thinks in files.
+#
+# COUNTED BY GREPPING `@Test`, WHICH IS A PROXY, AND THE PROXY IS CHECKED. A static count diverges
+# from what JUnit runs the moment anything uses `@RunWith(Parameterized)`, an inherited test
+# method or a `@Ignore`, so this hands the CORE figure to the runner, which compares it against
+# the number it actually ran and fails if they differ. That turns "the proxy is exact for this
+# tree" from an assumption into an assertion re-made on every run, which is the only way a
+# derived number belongs in output this job asks people to trust.
+core_assertions=$(xargs grep -hE '^[[:space:]]*@Test\b' < "$WORK/core-tests.txt" | wc -l)
+total_assertions=$(xargs grep -hE '^[[:space:]]*@Test\b' < "$WORK/all-tests.txt" | wc -l)
+not_run_assertions=$((total_assertions - core_assertions))
+[ "$core_assertions" -gt 0 ] || die "no @Test found in the $want core test files, so the
+   assertion counter has stopped matching this tree and every figure derived from it is wrong."
+
+# GROUPED BY TOP-LEVEL PACKAGE, from the tree rather than from a list. The package prefix comes
+# out of CORE_TEST rather than being restated, so there is no second copy to go stale; a file
+# outside it keeps its full path in the summary, which is ugly and true rather than silently
+# mislabelled.
+core_pkg=$(dirname "$(echo "$CORE_TEST" | head -n 1)")
+# THE LABEL IS EVERYTHING AFTER `uniq -c`'s COUNT, not `$2`. Two of the labels this can produce
+# contain a space (the root-package one, and the full path a file outside `$core_pkg` keeps), and
+# `$2` truncated them mid-word: "(the root package) 8" printed as "(the 8".
+groups=$(sed "s|^$core_pkg/||" "$WORK/not-run-tests.txt" \
+    | awk -F/ '{ print (NF == 1 ? "(the root package)" : $1 "/") }' \
+    | sort | uniq -c | sort -rn \
+    | awk '{ count = $1; sub(/^ *[0-9]+ +/, ""); \
+             printf "%s%s %s", (NR > 1 ? ", " : ""), $0, count } END { print "" }')
+# WRAPPED BY HAND at a width that survives the runner's indent, which prints continuation lines
+# under the label. `$groups` GETS A LINE TO ITSELF because it is the one part whose length grows
+# with the tree: wrapping prose around it produced "44 of 68" at the end of one line and
+# "*Test.java files" at the start of the next as soon as the assertion figures were added.
+not_run_note="$not_run_assertions of $total_assertions assertions, in $not_run of $total *Test.java files.
+$groups
+They need ModularUI, a pack jar or the patched Minecraft, which this job cannot fetch.
+tools/check.sh runs the whole suite; run it before merging."
+
 got=$(echo "$classes" | wc -l)
 [ "$got" -eq "$want" ] || die "$want *Test.java files but $got *Test.class classes to run"
 echo "== run =="
@@ -247,6 +346,9 @@ echo "== run =="
 # partway through with an OutOfMemoryError that looks like a hang.
 exec java -Xmx"${CI_JAVA_HEAP:-6g}" \
     -cp "$RUNNER:$CLASSES:$junit_jar:$hamcrest_jar:$gson_jar" JavaCoreSuite \
+    --scope 'core only' \
+    --not-run "$not_run_note" \
+    --expect-assertions "$core_assertions" \
     --allow-skip \
 'io.github.jacoblasky.recipedump.plan.PlanFixtureTest.everyFixturePlansExactlyAsThePythonOracleDoes' \
     $classes
