@@ -188,6 +188,22 @@ a world, because the plan book is a capability on the player:
 types something else into JEI's search box; the default is `@minecraft hopper`, chosen so the
 same probe means the same thing on the dev set and on the whole pack.
 
+UNDER `prodshot.sh` IT NEEDS 8g OF CONTAINER AND ~6500M OF HEAP, for the same reason `dump`
+does and not for a reason of its own: the cost is the WORLD. At the 7g/5G a GUI shot is
+comfortable at, the integrated server dies with `OutOfMemoryError: Java heap space` in
+`PECore.serverStarting` -> `EMCMapper.map`, because ProjectE enumerates every Forestry bee
+variant when a world starts. Measured here 2026-08-08. It does not present as an OOM: the
+server crashes, the client bounces back to the main menu, and the harness then reports
+"waiting for the main menu" until the run times out.
+
+```bash
+MEMORY=8g CLIENT_HEAP=6500M harness/prodclient/prodshot.sh jei-keybind packjeikey \
+    -Dmcrecipedump.shotWorld=packjeikey -Dmcrecipedump.shotTimeoutSeconds=3000
+```
+
+DO NOT RAISE IT ABOVE 8g. Tower runs the household's Home Assistant and its doorbell in
+sibling containers, and 8g is the ceiling those live under.
+
 It exists because this is the one path where both halves of a seam can be green and the
 feature still dead, and that happened twice at once. `PlannerHooks.setTargetListener` was never
 called by the shipped mod, so every press was handed to a listener that does nothing; and the

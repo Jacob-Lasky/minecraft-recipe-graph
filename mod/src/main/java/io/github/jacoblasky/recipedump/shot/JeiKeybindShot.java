@@ -8,7 +8,7 @@ import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.inventory.GuiInventory;
+import net.minecraft.client.gui.inventory.GuiCrafting;
 import net.minecraft.item.ItemStack;
 
 /**
@@ -37,8 +37,9 @@ import net.minecraft.item.ItemStack;
  * IT NEEDS A WORLD, and the reason is the seam under test rather than the rendering. The plan
  * book is a capability on the PLAYER, so with no player there is no book and `PlanTarget`
  * declines for a reason that has nothing to do with JEI. A world also gives the realistic
- * surface: JEI draws its item list beside an open inventory, which is where a player makes
- * this gesture.
+ * surface: JEI draws its item list beside an open `GuiContainer`, which is where a player
+ * makes this gesture. See {@link #open} for WHICH container and why it is not the player's
+ * own inventory.
  *
  * IT FINDS THE SLOT BY SWEEPING RATHER THAN BY COMPUTING IT. JEI publishes no geometry --
  * `IIngredientListOverlay` offers `getIngredientUnderMouse` and `getVisibleIngredients` and
@@ -99,14 +100,27 @@ final class JeiKeybindShot {
             throw new IllegalStateException("JEI runtime not available; nothing to hover");
         }
         String filter = arg == null || arg.trim().isEmpty() ? DEFAULT_FILTER : arg.trim();
-        // The realistic surface. JEI draws its item list beside any `GuiContainer`, and the
-        // player's own inventory is the one that needs no block placed to open it. Opened
-        // BEFORE the filter, because JEI builds the overlay when the screen appears.
-        mc.displayGuiScreen(new GuiInventory(mc.player));
+        // A CRAFTING TABLE AND NOT THE PLAYER'S INVENTORY, AND DO NOT SWAP IT BACK. JEI draws
+        // its item list beside any `GuiContainer`, and the inventory looks like the one that
+        // needs no block placed -- but `ShotHarness` starts a CREATIVE world, deliberately,
+        // and vanilla's `GuiInventory.initGui` replaces itself with `GuiContainerCreative`
+        // there. JEI draws no ingredient list over the creative menu, which has its own.
+        //
+        // MEASURED, NOT REASONED. A full-pack run on 2026-08-08 opened `GuiInventory`, got
+        // `GuiContainerCreative`, swept all 1260 points and had JEI report nothing under any
+        // of them. `GuiCrafting` is an ordinary `GuiContainer` that survives creative mode
+        // and still needs no block placed, because nothing here uses the container: the probe
+        // reads JEI's overlay and presses a key. Opened BEFORE the filter, because JEI builds
+        // the overlay when the screen appears.
+        mc.displayGuiScreen(new GuiCrafting(mc.player.inventory, mc.world));
         if (!JeiBridge.filterTo(filter)) {
             throw new IllegalStateException("JEI would not take the filter '" + filter + "'");
         }
-        ShotHarness.log("jei-keybind: filtered JEI to '" + filter + "'");
+        // THE SCREEN WE GOT, NOT THE ONE WE ASKED FOR, for the reason above: this line is the
+        // difference between "the sweep missed" and "the overlay was never there", and the
+        // run that cost a full pack boot to diagnose had only the first reading available.
+        ShotHarness.log("jei-keybind: filtered JEI to '" + filter + "'; the screen is "
+                + (mc.currentScreen == null ? "null" : mc.currentScreen.getClass().getName()));
         ShotScreens.expectReport("jei-keybind");
         ShotScreens.holdCapture(new Sweep());
     }
@@ -161,6 +175,13 @@ final class JeiKeybindShot {
                     + " points over " + width + "x" + height + " gui px");
         }
 
+        /** The class of whatever GUI is really on screen, for a failure that names it. */
+        private static String screenName() {
+            net.minecraft.client.gui.GuiScreen screen =
+                    Minecraft.getMinecraft().currentScreen;
+            return screen == null ? "null" : screen.getClass().getName();
+        }
+
         private static int[] axis(int from, int to) {
             int count = Math.max(1, (to - from) / STEP + 1);
             int[] out = new int[count];
@@ -183,8 +204,17 @@ final class JeiKeybindShot {
             }
             at++;
             if (at >= xs.length * ys.length) {
+                // NAME THE SCREEN, because "found nothing" has two causes that want opposite
+                // responses. Either the sweep looked in the wrong place, which is this
+                // class's problem, or JEI is not drawing a list over this screen at all,
+                // which is not -- and a message with only a point count sends every reader to
+                // the first one. Measured 2026-08-08: a full-pack run reported exactly this
+                // and the log could not distinguish them.
                 ShotScreens.reportFail("swept " + (xs.length * ys.length)
-                        + " points and JEI reported no item under any of them");
+                        + " points over the right-hand " + (int) ((1 - SWEEP_FROM) * 100)
+                        + "% and JEI reported no item under any of them; the screen is "
+                        + screenName() + " and JEI's runtime is "
+                        + (JeiBridge.isAvailable() ? "present" : "GONE"));
                 done = true;
                 return false;
             }

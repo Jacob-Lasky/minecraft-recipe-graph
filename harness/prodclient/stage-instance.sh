@@ -186,6 +186,44 @@ else:
 PY
 }
 
+# A PROBE THAT PLANS NEEDS A `graph.json`, AND NOTHING WAS PUTTING ONE HERE.
+#
+# The mod reads it from `config/mcrecipedump/graph.json` inside the game directory, and until
+# #240 nothing staged one, so every screen that SOLVES rather than photographing reached the
+# planner and got "no graph.json. looked in: /instance/config/mcrecipedump/graph.json". That
+# cost a full pack boot to find, because it presents as a screen-level verdict rather than as a
+# setup error: `jei-keybind` correctly hovered the item, correctly resolved its key, and then
+# had nothing to plan against.
+#
+# THE GRAPH MUST MATCH THE JAR'S DUMP SCHEMA. `mod/tools/build-jar.sh` prints the jar's
+# `SCHEMA n`, and a graph written by an older one parses into a graph that answers `keyId` -1
+# for keys the pack really has, which reads as "that item is not in the pack" rather than as a
+# version mismatch. `RECIPEGRAPH_GRAPH` names one explicitly; the default is the newest
+# `graph-s7.json` beside the build, which is the schema-7 dump of this pack.
+#
+# ABSENT IS NOT FATAL, because the eleven screens that photograph a fixture do not need it and
+# a 120 MB copy is not free. It says so instead, which is what the failing run needed.
+GRAPH_JSON="${RECIPEGRAPH_GRAPH:-$LOCAL_BUILD/graph-s7.json}"
+
+install_graph() {
+    dest="$INSTANCE/config/mcrecipedump"
+    if [ ! -f "$GRAPH_JSON" ]; then
+        echo "stage-instance: no graph at $GRAPH_JSON; screens that SOLVE will report" \
+             "'no graph.json'. Point RECIPEGRAPH_GRAPH at one." >&2
+        return 0
+    fi
+    mkdir -p "$dest"
+    # `cmp` first: this is 120 MB onto the array, and `prodshot.sh` calls the mod-only path
+    # before every run.
+    if cmp -s "$GRAPH_JSON" "$dest/graph.json"; then
+        echo "stage-instance: graph.json already matches $(basename "$GRAPH_JSON")"
+        return 0
+    fi
+    cp "$GRAPH_JSON" "$dest/graph.json"
+    echo "stage-instance: installed graph.json from $(basename "$GRAPH_JSON")" \
+         "($(wc -c < "$dest/graph.json") bytes)"
+}
+
 # EVERYTHING THAT TOUCHES `$INSTANCE` LIVES IN HERE, so that it can be covered by exactly one
 # gate acquisition. One, and not one per step: a run that released between the delete and the
 # copy would hand another agent a half-built instance, which is the same defect as #265 with a
@@ -193,6 +231,7 @@ PY
 stage_instance() {
     if [ "$MOD_ONLY" -eq 1 ]; then
         install_mod
+        install_graph
         return 0
     fi
 
@@ -200,6 +239,7 @@ stage_instance() {
         stage_from_amp
         build_instance
         install_mod
+        install_graph
     fi
     apply_headless_overrides
 
