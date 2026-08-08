@@ -192,14 +192,27 @@ public class BrowseLayoutTest {
     }
 
     @Test
-    public void theKeyColumnNeverEatsTheNameColumn() {
-        // The cap that stops one runaway key squeezing out the column a reader scans.
-        int width = SourcesWidgets.keyColumnWidth(sources(12, true).rows(),
-                                                  SourcesWidgets.CONTENT_WIDTH);
-        assertTrue("the key column took " + width,
-                   width <= SourcesWidgets.CONTENT_WIDTH - SourcesWidgets.GAP
-                           - SourcesWidgets.MIN_NAME);
-        assertTrue(width >= 0);
+    public void theKeyColumnIsCappedByWhatIsLeftAfterTheNameColumnsFloor() {
+        // MEASURED AT A NARROW WIDTH ON PURPOSE, and the first version of this test was
+        // vacuous for want of that. At the full 388px the `MAX_KEY_CHARS` cap (28 chars, 168px)
+        // binds first and the `MIN_NAME` floor never does, so the assertion passed whether or
+        // not the floor existed -- it was testing the wrong one of two limits. Sized here so
+        // the room left is POSITIVE but smaller than the key wants, which is the only case that
+        // exercises the floor.
+        int room = SourcesWidgets.GAP + SourcesWidgets.MIN_NAME + 12;
+        int width = SourcesWidgets.keyColumnWidth(sources(12, true).rows(), room);
+        assertEquals("the column takes what is left and no more", 12, width);
+        assertTrue("and that is less than the cap would have allowed",
+                   width < SourcesWidgets.MAX_KEY_CHARS * 6);
+    }
+
+    @Test
+    public void aPanelTooNarrowForBothColumnsDropsTheKeyRatherThanGoingNegative() {
+        // A negative width is not a smaller column: it is a box laid out at zero and a
+        // `pos(width - keyWidth)` that lands to the RIGHT of the panel edge. The floor is what
+        // lets `row` ask "is there a key column at all".
+        assertEquals(0, SourcesWidgets.keyColumnWidth(sources(12, true).rows(),
+                                                      SourcesWidgets.MIN_NAME));
     }
 
     @Test

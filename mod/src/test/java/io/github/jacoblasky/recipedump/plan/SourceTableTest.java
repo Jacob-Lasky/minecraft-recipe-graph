@@ -70,18 +70,32 @@ public class SourceTableTest {
     }
 
     @Test
-    public void aKeyWithNoRecordedNameFallsBackToTheKey() {
-        // Fluids and oredict entries routinely have no recorded name, and those are exactly the
-        // rows this screen exists to explain -- a blank name column would blank the interesting
-        // ones. The fallback is in the model so the sort key and the drawn label agree.
+    public void anUnnamedKeyGetsItsPrettifiedRegistryPathAndNotTheRawKey() {
+        // THIS TEST FAILED FIRST AND THE MODEL WAS WRONG, not the test. `SourceTable` carried a
+        // fall back to the raw key for a name that "might" be blank; `RecipeGraph.recordedName`
+        // is total, so that branch was unreachable AND it was the wrong answer. `bareName`'s own
+        // note says why: "a raw key sitting next to properly-cased names reads as a variable
+        // rather than an item" -- and fluids and oredict entries, which routinely have no
+        // recorded name, are exactly the rows this screen exists to explain.
         RecipeGraph graph = graphWith("mod:unnamed");
         SourceTable table = SourceTable.of(graph, free(graph, "mod:unnamed", "curated"));
-        assertEquals("mod:unnamed", table.rows().get(0).name());
+        assertEquals("Unnamed", table.rows().get(0).name());
+        assertEquals("mod:unnamed", table.rows().get(0).key());
     }
 
     @Test
-    public void aRecordedNameIsPreferredOverTheKey() {
-        // The half that would pass by always falling back.
+    public void anUnderscoredPathBecomesSeparateCapitalisedWords() {
+        // The half that would pass on a prettifier that only capitalised the first letter, and
+        // the shape most modded registry names actually take.
+        RecipeGraph graph = graphWith("mod:water_source_block");
+        SourceTable table = SourceTable.of(graph, free(graph, "mod:water_source_block", "x"));
+        assertEquals("Water Source Block", table.rows().get(0).name());
+    }
+
+    @Test
+    public void aRecordedNameBeatsThePrettifiedPath() {
+        // The other half: with a real name recorded, that is what shows -- so the two tests
+        // together pin both branches of `recordedName` rather than only the unnamed one.
         GraphBuilder b = new GraphBuilder();
         b.name(b.key("mod:water"), "Water");
         b.beginRecipe();

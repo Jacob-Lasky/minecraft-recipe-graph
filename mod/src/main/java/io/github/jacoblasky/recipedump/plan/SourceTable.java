@@ -51,12 +51,15 @@ public final class SourceTable {
         }
 
         /**
-         * The display name, falling back to the key.
+         * The display name, as `graph.names` would render it.
          *
-         * THE FALLBACK IS HERE rather than in the widget, so the sort key and the drawn label
-         * cannot disagree -- the same rule {@link MachineTable.Row#name} follows. A fluid or an
-         * oredict entry routinely has no recorded name, and those are exactly the rows this
-         * screen exists to explain.
+         * NO FALLBACK TO THE RAW KEY, AND THERE WAS ONE UNTIL THE TEST FOR IT FAILED.
+         * `RecipeGraph.recordedName` never answers null: an unnamed key falls back through
+         * `bareNameOfKey` to its prettified registry path, so `mod:unnamed` renders "Unnamed".
+         * The fallback written here was unreachable, and it was also the WRONG answer --
+         * `bareName`'s own note is that "a raw key sitting next to properly-cased names reads
+         * as a variable rather than an item", which is exactly what this screen would have
+         * shown for every fluid and oredict row, the ones it most exists to explain.
          */
         public String name() {
             return name;
@@ -95,8 +98,9 @@ public final class SourceTable {
                 // `WidgetTree.resizeInternal`, leaving the whole screen at 0x0 with no message.
                 continue;
             }
-            String name = graph.recordedName(keyId);
-            built.add(new Row(key, name == null || name.isEmpty() ? key : name,
+            // `recordedName` IS TOTAL -- see {@link Row#name}. A guard here would be dead code
+            // whose only effect is to tell a future reader this can be blank.
+            built.add(new Row(key, graph.recordedName(keyId),
                               entry.getValue() == null ? "" : entry.getValue()));
         }
         Collections.sort(built, new Comparator<Row>() {
