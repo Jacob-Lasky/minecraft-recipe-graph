@@ -98,7 +98,11 @@ public class GraphFactsTest {
         assertEquals(graph.recipes().count(), facts.recipes());
         assertEquals(graph.keyCount(), facts.keys());
         assertEquals(graph.namedKeyCount(), facts.namedKeys());
-        assertEquals(graph.categoryCount(), facts.categories());
+        // CATEGORIES THAT APPEAR IN RECIPES, not every interned one. On the real oracle those
+        // differ by 172 -- 676 interned against 504 in recipes -- and the machines tab shows
+        // the second. Two tabs disagreeing about the pack's size is how a reader stops
+        // believing either number.
+        assertEquals(1, facts.categories());
         assertEquals(graph.oreGroupCount(), facts.oreGroups());
     }
 
@@ -215,5 +219,39 @@ public class GraphFactsTest {
         GraphFacts facts = GraphFacts.of(stamped("deadbeef", 410));
         assertEquals("deadbeef", facts.modDigest());
         assertEquals(410, facts.modCount());
+    }
+
+    @Test
+    public void categoriesCountsOnlyTheOnesRecipesActuallyUse() {
+        // THE SCREENSHOT CAUGHT THIS. `graph.categoryCount()` is every interned category and
+        // included 172 catalyst-only ones the machines tab never lists, so the Graph tab said
+        // 676 where the Machines tab said 504.
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "a", "cat.one", "hei_dump");
+        recipe(b, "b", "cat.one", "hei_dump");
+        recipe(b, "c", "cat.two", "hei_dump");
+        // A category interned by a catalyst and used by no recipe: counted by
+        // `graph.categoryCount()` and correctly absent here.
+        b.beginCatalyst("cat.unused");
+        b.catalystKey(b.key("mod:block"));
+        b.endCatalyst();
+        RecipeGraph graph = b.build();
+
+        assertEquals("the fixture must have an unused category, or this proves nothing",
+                     3, graph.categoryCount());
+        assertEquals(2, GraphFacts.of(graph).categories());
+    }
+
+    @Test
+    public void theCannotTellReasonFitsThePanelWidth() {
+        // 64 characters is 388px at 6px a character. The first version ran to 66 and the
+        // screenshot showed "redump to enable the ..." with the actionable word cut off --
+        // which is the one word in the sentence a reader needs.
+        for (GraphFacts.PackCheck check : new GraphFacts.PackCheck[] {
+                GraphFacts.of(stamped(null, 0)).checkAgainst("abc", 1),
+                GraphFacts.of(stamped("abc", 1)).checkAgainst(null, 0)}) {
+            assertTrue(check.detail() + " is " + check.detail().length() + " chars",
+                       check.detail().length() <= 64);
+        }
     }
 }

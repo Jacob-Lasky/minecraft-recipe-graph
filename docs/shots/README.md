@@ -74,12 +74,14 @@ RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh graph graph
 cp $SHOTS/graph.png docs/shots/browse-graph.png
 ```
 
-**The `graph` shot is the one to read carefully, and it will show `pack: MISMATCH`.** That is
-CORRECT here and not a defect: the harness boots a five-jar dev set while the oracle was built
-from the full pack, so the jar sets genuinely differ and the screen is right to say so. The run
-logs `graph: pack check DIFFERS -- ...` beside it, and that line is what tells a real mismatch
-apart from the harness being the harness. A `pack: OK` in a harness shot would be the
-suspicious result.
+**The `graph` shot shows `pack: UNCHECKED`, and that is correct.** I predicted MISMATCH here and
+the run disproved it: the oracle graph is **schema 5**, and the jar-set stamp arrived in schema
+6, so there is no recorded digest to compare against and the honest verdict is "cannot tell"
+rather than "differs". The run logs it either way --
+`graph: pack check CANNOT_TELL -- this dump predates the mod-set stamp; redump to fix` -- and
+that line is what tells a harness artefact apart from a real finding.
+
+A `pack: OK` in a harness shot would be the suspicious result, since the dev set is five jars.
 
 Its whole subject is which graph is being read, so the other useful check is that the instance
 path in the picture is the pack you expect -- which is also the check a fixture could have

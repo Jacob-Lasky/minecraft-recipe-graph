@@ -712,7 +712,8 @@ jar set it saw; the mod is running inside the pack and can ask Forge what is act
 Comparing the two is a check the CLI cannot make as well — `recipegraph build` compares a dump
 against a graph file, two artifacts, while in game one side is reality.
 
-**`UNCHECKED` is a third state and not a soft pass.** A dump written before schema 6 records no
+**`UNCHECKED` is a third state and not a soft pass, and it is not hypothetical** — the
+project's own reference oracle is a schema-5 graph, so it triggers exactly this. A dump written before schema 6 records no
 jar-set stamp, so there is nothing to compare. On the command line that check is simply silent,
 which is fine for a command; a screen has no equivalent of silence, and whatever it drew for
 that case would be read as "looks fine". So the three verdicts are three different words in

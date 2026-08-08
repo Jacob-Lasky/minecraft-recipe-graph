@@ -98,11 +98,20 @@ public final class GraphFacts {
      */
     public static GraphFacts of(RecipeGraph graph) {
         Map<Integer, Integer> bySourceId = new LinkedHashMap<Integer, Integer>();
+        // CATEGORIES THAT APPEAR IN RECIPES, NOT `graph.categoryCount()`, AND THE SCREENSHOT IS
+        // WHY. `categoryCount` is every interned category and reported 676 while the machines
+        // tab -- one click away -- reported 504, because `MachineStates.describedCategories`
+        // walks the recipe list and the extra 172 are catalyst-only categories nothing is
+        // cooked in. Two tabs of one tool disagreeing about how many categories the pack has is
+        // exactly the sort of thing that makes a reader stop trusting both numbers, and the
+        // count a player can cross-check is the one the other screen shows.
+        java.util.Set<Integer> categoriesInRecipes = new java.util.HashSet<Integer>();
         int recipes = graph.recipes().count();
         for (int recipe = 0; recipe < recipes; recipe++) {
             Integer source = Integer.valueOf(graph.recipes().sourceId(recipe));
             Integer seen = bySourceId.get(source);
             bySourceId.put(source, Integer.valueOf(seen == null ? 1 : seen.intValue() + 1));
+            categoriesInRecipes.add(Integer.valueOf(graph.recipes().categoryId(recipe)));
         }
 
         List<Source> sources = new ArrayList<Source>();
@@ -131,7 +140,7 @@ public final class GraphFacts {
         return new GraphFacts(graph.instanceDir(), graph.dumpVersion(), graph.dumpSchema(),
                               graph.dumpModDigest(), graph.dumpModCount(),
                               recipes, graph.keyCount(), graph.namedKeyCount(),
-                              graph.categoryCount(), graph.oreGroupCount(), sources);
+                              categoriesInRecipes.size(), graph.oreGroupCount(), sources);
     }
 
 
@@ -200,7 +209,7 @@ public final class GraphFacts {
             // A reader who is told the dump is too old knows the fix is to redump; a reader
             // shown a blank concludes there is nothing to fix.
             return new PackCheck(Verdict.CANNOT_TELL,
-                    "this dump predates the mod-set stamp -- redump to enable the check");
+                    "this dump predates the mod-set stamp; redump to fix");
         }
         if (liveDigest == null || liveDigest.isEmpty()) {
             return new PackCheck(Verdict.CANNOT_TELL,
