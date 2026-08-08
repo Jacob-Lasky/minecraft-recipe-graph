@@ -190,6 +190,23 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void theJeiKeybindProbeIsReachableByName() {
+        // Same reasoning again, and it is the only assertion about `JeiKeybindShot` that a
+        // JUnit JVM can make: everything else in that class needs a JEI runtime, a world and a
+        // real cursor. If this name is dropped from the registry the probe silently stops
+        // existing and every run that asked for it fails on the NAME rather than on the
+        // gesture, which reads as a typo (#240).
+        //
+        // AND THE NAME IS WHY `ShotScreens` REPEATS THE LITERAL RATHER THAN READING A CONSTANT
+        // OFF THE SHOT. `JeiKeybindShot` names `GuiInventory` and `Minecraft`, so referring to
+        // a field on it from the registry's static initialiser would load LWJGL and throw
+        // NoClassDefFoundError in every test in this file. The duplication is the price of the
+        // registry staying loadable headlessly, and this assertion is what makes it safe.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("jei-keybind"));
+    }
+
+    @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");
         assertNotNull(problem);

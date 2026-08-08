@@ -366,6 +366,16 @@ public final class ShotScreens {
                 MachinesShot.openDetail(arg);
             }
         });
+        // The only screen that drives the WHOLE gesture: hover, press, plan. `jei` above
+        // photographs a recipe page and its own header says it moves no mouse, so the half
+        // the feature exists for is unexercised by it. See JeiKeybindShot for why this one
+        // asserts rather than photographs (#240).
+        register("jei-keybind", new Opener() {
+            @Override
+            public void open(String arg) {
+                JeiKeybindShot.open(arg);
+            }
+        });
     }
 
     private ShotScreens() {
