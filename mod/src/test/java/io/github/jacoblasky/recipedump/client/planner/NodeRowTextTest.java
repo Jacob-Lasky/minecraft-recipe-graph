@@ -525,10 +525,12 @@ public class NodeRowTextTest {
         String meta = NodeRowText.meta(
                 yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001)));
         assertTrue(meta, meta.contains("1,000 runs"));
-        assertTrue(meta, meta.contains("yields 0.1% of the time"));
+        assertTrue(meta, meta.contains(", 0.1%"));
         // NOT `0.0%`, which is what a fixed one-decimal format renders and which reads as
         // "never" for a route that does work.
         assertFalse("a rare yield must not round to zero: " + meta, meta.contains("0.0%"));
+        assertFalse("the prose form is what the cut was eating: " + meta,
+                    meta.contains("of the time"));
     }
 
     @Test
@@ -560,7 +562,7 @@ public class NodeRowTextTest {
         // point of #223 and must survive the suppression rule.
         String meta = NodeRowText.meta(
                 yieldNode(1L, Double.valueOf(1.0), Double.valueOf(0.001)));
-        assertTrue(meta, meta.contains("yields 0.1% of the time"));
+        assertTrue(meta, meta.contains(", 0.1%"));
     }
 
     @Test
@@ -600,6 +602,57 @@ public class NodeRowTextTest {
         assertFalse(NodeRowText.meta(node("raw")).contains("run"));
     }
 
+    /**
+     * AT WHAT DEPTH DOES THE YIELD SURVIVE THE CUT. #252, and it is the measurement that
+     * replaced a guess with a number.
+     *
+     * The first planner shot of this render showed rows reading `1 run, 1,0...` -- the cut had
+     * landed inside the run count and the yield was gone entirely. `fit` keeps the head and
+     * drops the tail, so everything this issue added is at risk and the only question that
+     * matters is how much width a row actually has at real indent depths.
+     *
+     * MEASURED HERE RATHER THAN IN A SCREENSHOT, because a shot is a sixteen-minute pack boot
+     * and answers one depth. This reproduces the production geometry exactly:
+     * `PlannerWidgets.row` charges `ICON + GAP`, `QTY + GAP` and the indent before the label,
+     * and `NodeRowText.fit` spends `CHAR_WIDTH` per character.
+     *
+     * A TEST RATHER THAN A NOTE, because #232 is editing this same line to disambiguate
+     * colliding labels, and its text lands in the same budget. Two changes that each fit alone
+     * do not fit together, and the shot that would show it is on neither author's branch. If
+     * this fails, the row has run out of width and something has to give: say which, in the
+     * commit, rather than widening the assertion.
+     */
+    @Test
+    public void theYieldSurvivesTheCutAtTheDepthsRealPlansReach() {
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
+        String row = NodeRowText.label(node) + NodeRowText.SEPARATOR + NodeRowText.meta(node);
+
+        // The label column at depth d, from `PlannerWidgets.row`'s own arithmetic.
+        for (int depth = 0; depth <= 8; depth++) {
+            int indent = Math.min(depth, 8) * 6;      // MAX_INDENT_DEPTH * INDENT
+            int x = indent + (10 + 2) + (52 + 2);     // ICON + GAP, QTY + GAP
+            int labelWidth = 400 - 6 * 2 - x;         // PANEL_WIDTH - PADDING * 2
+            String fitted = NodeRowText.fit(row, labelWidth);
+            assertTrue("depth " + depth + " lost the yield from: " + fitted,
+                       fitted.contains("0.1%"));
+        }
+    }
+
+    @Test
+    public void theProseFormWouldNotHaveSurvivedIt() {
+        // THE CONTROL, and without it the assertion above is a claim about nothing. It has to
+        // be shown that the budget is tight enough for the wording to matter, or `0.1%`
+        // surviving proves only that the row was never short of room.
+        PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001));
+        String prose = NodeRowText.label(node) + NodeRowText.SEPARATOR
+                + NodeRowText.meta(node).replace(", 0.1%", ", yields 0.1% of the time");
+        int x = 8 * 6 + (10 + 2) + (52 + 2);
+        int labelWidth = 400 - 6 * 2 - x;
+        assertFalse("the abbreviation is not earning anything at this width: "
+                    + NodeRowText.fit(prose, labelWidth),
+                    NodeRowText.fit(prose, labelWidth).contains("0.1%"));
+    }
+
     @Test
     public void theYieldComesBeforeTheMachineReasonSoACutTakesTheReasonFirst() {
         // WHY IT IS EARLY IN THE RUN. `machineWhyBit` is last so `fit` drops it first, because
@@ -613,7 +666,10 @@ public class NodeRowTextTest {
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001),
                                   "buildable", "craftable: mod:pulverizer");
         String meta = NodeRowText.meta(node);
-        int yieldAt = meta.indexOf("yields");
+        // THE PERCENT SIGN IS THE YIELD NOW. #252 abbreviated `yields 0.1% of the time`
+        // to a bare `0.1%` because the prose was 23 characters carrying 4 of content and
+        // `fit` was cutting it off entirely; there is no other proportion on this row.
+        int yieldAt = meta.indexOf("%");
         int whyAt = meta.indexOf("craftable: mod:pulverizer");
         assertTrue("the yield is missing from: " + meta, yieldAt >= 0);
         assertTrue("the machine reason is missing from: " + meta, whyAt >= 0);

@@ -583,7 +583,19 @@ public final class NodeRowText {
         }
         double chance = node.yieldChance();
         if (chance > 0.0 && chance < 1.0) {
-            sb.append(", yields ").append(percent(chance)).append(" of the time");
+            // A BARE PERCENTAGE, AND THE FIRST SHOT OF THIS RENDER IS WHY (#252). The phrase
+            // was `yields 0.1% of the time`, which is 23 characters to carry 4 characters of
+            // content, and `fit` cuts the meta run from the right: on the planner shot at real
+            // indent depths the cut landed INSIDE the number, so rows read `1 run, 1,0...` and
+            // the yield -- the thing this issue exists to show -- was gone. Trading "the number
+            // is absent" for "the number is present and unreadable" is not a fix, and the
+            // second is worse because it looks like one.
+            //
+            // UNAMBIGUOUS BECAUSE OF WHAT IT SITS NEXT TO. It always follows a run count and a
+            // per-run quantity, and there is no other proportion on the row it could be read
+            // as. DO NOT restore the prose without re-measuring `theYieldSurvivesTheCutAt...`
+            // below, which pins the depth at which the percentage stops surviving.
+            sb.append(", ").append(percent(chance));
         }
         return sb.toString();
     }
