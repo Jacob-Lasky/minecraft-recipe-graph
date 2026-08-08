@@ -148,6 +148,9 @@ class TestNameSourceKeys(unittest.TestCase):
                 fh.write("mod:thing:32767,Wildcard Thing\nmod:other:5,Meta Thing\n")
             csv_names = load_items_csv(path)
         json_names, _ = self._names_json({"mod:thing:32767": "Wildcard Thing"})
+        # Membership first: a reverted canonicaliser must red as an assertion naming the
+        # key that is missing, not as a KeyError from the lookup on the next line.
+        self.assertIn("mod:thing:*", csv_names)
         self.assertEqual(csv_names["mod:thing:*"], "Wildcard Thing")
         self.assertEqual(csv_names["mod:other:5"], "Meta Thing")
         # The point of the shared helper: one item, one key, whichever source named it.
