@@ -175,6 +175,21 @@ class ReadingTheObservedWorldgenTest(unittest.TestCase):
     def test_a_nonzero_meta_is_kept(self):
         self.assertIn("thermalfoundation:storage:5", observed())
 
+    def test_a_wildcard_meta_becomes_the_star_spelling(self):
+        """#253/#263: the two sources that name items disagreed about the any-damage
+        wildcard, and the fix was ONE spelling -- `:*`, never the literal `:32767`.
+
+        This reader goes through `model.norm_key`, so it lands on the right side of that by
+        construction rather than by care. Pinned anyway, because it is a DATA CONTRACT
+        between a parser and the graph's key vocabulary: a future edit here that split the
+        meta by hand would reintroduce exactly the phantom-key class #263 removed, and no
+        other test in this file would notice. The reference pack happens to contain zero
+        wildcard rows, so nothing else can catch it either.
+        """
+        parsed = dimensions.parse_world_gen(
+            '[{"block": "mod:thing:32767", "dim": "Dim -1: the_nether"}]')
+        self.assertEqual(parsed, {"mod:thing:*": {-1: "the_nether"}})
+
     def test_an_id_with_no_meta_at_all_keeps_its_whole_path(self):
         """The `tail.isdigit()` guard. Splitting on the last colon unconditionally would
         turn `mod:no_meta` into `mod` with a meta of `no_meta`, which `norm_key` coerces to
