@@ -140,12 +140,21 @@ FIELDS = {
     # BOTH POPULATIONS THE PLAN BADGES, which is the warning above being obeyed rather than
     # repeated. #171 added `pack_authored_unsourced` and charged it the same `UNSOURCED_COST`
     # in `cost._seed` and the same badge in `solve.expand`; reading only `reachable_form` here
-    # would under-report the field by 285 keys on the reference graph and reproduce exactly
+    # would under-report the field by 232 keys on the reference graph and reproduce exactly
     # the sweep-versus-solver drift described two lines up.
     "unsourced": (lambda c, k: bool(c.graph.reachable_form(k))
                   or k in c.graph.pack_authored_unsourced,
                   "nothing makes this key: either another form exists that the graph does "
                   "make, or the pack authored it and no recipe produces it at all"),
+    # AND THE COMPLEMENT OF IT, for the same reason and by the same argument. #171's second
+    # pass takes 53 keys OUT of `unsourced` above -- the pack explains them, so the badge and
+    # the price both stop firing -- and a sweep that could see the mark disappear but not what
+    # replaced it would report those keys as ordinary raw leaves. `solve.expand` reports the
+    # kind on the node and `shopping_row` on the row; this is the third surface, and leaving
+    # it out is the divergence the paragraph above spent a PR removing.
+    "provenance": (lambda c, k: c.graph.pack_authored_declared.get(k, ""),
+                   "how the PACK says you get a key no recipe makes: puzzle, loot_table or "
+                   "quest, empty when the pack declares nothing"),
 }
 
 

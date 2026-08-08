@@ -60,6 +60,17 @@ def api_graph():
     g.add(Recipe("widget", "t", [("other:widget", 1)],
                  [Ingredient(["fluid:molten_sednanite"], 500, "fluid")],
                  category="mod.press", machine="Press"))
+    # #171. Two pack-authored keys nothing produces, identical to every structural rule and
+    # different in the one way that matters: the pack says where one of them comes from.
+    # The sweep has to be able to tell them apart, because that is the difference between
+    # "go and solve its puzzle" and "the tool cannot help you".
+    g.names["contenttweaker:from_a_puzzle"] = "Puzzle Reward"
+    g.names["contenttweaker:from_nowhere"] = "Marker"
+    for rid, ingredient in (("uses_puzzle", "contenttweaker:from_a_puzzle"),
+                            ("uses_marker", "contenttweaker:from_nowhere")):
+        g.add(Recipe(rid, "t", [("other:widget", 1)], [Ingredient([ingredient], 1)],
+                     category="minecraft.crafting"))
+    g.declared_provenance = {"contenttweaker:from_a_puzzle": "puzzle"}
     return g
 
 
@@ -203,6 +214,31 @@ class SweepTest(ApiCase):
                          ["mod:sednanite_nugget"])
         self.assertEqual(payload["where"],
                          'endswith(label, "Nugget") and producers == 0')
+
+    def test_provenance_names_how_the_pack_hands_a_key_out(self):
+        # #171. A new FIELD is a runtime string with no compile-time check, so a typo in the
+        # registry or a rename on `Graph` fails silently on every sweep that asks for it.
+        payload = self.sweep('provenance != ""', "&select=key,provenance")
+        self.assertEqual([["contenttweaker:from_a_puzzle", "puzzle"]],
+                         [[r["key"], r["provenance"]] for r in payload["results"]])
+
+    def test_provenance_is_empty_rather_than_missing_for_everything_else(self):
+        # Empty string and not null, so `startswith`/`contains` work on the column and a
+        # sweep does not have to special-case the overwhelmingly common answer.
+        payload = self.sweep('key == "contenttweaker:from_nowhere"', "&select=key,provenance")
+        self.assertEqual("", payload["results"][0]["provenance"])
+
+    def test_the_sweep_and_the_plan_agree_about_which_key_is_unsourced(self):
+        # THE DRIFT THIS FIELD EXISTS TO PREVENT, asserted rather than described. #178 spent
+        # a PR removing a surface-to-surface divergence here; #171 takes 53 keys out of
+        # `unsourced` and a sweep that could see the mark vanish but not what replaced it
+        # would report a declared key as an ordinary raw leaf.
+        payload = self.sweep('startswith(key, "contenttweaker:")',
+                             "&select=key,unsourced,provenance&order=key")
+        self.assertEqual(
+            [["contenttweaker:from_a_puzzle", False, "puzzle"],
+             ["contenttweaker:from_nowhere", True, ""]],
+            [[r["key"], r["unsourced"], r["provenance"]] for r in payload["results"]])
 
     def test_select_chooses_the_columns(self):
         payload = self.sweep('kind == "fluid"', "&select=key,cost,kind")

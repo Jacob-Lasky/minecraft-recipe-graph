@@ -285,7 +285,7 @@ curl -s --get localhost:8765/api/sweep \
   --data-urlencode 'select=key,label,consumers' --data-urlencode 'limit=0'
 ```
 
-Fields are `key label name kind mod stock producers all_producers consumers cost live ores`,
+Fields are `key label name kind mod stock producers all_producers consumers cost live ores emc icon damaged unsourced provenance`,
 combined with `and or not`, the six comparisons, and
 `startswith endswith contains matches lower upper len`. `GET /api` prints the list, so it
 does not have to be remembered. A `limit` of 0 lifts the cap, `matched` always reports the

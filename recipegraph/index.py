@@ -3,7 +3,7 @@
 import os
 import sys
 
-from . import dimensions, multiblocks, notproduction, tokens
+from . import dimensions, multiblocks, notproduction, provenance, tokens
 from .model import FLUID_PREFIX, Graph, Ingredient, Recipe, base_key, is_item_key
 from .names import find_items_csv, load_items_csv
 from .sources import catalysts as catalysts_src
@@ -210,6 +210,18 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     else:
         say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
             "dimension is not priced, which is the pre-#112 behaviour")
+
+    # HOW THE PACK SAYS YOU GET AN ITEM, when no recipe in the dump can say it. #171.
+    #
+    # AFTER the oredict and the drop pass, because the count this reports is measured through
+    # `pack_authored_declared`, which reads `ores_of` and the finished recipe set.
+    #
+    # The assignment drops the memos both of those properties build; that is
+    # `Graph.declared_provenance`'s setter and not something a caller has to remember.
+    declared = provenance.load(instance_dir)
+    g.declared_provenance = declared
+    reached = len(g.pack_authored_declared)
+    say(provenance.report(declared, reached))
 
     _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say)
 
