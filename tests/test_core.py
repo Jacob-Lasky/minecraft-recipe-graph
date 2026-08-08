@@ -23,6 +23,8 @@ from recipegraph.sources.jar_json import parse_recipe_json  # noqa: E402
 from recipegraph.sources import jar_json  # noqa: E402
 from recipegraph.names import load_items_csv  # noqa: E402
 from recipegraph.sources import dump_names  # noqa: E402
+from recipegraph.sources import emc as emc_src  # noqa: E402
+from recipegraph.sources import icons as icons_src  # noqa: E402
 from recipegraph.sources.oredict import guess_from_names  # noqa: E402
 
 
@@ -150,6 +152,34 @@ class TestNameSourceKeys(unittest.TestCase):
         self.assertEqual(csv_names["mod:other:5"], "Meta Thing")
         # The point of the shared helper: one item, one key, whichever source named it.
         self.assertEqual(set(json_names), {"mod:thing:*"})
+
+
+class TestDumpReaderKeySpelling(unittest.TestCase):
+    """#253: EVERY reader of a dump file spells a key the way the graph does.
+
+    `dump_names` was the one with live damage (2,672 keys). These two have ZERO today and
+    are here because the audit that found the first one has to cover the rest: the mod
+    writes what the game stores, so any of them can meet an any-damage stack tomorrow, and
+    both fail silently when it happens -- a missing EMC value is indistinguishable from an
+    item ProjectE does not price, and a missing sprite is a blank square.
+    """
+
+    def test_emc_values_land_on_the_canonical_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "emc.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"mod:thing:32767": 64, "mod:other": 8}, fh)
+            values = emc_src.load(path)
+        self.assertEqual(values, {"mod:thing:*": 64, "mod:other": 8})
+
+    def test_icon_placements_land_on_the_canonical_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "icons.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"icon": 16, "cols": 2, "pages": ["icons-0.png"],
+                           "keys": {"mod:thing:32767": [0, 0, 0], "mod:other": [0, 1, 0]}}, fh)
+            index = icons_src.load(path)
+        self.assertEqual(sorted(index["keys"]), ["mod:other", "mod:thing:*"])
 
 
 class TestJarJson(unittest.TestCase):

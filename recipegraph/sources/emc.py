@@ -30,6 +30,7 @@ the dead end it replaces, which is #50's own stated worst case.
 import json
 import os
 
+from ..model import canonical_item_key
 from . import dump_meta
 
 
@@ -49,7 +50,15 @@ def load(path):
         # bool is an int in python and `True` would price something at 1 EMC. Nothing
         # writes one today; the check costs a clause and removes the question.
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            out[str(key)] = value
+            # CANONICALISED FOR THE SAME REASON `sources/dump_names` IS (#253), and with the
+            # same measured caveat: ZERO of this file's 15,216 keys need it today, which is
+            # a fact about the reference dump and not about the format. The mod writes what
+            # the game stores, so the day a ProjectE value lands on an any-damage stack it
+            # arrives as the literal `:32767` and this map stops joining to the graph --
+            # silently, because a missing EMC value looks exactly like an item ProjectE
+            # does not price. `min` over EMC feeds the cost table, so the failure would be
+            # a wrong price rather than a visible gap.
+            out[canonical_item_key(key)] = value
     return out
 
 
