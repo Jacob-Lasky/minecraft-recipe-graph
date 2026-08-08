@@ -268,6 +268,15 @@ public final class ShotScreens {
                 DumpShot.open(arg);
             }
         });
+        // Answers #228 rather than photographing anything. See RemainderProbeShot for why the
+        // question needs the real pack: getRemainingItems is an interface method, so a scripted
+        // recipe's answer comes from CraftTweaker's class and not from Minecraft's.
+        register("remainder-probe", new Opener() {
+            @Override
+            public void open(String arg) {
+                RemainderProbeShot.open(arg);
+            }
+        });
         register("world-probe", new Opener() {
             @Override
             public void open(String arg) {

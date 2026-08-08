@@ -190,6 +190,17 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void theRemainderProbeIsReachableByName() {
+        // Same reasoning as the AE2 probe, and the cost of getting it wrong is higher here: a
+        // typo in this name spends a full pack boot, which is roughly 22 minutes, before saying
+        // "no screen named ...". Asserting the NAME rather than the class keeps
+        // `RemainderProbeShot` and its Minecraft registry types off the test runtime classpath.
+        // See #228 for what the screen answers.
+        assertTrue(ShotScreens.names().toString(),
+                ShotScreens.names().contains("remainder-probe"));
+    }
+
+    @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");
         assertNotNull(problem);
