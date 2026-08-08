@@ -5,9 +5,6 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
 
 import org.junit.After;
 import org.junit.Before;
@@ -63,22 +60,7 @@ public class PlannerEntryTest {
     }
 
     private void loadGraph() throws Exception {
-        File file = new File(folder.getRoot(), "graph.json");
-        FileOutputStream out = new FileOutputStream(file);
-        try {
-            out.write(GraphDocuments.TINY.getBytes("UTF-8"));
-        } finally {
-            out.close();
-        }
-        System.setProperty(GraphSource.PROPERTY, file.getPath());
-        GraphService.get().startLoad(null);
-        long deadline = System.currentTimeMillis() + 30_000L;
-        while (GraphService.get().state() != GraphService.State.READY) {
-            if (System.currentTimeMillis() > deadline) {
-                throw new AssertionError("graph never loaded: " + GraphService.get().describe());
-            }
-            Thread.sleep(5L);
-        }
+        GraphDocuments.loadTinyGraphFrom(folder.getRoot());
     }
 
     private static PlannerState state() {

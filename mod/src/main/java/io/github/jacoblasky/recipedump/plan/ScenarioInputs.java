@@ -137,6 +137,24 @@ public final class ScenarioInputs {
         MachineStates machineStates;
 
         /**
+         * The machine verdicts this scenario resolved to.
+         *
+         * EXPOSED FOR THE MACHINES SCREEN (#254), which is a view of exactly this and nothing
+         * else. The alternative was for that screen to call `Machines.resolve` itself, and
+         * that is the mistake this class's own header warns about: "a second resolver on the
+         * production path would be code the golden gate never touches, so the mod could price
+         * a plan one way and describe it another". A screen that told the player a machine was
+         * on hand while the solver planned around not having it is that failure with a face.
+         *
+         * NOTE THIS IS THE CHEAP HALF OF A SCENARIO. `resolve` is what produces it; `price` is
+         * the expensive step and is separately memoised. The machines screen needs no cost
+         * table at all, so it pays for `resolve` and stops.
+         */
+        public MachineStates machineStates() {
+            return machineStates;
+        }
+
+        /**
          * What two scenarios must agree on to share one cost table.
          *
          * KEYED ON WHAT `Cost.estimate` IS ACTUALLY HANDED, not on a hand-maintained list of

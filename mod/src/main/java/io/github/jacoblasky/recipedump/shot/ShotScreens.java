@@ -348,6 +348,24 @@ public final class ShotScreens {
                 JeiRecipeShot.open(arg);
             }
         });
+        register("machines", new Opener() {
+            @Override
+            public void open(String arg) {
+                MachinesShot.open(arg);
+            }
+        });
+        register("machines-mods", new Opener() {
+            @Override
+            public void open(String arg) {
+                MachinesShot.openModPicker(arg);
+            }
+        });
+        register("machines-detail", new Opener() {
+            @Override
+            public void open(String arg) {
+                MachinesShot.openDetail(arg);
+            }
+        });
     }
 
     private ShotScreens() {

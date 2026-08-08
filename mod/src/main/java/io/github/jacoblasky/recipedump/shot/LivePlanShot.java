@@ -82,8 +82,14 @@ final class LivePlanShot {
         if (awaitGraph()) {
             log("graph: " + GraphService.get().describe());
             logPins();
-            if (PlannerService.get().plan(target, qty(), Solver.DEFAULT_MAX_NODES)) {
-                awaitPlan();
+            // THE VERDICT IS READ AND SAID OUT LOUD. `awaitPlan` returned void until #254's
+            // review, so a solve that ran past its two minutes produced a screenshot of a
+            // half-drawn planner and a zero exit code with nothing in the log to distinguish
+            // it from a finished one. `describe()` below reports the SERVICE's state, which
+            // still says PLANNING -- true, and easy to read past in a wall of harness output.
+            if (PlannerService.get().plan(target, qty(), Solver.DEFAULT_MAX_NODES)
+                    && !awaitPlan()) {
+                log("plan: NOT FINISHED -- the picture below is of an unfinished plan");
             }
             log("plan: " + PlannerService.get().describe());
             writeJson();
@@ -128,37 +134,35 @@ final class LivePlanShot {
      * reason, and a second copy of a bounded-poll loop is a second timeout to keep in step.
      */
     static boolean awaitGraph() {
-        GraphService graphs = GraphService.get();
-        long deadline = System.currentTimeMillis() + GRAPH_WAIT_MILLIS;
-        while (graphs.state() == GraphService.State.IDLE
-                || graphs.state() == GraphService.State.LOADING) {
-            if (System.currentTimeMillis() > deadline) {
-                log("gave up waiting for the graph after " + (GRAPH_WAIT_MILLIS / 1000L) + "s");
-                return false;
+        final GraphService graphs = GraphService.get();
+        ShotWaits.until("the graph", GRAPH_WAIT_MILLIS, new ShotWaits.Busy() {
+            @Override
+            public boolean busy() {
+                return graphs.state() == GraphService.State.IDLE
+                        || graphs.state() == GraphService.State.LOADING;
             }
-            sleep();
-        }
+        });
+        // THE RETURN IS THE STATE AND NOT THE WAIT'S VERDICT, deliberately. A timeout and a
+        // load that finished as MISSING are both "no graph", and this method's callers only
+        // ever ask that question; `ShotWaits.until` has already logged which of the two it was.
         return graphs.state() == GraphService.State.READY;
     }
 
-    private static void awaitPlan() {
-        PlannerService planner = PlannerService.get();
-        long deadline = System.currentTimeMillis() + PLAN_WAIT_MILLIS;
-        while (planner.state() == PlannerService.State.PLANNING) {
-            if (System.currentTimeMillis() > deadline) {
-                log("gave up waiting for the plan after " + (PLAN_WAIT_MILLIS / 1000L) + "s");
-                return;
+    /**
+     * @return false when the plan never finished, which the caller MUST NOT ignore.
+     *
+     * IT USED TO RETURN VOID, and that is the defect the shared wait was extracted to kill: a
+     * solve that ran past its two minutes was photographed exactly as though it had finished,
+     * and the run exited zero. The log line said so and nothing else did.
+     */
+    private static boolean awaitPlan() {
+        final PlannerService planner = PlannerService.get();
+        return ShotWaits.until("the plan", PLAN_WAIT_MILLIS, new ShotWaits.Busy() {
+            @Override
+            public boolean busy() {
+                return planner.state() == PlannerService.State.PLANNING;
             }
-            sleep();
-        }
-    }
-
-    private static void sleep() {
-        try {
-            Thread.sleep(50L);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-        }
+        });
     }
 
     private static void writeJson() {

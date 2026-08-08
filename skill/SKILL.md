@@ -733,6 +733,30 @@ become cards below 700px, ordered by the `c-` classes on each cell. Those classe
 contract between the row template and the card CSS, and `tests/test_server.py` asserts it
 in both directions; add a cell and you add a class.
 
+**That is a statement about a five-column HTML table, NOT about the machines table as such,
+and #254 built the same information into a 400px ModularUI panel.** Read the sentence above
+as a reason to reject the in-game screen and you will reject a screen that exists and works.
+What made it fit is the same move the phone breakpoint makes: stop being a table. The in-game
+row is TWO lines -- verdict, name and recipe count on the first, the evidence sentence
+indented under it -- which is the card layout with a fixed left column rather than a fifth
+column. Three things follow, and all three are the kind of decision that looks arbitrary once
+the reason is stripped off:
+
+* **Column widths are derived from the data on screen, never typed in.** `MachineLabels
+  .widestLabel` sizes the verdict column from the vocabulary and `MachinesWidgets
+  .recipeColumnWidth` sizes the count column from the visible rows, because filtering to
+  `no route` leaves three categories carrying two recipes each and a column sized for the
+  pack's five-figure maximum wastes 30 of 388 pixels. A hand-written width is how the badge
+  column once came out reading `no known...`.
+* **The evidence stays on the row and costs half the visible rows** -- seven instead of
+  thirteen. `machines_page` calls that column "the only reason anyone opens this page after
+  the first time", and the filters are what cut 503 rows down to the handful anyone reads.
+* **There is no text filter in game and that is deliberate.** `TextFieldWidget` appears
+  nowhere in `mod/src/main/java`, so a filter box would be the mod's first keyboard input,
+  with focus handling, the `e`-closes-the-inventory collision, and a headless harness whose
+  typing path has never been demonstrated. The state chips answer the question the screen is
+  for and the mod picker answers the axis a player knows by name.
+
 The two phone blocks sit LAST in `render.CSS` and in `server.HOME_CSS` because they win by
 cascade order. They use different breakpoints on purpose, 640 and 700, and the comment
 says why.
