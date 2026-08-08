@@ -698,10 +698,21 @@ CRAFTABLE_COST = 0.25
 #     bytes before and after this change and a cached table computed under 17 would be served
 #     for a formula that no longer produces it.
 #
-#     MEASURED ON THE REFERENCE GRAPH: **the table does not move at all.** All 162,537 finite
-#     prices are identical before and after, none up, none down, none appearing or vanishing.
-#     That is the expected result and it is worth writing down, because the obvious reading of
-#     this bump is that it must have repriced something.
+#     MEASURED ON THE REFERENCE GRAPH, RE-MEASURED AGAINST MASTER AFTER #171 LANDED: **the
+#     table does not move at all.** All 162,469 finite prices are identical before and after,
+#     none up, none down, none appearing or vanishing -- both trees digest to sha256
+#     11f86367e3e7ac160f348003ccd6df331b57357b771a6349d8f4fd727cc41e92. That is the expected
+#     result and it is worth writing down, because the obvious reading of this bump is that it
+#     must have repriced something.
+#
+#     THE EQUALITY IS ONLY EVIDENCE BECAUSE THE PROBE WAS MADE TO FAIL FIRST. Two trees
+#     agreeing is indistinguishable from a probe that measures nothing, and this repo has a
+#     warm `.cost-cache.json` that could serve both arms. Positive control: perturbing
+#     `BASE_RAW_COST` to 1.0001 under the same probe moves the digest to 4b13800448a64dc0...,
+#     which is what says `estimate` is really being recomputed here and the cache sits above
+#     it. DO NOT re-state this equality after a rebase without re-running that control; an
+#     earlier draft of this comment carried 162,537, a count from a different oracle, and
+#     nothing in a green suite would ever have contradicted it.
 #
 #     It does not, because a schema-7 graph carries no `q`, so every `chance` here is 1.0 and
 #     `_scaled_qty` returns exactly what it always did. The bump exists for the NEXT graph, not
