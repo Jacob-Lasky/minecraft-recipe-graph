@@ -166,7 +166,8 @@ public final class PlanJson {
             out.add(new PlanView.EntryRow(string(o, "key"), label, number(o, "qty", 0L),
                                           has(o, "kind") ? string(o, "kind") : ITEM,
                                           optional(o, "why"), optional(o, "token_kind"),
-                                          longOrNull(o, "emc"), bool(o, "unsourced")));
+                                          longOrNull(o, "emc"), bool(o, "unsourced"),
+                                          optional(o, "provenance")));
         }
         return out;
     }
@@ -217,7 +218,13 @@ public final class PlanJson {
                 .tokenKind(optional(json, "token_kind"))
                 .fromStock(longOrNull(json, "from_stock"))
                 .pinned(boolOrNull(json, "pinned"))
-                .unsourced(boolOrNull(json, "unsourced"));
+                .unsourced(boolOrNull(json, "unsourced"))
+                // #171/#262. READ FOR THE SAME REASON EVERY OTHER OPTIONAL FIELD IS: this
+                // class and `plan.PlanJson` are the two halves of one wire format, and
+                // `PlanNodeRoundTripTest` writes back what it reads. A field read by the
+                // writer and dropped by the reader is a node that silently loses it on any
+                // path through here.
+                .provenance(optional(json, "provenance"));
         // `name` IS THE ONE FIELD THAT KEEPS A FALLBACK, and it is safe where the others
         // were not. It is present on all 571 nodes across the fixtures and `PlanJson` writes
         // it unconditionally, so it is not an optional key -- the fallback covers hand-written

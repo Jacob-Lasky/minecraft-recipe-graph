@@ -385,6 +385,38 @@ public class NodeRowTextTest {
                      marked, occurrences(all, NodeStatus.UNSOURCED_BADGE));
     }
 
+    /**
+     * A DECLARED shopping row names the pack's answer instead of saying nothing. #171/#262.
+     *
+     * BUILT FROM JSON RATHER THAN FROM A GOLDEN FIXTURE, and that is the finding rather than a
+     * shortcut: no fixture in `tests/fixtures/plan/` carries `provenance`, because none can
+     * until the oracle is rebuilt with `declared_provenance` -- which is the whole of #262.
+     * `tests/fixtures/provenance.json` is the synthetic graph that does, and this is the row
+     * half of what `plan.ProvenanceFixtureTest` proves about the tree.
+     *
+     * ONE VOCABULARY FOR BOTH SURFACES, exactly as the unsourced row above: the words come from
+     * `plan.Provenance`, which is byte-equal to `provenance.KIND_BADGE` in python, so the panel
+     * and the browser cannot describe one item differently.
+     */
+    @Test
+    public void aDeclaredShoppingRowNamesThePackSAnswer() {
+        PlanView plan = PlanJson.readResult("{\"target\":\"mod:x\",\"target_name\":\"X\","
+                + "\"qty\":1,\"tree\":{\"key\":\"mod:x\",\"name\":\"X\",\"label\":\"X\","
+                + "\"kind\":\"item\",\"need\":1,\"status\":\"raw\"},"
+                + "\"shopping_list\":["
+                + "{\"key\":\"ct:puzzle\",\"name\":\"Bullet\",\"label\":\"Bullet\","
+                + "\"kind\":\"item\",\"qty\":1,\"provenance\":\"puzzle\"},"
+                + "{\"key\":\"ct:nowhere\",\"name\":\"Marker\",\"label\":\"Marker\","
+                + "\"kind\":\"item\",\"qty\":1,\"unsourced\":true}]}");
+        String all = join(NodeRowText.entryLines(plan.shoppingList(), TODO_INNER));
+        assertTrue("a declared row must carry the pack's word: " + all,
+                   all.contains("puzzle"));
+        assertTrue("and the undeclared one must keep the badge it had: " + all,
+                   all.contains(NodeStatus.UNSOURCED_BADGE));
+        assertEquals("the two marks are complements; a declared row must not claim both",
+                     1, occurrences(all, NodeStatus.UNSOURCED_BADGE));
+    }
+
     /** A fluid quantity is mB and says so, matching `render._rows`. Never buckets. */
     @Test
     public void aFluidRowIsMeasuredInMilliBucketsAndAnItemRowIsNot() {

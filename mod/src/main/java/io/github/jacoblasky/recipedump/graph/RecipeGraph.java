@@ -128,6 +128,25 @@ public final class RecipeGraph {
     private final int[] dimensionOreNameId;
     private final StringTable dimensionNames;
 
+    /**
+     * item key -&gt; how the PACK says you get it, when no recipe in the dump does. #171/#262.
+     *
+     * PACK DATA READ BACK FROM `graph.json`, on exactly the footing {@link #dimensionOres} is
+     * on: what the pack hands out cannot change without the pack changing, so `index.build`
+     * reads the scripts and the quest book once and everything downstream reads the answer.
+     * DO NOT re-derive it here from {@link #instanceDir} -- python's `Graph.load` refuses that
+     * by name, because the instance directory is a path recorded INSIDE the graph and a
+     * loader that read it would give two answers for one file depending on the machine.
+     *
+     * EMPTY ON EVERY GRAPH BUILT BEFORE #171's SECOND PASS, which behaves exactly as before:
+     * every one of these keys stays in {@link io.github.jacoblasky.recipedump.plan.Unsourced}'s
+     * pack-authored set at `UNSOURCED_COST`. That is the pre-existing answer and not a broken
+     * one, which is why an old graph needs no rebuild.
+     */
+    private final KeyIndex declaredProvenance;
+    private final int[] declaredProvenanceKind;
+    private final StringTable provenanceKinds;
+
     // -- schema 5 per-item facts, all five of them optional -------------------------------
     //
     // EVERY ONE MEANS "THE FEATURE IS OFF" WHEN ABSENT, never "something is broken": no meta
@@ -196,7 +215,9 @@ public final class RecipeGraph {
                 KeyIndex oreKeys, int[] oreKeyGroup, long[] oreGuessed, long[] worldOres, long[] liveKeys, long[] reshapedOnly,
                 Csr catalysts, StringTable categoryMods, int[] categoryModId,
                 KeyIndex dimensionOres, int[] dimensionOreDimId, int[] dimensionOreNameId,
-                StringTable dimensionNames, KeyIndex damageable, int[] maxDamage,
+                StringTable dimensionNames,
+                KeyIndex declaredProvenance, int[] declaredProvenanceKind,
+                StringTable provenanceKinds, KeyIndex damageable, int[] maxDamage,
                 KeyIndex emcKeys, long[] emcValue, Blueprints blueprints, IconAtlas icons,
                 Multiblocks multiblocks, int dumpSchema,
                 String dumpVersion, String instanceDir) {
@@ -230,6 +251,9 @@ public final class RecipeGraph {
         this.dimensionOreDimId = dimensionOreDimId;
         this.dimensionOreNameId = dimensionOreNameId;
         this.dimensionNames = dimensionNames;
+        this.declaredProvenance = declaredProvenance;
+        this.declaredProvenanceKind = declaredProvenanceKind;
+        this.provenanceKinds = provenanceKinds;
         this.damageable = damageable;
         this.maxDamage = maxDamage;
         this.emcKeys = emcKeys;
@@ -743,6 +767,29 @@ public final class RecipeGraph {
 
     public int dimensionOreCount() {
         return dimensionOres.size();
+    }
+
+    /**
+     * How the PACK says you get this key, or null when it declares nothing. #171/#262.
+     *
+     * NULL IS THE ANSWER FOR ALMOST EVERY KEY and means "the pack said nothing", never "the
+     * pack said this is unobtainable". Mirrors `Graph.declared_provenance.get(key)` in python,
+     * which the two provenance predicates in
+     * {@link io.github.jacoblasky.recipedump.plan.Unsourced} partition on.
+     *
+     * THE RAW DECLARATION AND NOT THE PRICED SET, which is the mistake that looks right. The
+     * pack declares 896 keys on the reference oracle and 843 of them are items the graph
+     * already makes; pricing all of them off this map moves 301 keys off their real prices.
+     * `Unsourced.isPackAuthoredDeclared` is what narrows it to the 53 the graph could not
+     * explain at all -- DO NOT price, badge or note a key straight off this accessor.
+     */
+    public String declaredProvenance(int keyId) {
+        int slot = declaredProvenance.slotOf(keyId);
+        return slot < 0 ? null : provenanceKinds.get(declaredProvenanceKind[slot]);
+    }
+
+    public int declaredProvenanceCount() {
+        return declaredProvenance.size();
     }
 
     // -- schema 5 per-item facts -----------------------------------------------------------
@@ -1282,6 +1329,8 @@ public final class RecipeGraph {
                 + Sizes.bytes(categoryModId)
                 + dimensionOres.retainedBytes() + Sizes.bytes(dimensionOreDimId)
                 + Sizes.bytes(dimensionOreNameId) + dimensionNames.retainedBytes()
+                + declaredProvenance.retainedBytes()
+                + Sizes.bytes(declaredProvenanceKind) + provenanceKinds.retainedBytes()
                 + multiblocks.retainedBytes()
                 // Zero until something asks for a fluid's name. Counted rather than assumed
                 // away, because a running GUI derives it on the first fluid it renders and a

@@ -129,6 +129,19 @@ public final class PlanNode {
      * reader must not expect the key.
      */
     Boolean unsourced;
+    /**
+     * How the PACK says you get this key: `puzzle`, `loot_table` or `quest`. #171/#262.
+     *
+     * THE COMPLEMENT OF {@link #unsourced} AND NOT A SECOND FLAVOUR OF IT. The pack declares
+     * how to get this, so the tool CAN say how and `unsourced` is deliberately absent on the
+     * same node. THE TWO ARE MUTUALLY EXCLUSIVE BY CONSTRUCTION, because
+     * `Unsourced.packAuthored` excludes everything `packAuthoredDeclared` holds; a reader
+     * seeing both on one node is looking at a bug, not at a case to handle.
+     *
+     * OPTIONAL, AND ITS ABSENCE MEANS "THE PACK DECLARES NOTHING", which is almost every key.
+     * Never written as an empty string, matching Python.
+     */
+    String provenance;
 
     /** Absent on a leaf; never an empty list, because Python never writes one. */
     List<PlanNode> children;
@@ -196,6 +209,11 @@ public final class PlanNode {
 
     public String tokenKind() {
         return tokenKind;
+    }
+
+    /** How the pack says you get this, or null when it declares nothing. #171. */
+    public String provenance() {
+        return provenance;
     }
 
     /** 0 when nothing came from stock, which is what the absent key means. */
@@ -315,6 +333,7 @@ public final class PlanNode {
         other.dimension = dimension;
         other.tokenKind = tokenKind;
         other.unsourced = unsourced;
+        other.provenance = provenance;
         other.children = children;
         return other;
     }
@@ -455,6 +474,11 @@ public final class PlanNode {
 
         public Builder unsourced(Boolean value) {
             node.unsourced = value;
+            return this;
+        }
+
+        public Builder provenance(String value) {
+            node.provenance = value;
             return this;
         }
 
