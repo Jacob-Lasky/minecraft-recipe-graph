@@ -25,17 +25,19 @@ jobs:
       - name: Byte-compile every module
         run: python -m compileall -q recipegraph
 
-  # THE JAVA PORT'S PURE CORE -- the graph reader, the solver and the cost model, a little over
-  # 40% of the Java suite. The reason this job exists at all is that before it NOT ONE Java test
-  # ran on a pull request: the port was checked only when a human remembered to run
-  # `tools/check.sh`, and this repository has reddened master twice from a distracted merge. The
-  # run prints its own counts, so no number here has to be maintained to stay true.
+  # THE JAVA PORT'S PURE CORE -- the graph reader, the solver and the cost model, which is a
+  # MINORITY of the Java suite; the run prints the exact fraction, and the "40%" this comment
+  # asserted until #244 was a figure nobody could check from here. This job exists at all because
+  # before it NOT ONE Java test ran on a pull request: the port was checked only when a human
+  # remembered to run `tools/check.sh`, and this repository has reddened master twice from a
+  # distracted merge. The run prints its own counts, so no number here has to be maintained.
   #
   # WHAT IT DOES NOT COVER IS IN `tools/ci-java.sh`'s header, in full, including the one skip it
   # allows and why no synthetic oracle can retire it. Read that before trusting this tick: the
   # golden plan gate needs a 121 MB graph that is not in git, so this job is a FLOOR and not a
   # substitute for `tools/check.sh` before a merge. The script fails on any OTHER skip, which is
-  # what stops that honest gap from quietly widening.
+  # what stops that honest gap from quietly widening, and since #244 it also prints a `NOT RUN`
+  # line above its verdict so a reader of the LOG learns the scope without opening the header.
   java-core:
     runs-on: ubuntu-latest
     steps:
