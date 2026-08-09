@@ -926,6 +926,19 @@ public final class PlannerWidgets {
             }
         }));
 
+        return menuPanel("mcrecipedump_node_menu", NodeRowText.label(node), entries);
+    }
+
+    /**
+     * A menu panel: a muted title and one clickable row per entry.
+     *
+     * SHARED BY BOTH MENUS RATHER THAN COPIED (#251). The node menu and the row menu differ in
+     * what they are ABOUT -- an occurrence against an aggregate, which is the whole distinction
+     * this issue exists to keep -- and in nothing about how a menu is assembled. A second copy
+     * of the assembly would agree with this one on every input anyone tried, which is exactly
+     * what would stop anybody noticing when they later diverged.
+     */
+    private static ModularPanel menuPanel(String id, String title, List<Entry> entries) {
         int height = PADDING * 2 + LINE + 1 + entries.size() * ROW_HEIGHT;
         // WIDE ENOUGH FOR THE LONGEST ENTRY, measured in the character budget the whole panel
         // uses. "Choose another recipe (172)" came out as "Choose another recip..." at 150.
@@ -934,8 +947,8 @@ public final class PlannerWidgets {
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
-        // Muted, so the title does not read as a fifth thing you can click.
-        body.child(line(NodeRowText.label(node), inner, NodeStatus.INK_MUTED).pos(0, 0));
+        // Muted, so the title does not read as one more thing you can click.
+        body.child(line(title, inner, NodeStatus.INK_MUTED).pos(0, 0));
         int y = LINE + 1;
         for (Entry entry : entries) {
             ClickableGroup row = new ClickableGroup(entry.action);
@@ -944,7 +957,7 @@ public final class PlannerWidgets {
             body.child(row.pos(0, y));
             y += ROW_HEIGHT;
         }
-        return ModularPanel.defaultPanel("mcrecipedump_node_menu", width, height).child(body);
+        return ModularPanel.defaultPanel(id, width, height).child(body);
     }
 
     /**
@@ -975,22 +988,7 @@ public final class PlannerWidgets {
             }
         }));
 
-        int height = PADDING * 2 + LINE + 1 + entries.size() * ROW_HEIGHT;
-        int width = MENU_WIDTH;
-        int inner = width - PADDING * 2;
-        Group body = new Group();
-        body.pos(PADDING, PADDING);
-        body.size(inner, height - PADDING * 2);
-        body.child(line(row.need() + "x " + row.label(), inner, NodeStatus.INK_MUTED).pos(0, 0));
-        int y = LINE + 1;
-        for (Entry entry : entries) {
-            ClickableGroup menuRow = new ClickableGroup(entry.action);
-            menuRow.size(inner, ROW_HEIGHT);
-            menuRow.child(line(entry.text, inner, NodeStatus.INK_CRAFT).pos(0, 0));
-            body.child(menuRow.pos(0, y));
-            y += ROW_HEIGHT;
-        }
-        return ModularPanel.defaultPanel("mcrecipedump_row_menu", width, height).child(body);
+        return menuPanel("mcrecipedump_row_menu", row.need() + "x " + row.label(), entries);
     }
 
     /** One menu line and what it does. */
