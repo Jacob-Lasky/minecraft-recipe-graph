@@ -7,14 +7,15 @@
   "raw"
  ],
  "graph": {
-  "bytes": 121448519,
-  "dimension_ores": 11,
+  "bytes": 122683241,
+  "dimension_ores": 10,
   "dump_schema": 5,
   "multiblocks": 259,
-  "names": 261089,
-  "ore_members": 3116,
-  "recipes": 124467,
-  "sha256": "33658f4a7b63b72a074e9887e4aed354dc1f341820d5220ee6da3a2f2f48ac85"
+  "names": 261073,
+  "offworld_ores": 98,
+  "ore_members": 3115,
+  "recipes": 123846,
+  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
  },
  "request": {
   "item": "thermalfoundation:material:32",
@@ -95,7 +96,7 @@
       {
        "children": [
         {
-         "alternatives": 172,
+         "alternatives": 190,
          "category": "minecraft.smelting",
          "children": [
           {
@@ -117,7 +118,7 @@
          "name": "Iron Ingot",
          "need": 2,
          "per_run": 1,
-         "recipe": "hei:minecraft.smelting:31344",
+         "recipe": "hei:minecraft.smelting:31715",
          "runs": 2,
          "status": "craft"
         }
@@ -131,7 +132,7 @@
        "status": "oredict"
       },
       {
-       "alternatives": 133,
+       "alternatives": 137,
        "category": "bdew.jeibees.produce.rootBees",
        "children": [
         {
@@ -214,7 +215,7 @@
                  "name": "Common Drone",
                  "need": 1,
                  "per_run": 1,
-                 "recipe": "hei:bdew.jeibees.mutation.rootBees:144470",
+                 "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
                  "runs": 1,
                  "status": "craft"
                 },
@@ -237,7 +238,7 @@
                "name": "Cultivated Drone",
                "need": 1,
                "per_run": 1,
-               "recipe": "hei:bdew.jeibees.mutation.rootBees:144485",
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:110801",
                "runs": 1,
                "status": "craft"
               }
@@ -251,7 +252,7 @@
              "name": "Eldritch Drone",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:bdew.jeibees.mutation.rootBees:144799",
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:111115",
              "runs": 1,
              "status": "craft"
             }
@@ -264,7 +265,7 @@
            "name": "Skulking Drone",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:bdew.jeibees.mutation.rootBees:144842",
+           "recipe": "hei:bdew.jeibees.mutation.rootBees:111158",
            "runs": 1,
            "status": "craft"
           }
@@ -277,7 +278,7 @@
          "name": "Spidery Drone",
          "need": 1,
          "per_run": 1,
-         "recipe": "hei:bdew.jeibees.mutation.rootBees:144844",
+         "recipe": "hei:bdew.jeibees.mutation.rootBees:111160",
          "runs": 1,
          "status": "craft"
         }
@@ -290,7 +291,7 @@
        "name": "String",
        "need": 1,
        "per_run": 1,
-       "recipe": "hei:bdew.jeibees.produce.rootBees:145134",
+       "recipe": "hei:bdew.jeibees.produce.rootBees:111450",
        "runs": 1,
        "status": "craft"
       },
@@ -328,7 +329,7 @@
      "status": "craft"
     },
     {
-     "alternatives": 172,
+     "alternatives": 190,
      "category": "minecraft.smelting",
      "children": [
       {
@@ -350,7 +351,7 @@
      "name": "Iron Ingot",
      "need": 1,
      "per_run": 1,
-     "recipe": "hei:minecraft.smelting:31344",
+     "recipe": "hei:minecraft.smelting:31715",
      "runs": 1,
      "status": "craft"
     }
@@ -363,7 +364,7 @@
    "name": "Iron Plate",
    "need": 1,
    "per_run": 1,
-   "recipe": "hei:minecraft.crafting:25760",
+   "recipe": "hei:minecraft.crafting:25604",
    "runs": 1,
    "status": "craft"
   },

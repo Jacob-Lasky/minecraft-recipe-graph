@@ -208,6 +208,11 @@
   "aoa3.whitewashing": [
    "aoa3:whitewashing_table"
   ],
+  "aoa_extraction_loot": [
+   "aoa3:extraction_device",
+   "aoa3:stone_bowl",
+   "aoa3:diamond_bowl"
+  ],
   "appliedenergistics2.grinder": [
    "appliedenergistics2:grindstone"
   ],
@@ -590,6 +595,9 @@
   ],
   "modularmachinery.recipes.aesir_resonator": [
    "modularmachinery:aesir_resonator_controller"
+  ],
+  "modularmachinery.recipes.alloy_furnace": [
+   "modularmachinery:itemblueprint"
   ],
   "modularmachinery.recipes.altar_to_the_name_of_names": [
    "modularmachinery:altar_to_the_name_of_names_controller"
@@ -2227,7 +2235,7 @@
    "mod": "Tech Reborn",
    "recipes": 20,
    "state": "buildable",
-   "title": "Solid-State Fusion Control Computer",
+   "title": "Fusion Control Computer",
    "why": "craftable: techreborn:fusion_control_computer"
   },
   "TechReborn.Grinder": {
@@ -2890,6 +2898,37 @@
    "state": "buildable",
    "title": "Whitewashing Table",
    "why": "craftable: aoa3:whitewashing_table"
+  },
+  "aoa_extraction_loot": {
+   "candidate_states": [
+    {
+     "key": "aoa3:extraction_device",
+     "state": "buildable",
+     "why": "craftable: aoa3:extraction_device"
+    },
+    {
+     "key": "aoa3:stone_bowl",
+     "state": "buildable",
+     "why": "craftable: aoa3:stone_bowl"
+    },
+    {
+     "key": "aoa3:diamond_bowl",
+     "state": "buildable",
+     "why": "craftable: aoa3:diamond_bowl"
+    }
+   ],
+   "candidates": [
+    "aoa3:extraction_device",
+    "aoa3:stone_bowl",
+    "aoa3:diamond_bowl"
+   ],
+   "from_catalyst": true,
+   "manual": false,
+   "mod": "Advent of Ascension",
+   "recipes": 19,
+   "state": "buildable",
+   "title": "Extraction Skill",
+   "why": "craftable: aoa3:extraction_device"
   },
   "appliedenergistics2.grinder": {
    "candidate_states": [
@@ -4007,7 +4046,7 @@
    "from_catalyst": false,
    "manual": false,
    "mod": "crafting",
-   "recipes": 7841,
+   "recipes": 6298,
    "state": "have",
    "title": "Crafting (shaped)",
    "why": "no machine needed"
@@ -4018,7 +4057,7 @@
    "from_catalyst": false,
    "manual": false,
    "mod": "crafting",
-   "recipes": 2399,
+   "recipes": 2102,
    "state": "have",
    "title": "Crafting (shapeless)",
    "why": "no machine needed"
@@ -5320,6 +5359,25 @@
    "title": "Squeezer",
    "why": "craftable: integrateddynamics:squeezer"
   },
+  "intestines_loot_table": {
+   "candidate_states": [
+    {
+     "key": "mod_lavacow:intestine",
+     "state": "unavailable",
+     "why": "no route to mod_lavacow:intestine"
+    }
+   ],
+   "candidates": [
+    "mod_lavacow:intestine"
+   ],
+   "from_catalyst": true,
+   "manual": false,
+   "mod": "MeatballCraft",
+   "recipes": 34,
+   "state": "unavailable",
+   "title": "Intestines Drops",
+   "why": "no route to mod_lavacow:intestine"
+  },
   "jei.cauldron": {
    "candidate_states": [
     {
@@ -5412,7 +5470,7 @@
    "from_catalyst": false,
    "manual": false,
    "mod": "Minecraft",
-   "recipes": 30474,
+   "recipes": 30473,
    "state": "have",
    "title": "Crafting",
    "why": "no machine needed"
@@ -5546,6 +5604,31 @@
    "state": "buildable",
    "title": "Aesir Resonator",
    "why": "craftable: modularmachinery:aesir_resonator_controller"
+  },
+  "modularmachinery.recipes.alloy_furnace": {
+   "candidate_states": [
+    {
+     "key": "modularmachinery:alloy_furnace_controller",
+     "state": "unavailable",
+     "why": "no route to modularmachinery:alloy_furnace_controller"
+    },
+    {
+     "key": "modularmachinery:itemblueprint",
+     "state": "buildable",
+     "why": "craftable: modularmachinery:itemblueprint (as modularmachinery:itemblueprint#da4c5d276af8)"
+    }
+   ],
+   "candidates": [
+    "modularmachinery:alloy_furnace_controller",
+    "modularmachinery:itemblueprint"
+   ],
+   "from_catalyst": true,
+   "manual": false,
+   "mod": "Modular Machinery: Community Edition",
+   "recipes": 1163,
+   "state": "buildable",
+   "title": "Alloy Smelter",
+   "why": "craftable: modularmachinery:itemblueprint (as modularmachinery:itemblueprint#da4c5d276af8)"
   },
   "modularmachinery.recipes.altar_to_the_name_of_names": {
    "candidate_states": [
@@ -7142,9 +7225,9 @@
    "from_catalyst": true,
    "manual": false,
    "mod": "Modular Machinery: Community Edition",
-   "recipes": 7,
+   "recipes": 13,
    "state": "buildable",
-   "title": "Steel Thermal Mixer",
+   "title": "Iron Reinforced Centrifuge",
    "why": "craftable: modularmachinery:iron_centrifuge_controller"
   },
   "modularmachinery.recipes.ligature_of_the_three_oaths": {
@@ -11376,7 +11459,7 @@
     {
      "key": "tconstruct:rack:1",
      "state": "buildable",
-     "why": "craftable: tconstruct:rack:1"
+     "why": "craftable: tconstruct:rack:1 (as tconstruct:rack:1#8a30a4fc02e2)"
     }
    ],
    "candidates": [
@@ -11388,7 +11471,7 @@
    "recipes": 29,
    "state": "buildable",
    "title": "Drying",
-   "why": "craftable: tconstruct:rack:1"
+   "why": "craftable: tconstruct:rack:1 (as tconstruct:rack:1#8a30a4fc02e2)"
   },
   "tconstruct.entitymelting": {
    "candidate_states": [
@@ -11423,7 +11506,7 @@
    "from_catalyst": true,
    "manual": false,
    "mod": "Tinkers' Antique",
-   "recipes": 5009,
+   "recipes": 5007,
    "state": "buildable",
    "title": "Smelting",
    "why": "craftable: tconstruct:smeltery_controller"
@@ -12856,14 +12939,15 @@
   }
  },
  "graph": {
-  "bytes": 121448519,
-  "dimension_ores": 11,
+  "bytes": 122683241,
+  "dimension_ores": 10,
   "dump_schema": 5,
   "multiblocks": 259,
-  "names": 261089,
-  "ore_members": 3116,
-  "recipes": 124467,
-  "sha256": "33658f4a7b63b72a074e9887e4aed354dc1f341820d5220ee6da3a2f2f48ac85"
+  "names": 261073,
+  "offworld_ores": 98,
+  "ore_members": 3115,
+  "recipes": 123846,
+  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
  },
  "scenario": {
   "craftables": [],
@@ -12881,9 +12965,9 @@
   }
  },
  "summary": {
-  "buildable": 485,
+  "buildable": 487,
   "have": 15,
-  "unavailable": 4,
+  "unavailable": 5,
   "unknown": 0
  },
  "why": "machines.py decides which recipes a plan prefers, from JEI's own catalyst map where the dump has one and from a title heuristic where it does not. Every category, with its evidence, because the failure is a few categories moving rather than the table being wrong."
