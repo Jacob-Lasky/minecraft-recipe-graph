@@ -71,9 +71,9 @@
    "enderio:block_soul_binder"
   ],
   "THAUMCRAFT_ARCANE_WORKBENCH": [
+   "thaumcraft:arcane_workbench",
    "thaumicenergistics:arcane_terminal",
-   "thaumicenergistics:arcane_inscriber",
-   "thaumcraft:arcane_workbench"
+   "thaumicenergistics:arcane_inscriber"
   ],
   "THAUMCRAFT_CRUCIBLE": [
    "thaumcraft:crucible"
@@ -2014,6 +2014,11 @@
   "THAUMCRAFT_ARCANE_WORKBENCH": {
    "candidate_states": [
     {
+     "key": "thaumcraft:arcane_workbench",
+     "state": "buildable",
+     "why": "craftable: thaumcraft:arcane_workbench"
+    },
+    {
      "key": "thaumicenergistics:arcane_terminal",
      "state": "buildable",
      "why": "craftable: thaumicenergistics:arcane_terminal"
@@ -2022,17 +2027,12 @@
      "key": "thaumicenergistics:arcane_inscriber",
      "state": "buildable",
      "why": "craftable: thaumicenergistics:arcane_inscriber"
-    },
-    {
-     "key": "thaumcraft:arcane_workbench",
-     "state": "buildable",
-     "why": "craftable: thaumcraft:arcane_workbench"
     }
    ],
    "candidates": [
+    "thaumcraft:arcane_workbench",
     "thaumicenergistics:arcane_terminal",
-    "thaumicenergistics:arcane_inscriber",
-    "thaumcraft:arcane_workbench"
+    "thaumicenergistics:arcane_inscriber"
    ],
    "from_catalyst": true,
    "manual": false,
@@ -2040,7 +2040,7 @@
    "recipes": 260,
    "state": "buildable",
    "title": "Arcane Workbench",
-   "why": "craftable: thaumicenergistics:arcane_terminal"
+   "why": "craftable: thaumcraft:arcane_workbench"
   },
   "THAUMCRAFT_CRUCIBLE": {
    "candidate_states": [
@@ -4046,7 +4046,7 @@
    "from_catalyst": false,
    "manual": false,
    "mod": "crafting",
-   "recipes": 6298,
+   "recipes": 6299,
    "state": "have",
    "title": "Crafting (shaped)",
    "why": "no machine needed"
@@ -12939,15 +12939,15 @@
   }
  },
  "graph": {
-  "bytes": 122683241,
+  "bytes": 121243322,
   "dimension_ores": 10,
-  "dump_schema": 5,
-  "multiblocks": 259,
-  "names": 261073,
+  "dump_schema": 8,
+  "multiblocks": 261,
+  "names": 261077,
   "offworld_ores": 98,
   "ore_members": 3115,
-  "recipes": 123846,
-  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
+  "recipes": 123847,
+  "sha256": "cbbe136bddf02c9fc7b5b267793570f46eb0f9e184e82a49598b9a72efded60b"
  },
  "scenario": {
   "craftables": [],

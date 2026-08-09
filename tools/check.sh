@@ -57,24 +57,91 @@ set -eu
 
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-# THE DEFAULT IS THE GRAPH THE FIXTURES NAME, AND A PINNED FILENAME IS WHY THAT NEEDED SAYING.
-# This defaulted to `graph-oracle.json` while #248 regenerated every plan fixture against
-# `graph-oracle-248.json`, so the golden gate regenerated against a graph the fixtures did not
-# come from and disagreed with itself. It went red on master for anyone running this with no
-# environment set -- not a port defect, an oracle mismatch wearing one, and the most expensive
-# possible disguise because `everyFixturePlansExactlyAsThePythonOracleDoes` is the assertion
-# people trust most.
+# THE BUILD DIRECTORY IS THE STABLE THING; WHICH GRAPH IN IT IS CURRENT IS NOT. This used to
+# read `BUILD_DIR=$(dirname "$ORACLE")` under a pinned `ORACLE`, which had the dependency
+# backwards: the directory never moves and the file within it changes every regeneration.
+BUILD_DIR=${RECIPEGRAPH_BUILD:-/coding/.recipegraph-build}
+PACK_MODS=${PACK_MODS:-$BUILD_DIR/deps}
+GRADLE_CACHE=${GRADLE_CACHE:-$BUILD_DIR/gradle-cache}
+
+# THE ORACLE IS RESOLVED BY MATCHING, NOT BY NAMING (#281).
 #
-# THE CHECK BELOW IS THE POINT, NOT THIS FILENAME. A default that names one file is a second
-# source of truth about which graph is current, and it goes stale the next time anyone
-# regenerates -- which is exactly what happened. So the run now REFUSES when the oracle it is
-# about to use is not the one the fixtures record, and says which file to pass instead. #281
-# tracks making the selection schema-aware; until then, a wrong oracle fails loudly at the top
-# rather than as a mystery in the Java arm twenty minutes later.
-ORACLE=${RECIPEGRAPH_ORACLE:-/coding/.recipegraph-build/graph-oracle-248.json}
-PACK_MODS=${PACK_MODS:-/coding/.recipegraph-build/deps}
-GRADLE_CACHE=${GRADLE_CACHE:-/coding/.recipegraph-build/gradle-cache}
-BUILD_DIR=$(dirname "$ORACLE")
+# A default that names one file is a SECOND SOURCE OF TRUTH about which graph is current, and
+# it goes stale the moment anyone regenerates. It did, twice in one day: this pinned
+# `graph-oracle.json` while #248 regenerated every fixture against `graph-oracle-248.json`, so
+# the golden gate regenerated against a graph the fixtures never came from and disagreed with
+# itself. Master went red for anyone running with no environment set -- not a port defect, an
+# oracle mismatch wearing one, which is the most expensive possible disguise because
+# `everyFixturePlansExactlyAsThePythonOracleDoes` is the assertion people trust most. Naming
+# the NEW file would have fixed the instance and left the class; this removes the class.
+#
+# THE FIXTURES ALREADY RECORD WHICH GRAPH THEY CAME FROM. Every one carries the sha256 of its
+# oracle and `test_every_fixture_names_the_same_oracle` asserts they agree, so the answer to
+# "which graph is current" is already written down by the thing that knows. Scanning for the
+# graph whose hash matches removes the second answer rather than moving it.
+#
+# AND A HASH IS THE RIGHT KEY RATHER THAN A SCHEMA. `graph-s8.json` and `graph-s8b.json` are
+# both dump_schema 8 and differ in whether they carry `offworld_ores`, because one was built
+# before #248 taught `index.build` to emit it. A version check cannot see a field a later code
+# change started emitting -- the number did not move, the meaning did -- and picking the wrong
+# one of that pair silently drops the toll #248 exists for. The hash cannot be fooled that way.
+#
+# MEASURED BEFORE BEING DESIGNED AROUND: hashing all eight graphs in the build directory takes
+# 6.0 s against a full run of about fourteen minutes, and it stops at the first match.
+fixture_oracle_sha() {
+    # ANY FIXTURE, NOT A NAMED ONE. Naming one file here would be the same defect one level
+    # down: a path that could be renamed while the rule kept pointing at it. They all record
+    # the same hash and a test asserts it, so the first readable one is as good as any.
+    for fixture in tests/fixtures/plan/plan-*.json; do
+        [ -f "$fixture" ] || continue
+        sha=$(sed -n 's/.*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p' "$fixture" | head -1)
+        if [ -n "$sha" ]; then
+            printf '%s' "$sha"
+            return 0
+        fi
+    done
+}
+
+resolve_oracle() {
+    [ -n "$1" ] || return 0
+    for candidate in "$BUILD_DIR"/graph-*.json; do
+        [ -f "$candidate" ] || continue
+        if [ "$(sha256sum "$candidate" | cut -d' ' -f1)" = "$1" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+}
+
+FIXTURE_SHA=$(fixture_oracle_sha)
+ORACLE=${RECIPEGRAPH_ORACLE:-$(resolve_oracle "$FIXTURE_SHA")}
+
+if [ -z "$ORACLE" ]; then
+    echo "!! NO GRAPH IN $BUILD_DIR MATCHES THE ONE THE FIXTURES WERE GENERATED AGAINST."
+    echo "!!   fixtures name: ${FIXTURE_SHA:-<no sha recorded>}"
+    echo "!! The golden plan gate cannot run, and everything else will pass without it."
+    echo "!! Build that graph, or pass RECIPEGRAPH_ORACLE=<path> to use another deliberately."
+fi
+
+# REFUSE AN ORACLE THE FIXTURES DID NOT COME FROM. Unreachable through `resolve_oracle`, which
+# only ever returns a match, so this now catches exactly one thing: an explicit
+# `RECIPEGRAPH_ORACLE` that is wrong. Kept rather than folded in, because a deliberate override
+# deserves a message naming what it overrode. Silent when no fixture records a sha256, which is
+# absence of evidence rather than evidence of mismatch.
+if [ -n "$ORACLE" ] && [ -f "$ORACLE" ] && [ -n "$FIXTURE_SHA" ]; then
+    have=$(sha256sum "$ORACLE" | cut -d' ' -f1)
+    if [ "$FIXTURE_SHA" != "$have" ]; then
+        echo "!! THE ORACLE IS NOT THE ONE THE FIXTURES WERE GENERATED AGAINST."
+        echo "!!   fixtures name : $FIXTURE_SHA"
+        echo "!!   $ORACLE"
+        echo "!!   hashes to     : $have"
+        echo "!! The golden gate would regenerate against this graph and disagree with the"
+        echo "!! stored plans, which reads as a port regression and is not one. Unset"
+        echo "!! RECIPEGRAPH_ORACLE to let the run find the right graph itself, or regenerate"
+        echo "!! the fixtures against this one with tools/make-java-fixtures.py."
+        exit 1
+    fi
+fi
 # EXPORTED because `mod/tools/build-jar.sh` reads both from the environment, and it is invoked
 # below as a plain command rather than with inline assignments so that it can take the
 # container gate itself. See `tools/gate.sh` on why nesting the gate would deadlock.

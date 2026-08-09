@@ -7,15 +7,15 @@
   "substituted"
  ],
  "graph": {
-  "bytes": 122683241,
+  "bytes": 121243322,
   "dimension_ores": 10,
-  "dump_schema": 5,
-  "multiblocks": 259,
-  "names": 261073,
+  "dump_schema": 8,
+  "multiblocks": 261,
+  "names": 261077,
   "offworld_ores": 98,
   "ore_members": 3115,
-  "recipes": 123846,
-  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
+  "recipes": 123847,
+  "sha256": "cbbe136bddf02c9fc7b5b267793570f46eb0f9e184e82a49598b9a72efded60b"
  },
  "request": {
   "item": "animus:kama_bound",
@@ -53,10 +53,10 @@
     "qty": 4
    },
    {
-    "key": "abyssalcraft:nitreore",
+    "key": "railcraft:ore:1",
     "kind": "item",
-    "label": "Nitre Ore",
-    "name": "Nitre Ore",
+    "label": "Saltpeter Ore",
+    "name": "Saltpeter Ore",
     "qty": 4
    },
    {
@@ -179,7 +179,7 @@
                "name": "Common Drone",
                "need": 1,
                "per_run": 1,
-               "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:149010",
                "runs": 1,
                "status": "craft"
               },
@@ -202,7 +202,7 @@
              "name": "Cultivated Drone",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:bdew.jeibees.mutation.rootBees:110801",
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:149025",
              "runs": 1,
              "status": "craft"
             },
@@ -225,7 +225,7 @@
            "name": "Sinister Drone",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:bdew.jeibees.mutation.rootBees:110814",
+           "recipe": "hei:bdew.jeibees.mutation.rootBees:149038",
            "runs": 1,
            "status": "craft"
           },
@@ -277,7 +277,7 @@
                  "name": "Common Drone",
                  "need": 1,
                  "per_run": 1,
-                 "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
+                 "recipe": "hei:bdew.jeibees.mutation.rootBees:149010",
                  "runs": 1,
                  "status": "craft"
                 },
@@ -300,7 +300,7 @@
                "name": "Cultivated Drone",
                "need": 1,
                "per_run": 1,
-               "recipe": "hei:bdew.jeibees.mutation.rootBees:110801",
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:149025",
                "runs": 1,
                "status": "craft"
               },
@@ -323,7 +323,7 @@
              "name": "Sinister Drone",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:bdew.jeibees.mutation.rootBees:110814",
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:149038",
              "runs": 1,
              "status": "craft"
             },
@@ -346,7 +346,7 @@
            "name": "Fiendish Drone",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:bdew.jeibees.mutation.rootBees:110817",
+           "recipe": "hei:bdew.jeibees.mutation.rootBees:149041",
            "runs": 1,
            "status": "craft"
           }
@@ -359,7 +359,7 @@
          "name": "Demonic Drone",
          "need": 1,
          "per_run": 1,
-         "recipe": "hei:bdew.jeibees.mutation.rootBees:110819",
+         "recipe": "hei:bdew.jeibees.mutation.rootBees:149043",
          "runs": 1,
          "status": "craft"
         }
@@ -372,7 +372,7 @@
        "name": "Glowstone Dust",
        "need": 1,
        "per_run": 1,
-       "recipe": "hei:bdew.jeibees.produce.rootBees:111238",
+       "recipe": "hei:bdew.jeibees.produce.rootBees:149462",
        "runs": 1,
        "status": "craft"
       },
@@ -423,7 +423,7 @@
        "name": "Gold Nugget",
        "need": 1,
        "per_run": 3,
-       "recipe": "hei:minecraft.smelting:31619",
+       "recipe": "hei:minecraft.smelting:31476",
        "runs": 1,
        "status": "craft"
       },
@@ -439,10 +439,10 @@
            "children": [
             {
              "alt_count": 3,
-             "key": "abyssalcraft:nitreore",
+             "key": "railcraft:ore:1",
              "kind": "item",
-             "label": "Nitre Ore",
-             "name": "Nitre Ore",
+             "label": "Saltpeter Ore",
+             "name": "Saltpeter Ore",
              "need": 4,
              "note": "mined, not crafted",
              "status": "raw"
@@ -456,7 +456,7 @@
            "name": "Niter",
            "need": 4,
            "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31816",
+           "recipe": "hei:minecraft.smelting:31598",
            "runs": 4,
            "status": "craft"
           }
@@ -492,7 +492,7 @@
            "name": "Sulfur",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:minecraft.crafting:25116",
+           "recipe": "hei:minecraft.crafting:25048",
            "runs": 1,
            "status": "craft"
           }
@@ -534,7 +534,7 @@
              "name": "Acacia Wood",
              "need": 2,
              "per_run": 1,
-             "recipe": "hei:bdew.jeibees.produce.rootTrees:110675",
+             "recipe": "hei:bdew.jeibees.produce.rootTrees:148899",
              "runs": 2,
              "status": "craft"
             }
@@ -547,7 +547,7 @@
            "name": "Charcoal",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31466",
+           "recipe": "hei:minecraft.smelting:31341",
            "runs": 1,
            "status": "craft"
           }
@@ -583,7 +583,7 @@
      "name": "Binding Reagent",
      "need": 1,
      "per_run": 1,
-     "recipe": "hei:modularmachinery.recipes.berserker_forge:202260",
+     "recipe": "hei:modularmachinery.recipes.berserker_forge:246761",
      "runs": 1,
      "status": "craft"
     },
@@ -615,7 +615,7 @@
          "name": "Diamond",
          "need": 3,
          "per_run": 2,
-         "recipe": "hei:minecraft.smelting:31695",
+         "recipe": "hei:minecraft.smelting:31833",
          "runs": 2,
          "status": "craft"
         }
@@ -671,7 +671,7 @@
    "need": 1,
    "note": "nothing makes this exact item; planned as animus:kama_bound#fd1adc426e12",
    "per_run": 1,
-   "recipe": "hei:bloodmagic:alchemyArray:117999",
+   "recipe": "hei:bloodmagic:alchemyArray:145368",
    "resolved_to": "animus:kama_bound#fd1adc426e12",
    "runs": 1,
    "status": "craft"
