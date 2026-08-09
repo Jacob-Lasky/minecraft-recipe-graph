@@ -315,6 +315,15 @@ public final class ShotScreens {
                 PlannerShot.openSelectedFlow(arg);
             }
         });
+        // The shopping row's menu (#251). Registered beside the node menu because they are the
+        // same KIND of artifact and differ only in which quantity they act on, which is the
+        // distinction the issue exists to keep.
+        register("row-menu", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openRowMenu(arg);
+            }
+        });
         register("planner-menu", new Opener() {
             @Override
             public void open(String arg) {

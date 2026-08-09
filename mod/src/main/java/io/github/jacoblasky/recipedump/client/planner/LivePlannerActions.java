@@ -33,9 +33,20 @@ public final class LivePlannerActions implements PlannerActions {
     private IPanelHandler menu;
     private IPanelHandler picker;
     private IPanelHandler caveats;
+    private IPanelHandler rowMenu;
 
     /** The node the next sub-panel describes. Client thread only, like every field here. */
     private PlanNode current;
+
+    /**
+     * The shopping row the next row menu describes. Client thread only, like every field here.
+     *
+     * A SECOND FIELD RATHER THAN A WIDER TYPE ON `current`, because the two menus are about
+     * different things and a shared field would let a row menu open on a node -- which is the
+     * per-occurrence quantity #251 exists to keep out of this surface. Two fields make that
+     * unrepresentable; one field plus a comment would make it merely unlikely.
+     */
+    private PlanView.EntryRow currentRow;
 
     /**
      * Attach to the panel the sub-panels will hang off.
@@ -182,6 +193,57 @@ public final class LivePlannerActions implements PlannerActions {
      * They build the widgets and never click, so a missing handler is correct rather than an
      * error, and {@link #open} treats it as a no-op.
      */
+    @Override
+    public void openRowMenu(PlanView.EntryRow row) {
+        // NO `selectNode` HERE, and its absence is the point. `openNodeMenu` selects first so
+        // the diagram lights up the occurrence that was clicked; a shopping row IS every
+        // occurrence at once, so there is no one node to select and picking any of them would
+        // be #251's rejected option 1 arriving by way of a highlight.
+        currentRow = row;
+        open(rowMenu());
+    }
+
+    @Override
+    public void addRowToTodo(PlanView.EntryRow row) {
+        // `row.need()` AND NOT ANY NODE'S. This is the aggregate the whole issue is about: the
+        // total the plan still wants of this item, across every parent that wants it, which is
+        // the number a player gathering things acts on.
+        PlanBookNetwork.CHANNEL.sendToServer(
+                new PlanBookEditMessage(PlanBookEdit.SET_TODO, row.key(), row.need()));
+        closeMenu();
+    }
+
+    @Override
+    public void favouriteRow(PlanView.EntryRow row) {
+        // ADD rather than toggle, and quantity 0, for the reasons `toggleFavourite` gives: this
+        // panel is built from a PLAN and has no copy of the book to consult, and a favourite
+        // carries no quantity.
+        PlanBookNetwork.CHANNEL.sendToServer(
+                new PlanBookEditMessage(PlanBookEdit.ADD_FAVOURITE, row.key(), 0L));
+        closeMenu();
+    }
+
+    /**
+     * The row menu's panel handler, built at open time like the other three.
+     *
+     * ITS OWN HANDLER AND NOT `menu()`, because `IPanelHandler.simple` caches the panel it
+     * built and `open` deletes that cache before each open. Sharing one handler between the
+     * node menu and the row menu would work by accident and break the moment either stopped
+     * being deleted first.
+     */
+    private IPanelHandler rowMenu() {
+        if (rowMenu == null && parent != null) {
+            rowMenu = IPanelHandler.simple(parent, new SecondaryPanel.IPanelBuilder() {
+                @Override
+                public ModularPanel build(ModularPanel opener,
+                                          net.minecraft.entity.player.EntityPlayer player) {
+                    return PlannerWidgets.rowMenu(currentRow, LivePlannerActions.this);
+                }
+            }, true);
+        }
+        return rowMenu;
+    }
+
     private IPanelHandler menu() {
         if (menu == null && parent != null) {
             menu = IPanelHandler.simple(parent, new SecondaryPanel.IPanelBuilder() {
