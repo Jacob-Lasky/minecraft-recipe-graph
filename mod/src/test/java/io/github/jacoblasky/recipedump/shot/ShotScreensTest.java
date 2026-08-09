@@ -232,6 +232,17 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void theYieldShotIsReachableByName() {
+        // #252's render had no artifact for months because no fixture could express it, and
+        // then no SHOT could frame it: the earliest chance-yielded row in any fixture is index
+        // 38 and the tree viewport is about 14 rows. `planner-yield` is the only screen that
+        // scrolls to one, so a dropped registration takes the artifact with it while every
+        // layout test still passes.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-yield"));
+    }
+
+    @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");
         assertNotNull(problem);

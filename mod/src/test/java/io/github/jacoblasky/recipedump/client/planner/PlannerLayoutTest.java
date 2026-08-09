@@ -88,6 +88,31 @@ public class PlannerLayoutTest {
      * start failing for the wrong reason the next time the oracle moves, which #280 says it is
      * about to.
      */
+    /**
+     * #280: does scrolling a laid-out tree list actually STICK?
+     *
+     * WRITTEN BECAUSE A PACK BOOT SAID NO AND COULD NOT SAY WHY. `planner-yield` scrolled to
+     * 367px of 550 -- the log proves the call was made with sane numbers -- and the PNG came
+     * back showing rows 0 to 13, the top of the tree. So the offset was either never applied
+     * or applied and then reset, and a 20-minute boot cannot tell those apart.
+     *
+     * This can, in three minutes, with no client: lay the panel out, scroll it, read the offset
+     * back. If it reads back, the shot's problem is WHEN it scrolls rather than HOW.
+     */
+    @Test
+    public void scrollingALaidOutTreeListSticks() {
+        ModularPanel panel = laidOut("plan-truncated");
+        ListWidget<?, ?> tree = findList(panel);
+        assertTrue("the tree must overflow or there is nothing to scroll",
+                   tree.getScrollData().getScrollSize() > tree.getArea().h());
+
+        int target = tree.getScrollData().getScrollSize() - tree.getArea().h();
+        tree.getScrollArea().getScrollY().scrollTo(tree.getScrollArea(), target);
+
+        assertEquals("a scroll offset set on a laid-out list must read back",
+                     target, tree.getScrollArea().getScrollY().getScroll());
+    }
+
     @Test
     public void clickingAShoppingRowOpensItsMenuCarryingTheRowsOwnAggregateNeed() {
         PlanView plan = PlanFixtures.load("plan-cycle");
