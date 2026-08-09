@@ -10,6 +10,7 @@ alone. #61 was left alone for exactly that reason.
     python3 tools/cost-probe.py                      # the default sweep
     python3 tools/cost-probe.py --raw 1 2.5 20       # your own values
     python3 tools/cost-probe.py --unsourced 1 2000 5000   # #176's constant instead
+    python3 tools/cost-probe.py --toll 0 1 5 20 100       # #248's constant instead
     python3 tools/cost-probe.py --rank               # ranking only, ~50x faster
     python3 tools/cost-probe.py --item minecraft:diamond --explain
 
@@ -217,6 +218,12 @@ def main():
     # that shows what the constant actually buys.
     ap.add_argument("--unsourced", nargs="+", type=float, metavar="V",
                     help="UNSOURCED_COST values to compare instead of --raw (#176)")
+    # #248's constant, on the same pattern. Put 0.0 FIRST in the arm list, as the usage line
+    # above does: `report` diffs every arm against the first, and 0.0 is the pre-#248
+    # behaviour, so that arm is what shows what the toll actually buys. A toll of 0 IS the
+    # bug -- it is what makes every iron ore in the pack tie at BASE_RAW_COST.
+    ap.add_argument("--toll", nargs="+", type=float, metavar="V",
+                    help="OVERWORLD_TOLL values to compare instead of --raw (#248)")
     ap.add_argument("--rank", action="store_true",
                     help="rank only, no solve: fast, and it LIES (see the module docstring)")
     ap.add_argument("--item", action="append", default=[],
@@ -235,10 +242,16 @@ def main():
     # ONE CONSTANT PER RUN. Sweeping two at once would give a grid whose cells cannot be
     # attributed to either, which is the shape of a measurement nobody can act on.
     constant, values = "BASE_RAW_COST", args.raw
+    if args.unsourced and args.toll:
+        ap.error("--unsourced and --toll sweep two constants; run them separately")
     if args.unsourced:
         if args.explain:
             ap.error("--explain sweeps nothing; use --raw for its single value")
         constant, values = "UNSOURCED_COST", args.unsourced
+    if args.toll:
+        if args.explain:
+            ap.error("--explain sweeps nothing; use --raw for its single value")
+        constant, values = "OVERWORLD_TOLL", args.toll
     if args.explain:
         if not args.item:
             ap.error("--explain needs --item")

@@ -198,19 +198,54 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
     # has.
     g.multiblocks = multiblocks.parse(instance_dir, known=multiblocks.known_keys(g), say=say)
 
-    # AFTER the oredict is settled, because `world_ores` is what makes this sound. The
-    # pack's planetDefs also names blocks the overworld plainly has -- `minecraft:iron_block`
-    # on Osiris, `minecraft:bone_block` on Hator -- and generating somewhere is not the same
-    # as generating ONLY there. Intersecting with the pack's own `ore*` registration is the
-    # same structural filter #61 and #106 already rely on, and it removes every one of those
-    # by construction: they are `block*` entries, not `ore*`. Measured on the reference pack,
-    # 17 exclusive declarations become 8 ores.
+    # AFTER the oredict is settled, because `world_ores` is what makes this sound. Both pack
+    # sources name blocks the overworld plainly has -- planetDefs puts `minecraft:iron_block`
+    # on Osiris and `minecraft:bone_block` on Hator, and JEResources observes literal stone,
+    # air and stairs in every dimension it profiled -- and generating somewhere is not the
+    # same as generating ONLY there. Intersecting with the pack's own `ore*` registration is
+    # the same structural filter #61 and #106 already rely on, and it removes every one of
+    # those by construction: they are `block*` entries or nothing at all, not `ore*`.
+    # Measured on the reference pack, 2,301 observed blocks and 17 exclusive planetDefs
+    # declarations become 91 gated ores and 94 tolled ones.
+    #
+    # TWO SOURCES, UNIONED, NEITHER WINNING. #248. planetDefs states what Advanced Rocketry
+    # ADDS to a planet; JEResources' world-gen.json states what was OBSERVED in each of 60
+    # dimensions. They answer different questions, so a precedence rule between them would
+    # discard true rows -- see `dimensions.where_ores_generate`. The union is also what makes
+    # the gate SOUND rather than merely wider: JEResources sees the overworld, which
+    # planetDefs has no reason to mention, and that is what withdraws `abyssalcraft:abyore`
+    # from a rocket trip to Diamerisma it never needed, and `nuclearcraft:ore:4` from one to
+    # Oi. Both are ordinary overworld ores and both were gated from #112 until now.
     defs = dimensions.load_planet_defs(instance_dir)
-    if defs:
-        exclusive = dimensions.exclusive_keys(defs)
-        by_name = {name: dim for dim, (name, _ores) in defs.items()}
-        g.dimension_ores = {key: [by_name[name], name] for key, name in exclusive.items()
-                            if key in g.world_ores and name in by_name}
+    observed = dimensions.load_world_gen(instance_dir)
+    if defs or observed:
+        where = dimensions.where_ores_generate(defs, observed)
+        # THE TOLL READS THE UNION. THE GATE DOES NOT. That asymmetry is the design and it is
+        # not a subset relationship: these are two claims held to different evidence
+        # standards, and deriving both from one map is what would make it impossible to hold
+        # them apart. See `dimensions.overworld_keys`.
+        offworld = dimensions.offworld_keys(where)
+        # planetDefs ALONE may CREATE a gate, because it is a declaration. JEResources may
+        # only ever WITHDRAW one, on the strength of a positive overworld row. A gate built
+        # from the observational source would rest on an ABSENCE in it, and absence there has
+        # two indistinguishable causes -- does not generate, or was never sampled.
+        declared = dimensions.exclusive_keys(dimensions.where_ores_generate(defs, {}))
+        withdrawn = set(declared) & dimensions.overworld_keys(observed)
+        exclusive = {key: value for key, value in declared.items()
+                     if key not in withdrawn}
+        # BOTH SETS ARE INTERSECTED WITH `world_ores`, which is the structural filter #112
+        # already relied on and the reason a `block*` entry cannot be gated: planetDefs puts
+        # `minecraft:iron_block` on Osiris, and JEResources observes literal stone and air in
+        # every dimension it profiled. Neither is an ore you go and mine.
+        #
+        # The dimension id comes back BESIDE the name rather than being looked up by name the
+        # way #112 did it. A name lookup cannot survive a second source that spells a
+        # dimension differently, and JEResources writes the Nether as `the_nether`; the id is
+        # the identity and both files agree on it.
+        g.dimension_ores = {key: [dim, name] for key, (dim, name) in exclusive.items()
+                            if key in g.world_ores}
+        g.offworld_ores = {key: [dim, name] for key, (dim, name) in offworld.items()
+                           if key in g.world_ores}
         # And the same ores again under the pack's OTHER id for them, which is where #112's
         # price went missing: the key planetDefs names is not the key the recipes consume.
         #
@@ -219,17 +254,31 @@ def build(instance_dir, hei_path=None, quiet=False, no_guess=False,
         # pack DELETED a same-named key from is the pack saying the two ids are one rock,
         # and it is the only signal that reaches the Rhenium twin. #168, and see
         # `oredict.removals_from_crafttweaker_log` for why the record cannot name a key.
+        #
+        # RUN OVER BOTH SETS, because "one registrant, one rock, two ids" is a fact about the
+        # rock and not about which of the two claims is being made against it. A twin of a
+        # tolled ore is the same rock behind the same portal; leaving the toll off it would
+        # reopen #117 one level down, with the toll going missing on exactly the key the
+        # recipes consume.
         removals = oredict.removals_from_crafttweaker_log(ct_log)
         shadows = dimensions.shadow_ores(g, g.dimension_ores, removals)
         g.shadow_ores = shadows
         g.dimension_ores.update(shadows)
-        say("dimensions: %d declared, %d ores generate in exactly one of them "
-            "(%d after the ore* filter, +%d duplicate registrations of those)"
-            % (len(defs), len(exclusive), len(g.dimension_ores) - len(shadows),
-               len(shadows)))
+        g.offworld_ores.update(dimensions.shadow_ores(g, g.offworld_ores, removals))
+        say("dimensions: %d planets declared, %d blocks observed across %d dimensions; "
+            "%d ores gated (+%d duplicate registrations), %d withdrawn by an overworld "
+            "sighting, %d ores pay the off-world toll"
+            % (len(defs), len(observed),
+               len({dim for dims in where.values() for dim in dims}),
+               len(g.dimension_ores) - len(shadows), len(shadows),
+               # ORE-LEVEL, because the line says "ores". Three of the five keys withdrawn
+               # on the reference pack are `block*` entries the `ore*` filter drops anyway,
+               # so the raw count would advertise a correction that changed no price.
+               len(withdrawn & g.world_ores), len(g.offworld_ores)))
     else:
-        say("dimensions: no config/advRocketry/planetDefs.xml -- a trip to another "
-            "dimension is not priced, which is the pre-#112 behaviour")
+        say("dimensions: no config/advRocketry/planetDefs.xml and no "
+            "config/jeresources/world-gen.json -- a trip to another dimension is not "
+            "priced, which is the pre-#112 behaviour")
 
     # HOW THE PACK SAYS YOU GET AN ITEM, when no recipe in the dump can say it. #171.
     #
@@ -382,7 +431,11 @@ def _read_schema_five(g, instance_dir, dump_dir, dump_root, out_path, say):
 #   anvil            repair/combine permutations, not crafting
 #   EIOTank/bottler  fluid container fill and empty
 #   information      JEI info panels (drop sources, usage notes)
-#   jeresources.*    world generation, villager trades, plant drops
+#   jeresources.*    world generation, villager trades, plant drops. NOT related to
+#                    `dimensions.load_world_gen`, which reads that mod's CONFIG FILE for
+#                    which dimension an ore generates in (#248). Dropped here are its JEI
+#                    RECIPE CATEGORIES, which claim worldgen produces an item; the two share
+#                    a mod name and nothing else, and dropping one does not blind the other.
 #   loot/drops       mob and chest loot tables, EXCEPT the ones
 #                    `tokens.LOOT_TABLE_CATEGORIES` declares by name: those are priced out
 #                    rather than deleted, so the JEI card stays readable and a sole-producer

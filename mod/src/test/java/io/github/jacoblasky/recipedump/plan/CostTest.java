@@ -406,6 +406,82 @@ public class CostTest {
         assertEquals(0.0, table.cost(ore), 0.0);
     }
 
+    // -- the off-world toll, which is #248 -----------------------------------------------------------
+
+    /** Two `oreIron` members, one in the overworld and one only in the Nether. */
+    private static RecipeGraph tiedIronGraph(boolean tolled) {
+        GraphBuilder b = new GraphBuilder();
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        // DUMP ORDER PUTS THE NETHER ONE FIRST, which is the point of the fixture: on a
+        // perfect tie the ranker returns the first alternative, so listing the overworld ore
+        // first would pass with no toll at all.
+        b.alternative(b.key("cyclicmagic:nether_iron_ore"));
+        b.alternative(b.key("minecraft:iron_ore"));
+        b.endSlot();
+        b.output(b.key("minecraft:iron_ingot"), 1);
+        b.endRecipe("smelt", "furnace", null, "test", false, false);
+        b.beginOreGroup("oreIron");
+        b.oreMember(b.key("cyclicmagic:nether_iron_ore"));
+        b.oreMember(b.key("minecraft:iron_ore"));
+        b.endOreGroup();
+        if (tolled) {
+            b.offworldOre(b.key("cyclicmagic:nether_iron_ore"));
+        }
+        return b.build();
+    }
+
+    @Test
+    public void anOreBehindAPortalCostsMoreThanTheIdenticalOreOutside() {
+        RecipeGraph graph = tiedIronGraph(true);
+        CostTable table = Cost.estimate(graph, new CostInputs());
+        assertEquals(Cost.BASE_RAW_COST, priceOf(graph, table, "minecraft:iron_ore"), 0.0);
+        assertEquals(Cost.BASE_RAW_COST + Cost.OVERWORLD_TOLL,
+                priceOf(graph, table, "cyclicmagic:nether_iron_ore"), 0.0);
+    }
+
+    @Test
+    public void withoutTheTollTheyTieAndDumpOrderDecides() {
+        // The bug, pinned. Dropping the toll data restores the reported behaviour, which is
+        // what makes the fixture above evidence rather than decoration.
+        RecipeGraph graph = tiedIronGraph(false);
+        CostTable table = Cost.estimate(graph, new CostInputs());
+        assertEquals(priceOf(graph, table, "minecraft:iron_ore"),
+                priceOf(graph, table, "cyclicmagic:nether_iron_ore"), 0.0);
+    }
+
+    @Test
+    public void liftingTheGateRemovesTheGateAndLeavesTheToll() {
+        // THE WHOLE DIFFERENCE FROM #112, and it has to be asserted as a DIFFERENCE rather
+        // than as "the ungated price is still high" -- that would restate the test above and
+        // pass with no gate in the picture at all. Going to the dimension must subtract
+        // exactly DIMENSION_COST and nothing else, leaving the portal still paid for.
+        RecipeGraph graph = tiedIronGraph(true);
+        int ore = graph.keyId("cyclicmagic:nether_iron_ore");
+        double gated = Cost.estimate(graph, new CostInputs().dimensionGated(ore)).cost(ore);
+        CostTable lifted = Cost.estimate(graph, new CostInputs());
+        double visited = lifted.cost(ore);
+        assertEquals(Cost.DIMENSION_COST, gated - visited, 0.0);
+        assertEquals(Cost.OVERWORLD_TOLL, visited - Cost.BASE_RAW_COST, 0.0);
+        assertTrue(visited > priceOf(graph, lifted, "minecraft:iron_ore"));
+    }
+
+    @Test
+    public void aGateAndATollAreBothCharged() {
+        RecipeGraph graph = tiedIronGraph(true);
+        int ore = graph.keyId("cyclicmagic:nether_iron_ore");
+        CostTable table = Cost.estimate(graph, new CostInputs().dimensionGated(ore));
+        assertEquals(Cost.BASE_RAW_COST + Cost.DIMENSION_COST + Cost.OVERWORLD_TOLL,
+                table.cost(ore), 0.0);
+    }
+
+    @Test
+    public void stockStillBeatsTheTollBecauseItOnlyRaisesAFloor() {
+        RecipeGraph graph = tiedIronGraph(true);
+        int ore = graph.keyId("cyclicmagic:nether_iron_ore");
+        assertEquals(0.0, Cost.estimate(graph, new CostInputs().have(ore)).cost(ore), 0.0);
+    }
+
     // -- transmutation, which is #50 ----------------------------------------------------------------
 
     @Test

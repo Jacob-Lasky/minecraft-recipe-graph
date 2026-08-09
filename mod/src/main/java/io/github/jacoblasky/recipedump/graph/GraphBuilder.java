@@ -87,6 +87,11 @@ public final class GraphBuilder {
     private final KeyIndex.Builder dimensionOreKey = new KeyIndex.Builder();
     private final IntArray dimensionOreDimId = new IntArray();
     private final IntArray dimensionOreNameId = new IntArray();
+    // Collected as a plain key list and built into a BITSET rather than a KeyIndex, because
+    // the toll is a membership test and nothing in Java ever asks WHICH dimension. No
+    // permutation is needed for the same reason: there is no value column to keep in step.
+    // See `offworldOre`.
+    private final IntArray offworldOreKey = new IntArray();
 
     private final KeyIndex.Builder declaredProvenanceKey = new KeyIndex.Builder();
     private final IntArray declaredProvenanceKind = new IntArray();
@@ -288,6 +293,20 @@ public final class GraphBuilder {
     }
 
     /**
+     * An ore no pack source ever places in the overworld, so a portal is on the route. #248.
+     *
+     * <p>ONLY THE KEY IS KEPT, unlike {@link #dimensionOre} beside it, and the difference is
+     * not an oversight. A gate is SHOWN to the player -- "mined on Sedna, and you have not
+     * been there" -- so it needs the dimension's id and name; a toll is a flat term in the
+     * price and Java never renders it, so carrying a name table for it would be bytes in a
+     * 400 MB heap budget bought with nothing. The python side keeps the name because
+     * `graph.json` is also read by people.
+     */
+    public void offworldOre(int keyId) {
+        offworldOreKey.add(keyId);
+    }
+
+    /**
      * What the PACK says hands this key out, when no recipe in the dump can say it. #171/#262.
      *
      * `kind` is one of {@link io.github.jacoblasky.recipedump.plan.Provenance}'s three words,
@@ -412,6 +431,10 @@ public final class GraphBuilder {
             Bits.set(oreGuessed, oreGuessedGroups.get(i));
         }
         long[] worldOres = buildWorldOres(oreTable, oreMembers, keyCount);
+        long[] offworldOres = Bits.ofSize(keyCount);
+        for (int i = 0; i < offworldOreKey.size(); i++) {
+            Bits.set(offworldOres, offworldOreKey.get(i));
+        }
 
         StringTable categoryTable = categories.build();
         Csr catalysts = pairsToCsr(catalystCategory, catalystKey, categoryTable.size());
@@ -438,8 +461,8 @@ public final class GraphBuilder {
                 categoryTable, machineNames.build(), sources.build(), roles.build(), store,
                 byOutput, byInput, wildcardSibling, oreTable, oreMembers, oreIndex,
                 oreGroupKeyId, oreKeyBuilder.build(oreKeyOrder),
-                permute(oreKeyGroup, oreKeyOrder), oreGuessed, worldOres, liveKeys,
-                reshapedOnly, catalysts,
+                permute(oreKeyGroup, oreKeyOrder), oreGuessed, worldOres, offworldOres,
+                liveKeys, reshapedOnly, catalysts,
                 categoryMods.build(), categoryModId,
                 dimensionOreKey.build(dimensionOrder),
                 permute(dimensionOreDimId, dimensionOrder),

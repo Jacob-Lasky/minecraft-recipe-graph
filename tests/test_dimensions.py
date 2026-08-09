@@ -6,12 +6,19 @@ ITEMS and could not price a PLACE, because travelling is not a recipe. So
 something you go and mine -- cost exactly what a cobblestone costs. You mine it on Sedna.
 The reference save has no DIM147 directory at all.
 
-TWO SOURCES, KEPT APART, and the split is the design:
+PACK DATA AND WORLD STATE, KEPT APART, and the split is the design:
 
-    what only grows there   pack data      graph.dimension_ores   (planetDefs.xml)
+    what only grows there   pack data      graph.dimension_ores   (two pack files)
     whether you have been   world state    the have file          (region directories)
 
 so the gate lifts by itself once the save has terrain for the place.
+
+AND #248 ADDS A SECOND PACK FILE AND A SECOND TERM, both covered below. The file is
+`config/jeresources/world-gen.json`, unioned with planetDefs because they answer different
+questions and neither is allowed to win. The term is a TOLL: a gate says "you have never
+been there" and lifts on the first visit, a toll says a portal is on the route and never
+lifts. Without it every iron ore in the pack tied at `BASE_RAW_COST` and a plan for a hopper
+sent you to the Nether.
 
 THE ISSUE'S OWN FRAMING WAS WRONG IN TWO WAYS AND BOTH ARE PINNED BELOW. It treated
 planets as a category distinct from dimensions -- Advanced Rocketry registers them as
@@ -31,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipegraph import cost, dimensions  # noqa: E402
 from recipegraph.model import Graph, Ingredient, Recipe  # noqa: E402
+from recipegraph.solve import Solver  # noqa: E402
 
 # Trimmed from the reference pack's config/advRocketry/planetDefs.xml, shapes preserved:
 # a gas giant with no DIMID that only groups moons, a nested moon that is its own
@@ -65,14 +73,55 @@ PLANET_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </galaxy>
 """
 
+# Trimmed from the reference pack's config/jeresources/world-gen.json, shapes preserved:
+# the `distrib` histogram and `dropsList` this reader ignores, the always-written `:0` meta,
+# an ore in one off-world dimension, an ore in two of them, an ore the overworld also has,
+# and the #248 case -- a block planetDefs puts on ONE planet that is in the overworld too.
+WORLD_GEN_JSON = """[
+  {"block": "cyclicmagic:nether_iron_ore:0",
+   "distrib": "0,0.0;1,0.0;2,1.6875E-4;", "silktouch": false,
+   "dim": "Dim -1: the_nether"},
+  {"block": "minecraft:iron_ore:0", "distrib": "0,0.0;", "silktouch": false,
+   "dropsList": [{"itemStack": "minecraft:iron_ore:0"}],
+   "dim": "Dim 0: overworld"},
+  {"block": "minecraft:iron_ore:0", "distrib": "0,0.0;", "silktouch": false,
+   "dim": "Dim -1: the_nether"},
+  {"block": "mod:twin_ore:0", "distrib": "0,0.0;", "silktouch": false,
+   "dim": "Dim -1: the_nether"},
+  {"block": "mod:twin_ore:0", "distrib": "0,0.0;", "silktouch": false,
+   "dim": "Dim 1: the_end"},
+  {"block": "thermalfoundation:storage:5", "distrib": "0,0.0;", "silktouch": false,
+   "dim": "Dim 0: overworld"},
+  {"block": "mod:no_meta", "distrib": "0,0.0;", "silktouch": false,
+   "dim": "Dim 427: divinerpg:vethea"}
+]"""
+
 SEDNANITE = "contenttweaker:sednanite_ore"
 RHENIUM = "contenttweaker:rhenium_ore"
+NETHER_IRON = "cyclicmagic:nether_iron_ore"
+OVERWORLD_IRON = "minecraft:iron_ore"
+TWIN = "mod:twin_ore"
 
 STATES = {"minecraft.crafting": ("have", ""), "mod.condenser": ("unavailable", "")}
+SMELT_STATES = {"minecraft.smelting": ("have", "")}
 
 
 def parsed():
     return dimensions.parse_planet_defs(PLANET_XML)
+
+
+def observed():
+    return dimensions.parse_world_gen(WORLD_GEN_JSON)
+
+
+def where(defs=None, obs=None):
+    """The unioned `{key: {dim: name}}` both `exclusive_keys` and `offworld_keys` read.
+
+    Defaults to BOTH sources, because that is what `index.build` passes and a test that
+    exercised one source alone would not notice the union going wrong.
+    """
+    return dimensions.where_ores_generate(parsed() if defs is None else defs,
+                                          observed() if obs is None else obs)
 
 
 class ReadingThePackTest(unittest.TestCase):
@@ -93,11 +142,11 @@ class ReadingThePackTest(unittest.TestCase):
         self.assertIn("thermalfoundation:storage:5", ores)
 
     def test_an_ore_two_dimensions_share_is_locked_to_neither(self):
-        self.assertNotIn("mod:shared_ore", dimensions.exclusive_keys(parsed()))
+        self.assertNotIn("mod:shared_ore", dimensions.exclusive_keys(where()))
 
     def test_the_exclusive_ones_are_kept(self):
-        self.assertEqual(dimensions.exclusive_keys(parsed()).get(SEDNANITE), "Sedna")
-        self.assertEqual(dimensions.exclusive_keys(parsed()).get(RHENIUM), "Rhenia")
+        self.assertEqual(dimensions.exclusive_keys(where()).get(SEDNANITE), (147, "Sedna"))
+        self.assertEqual(dimensions.exclusive_keys(where()).get(RHENIUM), (163, "Rhenia"))
 
     def test_a_missing_config_is_not_an_error(self):
         self.assertEqual(dimensions.load_planet_defs("/nonexistent"), {})
@@ -105,6 +154,182 @@ class ReadingThePackTest(unittest.TestCase):
     def test_junk_parses_to_nothing_rather_than_raising(self):
         """A hand-edited pack config must not be able to take the build down."""
         self.assertEqual(dimensions.parse_planet_defs("<galaxy><broken"), {})
+
+
+class ReadingTheObservedWorldgenTest(unittest.TestCase):
+    """`config/jeresources/world-gen.json`, the second source #248 added."""
+
+    def test_the_dimension_id_comes_out_of_the_display_string(self):
+        self.assertEqual(observed()[NETHER_IRON], {-1: "the_nether"})
+
+    def test_a_name_holding_a_colon_survives(self):
+        """`Dim 427: divinerpg:vethea` is a real row; a greedy split would eat the name."""
+        self.assertEqual(observed()["mod:no_meta"], {427: "divinerpg:vethea"})
+
+    def test_a_zero_meta_is_dropped_to_match_the_graph(self):
+        """JEResources always writes `:0`; the graph omits a zero meta, and the two
+        spellings have to meet. Done by `model.canonical_item_key`, which is the ONE
+        spelling of this since #253."""
+        self.assertIn("minecraft:iron_ore", observed())
+        self.assertNotIn("minecraft:iron_ore:0", observed())
+
+    def test_a_nonzero_meta_is_kept(self):
+        self.assertIn("thermalfoundation:storage:5", observed())
+
+    def test_a_wildcard_meta_becomes_the_star_spelling(self):
+        """#253/#263: the two sources that name items disagreed about the any-damage
+        wildcard, and the fix was ONE spelling -- `:*`, never the literal `:32767`.
+
+        This reader goes through `model.canonical_item_key`, which IS that one spelling, so
+        it cannot drift from the other five readers that use it. Pinned because it is a DATA
+        CONTRACT between a parser and the graph's key vocabulary: an edit that split the meta
+        by hand would reintroduce exactly the phantom-key class #263 removed. The reference
+        pack contains zero wildcard rows, so neither the golden set nor any other test in
+        this file could catch that -- which is precisely why it is asserted here.
+        """
+        parsed = dimensions.parse_world_gen(
+            '[{"block": "mod:thing:32767", "dim": "Dim -1: the_nether"}]')
+        self.assertEqual(parsed, {"mod:thing:*": {-1: "the_nether"}})
+
+    def test_an_id_with_no_meta_at_all_keeps_its_whole_path(self):
+        """An id with no meta at all must keep its whole path. Splitting on the last colon
+        unconditionally turns `mod:no_meta` into `mod` with a meta of `no_meta`, coerced to
+        0, so the ore comes back as the mod id and silently matches nothing.
+        `canonical_item_key` gets this right; a hand-rolled split is where it goes wrong."""
+        self.assertIn("mod:no_meta", observed())
+        self.assertNotIn("mod", observed())
+
+    def test_every_dimension_a_block_appears_in_is_collected(self):
+        self.assertEqual(sorted(observed()["minecraft:iron_ore"]), [-1, 0])
+
+    def test_a_missing_config_is_not_an_error(self):
+        self.assertEqual(dimensions.load_world_gen("/nonexistent"), {})
+
+    def test_junk_parses_to_nothing_rather_than_raising(self):
+        self.assertEqual(dimensions.parse_world_gen("[{\"block\": broken"), {})
+
+    def test_a_non_list_payload_is_declined(self):
+        self.assertEqual(dimensions.parse_world_gen('{"populate": {}}'), {})
+
+    def test_an_unparseable_dim_string_is_dropped_not_guessed(self):
+        """A format change must show up as coverage falling, never as an invented id."""
+        self.assertEqual(
+            dimensions.parse_world_gen('[{"block": "mod:x:0", "dim": "the nether"}]'), {})
+
+
+class UnioningTheTwoSourcesTest(unittest.TestCase):
+    """#248. Neither source wins, because they answer different questions."""
+
+    def test_a_planet_declaration_survives_a_source_that_never_saw_it(self):
+        """No profiling run reached Sedna, and planetDefs still places Sednanite there."""
+        self.assertEqual(where()[SEDNANITE], {147: "Sedna"})
+
+    def test_an_observation_survives_a_source_that_cannot_see_dimensions(self):
+        self.assertEqual(where()[NETHER_IRON], {-1: "the_nether"})
+
+    def test_the_overworld_withdraws_a_planet_declaration(self):
+        """THE #248 CASE, `abyssalcraft:abyore` in miniature. planetDefs puts
+        `thermalfoundation:storage:5` on Osiris alone, so #112 gated it behind a rocket;
+        JEResources saw it in the overworld, and only the union sees both."""
+        self.assertEqual(sorted(where()["thermalfoundation:storage:5"]), [0, 148])
+        # Gated by planetDefs alone, which is what #112 shipped and what this withdraws.
+        self.assertIn("thermalfoundation:storage:5",
+                      dimensions.exclusive_keys(where(obs={})))
+        self.assertNotIn("thermalfoundation:storage:5", dimensions.exclusive_keys(where()))
+
+    def test_either_source_alone_still_works(self):
+        planet_keys = {key for _name, ores in parsed().values() for key in ores}
+        self.assertEqual(sorted(where(obs={})), sorted(planet_keys))
+        self.assertIn(NETHER_IRON, where(defs={}))
+
+
+class OnlyADeclarationMayCreateAGateTest(unittest.TestCase):
+    """#248's central asymmetry: we are willing to be wrong by a toll and not by a gate."""
+
+    def test_an_overworld_sighting_withdraws_a_gate(self):
+        """`nuclearcraft:ore:4` in miniature. planetDefs puts `thermalfoundation:storage:5`
+        on Osiris alone, so #112 gated it; JEResources saw it in the overworld, which is
+        POSITIVE evidence that it is not exclusive to anywhere."""
+        declared = dimensions.exclusive_keys(where(obs={}))
+        self.assertIn("thermalfoundation:storage:5", declared)
+        self.assertIn("thermalfoundation:storage:5", dimensions.overworld_keys(observed()))
+        kept = {k: v for k, v in declared.items()
+                if k not in dimensions.overworld_keys(observed())}
+        self.assertNotIn("thermalfoundation:storage:5", kept)
+
+    def test_an_observation_can_never_create_a_gate(self):
+        """THE RULE, asserted as an inclusion rather than by example. Every gated key must
+        come from planetDefs; no amount of JEResources evidence may add one, because that
+        would rest on an ABSENCE in a source whose silences have two causes."""
+        declared = dimensions.exclusive_keys(where(obs={}))
+        kept = {k: v for k, v in declared.items()
+                if k not in dimensions.overworld_keys(observed())}
+        planet_keys = {key for _name, ores in parsed().values() for key in ores}
+        self.assertLessEqual(set(kept), planet_keys)
+        # NETHER_IRON is observed only in the Nether and would be gated by a union rule.
+        self.assertIn(NETHER_IRON, dimensions.offworld_keys(where()))
+        self.assertNotIn(NETHER_IRON, kept)
+
+    def test_the_overworld_set_reads_the_observed_source_alone(self):
+        """Handed the union it could not tell an overworld ROW from a planetDefs entry that
+        happens to name dimension 0, and only one of the two sources may speak here."""
+        self.assertEqual(dimensions.overworld_keys({}), set())
+        self.assertIn("minecraft:iron_ore", dimensions.overworld_keys(observed()))
+        self.assertNotIn(NETHER_IRON, dimensions.overworld_keys(observed()))
+
+
+class TheTollSetTest(unittest.TestCase):
+    """`offworld_keys`: a portal on the route, which never stops being true. #248."""
+
+    def test_an_ore_only_the_nether_has_is_tolled(self):
+        self.assertEqual(dimensions.offworld_keys(where())[NETHER_IRON], (-1, "the_nether"))
+
+    def test_an_ore_the_overworld_also_has_is_not_tolled(self):
+        self.assertNotIn("minecraft:iron_ore", dimensions.offworld_keys(where()))
+
+    def test_an_ore_in_two_off_world_dimensions_is_tolled_but_not_gated(self):
+        """A portal either way, so the toll applies; locked to neither, so no gate does.
+        This is the only place the two sets differ, and it is why they are two sets."""
+        toll = dimensions.offworld_keys(where())
+        self.assertIn(TWIN, toll)
+        self.assertNotIn(TWIN, dimensions.exclusive_keys(where()))
+
+    def test_the_gate_and_the_toll_are_not_two_views_of_one_map(self):
+        """THE NESTING WAS THE BUG, NOT THE FEATURE, and an earlier version of this file
+        asserted the opposite. Deriving both sets from the union makes `exclusive_keys` a
+        subset of `offworld_keys` by construction -- elegant, and it is exactly what makes it
+        impossible to hold them to DIFFERENT EVIDENCE STANDARDS. They are two claims, not two
+        views: a declaration may create a gate, an observation may only withdraw one. So the
+        gate is fed planetDefs alone and the toll is fed the union, and the two sets are free
+        to disagree in both directions.
+        """
+        gate = dimensions.exclusive_keys(where(obs={}))
+        toll = dimensions.offworld_keys(where())
+        # `mod:twin_ore` is tolled and NOT gated: JEResources sees it in the Nether and the
+        # End, planetDefs never mentions it.
+        self.assertIn(TWIN, toll)
+        self.assertNotIn(TWIN, gate)
+        # And the direction that matters: the gate is not built from the union at all, so
+        # nothing JEResources observes can put a key INTO it.
+        self.assertLessEqual(set(gate), set(where(obs={})))
+
+    def test_an_ore_no_source_places_anywhere_is_not_tolled(self):
+        """SILENCE IS NOT EVIDENCE. Nobody profiled the Erebus, so `erebus:ore_iron` pays
+        nothing -- the #248 bug left unfixed for it, which is the safe direction, rather
+        than a surcharge invented from a mod id.
+
+        The key is PUT IN the map with an empty dimension set rather than left out of it,
+        because leaving it out asserts nothing: any string absent from the fixture would
+        pass. An empty set is what a source that mentions an ore and places it nowhere
+        produces, and it is the `if dims` guard that has to decline it."""
+        merged = dict(where())
+        merged["erebus:ore_iron"] = {}
+        self.assertNotIn("erebus:ore_iron", dimensions.offworld_keys(merged))
+        self.assertNotIn("erebus:ore_iron", dimensions.exclusive_keys(merged))
+
+    def test_the_named_dimension_is_stable_across_rebuilds(self):
+        """Lowest id, not first seen, so the same pack files give the same graph.json."""
+        self.assertEqual(dimensions.offworld_keys(where())[TWIN][0], -1)
 
 
 class ReadingTheSaveTest(unittest.TestCase):
@@ -215,9 +440,14 @@ class PricingTheTripTest(unittest.TestCase):
     def test_a_cheaper_crafted_route_still_wins(self):
         """The gate raises a FLOOR. It must not be able to hide a route that beats it.
 
-        This is what bounds the damage of a misclassification: every ore the reference
-        pack gates has between 1 and 6 producers, so a wrongly gated terrestrial ore keeps
-        whatever its recipes cost.
+        THIS BOUNDS THE DAMAGE OF A MISCLASSIFICATION ONLY WHERE A ROUTE EXISTS, and #248
+        changed how often that is. Under planetDefs alone all 8 gated ores had between 1 and
+        6 producers, so a wrongly gated terrestrial ore always kept whatever its recipes
+        cost. The unioned set is 95 and 62 of them have NO producer, so for those the floor
+        is the entire price. What replaces the old argument is the source rather than the
+        fallback: JEResources observes the overworld directly, so a terrestrial ore is
+        excluded by `exclusive_keys` instead of being rescued afterwards by a recipe. See
+        `cost._seed`.
         """
         g = gated_graph()
         g.add(Recipe("cheap", "t", [(SEDNANITE, 1)],
@@ -226,6 +456,172 @@ class PricingTheTripTest(unittest.TestCase):
         costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
         self.assertAlmostEqual(costs[SEDNANITE],
                                cost.MACHINE_COST["have"] + cost.BASE_RAW_COST, places=6)
+
+
+def tied_iron_graph():
+    """Two `oreIron` members, one in the overworld and one only in the Nether. #248.
+
+    The reported plan in miniature. Both satisfy the same slot, so every iron recipe
+    accepts either and the choice falls to `Solver.pick_alternative`; before the toll the
+    two priced IDENTICALLY at BASE_RAW_COST and `max()` on a perfect tie returned dump
+    order, which put the Nether first. Nothing is stocked, because a stocked ore would be
+    picked on availability and the cost tiebreak would never be reached.
+    """
+    g = Graph()
+    g.names = {OVERWORLD_IRON: "Iron Ore", NETHER_IRON: "Nether Iron Ore",
+               "minecraft:iron_ingot": "Iron Ingot"}
+    g.ore_members = {"oreIron": [NETHER_IRON, OVERWORLD_IRON]}
+    # DUMP ORDER PUT THE NETHER ONE FIRST and that is the point of the fixture, not an
+    # accident of how it is written: with a perfect tie `max` returns the first element, so
+    # a fixture listing the overworld ore first would pass with no toll at all.
+    g.offworld_ores = {NETHER_IRON: [-1, "the_nether"]}
+    g.add(Recipe("smelt", "t", [("minecraft:iron_ingot", 1)],
+                 [Ingredient([NETHER_IRON, OVERWORLD_IRON], 1)],
+                 category="minecraft.smelting"))
+    return g
+
+
+class TheTollBreaksTheTieTest(unittest.TestCase):
+    """#248: every iron ore in the pack cost the same, so a plan sent you to the Nether."""
+
+    def _solver(self, g):
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        return Solver(g, have={}, machine_states=SMELT_STATES, costs=costs), costs
+
+    def test_the_overworld_ore_is_cheaper(self):
+        _solver, costs = self._solver(tied_iron_graph())
+        self.assertLess(costs[OVERWORLD_IRON], costs[NETHER_IRON])
+
+    def test_the_toll_is_exactly_what_separates_them(self):
+        """AND IT IS ASSERTED AGAINST A LITERAL, NOT AGAINST THE CONSTANT ITSELF.
+
+        Written as `difference == cost.OVERWORLD_TOLL` this test is PARAMETERISED ON THE
+        THING IT TESTS: set the constant to 0.0 and both ores price at 1.0, the difference
+        is 0.0, and the assertion passes while the defect is fully restored. Caught by
+        reverting the behaviour and watching which tests stayed green -- this one did.
+
+        A separation of exactly 5.0 is what the shipped constant means, so 5.0 is what the
+        assertion says. If the constant moves deliberately this test fails and is updated
+        deliberately, which is the point of pinning a magnitude anywhere.
+        """
+        _solver, costs = self._solver(tied_iron_graph())
+        self.assertAlmostEqual(costs[NETHER_IRON] - costs[OVERWORLD_IRON], 5.0, places=6)
+        self.assertAlmostEqual(cost.OVERWORLD_TOLL, 5.0, places=6)
+
+    def test_the_planner_picks_the_overworld_ore(self):
+        """The assertion the issue is actually about. `pick_alternative` ranks on
+        availability first and cheapest second, and the tiebreak could not fire."""
+        solver, _costs = self._solver(tied_iron_graph())
+        recipe = tied_iron_graph().recipes[0]
+        self.assertEqual(solver.pick_alternative(recipe.inputs[0]), OVERWORLD_IRON)
+
+    def test_without_the_toll_it_ties_and_dump_order_decides(self):
+        """The bug, pinned. Removing the toll data restores the reported behaviour, which
+        is what makes this fixture evidence rather than decoration."""
+        g = tied_iron_graph()
+        g.offworld_ores = {}
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        self.assertEqual(costs[OVERWORLD_IRON], costs[NETHER_IRON])
+        solver = Solver(g, have={}, machine_states=SMELT_STATES, costs=costs)
+        self.assertEqual(solver.pick_alternative(g.recipes[0].inputs[0]), NETHER_IRON)
+
+    def test_an_ore_group_node_also_resolves_to_the_overworld_member(self):
+        """THE SECOND PLACE THE TIE WAS DECIDED BY DUMP ORDER. A slot can hold the group key
+        `ore:oreIron` rather than the members, and `resolve_ore` picks among them with its own
+        copy of the three-tier rule. Both paths break on `-slot_cost`, so one term fixes both,
+        but only asserting `pick_alternative` would leave half of it unproven."""
+        g = tied_iron_graph()
+        g.ore_members = {"oreIron": [NETHER_IRON, OVERWORLD_IRON]}
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        solver = Solver(g, have={}, machine_states=SMELT_STATES, costs=costs)
+        node = solver.resolve_ore("ore:oreIron", 1, (), 0)
+        self.assertEqual(node["children"][0]["key"], OVERWORLD_IRON)
+
+    def test_visiting_the_dimension_lifts_the_gate_and_leaves_the_toll(self):
+        """THE WHOLE DIFFERENCE FROM A GATE, asserted as a DIFFERENCE.
+
+        `gates_for` returns {} here because the save has 42 region files in `DIM-1`, so the
+        gate genuinely lifts. What must remain is exactly the toll: going to the Nether
+        subtracts `DIMENSION_COST` and nothing else, and the portal is still paid for. Written
+        as two subtractions rather than as "the price is still high", because the latter
+        restates `test_the_overworld_ore_is_cheaper` and passes with no gate in the picture.
+        """
+        g = tied_iron_graph()
+        g.dimension_ores = {NETHER_IRON: [-1, "the_nether"]}
+        never = cost.estimate(g, machine_states=SMELT_STATES,
+                              dimension_gates=dimensions.gates_for(g, {".": 2}))
+        been = cost.estimate(g, machine_states=SMELT_STATES,
+                             dimension_gates=dimensions.gates_for(g, {"DIM-1": 42}))
+        self.assertAlmostEqual(never[NETHER_IRON] - been[NETHER_IRON],
+                               cost.DIMENSION_COST, places=6)
+        self.assertAlmostEqual(been[NETHER_IRON] - cost.BASE_RAW_COST,
+                               cost.OVERWORLD_TOLL, places=6)
+        self.assertGreater(been[NETHER_IRON], been[OVERWORLD_IRON])
+
+    def test_a_gate_and_a_toll_are_both_charged(self):
+        """An ore in a dimension you have NOT been to pays for the trip and the portal."""
+        g = tied_iron_graph()
+        g.dimension_ores = {NETHER_IRON: [-1, "the_nether"]}
+        gates = dimensions.gates_for(g, {".": 2})
+        costs = cost.estimate(g, machine_states=SMELT_STATES, dimension_gates=gates)
+        # Literals, for the reason on `test_the_toll_is_exactly_what_separates_them`: written
+        # against the constants this passes with the toll zeroed, which is the defect.
+        self.assertAlmostEqual(costs[NETHER_IRON], 1.0 + 800.0 + 5.0, places=6)
+
+    def test_stock_still_beats_the_toll(self):
+        """`min` is still `min`, exactly as for the gate."""
+        g = tied_iron_graph()
+        costs = cost.estimate(g, have={NETHER_IRON: 64}, machine_states=SMELT_STATES)
+        self.assertEqual(costs[NETHER_IRON], 0.0)
+
+    def test_an_untolled_graph_prices_exactly_as_before(self):
+        """A graph built before #248 has no `offworld_ores`, and must not move at all."""
+        g = tied_iron_graph()
+        del g.offworld_ores
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        self.assertAlmostEqual(costs[NETHER_IRON], cost.BASE_RAW_COST, places=6)
+
+
+class TheRawFloorIsOneDefinitionTest(unittest.TestCase):
+    """`cost.raw_floor`, extracted because `_seed` applies it twice and Java twice more.
+
+    THE FOUR COMBINATIONS ARE ASSERTED DIRECTLY rather than only through `_seed`, because
+    the helper is a CONTRACT BETWEEN TWO LANGUAGES: `Cost.rawFloor` must return the same
+    double for the same inputs, and `tests/fixtures/plan/` only catches a divergence that
+    happens to reach a fixture's chosen route. A key gated but not tolled, or tolled but
+    not gated, may not appear in any fixture at all.
+
+    LITERALS, NOT THE CONSTANTS, for the reason on `test_the_toll_is_exactly_what_separates
+    _them`: written as `BASE_RAW_COST + DIMENSION_COST` these pass with either constant
+    zeroed, which is the whole failure mode this file exists to catch.
+    """
+
+    def test_an_ordinary_leaf_pays_neither(self):
+        self.assertAlmostEqual(cost.raw_floor("mod:rock", {}, frozenset()), 1.0, places=6)
+
+    def test_a_gated_ore_pays_the_trip(self):
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {"mod:ore": "Sedna"}, frozenset()), 801.0, places=6)
+
+    def test_a_tolled_ore_pays_the_portal(self):
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {}, frozenset(["mod:ore"])), 6.0, places=6)
+
+    def test_an_unvisited_off_world_ore_pays_both(self):
+        """The two terms coexist; neither absorbs the other. See `dimensions` for why."""
+        self.assertAlmostEqual(
+            cost.raw_floor("mod:ore", {"mod:ore": "Sedna"}, frozenset(["mod:ore"])),
+            806.0, places=6)
+
+    def test_the_two_seed_rules_charge_a_key_identically(self):
+        """WHY THE HELPER EXISTS. The leaf rule ASSIGNS and the world-ore rule takes a MIN,
+        so a key reached by both must get the same number from each or the order of the two
+        loops decides the price. One definition makes that true by construction; this pins
+        it so a future edit to one call site cannot quietly diverge."""
+        g = tied_iron_graph()
+        costs = cost.estimate(g, machine_states=SMELT_STATES)
+        # NETHER_IRON is a world ore AND an unproduced leaf, so both rules reach it.
+        self.assertAlmostEqual(costs[NETHER_IRON], 6.0, places=6)
 
 
 class TheOrderingIsTheClaimTest(unittest.TestCase):
@@ -263,6 +659,56 @@ class TheOrderingIsTheClaimTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".json") as fh:
             a = cost.fingerprint(fh.name, {}, {}, {}, dimension_gates={})
             b = cost.fingerprint(fh.name, {}, {}, {}, dimension_gates={SEDNANITE: "Sedna"})
+        self.assertNotEqual(a, b)
+
+    def test_a_portal_costs_more_than_going_outside(self):
+        """#248's whole claim: the overworld ore must win OUTRIGHT, not by dump order."""
+        self.assertGreater(cost.OVERWORLD_TOLL, 0.0)
+
+    def test_a_portal_costs_far_less_than_a_boss(self):
+        """A portal is a walk. Farming a boss must never be preferred to walking through
+        one, which is what puts the whole tolled band below LOOT_COST rather than beside
+        it -- the floor is BASE_RAW_COST + OVERWORLD_TOLL, so that sum is what is bounded."""
+        self.assertLess(cost.BASE_RAW_COST + cost.OVERWORLD_TOLL, cost.LOOT_COST)
+
+    def test_a_machine_you_can_build_is_not_harder_than_a_portal(self):
+        """#248'S BINDING CONSTRAINT, AND IT IS NOT LOOT_COST.
+
+        The sweep found every positive toll routing-equivalent across the probe set, so the
+        magnitude is settled by the ordering alone -- and the tightest bound on it turned out
+        to be the machine band, not the loot band. An ore you walk to through a portal must
+        not read as a bigger obstacle than a machine you have to BUILD, or the solver starts
+        preferring construction projects to a walk. At a toll of 100 the floor is 101 and
+        this fails; that is what picked 5.0 rather than the top of the permitted band.
+        """
+        self.assertLess(cost.BASE_RAW_COST + cost.OVERWORLD_TOLL,
+                        cost.MACHINE_COST["buildable"])
+
+    def test_a_portal_costs_less_than_being_unable_to_get_there(self):
+        self.assertLess(cost.OVERWORLD_TOLL, cost.DIMENSION_COST)
+
+    def test_a_gate_and_a_toll_together_stay_finite(self):
+        """Both terms can apply at once, and the sum must still be a route the solver will
+        take when it is the only one. See `_seed`."""
+        self.assertLess(cost.BASE_RAW_COST + cost.DIMENSION_COST + cost.OVERWORLD_TOLL,
+                        cost.MACHINE_COST["unavailable"])
+
+    def test_the_toll_is_its_own_number(self):
+        """#95's lesson again: one figure for two unrelated statements destroys both."""
+        self.assertNotEqual(cost.OVERWORLD_TOLL, cost.DIMENSION_COST)
+        self.assertNotEqual(cost.OVERWORLD_TOLL, cost.LOOT_COST)
+        self.assertNotEqual(cost.OVERWORLD_TOLL, cost.BASE_RAW_COST)
+
+    def test_the_toll_is_in_the_fingerprint(self):
+        """`_seed` reads it, and the cache's own comment says every constant `_seed` reads
+        has to be hashed or a warm cache serves prices computed under the old table."""
+        with tempfile.NamedTemporaryFile(suffix=".json") as fh:
+            a = cost.fingerprint(fh.name, {}, {}, {})
+            was, cost.OVERWORLD_TOLL = cost.OVERWORLD_TOLL, cost.OVERWORLD_TOLL + 1.0
+            try:
+                b = cost.fingerprint(fh.name, {}, {}, {})
+            finally:
+                cost.OVERWORLD_TOLL = was
         self.assertNotEqual(a, b)
 
 
@@ -556,6 +1002,21 @@ class AGroupThePackDeletedIsStillEvidenceTest(unittest.TestCase):
         node = Solver(g, machine_states=STATES, costs=costs,
                       dimension_gates=gates).solve("fluid:rhenium", 1)["tree"]
         self.assertEqual([c["key"] for c in node["children"]], [SEDNANITE])
+
+    def test_spreading_to_the_twins_keeps_the_subset_relation(self):
+        """The subset holds by construction on the BASE sets -- one non-overworld dimension
+        implies no overworld dimension -- and `index.build` then widens both through
+        `shadow_ores` SEPARATELY. That second step is where it could break, so it is checked
+        rather than assumed: an ore gated but not tolled would pay for a trip it never stops
+        making and get no portal charge, which is the two terms coming apart.
+        """
+        g = shadow_graph(same_group=False)
+        g.offworld_ores = dict(g.dimension_ores)
+        gate_shadows = dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED)
+        toll_shadows = dimensions.shadow_ores(g, g.offworld_ores, SEDNANITE_REMOVED)
+        self.assertTrue(gate_shadows, "fixture spreads nothing; the check would be vacuous")
+        self.assertLessEqual(set(g.dimension_ores) | set(gate_shadows),
+                             set(g.offworld_ores) | set(toll_shadows))
 
     def test_the_graph_keeps_the_set_apart_from_the_gates(self):
         """`shadow_ores` is not recoverable from `dimension_ores`, so #168 persists it."""

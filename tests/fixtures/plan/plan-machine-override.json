@@ -7,14 +7,15 @@
   "not_truncated"
  ],
  "graph": {
-  "bytes": 121448519,
-  "dimension_ores": 11,
+  "bytes": 122683241,
+  "dimension_ores": 10,
   "dump_schema": 5,
   "multiblocks": 259,
-  "names": 261089,
-  "ore_members": 3116,
-  "recipes": 124467,
-  "sha256": "33658f4a7b63b72a074e9887e4aed354dc1f341820d5220ee6da3a2f2f48ac85"
+  "names": 261073,
+  "offworld_ores": 98,
+  "ore_members": 3115,
+  "recipes": 123846,
+  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
  },
  "request": {
   "item": "nuclearcraft:compound:7",
@@ -117,7 +118,7 @@
            "children": [
             {
              "alt_count": 35,
-             "alternatives": 7,
+             "alternatives": 8,
              "category": "minecraft.smelting",
              "children": [
               {
@@ -137,7 +138,7 @@
              "name": "Polished Granite",
              "need": 2,
              "per_run": 1,
-             "recipe": "hei:minecraft.smelting:31608",
+             "recipe": "hei:minecraft.smelting:31422",
              "runs": 2,
              "status": "craft"
             }
@@ -151,7 +152,7 @@
            "name": "Crushed Villiaumite",
            "need": 2,
            "per_run": 1,
-           "recipe": "hei:nuclearcraft_rock_crusher:333734",
+           "recipe": "hei:nuclearcraft_rock_crusher:260301",
            "runs": 2,
            "status": "craft"
           }
@@ -165,7 +166,7 @@
          "name": "Sodium Fluoride",
          "need": 2,
          "per_run": 1,
-         "recipe": "hei:nuclearcraft_manufactory:331085",
+         "recipe": "hei:nuclearcraft_manufactory:257652",
          "runs": 2,
          "status": "craft"
         },
@@ -188,7 +189,7 @@
        "name": "[fluid] Sodium Fluoride Solution",
        "need": 1332,
        "per_run": 666,
-       "recipe": "hei:nuclearcraft_dissolver:333410",
+       "recipe": "hei:nuclearcraft_dissolver:259977",
        "runs": 2,
        "status": "craft"
       },
@@ -224,7 +225,7 @@
            "name": "[fluid] Molten Boron",
            "need": 288,
            "per_run": 288,
-           "recipe": "hei:tconstruct.smeltery:131332",
+           "recipe": "hei:tconstruct.smeltery:232886",
            "runs": 1,
            "status": "craft"
           },
@@ -252,7 +253,7 @@
            "name": "[fluid] Hydrogen",
            "need": 6000,
            "per_run": 100,
-           "recipe": "hei:zmaster587.AR.electrolyzer:114198",
+           "recipe": "hei:zmaster587.AR.electrolyzer:119950",
            "runs": 60,
            "status": "craft"
           }
@@ -266,7 +267,7 @@
          "name": "[fluid] Diborane",
          "need": 2000,
          "per_run": 1000,
-         "recipe": "hei:nuclearcraft_chemical_reactor:333044",
+         "recipe": "hei:nuclearcraft_chemical_reactor:259611",
          "runs": 2,
          "status": "craft"
         },
@@ -289,7 +290,7 @@
        "name": "[fluid] Boric Acid",
        "need": 4000,
        "per_run": 1000,
-       "recipe": "hei:nuclearcraft_chemical_reactor:333045",
+       "recipe": "hei:nuclearcraft_chemical_reactor:259612",
        "runs": 4,
        "status": "craft"
       }
@@ -303,7 +304,7 @@
      "name": "[fluid] Borax Solution",
      "need": 666,
      "per_run": 333,
-     "recipe": "hei:nuclearcraft_chemical_reactor:333056",
+     "recipe": "hei:nuclearcraft_chemical_reactor:259623",
      "runs": 2,
      "status": "craft"
     }
@@ -316,7 +317,7 @@
    "name": "Borax",
    "need": 1,
    "per_run": 1,
-   "recipe": "hei:nuclearcraft_crystallizer:333388",
+   "recipe": "hei:nuclearcraft_crystallizer:259955",
    "runs": 1,
    "status": "craft"
   },

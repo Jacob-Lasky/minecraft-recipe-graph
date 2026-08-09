@@ -356,16 +356,42 @@ public class PlanFixtureTest {
     }
 
     /** What `tools/make-java-fixtures.py:graph_identity` would write for this pair. */
+
+    /**
+     * Every counted field of `graph_identity`, read off a loaded graph.
+     *
+     * ONE DEFINITION, BECAUSE THERE WERE TWO AND THE SECOND DRIFTED (#248). The refusal below
+     * and {@link #identityOf} both need this list, and when `graph_identity` grew
+     * `offworld_ores` the guard at the end of the refusal caught the refusal itself -- and
+     * said nothing about `identityOf`, which is a TEST helper the guard cannot see. The result
+     * was three synthetic-identity tests failing with a NullPointerException on a field one
+     * copy knew about and the other did not. A guard that enumerates can only police the copy
+     * it enumerates against; the fix is to stop having a second copy.
+     *
+     * ADDING A FIELD HERE IS THEREFORE THE WHOLE CHANGE, and the guard still fires if
+     * `graph_identity` grows something this does not.
+     */
+    private static Map<String, Long> identityCounts(RecipeGraph graph) {
+        Map<String, Long> counts = new LinkedHashMap<String, Long>();
+        counts.put("dump_schema", (long) graph.dumpSchema());
+        counts.put("recipes", (long) graph.recipes().count());
+        counts.put("names", (long) graph.namedKeyCount());
+        counts.put("ore_members", (long) graph.oreGroupCount());
+        counts.put("multiblocks", (long) graph.multiblocks().count());
+        counts.put("dimension_ores", (long) graph.dimensionOreCount());
+        // `offworld_ores` arrived with #248's toll; it is what distinguishes the oracle that
+        // branch needs from the one every other branch uses.
+        counts.put("offworld_ores", (long) graph.offworldOreCount());
+        return counts;
+    }
+
     private static JsonObject identityOf(RecipeGraph graph, File file) throws IOException {
         JsonObject identity = new JsonObject();
         identity.addProperty("sha256", sha256(file));
         identity.addProperty("bytes", file.length());
-        identity.addProperty("dump_schema", graph.dumpSchema());
-        identity.addProperty("recipes", graph.recipes().count());
-        identity.addProperty("names", graph.namedKeyCount());
-        identity.addProperty("ore_members", graph.oreGroupCount());
-        identity.addProperty("multiblocks", graph.multiblocks().count());
-        identity.addProperty("dimension_ores", graph.dimensionOreCount());
+        for (Map.Entry<String, Long> entry : identityCounts(graph).entrySet()) {
+            identity.addProperty(entry.getKey(), entry.getValue());
+        }
         return identity;
     }
 
@@ -486,13 +512,7 @@ public class PlanFixtureTest {
     private static String refuseAnOracleTheFixturesDoNotName(JsonObject identity,
                                                              RecipeGraph graph, File oracle)
             throws IOException {
-        Map<String, Long> got = new LinkedHashMap<String, Long>();
-        got.put("dump_schema", (long) graph.dumpSchema());
-        got.put("recipes", (long) graph.recipes().count());
-        got.put("names", (long) graph.namedKeyCount());
-        got.put("ore_members", (long) graph.oreGroupCount());
-        got.put("multiblocks", (long) graph.multiblocks().count());
-        got.put("dimension_ores", (long) graph.dimensionOreCount());
+        Map<String, Long> got = identityCounts(graph);
         // AND EVERY FIELD `graph_identity` WRITES IS CHECKED BY SOMETHING HERE. A guard that
         // enumerates is a guard that can be outgrown: `cost.fingerprint` hashed every constant
         // `_relax` used and none `_seed` used, and served a stale table as current for it. So a
@@ -515,7 +535,14 @@ public class PlanFixtureTest {
 
         List<String> wrong = new ArrayList<String>();
         for (Map.Entry<String, Long> entry : got.entrySet()) {
-            long want = identity.get(entry.getKey()).getAsLong();
+            // NAMED RATHER THAN DEREFERENCED BLIND. A fixture whose identity block predates a
+            // field this refusal checks used to arrive as a NullPointerException on this line,
+            // which reads as a broken test rather than as the stale fixture it is.
+            JsonElement recorded = identity.get(entry.getKey());
+            assertTrue("the fixtures' `graph` block carries no " + entry.getKey()
+                    + ", so it predates this refusal; regenerate them with"
+                    + " tools/make-java-fixtures.py", recorded != null);
+            long want = recorded.getAsLong();
             if (want != entry.getValue().longValue()) {
                 wrong.add(entry.getKey() + ": the fixtures were generated against " + want
                         + ", this graph has " + entry.getValue());

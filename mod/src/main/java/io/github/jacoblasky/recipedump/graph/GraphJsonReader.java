@@ -86,6 +86,8 @@ public final class GraphJsonReader {
                 readCategoryMods(reader, builder);
             } else if (field.equals("dimension_ores")) {
                 readDimensionOres(reader, builder);
+            } else if (field.equals("offworld_ores")) {
+                readOffworldOres(reader, builder);
             } else if (field.equals("declared_provenance")) {
                 readDeclaredProvenance(reader, builder);
             } else if (field.equals("multiblocks")) {
@@ -343,6 +345,30 @@ public final class GraphJsonReader {
             }
             reader.endArray();
             builder.dimensionOre(key, dimensionId, name);
+        }
+        reader.endObject();
+    }
+
+    /**
+     * `offworld_ores`, which carries the same `[dim id, name]` value as `dimension_ores` and
+     * of which Java keeps only the key. #248.
+     *
+     * <p>THE VALUE IS STILL READ THROUGH rather than skipped wholesale, because a JsonReader
+     * that stops mid-array leaves the stream pointing at a token the caller does not expect
+     * and the failure surfaces hundreds of keys later as a corrupt graph. See
+     * {@link GraphBuilder#offworldOre} for why the name is dropped rather than stored.
+     */
+    private static void readOffworldOres(JsonReader reader, GraphBuilder builder)
+            throws IOException {
+        reader.beginObject();
+        while (reader.hasNext()) {
+            int key = builder.key(reader.nextName());
+            reader.beginArray();
+            while (reader.hasNext()) {
+                reader.skipValue();
+            }
+            reader.endArray();
+            builder.offworldOre(key);
         }
         reader.endObject();
     }
