@@ -540,6 +540,32 @@ mod/tools/build-jar.sh                      # ~3 min, verifies what it produced
 cp mod/build/libs/mc-recipe-dump-*.jar '/path/to/instance/minecraft/mods/'
 ```
 
+**If the machine that plays is not the machine that builds**, that `cp` has nowhere to copy
+from, and until #279 there was no other route: `mod/build/` is gitignored, CI builds no jar,
+and no release had ever been cut. So the mod could not be installed anywhere except where it
+was compiled.
+
+`mod/tools/release-jar.sh` publishes a built jar as a GitHub release, which is the only sync
+channel between these machines. Run it from a checkout that has the pack:
+
+```bash
+mod/tools/release-jar.sh --dry-run          # every check, publishes nothing
+mod/tools/release-jar.sh                    # cuts mod-v<mod_version>
+```
+
+It refuses rather than publishing when the tree is dirty, when HEAD is not on `origin/master`,
+when the jar was built from other source than the commit being tagged, when the jar is the
+`-dev` one, or when the tag already exists. The release notes carry the dump schema, the
+commit, the source stamp and the SRG count, because **the first thing anyone needs to know
+about a downloaded jar is which schema it speaks** -- a graph from a different schema still
+loads and then reports items the pack really has as missing.
+
+**CI cannot do this for you and that is not a gap somebody forgot.** `checkPackJars` gates
+`compileJava`, and HadEnoughItems, ModularUI and AE2-UEL are CurseForge distributions on no
+maven a runner can reach -- re-probed 2026-08-09, with `modularui` returning 25 results from
+the same nexus that returns 0 for HadEnoughItems as the control. Mirroring them is a
+supply-chain decision rather than a code change.
+
 It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
 source in `mod/` on the dump schema, the version, and a SHA-256 over the whole Java tree, so
 it cannot quietly fall behind the Python side that reads its output. If that test fails,
