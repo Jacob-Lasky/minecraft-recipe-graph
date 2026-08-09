@@ -102,6 +102,18 @@ public class PlanFixtureTest {
         node.runs = 1L;
         node.perRun = Double.valueOf(1.0);
         node.yieldChance = Double.valueOf(0.5);
+        // #175's catalyst mark, ADDED IN #280 BECAUSE THE GATE BELOW ACCUSED THE PORT OF NOT
+        // BEING ABLE TO EMIT IT. It can -- `PlanNode` has `notConsumed()` and
+        // `Builder.notConsumed(...)`. This node is where `emittableNames` gets its list, so a
+        // field missing HERE is reported as a field the port cannot write, and the message
+        // sends the reader to the emitter rather than to this line.
+        //
+        // IT WENT UNNOTICED BECAUSE NO FIXTURE HAD EVER CARRIED ONE. `not_consumed` needs a
+        // schema-8 dump's `p`, so every oracle before `graph-s8b` produced fixtures in which
+        // the gate had nothing to compare against and passed. A maximal node that is not
+        // maximal is only detectable once the data catches up with it -- the same shape as
+        // the per_run artifact next door in `PerRunRoundTripTest`.
+        node.notConsumed = Boolean.TRUE;
         node.alternatives = 1;
         // MAXIMAL MEANS MAXIMAL, and `pinned` below suppresses this one on a REAL node --
         // #181 writes `interchangeable` only in the `else` of the pin branch. Both are set

@@ -457,8 +457,27 @@ public class PlanJsonTest {
         // and the paragraph above warns about, so the thin headroom got thicker rather than
         // thinner. `exhausted` is false on both sides.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        // 3249 -> 1415. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
-        assertEquals(1415, plan.work());
+
+        // 1415 -> 1334, AND THE MOVEMENT IS THE DUMP RATHER THAN THE SOLVER. That was worth
+        // establishing rather than asserting, because this number had moved three times in a
+        // day and the previous note could only say "the oracle changed". A 2x2 over the two
+        // things that vary -- WHICH DUMP the graph was built from, and WHICH CODE built it --
+        // separates them:
+        //
+        //     schema 5, pre-#248 builder    nodes 769   work 3249
+        //     schema 5, post-#248 builder   nodes 784   work 1415
+        //     schema 8, pre-#248 builder    nodes 702   work 1333
+        //     schema 8, post-#248 builder   nodes 703   work 1334
+        //
+        // Hold the dump and change only the builder: +1 work, +1 node. Hold the builder and
+        // change the dump: 3249 -> 1333. So the halving belongs to the schema-8 dump and
+        // #248's contribution to THIS plan is one unit.
+        //
+        // THE SCHEMA-5 PAIR IS A CONFOUNDED COMPARISON and reading it alone is what made this
+        // look like a solver mystery: `graph-oracle.json` carries no `offworld_ores` and
+        // `graph-oracle-248.json` carries 98, so that pair differs in graph CONTENT as well as
+        // in builder code. The single-variable comparison is the schema-8 pair.
+        assertEquals(1334, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
@@ -540,9 +559,11 @@ public class PlanJsonTest {
         // gradle suite is the only thing that reaches here, and `ModularUiLayoutTest` next door
         // is why: these need ModularUI, which ci-java deliberately does not fetch.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        // 769 -> 784, an INCREASE and so not the suspicious direction this comment
-        // family warns about. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
-        assertEquals(784, plan.flatten().size());
+        // 784 -> 703, a DECREASE, which is the direction this comment family warns
+        // about -- and it is the schema-8 dump rather than anything losing nodes. The
+        // decomposition is on `theWorkCounterAndItsBudgetBothArrive` above: same dump,
+        // different builder is +1 node; same builder, different dump is 769 -> 702.
+        assertEquals(703, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

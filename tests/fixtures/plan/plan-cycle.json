@@ -7,15 +7,15 @@
   "oredict"
  ],
  "graph": {
-  "bytes": 122683241,
+  "bytes": 121243322,
   "dimension_ores": 10,
-  "dump_schema": 5,
-  "multiblocks": 259,
-  "names": 261073,
+  "dump_schema": 8,
+  "multiblocks": 261,
+  "names": 261077,
   "offworld_ores": 98,
   "ore_members": 3115,
-  "recipes": 123846,
-  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
+  "recipes": 123847,
+  "sha256": "cbbe136bddf02c9fc7b5b267793570f46eb0f9e184e82a49598b9a72efded60b"
  },
  "request": {
   "item": "aoa3:heart_fruit_seeds",
@@ -131,10 +131,10 @@
     "qty": 1
    },
    {
-    "key": "abyssalcraft:nitreore",
+    "key": "railcraft:ore:1",
     "kind": "item",
-    "label": "Nitre Ore",
-    "name": "Nitre Ore",
+    "label": "Saltpeter Ore",
+    "name": "Saltpeter Ore",
     "qty": 1
    },
    {
@@ -220,7 +220,7 @@
                    "name": "Iron Ingot",
                    "need": 2,
                    "per_run": 1,
-                   "recipe": "hei:minecraft.smelting:31715",
+                   "recipe": "hei:minecraft.smelting:31459",
                    "runs": 2,
                    "status": "craft"
                   }
@@ -317,7 +317,7 @@
                            "name": "Common Drone",
                            "need": 1,
                            "per_run": 1,
-                           "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
+                           "recipe": "hei:bdew.jeibees.mutation.rootBees:149010",
                            "runs": 1,
                            "status": "craft"
                           },
@@ -340,7 +340,7 @@
                          "name": "Cultivated Drone",
                          "need": 1,
                          "per_run": 1,
-                         "recipe": "hei:bdew.jeibees.mutation.rootBees:110801",
+                         "recipe": "hei:bdew.jeibees.mutation.rootBees:149025",
                          "runs": 1,
                          "status": "craft"
                         }
@@ -354,7 +354,7 @@
                        "name": "Eldritch Drone",
                        "need": 1,
                        "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.mutation.rootBees:111115",
+                       "recipe": "hei:bdew.jeibees.mutation.rootBees:149339",
                        "runs": 1,
                        "status": "craft"
                       }
@@ -367,7 +367,7 @@
                      "name": "Skulking Drone",
                      "need": 1,
                      "per_run": 1,
-                     "recipe": "hei:bdew.jeibees.mutation.rootBees:111158",
+                     "recipe": "hei:bdew.jeibees.mutation.rootBees:149382",
                      "runs": 1,
                      "status": "craft"
                     }
@@ -380,7 +380,7 @@
                    "name": "Spidery Drone",
                    "need": 1,
                    "per_run": 1,
-                   "recipe": "hei:bdew.jeibees.mutation.rootBees:111160",
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:149384",
                    "runs": 1,
                    "status": "craft"
                   }
@@ -393,7 +393,7 @@
                  "name": "String",
                  "need": 1,
                  "per_run": 1,
-                 "recipe": "hei:bdew.jeibees.produce.rootBees:111450",
+                 "recipe": "hei:bdew.jeibees.produce.rootBees:149674",
                  "runs": 1,
                  "status": "craft"
                 },
@@ -439,7 +439,7 @@
              "name": "Pulverized Platinum",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:minecraft.crafting:25162",
+             "recipe": "hei:minecraft.crafting:25246",
              "runs": 1,
              "status": "craft"
             }
@@ -453,7 +453,7 @@
            "name": "Rich Slag",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:thermalexpansion.smelter:249607",
+           "recipe": "hei:thermalexpansion.smelter:229588",
            "runs": 1,
            "status": "craft"
           },
@@ -464,10 +464,10 @@
            "children": [
             {
              "alt_count": 3,
-             "key": "abyssalcraft:nitreore",
+             "key": "railcraft:ore:1",
              "kind": "item",
-             "label": "Nitre Ore",
-             "name": "Nitre Ore",
+             "label": "Saltpeter Ore",
+             "name": "Saltpeter Ore",
              "need": 1,
              "note": "mined, not crafted",
              "status": "raw"
@@ -481,7 +481,7 @@
            "name": "Niter",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:minecraft.smelting:31816",
+           "recipe": "hei:minecraft.smelting:31598",
            "runs": 1,
            "status": "craft"
           },
@@ -555,7 +555,7 @@
                    "name": "Common Drone",
                    "need": 1,
                    "per_run": 1,
-                   "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:149010",
                    "runs": 1,
                    "status": "craft"
                   },
@@ -597,7 +597,7 @@
                      "name": "Common Drone",
                      "need": 1,
                      "per_run": 1,
-                     "recipe": "hei:bdew.jeibees.mutation.rootBees:110786",
+                     "recipe": "hei:bdew.jeibees.mutation.rootBees:149010",
                      "runs": 1,
                      "status": "craft"
                     },
@@ -620,7 +620,7 @@
                    "name": "Cultivated Drone",
                    "need": 1,
                    "per_run": 1,
-                   "recipe": "hei:bdew.jeibees.mutation.rootBees:110801",
+                   "recipe": "hei:bdew.jeibees.mutation.rootBees:149025",
                    "runs": 1,
                    "status": "craft"
                   }
@@ -633,7 +633,7 @@
                  "name": "Noble Drone",
                  "need": 1,
                  "per_run": 1,
-                 "recipe": "hei:bdew.jeibees.mutation.rootBees:110807",
+                 "recipe": "hei:bdew.jeibees.mutation.rootBees:149031",
                  "runs": 1,
                  "status": "craft"
                 }
@@ -646,7 +646,7 @@
                "name": "Miry Drone",
                "need": 1,
                "per_run": 1,
-               "recipe": "hei:bdew.jeibees.mutation.rootBees:110840",
+               "recipe": "hei:bdew.jeibees.mutation.rootBees:149064",
                "runs": 1,
                "status": "craft"
               }
@@ -659,7 +659,7 @@
              "name": "Boggy Drone",
              "need": 1,
              "per_run": 1,
-             "recipe": "hei:bdew.jeibees.mutation.rootBees:110841",
+             "recipe": "hei:bdew.jeibees.mutation.rootBees:149065",
              "runs": 1,
              "status": "craft"
             }
@@ -672,7 +672,7 @@
            "name": "Peat",
            "need": 1,
            "per_run": 1,
-           "recipe": "hei:bdew.jeibees.produce.rootBees:111263",
+           "recipe": "hei:bdew.jeibees.produce.rootBees:149487",
            "runs": 1,
            "status": "craft"
           }
@@ -685,7 +685,7 @@
          "name": "Rich Phyto-Gro",
          "need": 1,
          "per_run": 64,
-         "recipe": "hei:minecraft.crafting:28309",
+         "recipe": "hei:minecraft.crafting:28266",
          "runs": 1,
          "status": "craft"
         }
@@ -699,7 +699,7 @@
        "name": "Fluxed Phyto-Gro",
        "need": 1,
        "per_run": 1,
-       "recipe": "hei:thermalexpansion.charger:252054",
+       "recipe": "hei:thermalexpansion.charger:232035",
        "runs": 1,
        "status": "craft"
       },
@@ -730,7 +730,7 @@
      "name": "Heart Fruit",
      "need": 1,
      "per_run": 12,
-     "recipe": "hei:thermalexpansion.insolator:250551",
+     "recipe": "hei:thermalexpansion.insolator:230633",
      "runs": 1,
      "status": "craft"
     }

@@ -91,14 +91,31 @@ public class PerRunRoundTripTest {
     @Test
     public void everyCommittedFixtureStillReadsItsPerRunUnchanged() {
         // THE POPULATION GUARD. The two tests above are hand-built nodes; this one holds the
-        // change against every real plan. All 1,406 committed values are integral, so a
-        // non-integral reading here is this change misfiring rather than a fixture being odd.
+        // change against every real plan.
+        //
+        // "ALL OF THEM ARE INTEGRAL" WAS TRUE AND WAS AN ARTIFACT (#280). It held on every
+        // oracle this repository ever had, and only because all of them predated chance
+        // outputs: a node yielded 20% of the time has a per-run yield of 0.2, and until
+        // `graph-s8b` no graph carried the `q` that produces one. So the old assertion could
+        // not have failed, which is not the same as it being right -- the same shape as a
+        // fixture that cannot exercise its own case.
+        //
+        // THE REAL RULE IS SHARPER AND IS NOW TESTABLE: a per_run is integral UNLESS the node
+        // is chance-yielded, and then it is exactly the fraction the chance implies. Measured
+        // across the committed set: 8 fractional values, 8 of them carrying `yield_chance`,
+        // and ZERO fractional without one. That correspondence is the assertion; a fractional
+        // per_run on a node with no chance really would be the reader misfiring.
         int seen = 0;
+        int chanced = 0;
         for (String name : PlanFixtures.names()) {
             for (PlanNode node : PlanFixtures.load(name).flatten()) {
                 if (node.runs() > 0L && node.perRun() > 0.0) {
-                    assertEquals(name + " read a whole per_run as a fraction",
-                                 node.perRun(), Math.rint(node.perRun()), 1e-9);
+                    if (node.yieldChance() < 1.0) {
+                        chanced++;
+                    } else {
+                        assertEquals(name + " read a whole per_run as a fraction",
+                                     node.perRun(), Math.rint(node.perRun()), 1e-9);
+                    }
                     seen++;
                 }
             }
@@ -106,5 +123,11 @@ public class PerRunRoundTripTest {
         // A loop over an empty population passes vacuously, which is the failure this repo
         // keeps finding; assert the denominator.
         assertTrue("no per_run values found; the fixtures or the reader moved", seen > 0);
+        // AND ASSERT THE EXEMPTION IS REACHED, or the branch above is a way of not testing.
+        // Zero here means the fixtures went back to an oracle with no chance outputs and the
+        // rule has quietly stopped being exercised -- which is exactly how the old version
+        // passed for as long as it did.
+        assertTrue("no chance-yielded nodes found, so the fractional case is untested and"
+                   + " this guard has gone back to asserting the artifact", chanced > 0);
     }
 }

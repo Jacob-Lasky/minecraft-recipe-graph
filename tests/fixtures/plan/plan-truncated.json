@@ -6,15 +6,15 @@
   "truncated"
  ],
  "graph": {
-  "bytes": 122683241,
+  "bytes": 121243322,
   "dimension_ores": 10,
-  "dump_schema": 5,
-  "multiblocks": 259,
-  "names": 261073,
+  "dump_schema": 8,
+  "multiblocks": 261,
+  "names": 261077,
   "offworld_ores": 98,
   "ore_members": 3115,
-  "recipes": 123846,
-  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
+  "recipes": 123847,
+  "sha256": "cbbe136bddf02c9fc7b5b267793570f46eb0f9e184e82a49598b9a72efded60b"
  },
  "request": {
   "item": "fluid:nethengeic_fluid",
@@ -117,7 +117,7 @@
     "kind": "item",
     "label": "Aluminum Ore",
     "name": "Aluminum Ore",
-    "qty": 14
+    "qty": 11
    },
    {
     "key": "thermalfoundation:storage:6",
@@ -125,13 +125,6 @@
     "label": "Block of Platinum",
     "name": "Block of Platinum",
     "qty": 8
-   },
-   {
-    "key": "railcraft:ore_metal_poor:2",
-    "kind": "item",
-    "label": "Poor Copper Ore",
-    "name": "Poor Copper Ore",
-    "qty": 7
    },
    {
     "key": "forestry:bee_princess_ge#438f0076b188",
@@ -153,6 +146,13 @@
     "label": "Fiery Pyrite",
     "name": "Fiery Pyrite",
     "qty": 4
+   },
+   {
+    "key": "railcraft:ore_metal_poor:2",
+    "kind": "item",
+    "label": "Poor Copper Ore",
+    "name": "Poor Copper Ore",
+    "qty": 2
    },
    {
     "key": "minecraft:iron_ore",
@@ -261,7 +261,7 @@
                      "kind": "item",
                      "label": "Poor Copper Ore",
                      "name": "Poor Copper Ore",
-                     "need": 3,
+                     "need": 1,
                      "note": "mined, not crafted",
                      "status": "raw"
                     }
@@ -272,10 +272,10 @@
                    "machine": "Smelting",
                    "machine_state": "have",
                    "name": "Copper Nugget",
-                   "need": 9,
+                   "need": 1,
                    "per_run": 3,
-                   "recipe": "hei:minecraft.smelting:31566",
-                   "runs": 3,
+                   "recipe": "hei:minecraft.smelting:31713",
+                   "runs": 1,
                    "status": "craft"
                   },
                   {
@@ -291,7 +291,7 @@
                        "kind": "item",
                        "label": "Poor Copper Ore",
                        "name": "Poor Copper Ore",
-                       "need": 4,
+                       "need": 1,
                        "note": "mined, not crafted",
                        "status": "raw"
                       }
@@ -303,10 +303,10 @@
                      "machine_state": "buildable",
                      "machine_why": "craftable: tconstruct:smeltery_controller",
                      "name": "[fluid] Molten Copper",
-                     "need": 324,
+                     "need": 36,
                      "per_run": 96,
-                     "recipe": "hei:tconstruct.smeltery:231110",
-                     "runs": 4,
+                     "recipe": "hei:tconstruct.smeltery:115479",
+                     "runs": 1,
                      "status": "craft"
                     },
                     {
@@ -319,7 +319,7 @@
                        "kind": "item",
                        "label": "Aluminum Ore",
                        "name": "Aluminum Ore",
-                       "need": 4,
+                       "need": 1,
                        "note": "mined, not crafted",
                        "status": "raw"
                       }
@@ -331,10 +331,10 @@
                      "machine_state": "buildable",
                      "machine_why": "craftable: tconstruct:smeltery_controller",
                      "name": "[fluid] Molten Aluminum",
-                     "need": 972,
+                     "need": 108,
                      "per_run": 288,
-                     "recipe": "hei:tconstruct.smeltery:231353",
-                     "runs": 4,
+                     "recipe": "hei:tconstruct.smeltery:115722",
+                     "runs": 1,
                      "status": "craft"
                     }
                    ],
@@ -345,10 +345,10 @@
                    "machine_state": "buildable",
                    "machine_why": "craftable: tconstruct:smeltery_controller",
                    "name": "[fluid] Molten Aluminum Brass",
-                   "need": 1296,
+                   "need": 144,
                    "per_run": 4,
-                   "recipe": "hei:tconstruct.alloy:235189",
-                   "runs": 324,
+                   "recipe": "hei:tconstruct.alloy:119558",
+                   "runs": 36,
                    "status": "craft"
                   }
                  ],
@@ -359,10 +359,11 @@
                  "machine_state": "buildable",
                  "machine_why": "craftable: tconstruct:casting",
                  "name": "Nugget Cast",
-                 "need": 9,
+                 "need": 1,
+                 "not_consumed": true,
                  "per_run": 1,
-                 "recipe": "hei:tconstruct.casting_table:237011",
-                 "runs": 9,
+                 "recipe": "hei:tconstruct.casting_table:121380",
+                 "runs": 1,
                  "status": "craft"
                 },
                 {
@@ -407,7 +408,7 @@
                        "name": "Clay",
                        "need": 4,
                        "per_run": 1,
-                       "recipe": "hei:bdew.jeibees.produce.rootBees:111608",
+                       "recipe": "hei:bdew.jeibees.produce.rootBees:149832",
                        "runs": 4,
                        "status": "craft"
                       },
@@ -442,7 +443,7 @@
                              "name": "Iron Ingot",
                              "need": 2,
                              "per_run": 1,
-                             "recipe": "hei:minecraft.smelting:31715",
+                             "recipe": "hei:minecraft.smelting:31459",
                              "runs": 2,
                              "status": "craft"
                             }
@@ -535,7 +536,7 @@
                                "name": "Aluminum Ingot",
                                "need": 10,
                                "per_run": 1,
-                               "recipe": "hei:minecraft.smelting:31820",
+                               "recipe": "hei:minecraft.smelting:31602",
                                "runs": 10,
                                "status": "craft"
                               }
@@ -548,7 +549,7 @@
                              "name": "Aluminum Nugget",
                              "need": 84,
                              "per_run": 9,
-                             "recipe": "hei:minecraft.crafting:25322",
+                             "recipe": "hei:minecraft.crafting:25217",
                              "runs": 10,
                              "status": "craft"
                             },
@@ -580,7 +581,7 @@
                                "name": "Titanium Ingot",
                                "need": 4,
                                "per_run": 1,
-                               "recipe": "hei:minecraft.smelting:31871",
+                               "recipe": "hei:minecraft.smelting:31573",
                                "runs": 4,
                                "status": "craft"
                               }
@@ -593,7 +594,7 @@
                              "name": "Titanium Nugget",
                              "need": 36,
                              "per_run": 9,
-                             "recipe": "hei:minecraft.crafting:25111",
+                             "recipe": "hei:minecraft.crafting:25332",
                              "runs": 4,
                              "status": "craft"
                             }
@@ -607,7 +608,7 @@
                            "name": "Titanium Aluminide Nugget",
                            "need": 36,
                            "per_run": 3,
-                           "recipe": "hei:nuclearcraft_alloy_furnace:258253",
+                           "recipe": "hei:nuclearcraft_alloy_furnace:333084",
                            "runs": 12,
                            "status": "craft"
                           }
@@ -634,7 +635,7 @@
                        "name": "Titanium Aluminide Plate",
                        "need": 4,
                        "per_run": 1,
-                       "recipe": "hei:thermalexpansion.compactor:251197",
+                       "recipe": "hei:thermalexpansion.compactor:231178",
                        "runs": 4,
                        "status": "craft"
                       }
@@ -648,7 +649,7 @@
                      "name": "Titanium Aluminide Sheet",
                      "need": 4,
                      "per_run": 1,
-                     "recipe": "hei:TechReborn.RollingMachine:228237",
+                     "recipe": "hei:TechReborn.RollingMachine:112616",
                      "runs": 4,
                      "status": "craft"
                     }
@@ -662,7 +663,7 @@
                    "name": "Manasteelboots",
                    "need": 1,
                    "per_run": 1,
-                   "recipe": "hei:zmaster587.AR.chemicalReactor:119075",
+                   "recipe": "hei:zmaster587.AR.chemicalReactor:130740",
                    "runs": 1,
                    "status": "craft"
                   }
@@ -676,7 +677,7 @@
                  "name": "[fluid] Molten Manasteel",
                  "need": 144,
                  "per_run": 576,
-                 "recipe": "hei:tconstruct.smeltery:234341",
+                 "recipe": "hei:tconstruct.smeltery:118710",
                  "runs": 1,
                  "status": "craft"
                 }
@@ -690,7 +691,7 @@
                "name": "Manasteel Nugget",
                "need": 9,
                "per_run": 1,
-               "recipe": "hei:tconstruct.casting_table:241579",
+               "recipe": "hei:tconstruct.casting_table:125948",
                "runs": 9,
                "status": "craft"
               }
@@ -738,7 +739,7 @@
            "name": "Strange Stone Essence",
            "need": 1,
            "per_run": 2,
-           "recipe": "hei:bdew.jeibees.produce.rootBees:111586",
+           "recipe": "hei:bdew.jeibees.produce.rootBees:149810",
            "runs": 1,
            "status": "craft"
           },
@@ -768,7 +769,7 @@
              "name": "[fluid] fluid.overworldian_fluid",
              "need": 25,
              "per_run": 1000,
-             "recipe": "hei:nuclearcraft_centrifuge:260294",
+             "recipe": "hei:nuclearcraft_centrifuge:335125",
              "runs": 1,
              "status": "craft"
             }
@@ -781,10 +782,11 @@
            "machine_why": "craftable: modularmachinery:mythical_resource_miner_tier5_controller",
            "name": "Purple Blaze",
            "need": 1,
-           "per_run": 20,
-           "recipe": "hei:modularmachinery.recipes.mythical_resource_miner_tier5:200840",
+           "per_run": 10.0,
+           "recipe": "hei:modularmachinery.recipes.mythical_resource_miner_tier5:245279",
            "runs": 1,
-           "status": "craft"
+           "status": "craft",
+           "yield_chance": 0.5
           },
           {
            "key": "erebus:materials:21",
@@ -812,7 +814,7 @@
          "name": "Rune of Fire",
          "need": 2,
          "per_run": 45,
-         "recipe": "hei:botania.runicAltar:245164",
+         "recipe": "hei:botania.runicAltar:143393",
          "runs": 1,
          "status": "craft"
         },
@@ -850,7 +852,7 @@
        "name": "Nethengeic Rune",
        "need": 1,
        "per_run": 1,
-       "recipe": "hei:botania.runicAltar:245414",
+       "recipe": "hei:botania.runicAltar:143643",
        "runs": 1,
        "status": "craft"
       },
@@ -897,7 +899,7 @@
      "name": "[fluid] fluid.mildly_recursive_goo",
      "need": 100,
      "per_run": 1000,
-     "recipe": "hei:modularmachinery.recipes.bloodmaster_crucible:207040",
+     "recipe": "hei:modularmachinery.recipes.bloodmaster_crucible:251541",
      "runs": 1,
      "status": "craft"
     }
@@ -911,7 +913,7 @@
    "name": "[fluid] fluid.nethengeic_fluid",
    "need": 1,
    "per_run": 1000,
-   "recipe": "hei:nuclearcraft_centrifuge:260295",
+   "recipe": "hei:nuclearcraft_centrifuge:335126",
    "runs": 1,
    "status": "craft"
   },

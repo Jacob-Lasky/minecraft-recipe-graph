@@ -223,8 +223,11 @@ public class PlannerLayoutTest {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        // 769 -> 784. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
-        assertEquals(784, tree.getChildren().size());
+        // 784 -> 703. The tree shrank with the dump, not with the layout: see the 2x2 on
+        // `PlanJsonTest.theWorkCounterAndItsBudgetBothArrive`. What this test is actually
+        // about is unchanged -- the content still exceeds the viewport, which the two
+        // assertions below check and which is why a smaller tree is not a weaker case.
+        assertEquals(703, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",
