@@ -318,6 +318,14 @@ public final class ShotScreens {
         // The shopping row's menu (#251). Registered beside the node menu because they are the
         // same KIND of artifact and differ only in which quantity they act on, which is the
         // distinction the issue exists to keep.
+        // A chance-yielded row, scrolled into frame (#280). Its own screen rather than a flag
+        // on `planner`, because the scroll is not the state a freshly opened planner is in.
+        register("planner-yield", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openYield(arg);
+            }
+        });
         register("row-menu", new Opener() {
             @Override
             public void open(String arg) {

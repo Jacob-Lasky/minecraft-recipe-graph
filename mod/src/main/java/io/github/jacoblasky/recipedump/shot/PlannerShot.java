@@ -12,6 +12,8 @@ import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
+import com.cleanroommc.modularui.screen.ModularPanel;
+import com.cleanroommc.modularui.widgets.ListWidget;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.client.planner.RecipeChoices;
 import io.github.jacoblasky.recipedump.common.GraphService;
@@ -46,6 +48,163 @@ final class PlannerShot {
         PlanView plan = fixture(arg);
         armNodeActions(plan.tree());
         PlannerScreen.openPlan(plan, book(plan));
+    }
+
+    /**
+     * `planner-yield`: a CHANCE-YIELDED row, scrolled into frame so the percentage is visible.
+     *
+     * IT SCROLLS BECAUSE ARITHMETIC SAYS A PLAIN `planner` SHOT CANNOT SHOW ONE (#252, #280).
+     * The tree viewport is about 14 rows -- `PANEL_HEIGHT` 220 less padding, header and footer,
+     * over `ROW_HEIGHT` 11 -- and the EARLIEST chance-yielded row in any committed fixture is
+     * index 38. Measured across all four fixtures that carry one: 38, 121, 123, 533, 559, 619,
+     * 644. So the row this screen exists to photograph is off the bottom of the panel in every
+     * one of them, and a `planner` shot would come back a perfectly good picture of the wrong
+     * fourteen rows.
+     *
+     * THAT IS #252's OWN FAILURE MODE AND IT COST THREE BOOTS. Its first two planner shots were
+     * byte-identical because the width cut landed before the part that differed; this is the
+     * same class one axis over, the viewport rather than the width. It was caught here by
+     * counting rows before booting rather than by looking at a PNG afterwards.
+     *
+     * SCROLLING IS HONEST HERE AND RE-ROOTING WOULD NOT BE. This photographs the real panel
+     * built from the real fixture, moved to where a player would move it; building a synthetic
+     * plan rooted at the chanced node would photograph a plan that never existed. `flow-hit`
+     * establishes that a shot may drive a widget after layout, and `FlowCanvas` already uses
+     * the same `scrollTo`.
+     *
+     * A HOLD RATHER THAN `animate`, because this needs one action after layout rather than a
+     * measured sequence of frames -- and `animate` is gated on `-Dmcrecipedump.shotTimedFrames`,
+     * which a caller who did not know that would omit, getting a capture before the scroll and
+     * no sign of it in the log.
+     */
+    static void openYield(String arg) {
+        final PlanView plan = fixture(arg == null || arg.trim().isEmpty()
+                                      ? YIELD_FIXTURE : arg);
+        final int row = firstChancedRow(plan);
+        if (row < 0) {
+            // LOUDLY. A fixture with no chance-yielded node cannot exercise this surface, and a
+            // picture of an unscrolled tree would look like a successful shot of the render.
+            throw new IllegalStateException(
+                    "planner-yield needs a fixture with a chance-yielded node; "
+                    + plan.target() + " has none. `plan-truncated` has one at row 38.");
+        }
+        armNodeActions(plan.tree());
+        // BUILT HERE RATHER THAN THROUGH `openPlan`, ONLY so the panel can be kept. The scroll
+        // has to reach the tree list after layout, and fishing it back out of
+        // `Minecraft.currentScreen` means unwrapping ModularUI's `GuiScreenWrapper` -- the
+        // indirection `ShotScreens.Animated` exists to avoid. This is the same panel `openPlan`
+        // would have built; `openMenu` opens a hand-built panel for the same reason.
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan), SHOT_ACTIONS);
+        PlannerScreen.openPanel(panel);
+        ShotHarness.log("planner-yield: " + plan.target() + " has its first chanced row at "
+                        + row + "; scrolling it into a viewport of about 14 rows");
+        ShotScreens.holdCapture(new ScrollToRow(panel, row));
+    }
+
+    /** The fixture `planner-yield` uses when none is named: the smallest tree with a chance. */
+    private static final String YIELD_FIXTURE = "plan-truncated";
+
+    /**
+     * Index of the first chance-yielded row in display order, or -1.
+     *
+     * DISPLAY ORDER AND NOT `flatten()` ORDER, because the number is used to scroll a list whose
+     * rows are in the order the tree is walked. They are the same walk today and this comment is
+     * the reason to keep them so.
+     */
+    private static int firstChancedRow(PlanView plan) {
+        int index = 0;
+        for (PlanNode node : plan.flatten()) {
+            if (node.runs() > 0L && node.yieldChance() > 0.0 && node.yieldChance() < 1.0) {
+                return index;
+            }
+            index++;
+        }
+        return -1;
+    }
+
+    /**
+     * Scroll the tree list so a given row is in frame, once, after layout has run.
+     *
+     * ONE POLL AND DONE. The list has no box until `WidgetTree` has sized it, so this cannot
+     * happen in the opener; by the first hold poll the layout is up and the scroll area knows
+     * its own size. Returning false immediately after means the harness captures the next frame.
+     */
+    private static final class ScrollToRow implements ShotScreens.Hold {
+
+        private final ModularPanel panel;
+
+        private final int row;
+
+        ScrollToRow(ModularPanel panel, int row) {
+            this.panel = panel;
+            this.row = row;
+        }
+
+        /** Polls to keep re-applying the scroll before letting the capture happen. */
+        private static final int HOLD_POLLS = 8;
+
+        private int polls;
+
+        @Override
+        public boolean busy() {
+            ListWidget<?, ?> list = firstList(panel);
+            if (list == null || list.getArea().h() <= 0) {
+                // NOT YET LAID OUT, or there is no list. Both are "come back next poll", and
+                // the run's own timeout is the backstop -- the same shape `JeiKeybindShot`'s
+                // sweep uses rather than a frame count nobody can justify.
+                return true;
+            }
+            // A THIRD OF THE WAY DOWN THE VIEWPORT RATHER THAN AT THE TOP, so the picture shows
+            // the chanced row with ordinary rows above and below it. A row pinned to the first
+            // line reads as a cropped panel rather than as a row in a list.
+            int target = Math.max(0, row * PlannerWidgets.ROW_HEIGHT
+                                     - list.getArea().h() / 3);
+            list.getScrollArea().getScrollY().scrollTo(list.getScrollArea(), target);
+
+            // RE-APPLIED EVERY POLL, AND THAT IS THE WHOLE FIX. The first version scrolled once
+            // and returned false, and the PNG came back showing rows 0 to 13 while the log said
+            // "scrolled to 367px of 550" -- the call was made, with sane numbers, and the
+            // capture did not show it. `scrollingALaidOutTreeListSticks` then proved headlessly
+            // that the offset DOES read back on a laid-out list, so the problem was never the
+            // API: something between that poll and the capture put it back. Holding for a few
+            // polls means the last frame before the capture is a scrolled one whatever that
+            // something is, and it costs eight render ticks.
+            //
+            // THE READ-BACK IS LOGGED ON THE LAST POLL rather than the first, so the log
+            // answers "did it stick" instead of "was it called" -- which is exactly the
+            // distinction the wasted boot could not make.
+            polls++;
+            if (polls < HOLD_POLLS) {
+                return true;
+            }
+            ShotHarness.log("planner-yield: asked for " + target + "px of "
+                            + list.getScrollData().getScrollSize() + " for row " + row
+                            + "; after " + HOLD_POLLS + " polls the list reads back "
+                            + list.getScrollArea().getScrollY().getScroll() + "px");
+            return false;
+        }
+    }
+
+    /**
+     * The first `ListWidget` under `parent`, depth first, which in the planner is the tree.
+     *
+     * FIRST RATHER THAN ONLY. The panel holds one list today and this returns as soon as it
+     * finds one, so a second list added below the tree would not change what this picks. If a
+     * second one is ever added ABOVE it, this returns the wrong widget and the shot scrolls
+     * something else -- which the log line at the call site would show as a scroll of the wrong
+     * size rather than as silence.
+     */
+    private static ListWidget<?, ?> firstList(com.cleanroommc.modularui.api.widget.IWidget parent) {
+        if (parent instanceof ListWidget) {
+            return (ListWidget<?, ?>) parent;
+        }
+        for (com.cleanroommc.modularui.api.widget.IWidget child : parent.getChildren()) {
+            ListWidget<?, ?> found = firstList(child);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     /**
