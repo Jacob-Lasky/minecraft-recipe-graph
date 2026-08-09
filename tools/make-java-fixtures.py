@@ -574,33 +574,90 @@ TARGETS = [
             "field and the note beside it. Without this the oracle cannot show a port "
             "that the trip is priced and named."),
     Target(
-        "dimension-in-chain", "fluid:moltenabyssalnite",
-        expect=("craft", "raw", "dimension", "oredict", "alternatives", "machine",
-                "not_truncated"),
-        why="Molten Abyssalnite, which is #112 reached BELOW the root rather than at it. "
-            "The fixture above plans the gated ore directly, so a port could pass it while "
-            "gating only the item asked for; here the trip to Diamerisma is discovered four "
-            "levels down -- smeltery, ingot, smelting, dust, ore -- through an oredict slot "
-            "and a machine, which is how a player actually meets one. `cost` has already "
-            "priced the trip and this is what lets the plan say WHICH -- a route that got "
-            "dearer without saying why is worse than one that never mentioned the trip.\n"
+        "dimension-in-chain", "contenttweaker:material_part:77",
+        expect=("craft", "raw", "dimension", "machine", "not_truncated"),
+        why="Rhenium Dust, and the claim is about the CODE PATH rather than about the pack: a "
+            "dimension gate discovered BELOW the root, through a chain, rather than at the "
+            "item asked for. `dimension-gate` above plans a gated ore directly, so a port "
+            "could satisfy it while gating only the requested key; here the trip to Rhenia "
+            "is found three levels down -- dust, dust, fluid, ore -- and `cost` has already "
+            "priced it, which is what lets the plan say WHICH trip. A route that got dearer "
+            "without saying why is worse than one that never mentioned the trip.\n"
             "\n"
-            "THIS TARGET WAS RHENIUM DUST (`contenttweaker:material_part:77`) UNTIL #171, "
-            "AND THE SWAP IS THE FIX WORKING RATHER THAN A CONCESSION TO IT. Rhenium Ore "
-            "has a 'producer' whose only input is `contenttweaker:custom_dimensions`, a "
-            "marker item nothing makes. At `BASE_RAW_COST` that fake recipe priced the ore "
-            "at 2.0 and undercut mining it on Rhenia at 801, so the cost model believed a "
-            "route the solver then refused to take -- it stopped at the ore and badged the "
-            "trip anyway. Pricing the marker at `UNSOURCED_COST` puts the ore back at 801 "
-            "and the planner now prefers a route needing no unvisited dimension, so this "
-            "target stopped reaching a gate at all. The generator refused to write rather "
-            "than let the fixture pass forever asserting nothing, which is exactly what "
-            "that check is for.\n"
+            "WORDED AS A CODE-PATH CLAIM ON PURPOSE, BECAUSE THE PACK-SHAPED WORDING IS WHAT "
+            "WENT STALE TWICE. This fixture previously said its route was `how a player "
+            "actually meets one`, which is a statement about the pack; the pack moved and "
+            "dragged the fixture with it, both times. What the golden gate actually asserts "
+            "is that the Java plan tree equals the Python oracle's ON THE SAME GRAPH -- a "
+            "cross-language agreement contract, not a fidelity-to-the-pack one -- so the "
+            "durable justification is which path the input exercises.\n"
             "\n"
-            "REJECTED ALTERNATIVE, so nobody re-derives it: `nuclearcraft:dust:4` (Uranium "
-            "Dust) also satisfies all seven claims, and its gate sits at depth 1 -- which "
-            "is what `dimension-at-root` above already covers -- across 170 nodes against "
-            "this one's 23."),
+            "THE TARGET HAS NOW BEEN SWAPPED TWICE AND IS BACK WHERE IT STARTED. It was "
+            "Rhenium Dust until #171, which priced `contenttweaker:rhenium_ore` at "
+            "`UNSOURCED_COST` 801 -- its only 'producer' takes a marker item nothing makes -- "
+            "so the planner preferred a route needing no unvisited dimension and the target "
+            "stopped reaching a gate at all. It became Molten Abyssalnite. #248 then "
+            "exonerated the ores that were wrongly unsourced, Rhenium Ore is cheap again, "
+            "the plan routes through it, and the toll PRICES AND NAMES the trip instead of "
+            "the route silently vanishing. That is the difference between the two changes: "
+            "#171 made gated routes unattractive, the toll makes them visible.\n"
+            "\n"
+            "THE ORACLE THIS NEEDS IS A BUILD ARTIFACT OF #248'S OWN CODE, NOT A FRESH DUMP, "
+            "and that is the next way this fixture breaks. `offworld_ores` is produced by "
+            "`index.build` from planetDefs and JEResources; no dump carries it. Measured: "
+            "`graph-s8.json`, a schema-8 build newer than this oracle in every other respect, "
+            "carries `declared_provenance` and `dimension_ores` and NOT `offworld_ores`. So "
+            "regenerating the oracle from a fresh dump WITHOUT this branch's `index.build` "
+            "produces a graph on which the toll cannot be expressed -- the reader skips "
+            "unknown sections by design, so nothing complains, plans simply stop pricing any "
+            "toll, and this fixture fails looking like a code regression. A newer graph is "
+            "the obvious upgrade and is the trap.\n"
+            "\n"
+            "DO NOT CONCLUDE THAT THE SWAP STRATEGY IS EXHAUSTED, which was concluded once "
+            "and was wrong. A sweep reported that nothing in the pack reaches a gate below "
+            "the root and that no third target existed; re-run independently it reports FOUR "
+            "-- `material_part:77`, `:55`, `:83`, `:119`, one per dimension, all at depth 3, "
+            "since reproduced by both people who measured it.\n"
+            "\n"
+            "THE SWEEP WAS NOT BUGGY, IT WAS UNDER-POWERED, and that distinction is the "
+            "reusable part. It sampled 3,000 of 29,349 candidates for 4 positives, so the "
+            "expected number of hits was 0.41 and the chance of finding NOTHING was about "
+            "66%. The negative was more likely than not to occur with the positives present; "
+            "it was never evidence of absence, and no amount of care elsewhere in the probe "
+            "would have changed that. A code bug can be found by reading the code. A sample "
+            "too small to detect what it is looking for returns exactly the output of a world "
+            "without it.\n"
+            "\n"
+            "SO TWO CHECKS ARE NEEDED BEFORE BELIEVING A NEGATIVE SWEEP, and running the "
+            "first does not cover the second. A POSITIVE CONTROL separates a broken "
+            "instrument from a working one -- here, the ten gated ores planned directly must "
+            "show a gate at the root, and 9 of 10 do, the tenth being #270. It says nothing "
+            "about whether the sample was large enough. COMPUTING WHAT THE SWEEP COULD HAVE "
+            "DETECTED is the second check: if the answer is `about one expected hit`, nothing "
+            "has been measured. The replacement here needs neither, because it is not a "
+            "sample -- a key can only reach a gate if it transitively depends on a gated ore, "
+            "so reverse reachability enumerates the population exactly. Targeted search for a "
+            "rare positive, not sampling for a prevalence estimate; different questions, "
+            "different designs.\n"
+            "\n"
+            "One probe written for this check printed a confident `0 of 10` because it called "
+            "`.to_json()` on a dict and every plan raised. A broken probe and a real negative "
+            "look identical in the output, which is what the control is for.\n"
+            "\n"
+            "`oredict` AND `alternatives` ARE DROPPED HERE, MEASURED RATHER THAN ASSUMED. "
+            "All four candidates reach the gate through a straight chain and hold 5 of the "
+            "old 7 claims; the Molten Abyssalnite route reached it through an oredict slot "
+            "with alternatives, and that route no longer exists because #248 exonerated the "
+            "ore under it. Neither claim leaves the suite: `oredict` is still asserted by "
+            "`fluid-chain`, `cycle`, `unsourced-variant` and `same-name`, and `alternatives` "
+            "by `fluid-chain`. A claim that silently stops being asserted is exactly what the "
+            "generator's refusal exists to catch, so it is said here instead.\n"
+            "\n"
+            "REJECTED ALTERNATIVES, so nobody re-derives them: `nuclearcraft:dust:4` (Uranium "
+            "Dust) puts its gate at depth 1, which `dimension-gate` already covers, across "
+            "170 nodes against this one's 4. The other three depth-3 candidates are "
+            "interchangeable with this one on every claim; Rhenium Dust is chosen because it "
+            "is the target #171 swapped away from, which makes the history legible."),
     Target(
         "dimension-shadow", "contenttweaker:sub_block_holder_1:2",
         expect=("raw", "dimension", "not_truncated"),
@@ -809,7 +866,9 @@ def graph_identity(graph, path):
     content one. The counts are here because a bare hash mismatch says nothing about WHAT
     moved, and `dimension_ores` in particular is the tell for an oracle built before #112 and
     #117 -- three of the targets below would assert the pre-fix behaviour against such a
-    graph while looking exactly as green, so `generate` refuses one.
+    graph while looking exactly as green, so `generate` refuses one. `offworld_ores` is the
+    same tell for #248, and it moves INDEPENDENTLY of `dimension_ores`: the toll set is a
+    superset of the gate set, so a graph can carry a full gate set and no toll at all.
     """
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -824,6 +883,7 @@ def graph_identity(graph, path):
         "ore_members": len(graph.ore_members),
         "multiblocks": len(graph.multiblocks or {}),
         "dimension_ores": len(graph.dimension_ores or {}),
+        "offworld_ores": len(getattr(graph, "offworld_ores", None) or {}),
     }
 
 
@@ -1057,8 +1117,8 @@ PINNED_CONSTANTS = (
     "BASE_RAW_COST", "BLOCKED_CEILING", "BLOCKED_FLOOR", "BUILD_KNEE", "BUILD_SCALE",
     "BUILD_SLOPE", "BUILD_SPREAD", "CRAFTABLE_COST", "DIMENSION_COST",
     "EMC_COST", "FLUID_SCALE",
-    "GATE_COST", "LOOT_COST", "NON_PRODUCTION_PENALTY", "PASSES", "PRICED_CEILING",
-    "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
+    "GATE_COST", "LOOT_COST", "NON_PRODUCTION_PENALTY", "OVERWORLD_TOLL", "PASSES",
+    "PRICED_CEILING", "SETTLED_FRACTION", "TRANSFER_PENALTY", "UNGATED_MACHINE_COST",
     "UNPRICED_MACHINE_COST", "UNSOURCED_COST",
 )
 
@@ -1089,6 +1149,12 @@ def generate(graph_path):
             "the dimension gates at all -- three targets would assert the pre-fix behaviour "
             "and look green doing it. Build an oracle with current code first."
             % graph_path)
+    if not getattr(graph, "offworld_ores", None):
+        raise SystemExit(
+            "%s has no offworld_ores, so it was built before #248 and cannot exercise the "
+            "off-world toll -- every iron ore in it ties at BASE_RAW_COST, which is the bug, "
+            "and a fixture frozen against it would assert the pre-fix behaviour while "
+            "looking green. Build an oracle with current code first." % graph_path)
     if not getattr(graph, "emc", None):
         raise SystemExit(
             "%s carries no emc, so it predates schema 5 and #50's terminator can never fire "

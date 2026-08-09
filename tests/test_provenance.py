@@ -641,12 +641,26 @@ class AgainstTheRealPackTest(unittest.TestCase):
     def test_it_reaches_the_keys_the_module_says_it_reaches(self):
         # Not a round number for its own sake: this is the count that moves prices, and a
         # drift in it means the pack changed or a parser stopped matching.
+        #
+        # THE LITERALS ARE MEASURED AGAINST ONE ORACLE AND ARE NOT PORTABLE BETWEEN GRAPHS.
+        # 285/232 was `graph-oracle.json`; #248 moved the whole fixture set onto
+        # `graph-oracle-248.json`, which is the only graph carrying `offworld_ores`, and the
+        # first count falls by one there. Measured with the SAME code on both graphs, so the
+        # move is the oracle and not this branch:
+        #
+        #     graph-oracle.json       before=285   recipes=124,467   offworld=0
+        #     graph-oracle-248.json   before=284   recipes=123,846   offworld=98
+        #
+        # The two are different builds rather than one being the other plus a field -- 621
+        # recipes apart -- so a reader seeing this number move again should check WHICH graph
+        # before concluding a parser broke. That is the whole reason the figure is hardcoded:
+        # deriving it from the graph under test would make the tripwire assert nothing.
         graph = Graph.load(os.environ["RECIPEGRAPH_ORACLE"])
         graph.declared_provenance = {}
         before = len(graph.pack_authored_unsourced)
         graph.declared_provenance = self.declared
         after = len(graph.pack_authored_unsourced)
-        self.assertEqual(285, before)
+        self.assertEqual(284, before)
         self.assertEqual(232, after)
 
     def test_the_example_the_issue_names_is_one_of_them(self):

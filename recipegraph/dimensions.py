@@ -7,12 +7,12 @@ graph is a trip. So a plan would route you to another planet without mentioning 
 something you go and mine, at exactly what a cobblestone costs. You mine it on Sedna. The
 reference save has never been to Sedna.
 
-TWO SOURCES, AND KEEPING THEM APART IS THE DESIGN.
+PACK DATA AND WORLD STATE, AND KEEPING THEM APART IS THE DESIGN. A different axis from the
+two PACK FILES below, which are both pack data and get unioned; do not conflate the two
+splits.
 
-  * WHAT ONLY GROWS THERE is pack data and belongs to the graph. `config/advRocketry/
-    planetDefs.xml` is the pack's own declaration of every dimension it adds, each with a
-    `DIMID` and an `<OreGen>` block naming the blocks that generate in it. Read back, never
-    guessed -- the same standing rule as `tokens.DEFAULT_TOKENS` and `Graph.world_ores`.
+  * WHAT ONLY GROWS THERE is pack data and belongs to the graph. Two pack files answer it,
+    and `where_ores_generate` unions them; see WHY BOTH below.
   * WHETHER YOU HAVE BEEN THERE is world state and belongs to the have file, beside stock
     and placed blocks. It changes without the pack changing, and a graph is built once and
     serves every inventory.
@@ -20,12 +20,79 @@ TWO SOURCES, AND KEEPING THEM APART IS THE DESIGN.
 Split that way the gate lifts BY ITSELF: fly to Sedna, rescan, and Sednanite stops being
 gated with no edit to any curated list.
 
+WHY BOTH PACK FILES, AND WHY NEITHER WINS. #248. The two answer DIFFERENT QUESTIONS and a
+precedence rule between them would throw one of the two away:
+
+  * `config/advRocketry/planetDefs.xml` states what Advanced Rocketry ADDS to a planet.
+    Each `<planet>` carries a `DIMID` and an `<OreGen>` block naming the blocks generated
+    there. It is a statement of intent by one mod about its own dimensions, and it is
+    silent about everywhere else -- it has no reason to mention that a block it seeds on
+    Diamerisma is also lying around the overworld.
+  * `config/jeresources/world-gen.json` states what was OBSERVED, dimension by dimension,
+    across 60 of them, in one uniform format: `"block": "modid:name:meta"` beside
+    `"dim": "Dim -1: the_nether"`. It sees the Nether, the End and the Abyssal Wasteland,
+    which planetDefs cannot, and it sees the overworld, which is what BOUNDS planetDefs.
+
+Read back, never guessed, the same standing rule as `tokens.DEFAULT_TOKENS` and
+`Graph.world_ores`. BUT THE TWO ARE NOT THE SAME KIND OF EVIDENCE AND THIS IS THE WHOLE
+DESIGN. planetDefs is a DECLARATION: Advanced Rocketry states what it adds, and the file
+means it whether or not anyone has looked. world-gen.json is a MEASUREMENT: it is the output
+of JEResources' in-game profiler (`/jer_profile`, `ProfilingAdapter.write`), which is what
+produces this schema including the `Dim -1: the_nether` spelling.
+
+DO NOT CITE `diyData=true` AS PROVENANCE. An earlier version of this comment did, and it is
+wrong: that flag is the CONSUMER side, telling the mod to skip its built-in compat plugins
+and read the JSON, and it says nothing about who wrote the JSON. The mtime argument was
+wrong too -- the file sits 22 seconds from its neighbour in a window shared by 784 files,
+which is an archive unpack and not authorship. The file does ship with the pack; the pack
+author generated it. That makes it good data and not a declaration.
+
+WHAT THE PROFILER ACTUALLY DOES, because it decides which way the evidence runs. It
+force-generates chunks at random coordinates across the world border and iterates
+`DimensionManager.getStaticDimensionIDs()`, so it needs no visit and this is NOT a record of
+where somebody walked. Sample sizes implied by the smallest non-zero `distrib` quantum are
+roughly 10,000 chunks in the overworld and the Nether, 50,000 in the End, 250,000 in the
+Abyssal Wasteland.
+
+SO ITS POSITIVE ROWS ARE TRUSTWORTHY AND ITS ABSENCES ARE WEAKER THAN THEY LOOK. "No row"
+has two indistinguishable causes: the ore does not generate there, or nothing sampled it.
+Everything below turns on that asymmetry.
+
+A POSITIVE OVERWORLD ROW BOUNDS A planetDefs EXCLUSIVITY CLAIM, and this is the strongest
+thing the second source does. `nuclearcraft:ore:4` is the case to cite:
+
+    nuclearcraft:ore:4 | Dim 0: overworld | y 0-32 | 9.6862 blocks per chunk
+    nuclearcraft:ore:4 | Dim 152: Oi      | y 3-52 | 0.2706 blocks per chunk
+
+Gated exclusive to Oi since #112, and Oi is unvisited. The overworld signal is 36x its own
+Oi signal and unmistakably a vein rather than a stray block. planetDefs was not lying -- AR
+really does seed it on Oi -- it simply has no reason to mention Earth.
+
+DO NOT CITE `abyssalcraft:abyore` AS THE EXAMPLE, which an earlier version of this comment
+did. It is the weakest row in the file: 0.013 blocks per chunk, the same trace magnitude in
+all four dimensions it appears in, and `AbyssalCraftWorldGenerator` ships generators for
+coralium, nitre, darklands structures and shoggoth lairs and NO abyssalnite ore generator at
+all. That is structure-shaped, not vein-shaped. Diamerisma was never profiled, so on that
+ore the two sources do not even disagree; one of them is silent.
+
+A GATE IS NOT A TOLL, and #248 is about the second one. A gate says "you have never been
+there" and it lifts the moment you go. A toll says a portal has to exist and you have to
+walk through it, EVERY TIME, and it never lifts.
+
+AND THEY ARE NOT COMPUTED FROM THE SAME INPUT, WHICH IS THE POINT. `offworld_keys` reads the
+union; `exclusive_keys` reads planetDefs alone and `overworld_keys` may only subtract from
+its result. Deriving both from one map makes the gate a subset of the toll BY CONSTRUCTION,
+which is elegant and is exactly what makes it impossible to hold them to different evidence
+standards. They are two claims, not two views. See `cost.OVERWORLD_TOLL` for the toll's
+ordering and `overworld_keys` for why the asymmetry runs the way it does.
+
 A PLANET IS NOT A SPECIAL KIND OF PLACE. Advanced Rocketry registers its planets as
 ordinary dimensions with ordinary dimension ids -- Sedna is DIM147 -- and the save stores
 them exactly as it stores the Nether. Anything here that treated "planet" as its own
 concept would have to be undone the first time a non-planet dimension needed pricing, so
-the vocabulary is `dimension` throughout and planetDefs is merely the one source that
-happens to describe some of them.
+the vocabulary is `dimension` throughout, and each source is merely one that happens to
+describe some of them: planetDefs the Advanced Rocketry planets, JEResources whatever the
+profiling run walked into.
 
 THE NETHER IS NOT INVISIBLE, and #112 said it was. The claim was that a vanilla nether
 portal has no tile entity, so `ae2_inventory.scan` (which records tile entity ids) cannot
@@ -36,10 +103,11 @@ for every dimension there is, vanilla or modded or planet, and needs no portal, 
 scan and no per-mod knowledge.
 """
 
+import json
 import os
 import re
 
-from .model import is_world_ore_group, mod_of
+from .model import canonical_item_key, is_world_ore_group, mod_of
 
 # The overworld is where you already are, so it can never gate anything. Named rather than
 # filtered by id at each call site, because "0 is not a gate" is a fact about the world and
@@ -50,6 +118,16 @@ _PLANET = re.compile(r'<planet\b[^>]*>')
 _NAME = re.compile(r'name="([^"]+)"')
 _DIMID = re.compile(r'DIMID="(-?\d+)"')
 _ORE = re.compile(r'<ore\b[^>]*?block="([^"]+)"(?:[^>]*?meta="(\d+)")?[^>]*?/?>')
+
+# JEResources writes its dimension as one display string rather than a field pair, so the
+# id has to come back out of it. `Dim -1: the_nether`, `Dim 165: Pixonia`,
+# `Dim 427: divinerpg:vethea`.
+#
+# THE NAME HALF IS FREE TEXT AND MAY ITSELF HOLD A COLON, which is why the id is bounded by
+# the FIRST colon and the name is everything after it. Splitting on the last colon instead,
+# or on any colon, truncates `divinerpg:vethea` to `divinerpg` -- a real row in the
+# reference pack, and a dimension named after only half of itself.
+_JER_DIM = re.compile(r'^Dim (-?\d+):\s*(.*)$')
 
 
 def _ore_key(block, meta):
@@ -103,8 +181,98 @@ def load_planet_defs(instance_dir):
         return {}
 
 
-def exclusive_keys(defs):
-    """`{block key: dimension name}` for blocks exactly ONE dimension generates.
+def parse_world_gen(text):
+    """`{block key: {dim id: dim name}}` from JEResources' `world-gen.json`. #248.
+
+    The file is a flat JSON array, one object per (block, dimension) pair, so a block that
+    generates in five dimensions appears five times. ONLY `block` AND `dim` ARE READ; the
+    `distrib` histogram says how much of it there is per height, and `dropsList` what it
+    drops, and the graph already knows the second by better means and has no use for the
+    first. They are most of the file's 5.8 MB, which is why this returns a small dict from
+    a large document.
+
+        {"block": "cyclicmagic:nether_iron_ore:0",
+         "distrib": "0,0.0;1,0.0;2,1.6875E-4;...",
+         "silktouch": false,
+         "dim": "Dim -1: the_nether"}
+
+    PARSED WITH `json` RATHER THAN REGEXES, which is the opposite call from
+    `parse_planet_defs` beside it and deliberately so. That file is hand-edited and one
+    pack's copy is not well-formed enough for a strict parser; this one is written by a mod
+    and has never been anything but valid JSON. A malformed entry here is a real signal
+    that the file is not what we think it is, and the caller degrades the whole file to
+    "declares nothing" rather than silently reading half of it.
+
+    An entry whose `dim` does not match `Dim <id>: <name>` is DROPPED rather than guessed
+    at. Nothing in the reference pack's 6,646 entries fails to match, so this is a guard
+    against a future format change, not a live filter -- and dropping is what makes such a
+    change show up as coverage falling to zero instead of as ids invented from a string.
+    """
+    try:
+        entries = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(entries, list):
+        return {}
+    out = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        block, dim = entry.get("block"), entry.get("dim")
+        if not isinstance(block, str) or not isinstance(dim, str):
+            continue
+        matched = _JER_DIM.match(dim)
+        if not matched:
+            continue
+        # `model.canonical_item_key`, NOT a local copy of its three lines. JEResources writes
+        # a raw `mod:name:meta` id -- always with the meta, including `:0`, which the graph
+        # omits -- and that is exactly the shape #253 gave one spelling to. A hand-rolled
+        # split here was equivalent on today's file and is the second spelling #263 removed:
+        # it would take a `:32767` to the literal rather than to `:*`, and this file having
+        # none of those today is not a property anyone should have to re-verify.
+        key = canonical_item_key(block)
+        if key:
+            out.setdefault(key, {})[int(matched.group(1))] = matched.group(2)
+    return out
+
+
+def load_world_gen(instance_dir):
+    """`parse_world_gen` against the pack's config, or `{}` when it is not there."""
+    path = os.path.join(instance_dir, "config", "jeresources", "world-gen.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return parse_world_gen(fh.read())
+    except OSError:
+        return {}
+
+
+def where_ores_generate(defs, observed):
+    """`{block key: {dim id: dim name}}` unioned across both pack sources. #248.
+
+    NEITHER SOURCE WINS, because they answer different questions -- see the module
+    docstring. planetDefs says what Advanced Rocketry adds to a planet, JEResources says
+    what was observed in a dimension, and a block can perfectly well be both. Taking either
+    as authoritative discards true rows from the other: precedence for planetDefs keeps
+    gating `abyssalcraft:abyore` behind Diamerisma when it is also in the overworld, and
+    precedence for JEResources drops the five ContentTweaker ores no profiling run reached.
+
+    A COLLISION KEEPS THE FIRST NAME AND THAT IS DELIBERATE. The two files spell a
+    dimension's name differently -- planetDefs says `Sedna`, JEResources says the same id
+    as `Sedna` but writes `the_nether` where a person would write the Nether -- and the
+    name is only ever shown to a reader. The ID is the identity and the two agree on it,
+    which is the thing that has to be right.
+    """
+    out = {key: dict(dims) for key, dims in observed.items()}
+    for dim, (name, ores) in defs.items():
+        for key in ores:
+            out.setdefault(key, {}).setdefault(dim, name)
+    return out
+
+
+def exclusive_keys(where):
+    """`{block key: (dimension id, dimension name)}` for blocks exactly ONE dimension makes.
 
     A block two dimensions both generate is not locked to either, and a block the
     overworld generates is not locked at all. That second case is not hypothetical and is
@@ -113,24 +281,127 @@ def exclusive_keys(defs):
     Hator, and pricing a trip to Osiris into every iron block in the pack would be a far
     worse error than the one being fixed.
 
-    THIS ONLY KNOWS WHAT THE FILE SAYS, and on its own it is not sound. A block that also
-    generates in the overworld through ordinary worldgen, which planetDefs has no reason to
-    mention, still looks exclusive here. Two things downstream bound that:
+    FEED THIS planetDefs ALONE. #248 added a second source and deliberately did NOT route it
+    through here: `index.build` calls this with `where_ores_generate(defs, {})` and then
+    SUBTRACTS `overworld_keys(observed)` from the result. A declaration may create a gate; an
+    observation may only withdraw one. The full argument is on `overworld_keys`, and the one
+    sentence of it is that we are willing to be wrong by a toll and not by a gate.
+
+    THE HOLE THIS DOCSTRING USED TO RECORD IS NOW HALF CLOSED, and only half. It said a block
+    that also generates in the overworld through ordinary worldgen, which planetDefs has no
+    reason to mention, still looked exclusive. The withdrawal closes that where JEResources
+    positively SAW the block in the overworld: on the reference pack it takes two ores off the
+    gate, `abyssalcraft:abyore` (a rocket to Diamerisma since #112) and `nuclearcraft:ore:4`
+    (one to Oi), plus three `block*` entries the `ore*` filter was already dropping. 8 gated
+    ores become 6.
+
+    WHAT STILL GETS THROUGH, because a withdrawal needs a positive sighting. JEResources is a
+    profiling snapshot: an ore in a dimension it never profiled, or an ore whose overworld
+    generation is confined to a biome the sample never hit, produces no row and cannot
+    exonerate anything. If planetDefs names such an ore and ordinary overworld worldgen also
+    generates it, this still calls it exclusive. That is the same hole, narrowed, and it is
+    narrowed only in the direction the evidence can carry.
+
+    Two things bound what is left, and THE SECOND WAS ALREADY OVERSTATED BEFORE #248:
 
       * `index.build` intersects this with `Graph.world_ores`, the pack's own `ore*`
-        registration. On the reference pack that alone takes 17 exclusive declarations down
-        to 8, dropping every `block*` entry -- iron, bone, nickel -- by construction.
+        registration, dropping every `block*` entry -- iron, bone, nickel -- by construction.
+        17 exclusive declarations become 8 ores, plus 4 shadow registrations of those.
       * `cost._seed` applies the result as a FLOOR under `min`, so an ore with any crafted
-        route keeps that route's price. Every one of the 8 has between 1 and 6 producers,
-        so the worst a leftover misclassification does is decline to discount an ore that
-        had another way in anyway.
+        route keeps that route's price. THIS IS A FREQUENT MERCY AND NOT A GUARANTEE, and the
+        docstring here used to claim otherwise: "every one of the 8 has between 1 and 6
+        producers". Measured on the reference graph, 3 of the 12 gated keys have NO producer
+        at all -- `contenttweaker:sub_block_holder_0:6`, `1:1` and `1:2`, the shadow
+        registrations #117 added -- and for those the floor IS the price with nothing
+        underneath it. The claim was written when the set was 8 and was not revisited when
+        #117 made it 12.
+
+    WHY THAT MATTERS FOR WHAT #248 DID NOT DO. The producer count was never evidence that a
+    gate was CORRECT, only that being wrong was cheap, and it is cheap for 9 of 12 rather
+    than all of them. That is the safety budget this function is running on, and it is why
+    the observational source is not allowed to CREATE a gate: see `overworld_keys`.
     """
-    seen = {}
-    for dim, (name, ores) in defs.items():
-        for key in ores:
-            seen.setdefault(key, []).append((dim, name))
-    return {key: where[0][1] for key, where in seen.items()
-            if len(where) == 1 and where[0][0] != HOME_DIMENSION}
+    out = {}
+    for key, dims in where.items():
+        if len(dims) != 1:
+            continue
+        dim, name = next(iter(dims.items()))
+        if dim != HOME_DIMENSION:
+            out[key] = (dim, name)
+    return out
+
+
+def overworld_keys(observed):
+    """Keys JEResources positively recorded generating in the OVERWORLD. #248.
+
+    THE ONLY THING THE OBSERVATIONAL SOURCE IS ALLOWED TO DO TO A GATE, and it may only
+    ever WITHDRAW one. A positive overworld row says "this ore is not exclusive to
+    anywhere", which is a claim the source can carry: its rows are a worldgen sample and a
+    row exists because a block was seen. Its SILENCES cannot carry the opposite claim,
+    because "does not generate there" and "was never sampled" are indistinguishable in it.
+
+    WE ARE WILLING TO BE WRONG BY A TOLL AND NOT BY A GATE, and that sentence is the whole
+    design. #259 is the defensible version of the other direction -- gate where JEResources
+    saw the ore ELSEWHERE at vein level, so the overworld absence is a measurement rather
+    than a silence -- and it is a separate change with its own blast radius, because it
+    moves 15,433 keys where the toll moves a deep plan by one node. A wrong toll costs `OVERWORLD_TOLL`, deliberately tiny and bounded by the
+    ordering. A wrong gate costs `DIMENSION_COST` = 800, and for 3 of the 12 keys the
+    mechanism currently gates there is no producer underneath it, so the gate IS the price
+    with nothing to fall back on. Those are not the same bet and they must not rest on the
+    same evidence.
+
+    So: `exclusive_keys` is fed planetDefs ALONE and this set subtracts from its result.
+    A DECLARATION may create a gate; an OBSERVATION may only take one away.
+
+    Takes the raw `parse_world_gen` map rather than a union, on purpose. Handed the union
+    it could not tell an overworld row from a planetDefs entry that happens to mention
+    dimension 0, and the whole point is that only one of the two sources may speak here.
+    """
+    return {key for key, dims in observed.items() if HOME_DIMENSION in dims}
+
+
+def offworld_keys(where):
+    """`{block key: (dimension id, dimension name)}` for ores never seen in the overworld.
+
+    THE TOLL SET, and it is not the gate set. A gate asks "can you get there at all"; this
+    asks "is there a portal on the route", which stays true forever. `exclusive_keys` is a
+    SUBSET of this by construction -- exactly one dimension, and not the overworld, implies
+    no overworld -- and a proper one on the reference pack, 95 against 98. The three that
+    differ are ores in the Nether AND the End: behind a portal either way and so tolled,
+    locked to neither and so not gated.
+
+    SILENCE IS NOT EVIDENCE OF ABSENCE, which is the whole reason this returns keys rather
+    than a predicate over every ore. An ore NO source places anywhere gets no toll, because
+    "nobody profiled the Erebus" and "this ore is not behind a portal" are different
+    statements and only one of them is knowable here. The coverage limit that buys, stated
+    so #248 can record it rather than a later reader rediscovering it:
+
+      * If a dimension appears in the JEResources profile, an ore's absence from it IS
+        evidence the ore does not generate there. 60 dimensions are in it.
+      * If a dimension is absent from the profile, nothing here knows anything about it.
+        The Erebus (66), the Betweenlands (20) and the NuclearCraft Wasteland (4598) are
+        the notable ones, and their ores are untolled for that reason and no other.
+      * The 35 ContentTweaker ores beyond the twelve planetDefs names have NO SOURCE AT
+        ALL. They are pack-authored blocks whose worldgen is registered in code, and
+        nothing in the pack's config states where they generate.
+
+    Under-tolling is the safe direction and that is why silence reads this way: an untolled
+    off-world ore ties with the overworld exactly as it did before #248, which is the bug
+    unfixed rather than a new one introduced. Over-tolling would surcharge a rock you can
+    pick up in the overworld, which is worse and is not reachable from here.
+
+    The dimension returned is one of the several it may generate in, for the reader. It is
+    the LOWEST id rather than the first seen, so a rebuild from the same pack files produces
+    the same graph.json whatever order the dicts iterated in; no caller may depend on which
+    one it is, because the toll is a flat per-ore term that does not vary by destination.
+    See `cost.OVERWORLD_TOLL`.
+    """
+    out = {}
+    for key, dims in where.items():
+        if dims and HOME_DIMENSION not in dims:
+            dim = min(dims)
+            out[key] = (dim, dims[dim])
+    return out
 
 
 def shadow_ores(graph, dimension_ores, ore_removals=None):
@@ -322,8 +593,10 @@ def gates_for(graph, visited):
     A STOCK FILE WITH NO `dimensions` RECORD GATES NOTHING. Every file written before #112
     is in that state, and so is one written by `tools/ae2_dump.lua`, which runs inside the
     game and can see no other dimension. Reading "no record" as "never been anywhere" would
-    surcharge eight ores the moment an old stock file was loaded -- a silent repricing of
-    the pack triggered by a missing field, and the pre-#112 answer is the safe one.
+    surcharge every gated ore the moment an old stock file was loaded -- a silent repricing
+    of the pack triggered by a missing field, and the pre-#112 answer is the safe one. That
+    was 8 ores when #112 shipped and is 95 since #248 widened the source, which makes the
+    safe reading more important rather than less.
     """
     if not graph.dimension_ores or not visited:
         return {}

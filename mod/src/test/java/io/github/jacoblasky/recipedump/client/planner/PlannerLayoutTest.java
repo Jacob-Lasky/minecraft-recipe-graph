@@ -223,7 +223,8 @@ public class PlannerLayoutTest {
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
         ModularPanel panel = laidOut("plan-fluid-chain");
         ListWidget<?, ?> tree = findList(panel);
-        assertEquals(769, tree.getChildren().size());
+        // 769 -> 784. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
+        assertEquals(784, tree.getChildren().size());
         assertTrue("the content must exceed the viewport, or nothing is being scrolled",
                    tree.getScrollData().getScrollSize() > tree.getArea().h());
         assertTrue("the viewport itself must stay inside the panel",

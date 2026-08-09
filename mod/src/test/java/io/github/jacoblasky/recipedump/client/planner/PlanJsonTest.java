@@ -111,7 +111,8 @@ public class PlanJsonTest {
         // "Radiant Drone", which carried `unsourced`, becomes `bee_princess_ge#438f0076b188`
         // -- and the mark goes from 1 to 0. Two changes had claimed the same three nodes by
         // different mechanisms; only #172's claim survived being measured.
-        assertEquals(52, plan.nodes());
+        // 52 -> 50. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
+        assertEquals(50, plan.nodes());
         assertTrue(plan.maxNodes() > 0);
     }
 
@@ -399,8 +400,10 @@ public class PlanJsonTest {
         // the tool cannot source is exactly what this flag is for, so a plan that reaches more
         // of the graph should carry more of them. 3 of 66 shopping rows, so it stays rare,
         // which is the property the count below is guarding.
+        // 3 -> 2, and still rare against 64 shopping rows, which is the property this
+        // guards. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
         assertEquals("the unsourced mark is lost on the surface a player gathers from",
-                     3, marked);
+                     2, marked);
     }
 
     /**
@@ -454,7 +457,8 @@ public class PlanJsonTest {
         // and the paragraph above warns about, so the thin headroom got thicker rather than
         // thinner. `exhausted` is false on both sides.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(3249, plan.work());
+        // 3249 -> 1415. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
+        assertEquals(1415, plan.work());
         assertEquals(80000, plan.workBudget());
         assertFalse("this fixture is not exhausted; the pair must be readable anyway",
                     plan.exhausted());
@@ -536,7 +540,9 @@ public class PlanJsonTest {
         // gradle suite is the only thing that reaches here, and `ModularUiLayoutTest` next door
         // is why: these need ModularUI, which ci-java deliberately does not fetch.
         PlanView plan = PlanFixtures.load("plan-fluid-chain");
-        assertEquals(769, plan.flatten().size());
+        // 769 -> 784, an INCREASE and so not the suspicious direction this comment
+        // family warns about. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
+        assertEquals(784, plan.flatten().size());
     }
 
     private static PlanNode deepest(PlanNode node) {

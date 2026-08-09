@@ -119,6 +119,14 @@ class EveryFixtureIsExactlyWhatTheGeneratorWritesTest(unittest.TestCase):
             self.assertEqual(got, first, "%s was generated against another graph" % name)
         self.assertTrue(first["dimension_ores"],
                         "the oracle had no dimension_ores, so it predates #112/#117")
+        # `.get`, NOT `[...]`, unlike the line above. `dimension_ores` is in every fixture on
+        # disk so a subscript there can only fail the way the message describes; this key is
+        # NEW, and the state it will actually be met in is a fixture set written before #248 --
+        # where a subscript raises KeyError and the reader gets a crash instead of being told
+        # to regenerate.
+        self.assertTrue(first.get("offworld_ores"),
+                        "the oracle had no offworld_ores, so it predates #248 and every "
+                        "iron ore in it ties at BASE_RAW_COST; %s" % REGENERATE)
 
 
 class EveryClaimAFixtureMakesIsStillTrueOfItTest(unittest.TestCase):

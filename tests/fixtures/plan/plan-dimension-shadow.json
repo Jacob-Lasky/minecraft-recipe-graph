@@ -6,14 +6,15 @@
   "raw"
  ],
  "graph": {
-  "bytes": 121448519,
-  "dimension_ores": 11,
+  "bytes": 122683241,
+  "dimension_ores": 10,
   "dump_schema": 5,
   "multiblocks": 259,
-  "names": 261089,
-  "ore_members": 3116,
-  "recipes": 124467,
-  "sha256": "33658f4a7b63b72a074e9887e4aed354dc1f341820d5220ee6da3a2f2f48ac85"
+  "names": 261073,
+  "offworld_ores": 98,
+  "ore_members": 3115,
+  "recipes": 123846,
+  "sha256": "868f63c9f446d5a5286a57e0d1b32917ef5d6b81d9672038ab8bd371c5e1da5c"
  },
  "request": {
   "item": "contenttweaker:sub_block_holder_1:2",

@@ -372,6 +372,73 @@ GATE_COST = 1000.0
 # 8 is not knowable from the graph, and no one has measured it.
 DIMENSION_COST = 800.0
 
+# What WALKING THROUGH THE PORTAL costs, every time, forever. #248.
+#
+# A GATE IS NOT A TOLL, and having only the first is the defect. `DIMENSION_COST` above says
+# "you have never been there", and it correctly drops to nothing the moment you go. That is
+# the whole of what #112 shipped, and it leaves a player who has been to the Nether a
+# thousand times with `minecraft:iron_ore` and `cyclicmagic:nether_iron_ore` priced
+# IDENTICALLY at BASE_RAW_COST. Both are `oreIron`, so every iron recipe accepts either and
+# the choice falls to `Solver.pick_alternative`, whose #29 cheapest-wins tiebreak cannot fire
+# on a perfect tie and returns dump order instead. The reported plan was a hopper solving as
+# `Iron Ingot <- Nether Iron Ore x5`.
+#
+# The portal does not stop existing once you have used it. You still have to build it, stand
+# in it, come back through it with the ore, and do that again next time. That is a real and
+# PERMANENT difference from picking up a rock in the overworld, and it is the term that
+# breaks the tie in the right direction for good.
+#
+# THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, exactly as for DIMENSION_COST and EMC_COST:
+#
+#     BASE_RAW_COST < BASE_RAW_COST + OVERWORLD_TOLL
+#                   < MACHINE_COST["buildable"] < LOOT_COST < DIMENSION_COST
+#
+# Above BASE_RAW_COST so the overworld ore wins OUTRIGHT rather than by dump order, which is
+# the entire fix. Below LOOT_COST so a rock behind a portal never loses to farming a boss,
+# because a portal is a walk and a boss is a fight. AND BELOW `MACHINE_COST["buildable"]`,
+# which is the TIGHTER of the two and the one that actually pins the magnitude: walking
+# through a portal must not read as a bigger obstacle than BUILDING a machine. All three are
+# asserted in `tests/test_dimensions.py` rather than left to the reader.
+#
+# AND THE MAGNITUDE IS MEASURED INERT ACROSS THE BAND THE ORDERING PERMITS, which is the
+# same evidence UNSOURCED_COST rests on and the strongest this file asks for. Swept with
+# `tools/cost-probe.py --toll 0 1 2 5 20 100` in slow mode over the 18 built-in probes:
+#
+#   * At 0 -- the pre-#248 behaviour -- three probes route through the Nether: Iron Ingot
+#     from Nether Iron Ore, Gold Ingot from Nether Gold Ore, Coal from Nether Coal Ore. Two
+#     of those three are in the tool's CONTROL GROUP, the set chosen because they were
+#     believed correct. #248 is reproduced on the real pack, not just in a fixture.
+#   * At 1, 2, 5, 20 and 100 all three flip to the overworld ore and NOTHING ELSE MOVES.
+#     Every arm reports the same 3 of 18 and the same routes; the other 15 are byte-identical
+#     to the baseline. So routing does not distinguish any positive value from any other, and
+#     a magnitude argued from plan changes would be argued from nothing.
+#
+# THE VALUE IS THEREFORE SETTLED BY THE ORDERING ALONE, and the binding constraint is not
+# LOOT_COST. It is `MACHINE_COST["buildable"]` = 40: an ore you walk to through a portal must
+# not read as a bigger obstacle than a machine you have to BUILD, and at a toll of 100 the
+# floor is 101, which passes both `buildable` and most of the #95 band. 5.0 puts the floor at
+# 6.0 -- six cobblestones, under a seventh of `buildable` and a thirty-third of a boss --
+# which is the proportion "a walk you repeat forever" argues for. It sits ABOVE
+# `MACHINE_COST["have"]` = 1.0, and that is right rather than an oversight: a machine already
+# standing in your base is genuinely less trouble than a round trip through a portal.
+#
+# DO NOT READ THE INERTNESS AS LICENCE TO RAISE IT. The sweep says routing is insensitive
+# across 18 probes, not across 51,491 priced keys, and the ordering above is what bounds it.
+#
+# THE KNOWN LIMIT: THIS IS PER ORE, AND A TRIP IS NOT. One portal serves every ore behind it,
+# so a plan that wants Nether Quartz AND Nether Iron Ore AND Nether Gold Ore is charged three
+# tolls for one walk. That is wrong in the sense that the real cost is shared, and it is what
+# the cost table can express: prices are per key, and nothing in the model can say "these
+# five rows are one journey". Recorded here rather than left for a reader to rediscover from
+# a plan that looks expensive.
+#
+# IT IS THE SAFE DIRECTION OF WRONG, which is why it ships this way. Over-charging a
+# multi-ore Nether trip biases towards the overworld, which is #248's whole intent; charging
+# once for the first ore and nothing for the rest would make the second Nether ore FREE and
+# reintroduce the tie one row down. The per-DIMENSION shape needs the plan to carry "this is
+# one trip" -- a change to what a plan node means, not to what a constant is worth.
+OVERWORLD_TOLL = 5.0
+
 # What a key the graph has PROVEN it cannot explain costs. #176.
 #
 # `Graph.unsourced_keys` is the set: nothing makes this exact key, and the graph
@@ -659,6 +726,12 @@ CRAFTABLE_COST = 0.25
 #
 #     The biggest absolute moves are all in the ProjectE star ladder, where prices are already
 #     ~1e12 and a 9.6% rise changes no ordering; nothing there is reachable anyway.
+#
+#     AND #248 IS THE FOLLOW-UP THIS ENTRY WROTE DOWN WITHOUT NOTICING. The "after" route two
+#     paragraphs up -- Iron Ingot from Nether Iron Ore x5 -- was recorded here as the fix
+#     landing correctly, and it is the exact plan #248 was filed about. #246 did not cause it;
+#     it made a pre-existing tie visible by moving the block price out of the way.
+#
 # #171's SECOND PASS DECLINES A BUMP, and the reasoning is recorded here rather than left out
 # because a declined bump is exactly as easy to get wrong as a taken one -- see #211's accident
 # above, which #193 then refused to rely on.
@@ -733,7 +806,82 @@ CRAFTABLE_COST = 0.25
 #     is the safe direction, and correcting it would move prices and wants its own measurement.
 #     Filed separately. DO NOT "unify" it into `expected_yield` as a tidy-up: that is a
 #     repricing wearing a refactor's clothes.
-FORMULA_VERSION = 18
+# 19: an off-world TOLL is seeded beside the dimension gate, and JEResources is read as a
+#     second source for both (#248).
+#
+#     18 IS #223'S AND IS NOT SKIPPED. It is the entry directly above this one; #223 merged
+#     to master at #267 before this landed, so 18 is taken and this is 19 rather than a
+#     second 18. That ordering was deliberate rather than lucky: had #248 landed first, 18
+#     would have been a hole in the counter and this entry would have described a state that
+#     never existed on master. Two branches
+#     claiming one version is exactly the failure this counter exists to prevent: the
+#     caches would collide silently and a warm table would be served for arithmetic that
+#     no longer produces it. #223's entry records a blast radius of ZERO -- a schema-7
+#     graph carries no chance data -- which is why the two are legible as separate
+#     changes rather than one overwritten.
+#
+#     THIS IS #136'S RULE AGAIN AND IT ADDS A CONSTANT, WHICH IS NOT THE JUSTIFICATION.
+#     `OVERWORLD_TOLL` lands in the hashed tuple, so a warm `.cost-cache.json` written before
+#     this is invalidated by that alone -- and #193 and #171/#242 both refused to rest a bump
+#     on exactly that accident. The bump rests on the measured price movement below. The
+#     accident is real and is worth nothing.
+#
+#     THE DATA MOVED TOO, AND THE GRAPH FILE COVERS THAT HALF. `dimension_ores` goes 11 -> 95
+#     and `offworld_ores` is new at 98, both baked into graph.json, which `fingerprint` hashes
+#     by size and mtime. So the DATA could not serve a stale table. The ARITHMETIC that reads
+#     it -- a third additive term in two seed rules -- is what this number is for.
+#
+#     MEASURED ON THE #248 ORACLE, BOTH ARMS IN ONE PROCESS per `tools/cost-probe.py`'s
+#     warning about FUSE mtime granularity serving a stale `.pyc` to the second arm.
+#
+#     THE TOLL ALONE, no gates in either arm, so only OVERWORLD_TOLL differs:
+#
+#         priced keys  162,537     moved 16,301     UP 16,301     DOWN 0
+#         appeared 0, vanished 0
+#
+#     MONOTONIC, AND THAT IS THE SAFETY ARGUMENT rather than a pleasing statistic, exactly as
+#     for 17. A toll is a surcharge; if it lowered anything, some route would be winning by a
+#     discount it did not earn, which is the failure being removed rather than a side effect
+#     of removing it. Nothing is stranded either -- no key goes finite to infinity.
+#
+#     The tolled ores land where the arithmetic says: 1.0 -> 6.0 for `nether_iron_ore`,
+#     `end_iron_ore` and `abyiroore`, while `minecraft:iron_ore` and `railcraft:ore_metal_poor`
+#     hold at 1.0 and `ore:oreIron` holds at 1.0 because a group costs its cheapest member.
+#     `erebus:ore_iron` also holds at 1.0, and that is the COVERAGE LIMIT showing up in the
+#     measurement rather than a miss: nobody profiled the Erebus. See `dimensions.offworld_keys`.
+#
+#     The largest absolute raises are all in the ProjectE star ladder, ~1e12 already, where a
+#     16% rise changes no ordering and nothing is reachable anyway. Same population 17 found.
+#
+#     THE GATE WIDENING alone, toll held fixed, old gate set against new, both resolved
+#     against the reference save's real visited list (11 gated before, 58 after):
+#
+#         moved 15,433     UP 15,400     DOWN 33
+#
+#     THE 33 DECREASES ARE THE FIX AND THAT IS PROVEN, NOT ASSUMED. Two of them are the ores
+#     that stop being wrongly gated -- `abyssalcraft:abyore` 801 -> 1.0 and `nuclearcraft:ore:4`
+#     178.63 -> 1.0, both plainly in the overworld -- and the other 31 are their consumers,
+#     mostly Tinkers' parts and `fluid:moltenabyssalnite`.
+#
+#     THAT ATTRIBUTION WAS MEASURED, NOT INFERRED FROM THE NAMES LOOKING RIGHT. Re-run with
+#     those two HELD GATED and every other widening applied:
+#
+#         moved 15,967     UP 15,967     DOWN 0
+#
+#     So widening the gate set cannot lower a price on its own, and all 33 decreases trace to
+#     the exoneration. The alternative reading -- that widening was silently REMOVING a gate
+#     somewhere nobody looked -- is what this rules out, and 31 plausible-looking consumer
+#     names would not have ruled it out.
+#
+#     AND THE ROUTES THE TOLL WAS FILED FOR, from `tools/cost-probe.py --toll 0 1 2 5 20 100`:
+#
+#         before  Iron Ingot -> minecraft.smelting -> Nether Iron Ore
+#         after   Iron Ingot -> minecraft.smelting -> Iron Ore
+#
+#     Gold Ingot and Coal move the same way and 15 of the 18 probes do not move at all. Two of
+#     the three that move are in the probe's CONTROL GROUP -- the set chosen because it was
+#     believed already correct -- which is what makes this a fix rather than a retune.
+FORMULA_VERSION = 19
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -1112,6 +1260,31 @@ def _settle_reshaped(graph, cost, passes, machine_states, machine_entry):
     return _relax(graph, cost, passes, machine_states, machine_entry)
 
 
+def raw_floor(key, gates, tolled):
+    """What "you go and get this" costs: a raw leaf, plus whatever stands between.
+
+    ONE DEFINITION, BECAUSE `_seed` APPLIES IT IN TWO PLACES AND JAVA IN TWO MORE. The leaf
+    rule and the world-ore rule must charge a key identically -- the first assigns, the
+    second `min`s, and a key reached by both has to get the same number from each or the
+    order of the two loops silently decides the price. Four hand-maintained copies of one
+    three-term sum is four chances to drift, and drift here is a repricing nobody sees.
+    Java mirrors this as `Cost.rawFloor` for the same reason.
+
+    OPERAND ORDER IS PART OF THE CONTRACT, not formatting. `tests/fixtures/plan/` freezes
+    prices computed here and the Java port is asserted against them bit-for-bit, so
+    `a + b + c` may not become `a + c + b`. See the class comment on `Cost.java`.
+
+    THE TWO TERMS ARE DIFFERENT CLAIMS AND BOTH CAN APPLY. `gates` says you have never been
+    to the dimension and lifts the moment you go (#112). `tolled` says a portal is on the
+    route and never lifts (#248). An ore in an unvisited dimension pays both; one in a
+    dimension you have been to a thousand times pays only the toll; an overworld ore pays
+    neither. Folding either into the other loses one of the two statements.
+    """
+    return (BASE_RAW_COST
+            + (DIMENSION_COST if key in gates else 0.0)
+            + (OVERWORLD_TOLL if key in tolled else 0.0))
+
+
 def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
           emc_available=None, craftables=None, raw=None):
     """Starting costs, before any recipe is considered. Shared by both relaxation passes.
@@ -1181,11 +1354,18 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # relaxation. Java does the same, in the same two places, for the same reason.
     produced = frozenset(key for key in graph.by_output if graph.real_output(key))
     gates = dimension_gates or {}
+    # THE TOLL COMES OFF THE GRAPH, NOT OFF THE CALLER, and that asymmetry with `gates`
+    # beside it is the whole distinction #248 draws. A gate depends on where this SAVE has
+    # been, so it has to arrive per-call from whoever read the have file; a toll depends only
+    # on where the ore generates, which is pack data settled at build time and identical for
+    # every inventory. Threading it through every caller would invite exactly the confusion
+    # this separation exists to prevent.
+    tolled = frozenset(getattr(graph, "offworld_ores", None) or ())
     for r in graph.recipes:
         for ing in r.inputs:
             for alt in ing.alternatives:
                 if alt not in cost and alt not in produced:
-                    cost[alt] = BASE_RAW_COST + (DIMENSION_COST if alt in gates else 0.0)
+                    cost[alt] = raw_floor(alt, gates, tolled)
 
     # AND EVERY WORLD ORE, WHETHER OR NOT SOMETHING PRODUCES IT. The loop above prices a
     # leaf as obtainable only when NO recipe outputs it, which quietly assumes the only way
@@ -1213,16 +1393,42 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # FLOOR for exactly those keys -- see `dimensions.gates` for how they are identified --
     # and raises nothing else.
     #
-    # RAISING A FLOOR IS WHY A WRONG ENTRY HERE IS SURVIVABLE. `min` is still `min`, so a
-    # gated ore with any crafted route keeps that route's price; all this can do is stop
-    # MINING from being the cheap answer. Measured on the reference graph, all 8 gated ores
-    # have between 1 and 6 producers, so the worst a misclassification does is decline to
-    # discount an ore that had another way in anyway. The failure that would matter is a
-    # terrestrial ore with NO producer wrongly declared exclusive to a planet, and
-    # `tests/test_dimensions.py` asserts the reference set contains none.
+    # RAISING A FLOOR IS WHY A WRONG ENTRY HERE IS OFTEN SURVIVABLE, BUT NOT ALWAYS, AND #248
+    # MOVED THAT BALANCE. `min` is still `min`, so a gated ore with any crafted route keeps
+    # that route's price and all this can do is stop MINING from being the cheap answer.
+    #
+    # THE COMFORTABLE VERSION OF THIS CLAIM IS NOW FALSE AND IS RECORDED HERE RATHER THAN
+    # QUIETLY DROPPED. When planetDefs was the only source, all 8 gated ores had between 1 and
+    # 6 producers, so a misclassification could only decline a discount. Unioning JEResources
+    # in takes the set to 95, of which 62 have NO producer at all -- AoA3, AbyssalCraft and
+    # DivineRPG ores that nothing in the pack crafts. For those the floor is the whole price:
+    # get the dimension wrong and the key goes to 806 -- gate and toll together, since the
+    # gate set is a subset of the toll set -- with nothing to fall back on.
+    #
+    # WHAT MAKES THAT ACCEPTABLE IS THE SOURCE, NOT THE SAFETY NET. The failure that would
+    # matter is a TERRESTRIAL ore with no producer wrongly declared exclusive to a dimension,
+    # and JEResources is direct evidence against exactly that: it observes the overworld, so
+    # an ore that generates there is seen generating there and is excluded by
+    # `dimensions.exclusive_keys` on the spot. That is a stronger guarantee than the old
+    # producer-count argument was, and it is why the set could be widened at all -- but it
+    # holds only for dimensions the profile covers. See `dimensions.offworld_keys` for which
+    # ones it does not, and note that an ore in an UNPROFILED dimension cannot be gated by
+    # this source either, so the gap is silence rather than error.
+    #
+    # AND A TOLL ON TOP OF THAT, WHICH IS #248 AND IS A SECOND TERM RATHER THAN A BIGGER
+    # FIRST ONE. The gate above expires: fly to Sedna once and `dimension_gates` stops naming
+    # Sednanite, correctly. The portal does not expire, so the two have to coexist -- an ore
+    # in an unvisited dimension pays both, an ore in one you have been to a thousand times
+    # pays only the toll, and an overworld ore pays neither. Folding the toll into
+    # DIMENSION_COST would make it lift on first visit, which is the bug; folding the gate
+    # into the toll would charge for a trip you have already made, forever.
+    #
+    # ADDITIVE, so the ordering the two constants each assert on their own survives being
+    # combined: the largest thing this line can produce is BASE_RAW_COST + DIMENSION_COST +
+    # OVERWORLD_TOLL = 806, still far below `UNSOURCED_COST` and the `unavailable` wall, and
+    # `tests/test_dimensions.py` asserts that band rather than leaving it to the reader.
     for key in graph.world_ores:
-        floor = BASE_RAW_COST + (DIMENSION_COST if key in gates else 0.0)
-        cost[key] = min(cost.get(key, math.inf), floor)
+        cost[key] = min(cost.get(key, math.inf), raw_floor(key, gates, tolled))
 
     # AND EVERY KEY THE TRANSMUTATION NETWORK CAN MAKE, for the same reason and by the same
     # mechanism as the world ores above: it counts as produced, so the leaf rule never sees
@@ -1275,16 +1481,17 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # runs, so `max` and a bare assignment produce identical tables -- the count of keys where
     # they differ is 0. An earlier version of this comment justified `max` by saying a
     # dimension-gated leaf "would be lowered by a bare assignment"; that is backwards. Such a
-    # leaf sits at BASE_RAW_COST + DIMENSION_COST = 801, which is BELOW UNSOURCED_COST, so an
-    # assignment would RAISE it exactly as `max` does.
+    # leaf sits at BASE_RAW_COST + DIMENSION_COST + OVERWORLD_TOLL = 806, which is BELOW
+    # UNSOURCED_COST, so an assignment would RAISE it exactly as `max` does.
     #
     # KEEP `max` ANYWAY, and this is the real reason: it is what makes the loop correct for
     # any ordering of the constants rather than only for the current one. The seed rules above
-    # can leave at most BASE_RAW_COST + DIMENSION_COST here, and nothing enforces that that
-    # stays under UNSOURCED_COST -- `test_progression` pins UNSOURCED_COST between GATE_COST
-    # and the `unavailable` wall, and DIMENSION_COST is free to move. A bare assignment would
-    # silently start LOWERING gated leaves the day DIMENSION_COST passes 2,000, and the symptom
-    # would be a cheaper route through a planet you have never visited.
+    # can leave at most BASE_RAW_COST + DIMENSION_COST + OVERWORLD_TOLL here, and nothing
+    # enforces that that stays under UNSOURCED_COST -- `test_progression` pins UNSOURCED_COST
+    # between GATE_COST and the `unavailable` wall, and both DIMENSION_COST and OVERWORLD_TOLL
+    # are free to move. A bare assignment would silently start LOWERING gated leaves the day
+    # their sum passes 2,000, and the symptom would be a cheaper route through a planet you
+    # have never visited. #248 added the third term and did not change the argument.
     #
     # BEFORE THE TOKENS, so a token wins. A placeholder is already an instruction with its
     # own price for what the player must go and DO, and `Solver.expand` returns at the token
@@ -1637,9 +1844,9 @@ def fingerprint(graph_path, have, machine_states, free_sources, machine_items=No
     # that moves without any constant moving; these are the PRICES those data are charged
     # at, and both halves are needed.
     from .generators import SOURCE_COST
-    h.update(("%r %r %r %r %r %r"
-              % (LOOT_COST, GATE_COST, DIMENSION_COST, EMC_COST, UNSOURCED_COST,
-                 CRAFTABLE_COST)).encode())
+    h.update(("%r %r %r %r %r %r %r"
+              % (LOOT_COST, GATE_COST, DIMENSION_COST, OVERWORLD_TOLL, EMC_COST,
+                 UNSOURCED_COST, CRAFTABLE_COST)).encode())
     h.update(("%r" % (SOURCE_COST,)).encode())
     # Beside the stock rather than with the constants: a gate depends on which dimensions
     # the SAVE has terrain for, so it moves when the player flies somewhere without the

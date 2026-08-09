@@ -1670,26 +1670,89 @@ GENERATES it, so `<save>/DIM-1/region/*.mca` is the evidence -- 42 files on the 
 Visited-ness reads identically for vanilla, modded and planet dimensions, with no portal, no
 block scan and no per-mod knowledge. Do not reach for portal evidence again.
 
-**The source is `config/advRocketry/planetDefs.xml`,** on the AMP server instance at
-`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/config/advRocketry/planetDefs.xml`
-(mode 0700 uid 1000, so stage it out with a root container). 33 dimensions carry a DIMID, each
-with an `<OreGen>` block naming the blocks that generate there. Pack data, read back, not a
-name guess -- the `tokens.DEFAULT_TOKENS` rule.
+**TWO PACK SOURCES, AND NEITHER WINS (#248).** They answer different questions, so a
+precedence rule between them throws away true rows.
 
-**Two sources, kept apart, and the split is the whole design.** What only grows there is pack
-data and lives in `graph.dimension_ores`; whether you have been there is world state and lives
-in the have file's `dimensions`. So the gate lifts by itself after a trip and a rescan.
+* `config/advRocketry/planetDefs.xml` states what Advanced Rocketry ADDS to a planet. 33
+  dimensions carry a DIMID, each with an `<OreGen>` block naming the blocks generated there.
+  On the AMP server instance at `.../Meatballcraft01/Minecraft/config/advRocketry/planetDefs.xml`
+  (mode 0700 uid 1000, so stage it out with a root container).
+* `config/jeresources/world-gen.json` states what was OBSERVED, one flat JSON array of
+  `{"block": "modid:name:meta", "dim": "Dim -1: the_nether"}` rows, 6,646 of them across 60
+  dimensions. It sees the Nether, the End and the Abyssal Wasteland, which planetDefs cannot,
+  and it sees the OVERWORLD, which is what bounds planetDefs.
+
+**JEResources' file is a MEASUREMENT, not a declaration, and do not re-derive otherwise.**
+It is the output of the in-game profiler (`/jer_profile`, `ProfilingAdapter.write`). The
+pack author generated it and it ships with the pack, which makes it good data and not a
+statement of intent. `B:diyData=true` is NOT provenance -- it is the consumer flag telling
+the mod to read the JSON instead of its built-in compat plugins, and it says nothing about
+who wrote the JSON. The mtime argument is wrong too: the file sits 22 seconds from its
+neighbour in a window shared by 784 files, which is an archive unpack.
+
+**The profiler force-generates chunks, so this is not a record of where anyone walked.**
+Random coordinates across the world border, over `DimensionManager.getStaticDimensionIDs()`,
+no visit required. Implied sample sizes from the smallest non-zero `distrib` quantum: ~10,000
+chunks in the overworld and the Nether, ~50,000 in the End, ~250,000 in the Abyssal Wasteland.
+**Its positive rows are trustworthy and its absences are not**, because "does not generate
+there" and "was never sampled" are indistinguishable in it.
+
+**THE RULE THAT FALLS OUT, and it is the whole design: a DECLARATION may create a gate, an
+OBSERVATION may only withdraw one.** planetDefs alone feeds `exclusive_keys`; JEResources
+feeds `overworld_keys`, which subtracts. JEResources may add to the TOLL set, because a wrong
+toll costs 5.0 and a wrong gate costs 800 with no producer underneath it for 3 of the 12 keys
+the mechanism gates. **We are willing to be wrong by a toll and not by a gate.** Measured: the
+gate set goes 11 to 10, never up.
+
+**`distrib` values are per-block probabilities, not per-chunk counts.** Multiply the column
+sum by 256. Getting this wrong understates every density 256x and grades the whole population
+as sub-vein; the check is `nuclearcraft:ore:4` overworld = 9.6862 blocks/chunk.
+
+**COFH World is NOT a usable source and was checked.** `config/cofh/world/*.json` exists and
+looks promising, but its dimension field is only ever `{"restriction": "blacklist", "value":
+[-1, 1]}` or `"all"` -- a NEGATIVE statement. It can say "not in the Nether", never "in the
+Nether", so it attributes zero ores to a dimension. `00_minecraft.json` is inert as well
+(`ReplaceStandardGeneration=false`). Do not re-derive this.
+
+**PACK DATA AND WORLD STATE ARE KEPT APART, and that split is the whole design.** A different
+axis from the two pack files above, and the two must not be confused: those are both pack data
+and get unioned; this is the line between pack data and the save. What only grows there is
+pack data and lives in `graph.dimension_ores`; whether you have been there is world state and
+lives in the have file's `dimensions`. So the gate lifts by itself after a trip and a rescan.
+
+**A GATE IS NOT A TOLL, and #248 is the second one.** The gate (`DIMENSION_COST`) says "you
+have never been there" and lifts on first visit. The toll (`OVERWORLD_TOLL`, on
+`graph.offworld_ores`) says a portal is on the route and never lifts. Without it every iron
+ore in the pack tied at `BASE_RAW_COST`, `pick_alternative`'s #29 tiebreak could not fire, and
+`max()` on a perfect tie returned dump order -- which planned a hopper as Nether Iron Ore x5.
+
+**THE TWO SETS ARE NOT TWO VIEWS OF ONE MAP AND MUST NOT BE NESTED.** An early version of
+#248 derived both from the union, which makes the gate a subset of the toll by construction --
+elegant, and exactly what makes it impossible to hold them to different evidence standards.
+The gate reads planetDefs alone; the toll reads the union. They are free to disagree in both
+directions, and the subset relation holding on today's data is a measured fact rather than a
+guarantee.
+
+**SILENCE IS NOT EVIDENCE, and the coverage limit is the honest part.** If a dimension is in
+the JEResources profile, an ore's absence from it is evidence; if the dimension is ABSENT from
+the profile, nothing is known. The Erebus (66), the Betweenlands (20) and the NuclearCraft
+Wasteland (4598) are unprofiled, so their ores pay no toll -- the bug left unfixed for them,
+which is the safe direction. The 35 ContentTweaker ores beyond the twelve planetDefs names
+have no source at all; their worldgen is registered in code.
 
 **GENERATING SOMEWHERE IS NOT GENERATING ONLY THERE**, and planetDefs cannot tell you which.
 It puts `minecraft:iron_block` on Osiris and `minecraft:bone_block` on Hator; those obviously
 exist on Earth too, and pricing a rocket into every iron block would be far worse than the bug.
-Two things bound it, and neither is a guess:
+Three things bound it, and none is a guess:
 
-* Intersect with `Graph.world_ores`, the pack's own `ore*` registration. 17 exclusive
-  declarations become 8; every `block*` entry drops by construction.
-* Apply it as a FLOOR under `min` in `_seed`. An ore with a crafted route keeps that route.
-  Measured: all 8 have 1 to 6 producers, and only 3 end up paying the 801 -- Uranium Ore is
-  declared on Oi and settles at 2.0.
+* Intersect with `Graph.world_ores`, the pack's own `ore*` registration; every `block*` entry
+  drops by construction. 17 exclusive declarations become 8 ores, plus 4 shadow registrations.
+* Apply it as a FLOOR under `min` in `_seed`. An ore with a crafted route keeps that route --
+  Uranium Ore is declared on Oi, has four crafted routes and settles at 2.0 rather than 801.
+* **And read the overworld back (#248).** The two bounds above are structural; JEResources is
+  the direct evidence, and it withdrew two ores planetDefs had gated behind a rocket:
+  `abyssalcraft:abyore` (Diamerisma) and `nuclearcraft:ore:4` (Oi) are both in the overworld.
+  The hole this bullet list used to work around now has a reader.
 
 **The leaf rule runs BEFORE the world-ore rule and both need the surcharge.** `_seed` prices a
 key nothing produces at `BASE_RAW_COST` first, and the world-ore pass is a `min`, so a gated ore

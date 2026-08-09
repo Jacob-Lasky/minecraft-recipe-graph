@@ -262,6 +262,42 @@ public strictfp final class Cost {
     public static final double DIMENSION_COST = 800.0;
 
     /**
+     * What WALKING THROUGH THE PORTAL costs, every time, forever. #248.
+     *
+     * A GATE IS NOT A TOLL, and having only the first is the defect. DIMENSION_COST above
+     * says "you have never been there", and it correctly drops to nothing the moment you go.
+     * That leaves a player who has been to the Nether a thousand times with
+     * `minecraft:iron_ore` and `cyclicmagic:nether_iron_ore` priced IDENTICALLY, and since
+     * both are `oreIron` the choice falls to the alternative ranker, whose cheapest-wins
+     * tiebreak cannot fire on a perfect tie and returns dump order instead. The reported plan
+     * was a hopper solving as Iron Ingot from Nether Iron Ore x5.
+     *
+     * The portal does not stop existing once you have used it, so this term never lifts.
+     *
+     * <pre>
+     *   BASE_RAW_COST &lt; BASE_RAW_COST + OVERWORLD_TOLL
+     *                 &lt; MACHINE_COST[BUILDABLE] &lt; LOOT_COST &lt; DIMENSION_COST
+     * </pre>
+     *
+     * Above BASE_RAW_COST so the overworld ore wins OUTRIGHT rather than by dump order, which
+     * is the entire fix; below LOOT_COST so a rock behind a portal never loses to farming a
+     * boss; and below MACHINE_COST[BUILDABLE], which is the TIGHTER of the two and the one
+     * that actually pins the magnitude -- walking through a portal must not read as a bigger
+     * obstacle than BUILDING a machine. THE ORDERING IS THE CLAIM, NOT THE MAGNITUDE, and the
+     * magnitude was measured -- see the python `cost.py`, which is the oracle this file is
+     * held to.
+     *
+     * <p>THE KNOWN LIMIT: THIS IS PER ORE, AND A TRIP IS NOT. One portal serves every ore
+     * behind it, so a plan wanting three Nether ores is charged three tolls for one walk.
+     * That is what the cost table can express -- prices are per key, and nothing here can say
+     * "these rows are one journey" -- and it is the safe direction of wrong, because charging
+     * once and letting the rest ride free would make the second Nether ore FREE and bring the
+     * tie back one row down. Fixing it properly needs the PLAN to carry the trip, not this
+     * constant to change.
+     */
+    public static final double OVERWORLD_TOLL = 5.0;
+
+    /**
      * What a transmutation costs, for an item the ProjectE network has learned. #50.
      *
      * BETWEEN STOCK AND A RAW LEAF, and both bounds are the claim. Above stock and above a
@@ -741,6 +777,30 @@ public strictfp final class Cost {
     }
 
     /** Starting costs, before any recipe is considered. Shared by both relaxation passes. */
+    /**
+     * What "you go and get this" costs: a raw leaf, plus whatever stands between. Mirrors
+     * `cost.raw_floor` in python, which is the oracle this file is held to.
+     *
+     * <p>ONE DEFINITION, BECAUSE {@code seed} APPLIES IT IN TWO PLACES. The leaf rule and the
+     * world-ore rule must charge a key identically -- the first assigns, the second takes a
+     * min, and a key reached by both has to get the same number from each or the order of the
+     * two loops silently decides the price. Two hand-maintained copies here plus two in python
+     * is four chances to drift, and drift is a repricing nobody sees.
+     *
+     * <p>OPERAND ORDER IS PART OF THE CONTRACT. `tests/fixtures/plan/` freezes prices computed
+     * in python and this side is asserted against them bit-for-bit, so {@code a + b + c} may
+     * not become {@code a + c + b}. See the class comment above.
+     *
+     * <p>THE TWO TERMS ARE DIFFERENT CLAIMS AND BOTH CAN APPLY. The gate says you have never
+     * been to the dimension and lifts the moment you go (#112); the toll says a portal is on
+     * the route and never lifts (#248). An ore in an unvisited dimension pays both.
+     */
+    private static double rawFloor(RecipeGraph graph, long[] gated, int key) {
+        return BASE_RAW_COST
+                + (Bits.get(gated, key) ? DIMENSION_COST : 0.0)
+                + (graph.isOffworldOre(key) ? OVERWORLD_TOLL : 0.0);
+    }
+
     static double[] seed(RecipeGraph graph, CostInputs in) {
         double[] cost = new double[graph.keyCount()];
         Arrays.fill(cost, Double.POSITIVE_INFINITY);
@@ -805,8 +865,7 @@ public strictfp final class Cost {
                 for (int p = recipes.altStart(slot); p < recipes.altEnd(slot); p++) {
                     int alt = recipes.altKeyAt(p);
                     if (Double.isInfinite(cost[alt]) && !Bits.get(produced, alt)) {
-                        cost[alt] = BASE_RAW_COST
-                                + (Bits.get(gated, alt) ? DIMENSION_COST : 0.0);
+                        cost[alt] = rawFloor(graph, gated, alt);
                     }
                 }
             }
@@ -829,9 +888,17 @@ public strictfp final class Cost {
         // genuinely cheaper crafted route still wins, because relaxation lowers it further.
         for (int key = 0; key < cost.length; key++) {
             if (graph.isWorldOre(key)) {
-                double floor = BASE_RAW_COST
-                        + (Bits.get(gated, key) ? DIMENSION_COST : 0.0);
-                cost[key] = Math.min(cost[key], floor);
+                // AND A TOLL ON TOP OF THAT, WHICH IS #248 AND IS A SECOND TERM RATHER THAN A
+                // BIGGER FIRST ONE. The gate expires -- fly to Sedna once and it stops being
+                // charged, correctly -- and the portal does not, so the two have to coexist.
+                // An ore in an unvisited dimension pays both; one in a dimension you have been
+                // to a thousand times pays only the toll; an overworld ore pays neither.
+                //
+                // THE TOLL COMES OFF THE GRAPH AND THE GATE OFF THE INPUT, which is the same
+                // asymmetry the python `_seed` has and for the same reason: where an ore
+                // generates is pack data settled at build time, and where the player has been
+                // is per-save.
+                cost[key] = Math.min(cost[key], rawFloor(graph, gated, key));
             }
         }
 
@@ -859,9 +926,10 @@ public strictfp final class Cost {
         // runs, so the two produce identical tables and the count of keys where they differ is
         // 0. An earlier comment claimed a dimension-gated leaf "would be lowered by a bare
         // assignment"; that is backwards -- such a leaf sits at BASE_RAW_COST + DIMENSION_COST
-        // = 801, BELOW UNSOURCED_COST, so an assignment raises it exactly as `max` does. Keep
-        // `max` because it is what keeps the loop correct if DIMENSION_COST ever passes
-        // UNSOURCED_COST, which nothing enforces. Mirrors the same note in `cost._seed`.
+        // + OVERWORLD_TOLL = 806, BELOW UNSOURCED_COST, so an assignment raises it exactly as
+        // `max` does. Keep `max` because it is what keeps the loop correct if that SUM ever
+        // passes UNSOURCED_COST, which nothing enforces and which #248 brought one term
+        // closer by adding the toll. Mirrors the same note in `cost._seed`.
         //
         // BEFORE THE TOKENS, so a token wins: `expand` returns at the token branch before it
         // ever reaches the unsourced mark, so the price has to agree with the display about

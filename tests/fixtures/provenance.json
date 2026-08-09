@@ -68,6 +68,7 @@
       "mod:quest_widget": "Quest Widget",
       "mod:tool_widget": "Tool Widget"
     },
+    "offworld_ores": {},
     "ore_guessed": [],
     "ore_members": {
       "nuggetThing": [

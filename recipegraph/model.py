@@ -665,12 +665,33 @@ class Graph:
         # keep using `machines.same_mod` on the uid. See sources/dump_meta.category_mods.
         self.category_mods = {}
         # item key -> [dimension id, dimension name] for an ore exactly one dimension
-        # generates, from the pack's own planetDefs.xml. PACK DATA, not a name guess, and
-        # the static half of #112: what only grows THERE cannot change without the pack
-        # changing. Whether you have BEEN there is world state and lives in the have file,
-        # so the two never have to be rebuilt together. Empty for a pack with no
-        # Advanced Rocketry, which behaves exactly as before.
+        # generates. SOURCED FROM planetDefs.xml ALONE, with JEResources' world-gen.json
+        # allowed only to WITHDRAW an entry it saw in the overworld (#248; #112 built the
+        # field). The observational source may never ADD one, because that would rest on an
+        # absence in it -- see `dimensions.overworld_keys`. PACK DATA, not a name guess, and
+        # the static half of #112: what only grows THERE cannot change
+        # without the pack changing. Whether you have BEEN there is world state and lives in
+        # the have file, so the two never have to be rebuilt together. Empty for a pack that
+        # ships neither file, which behaves exactly as before.
         self.dimension_ores = {}
+        # item key -> [dimension id, dimension name] for an ore NO pack source ever places
+        # in the overworld. #248. Read from the UNION of both sources, which `dimension_ores`
+        # deliberately is not: a wrong toll costs `cost.OVERWORLD_TOLL` and a wrong gate costs
+        # `cost.DIMENSION_COST`, so the two are held to different evidence standards and are
+        # NOT two views of one map. A different claim, and wider in practice: that
+        # one says "you cannot get there yet", this one says "there is a portal on the route
+        # and there always will be". The gate lifts on first visit; this never does, which is
+        # why an ore behind a portal must keep losing to the identical ore you can walk to
+        # after you have been to the Nether a thousand times.
+        #
+        # THE DIMENSION IN THE VALUE IS FOR THE READER ONLY. The toll is a flat per-ore term
+        # (`cost.OVERWORLD_TOLL`) and does not vary by destination, and when an ore generates
+        # in several off-world dimensions the one named here is arbitrary. DO NOT start
+        # varying the toll by it without first fixing that -- see `dimensions.offworld_keys`.
+        #
+        # Empty on any graph built before #248, which behaves exactly as before: no toll,
+        # and every iron ore in the pack ties at BASE_RAW_COST.
+        self.offworld_ores = {}
         # The subset of `dimension_ores` that is a SECOND id for an ore already in it, from
         # `dimensions.shadow_ores`. Kept as well as folded in, because the two answer
         # different questions and #168 needs both: `dimension_ores` says "a trip is priced
@@ -679,8 +700,9 @@ class Graph:
         # from the 19 barren ores in this pack that are perfectly real.
         #
         # PERSISTED RATHER THAN RECOMPUTED, and that is the point rather than an
-        # optimisation. It is derived from pack files (planetDefs.xml, crafttweaker.log)
-        # that only `index.build` has in hand, so a consumer that re-derived it would need
+        # optimisation. It is derived from pack files (planetDefs.xml, world-gen.json,
+        # crafttweaker.log) that only `index.build` has in hand, so a consumer that re-derived
+        # it would need
         # the instance directory and would be a second spelling besides. #19 Phase 6 deletes
         # the Python search page and the in-game planner has no search surface yet; carrying
         # the answer in graph.json is what stops that search being born with this bug.
@@ -2076,6 +2098,7 @@ class Graph:
             "instance_dir": self.instance_dir,
             "multiblocks": self.multiblocks,
             "dimension_ores": self.dimension_ores,
+            "offworld_ores": self.offworld_ores,
             "shadow_ores": self.shadow_ores,
             "declared_provenance": self.declared_provenance,
             "max_damage": self.max_damage,
@@ -2164,6 +2187,10 @@ class Graph:
         g.multiblocks = d.get("multiblocks") or {}
         # Absent before #112; empty means "no dimension is priced", the pre-#112 behaviour.
         g.dimension_ores = d.get("dimension_ores") or {}
+        # Absent before #248; empty means "no ore pays a toll", the pre-#248 behaviour, and
+        # NOT "every ore is in the overworld". Same reason as `shadow_ores` below for not
+        # deriving it here: it comes from pack files rather than from the graph.
+        g.offworld_ores = d.get("offworld_ores") or {}
         # Absent before #168; empty means "no key is known to be a duplicate registration",
         # which is the pre-#168 behaviour and NOT "every key is genuine". DO NOT recompute it
         # here the way `relabel_unlocalized` is recomputed below: this is derived from pack

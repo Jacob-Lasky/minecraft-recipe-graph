@@ -127,7 +127,15 @@ class WhatTheGraphCannotExplainCostsTest(unittest.TestCase):
         # that exists -- an afternoon of fighting, a trip, a locked chapter, a machine you
         # cannot have. A loot table or a JEI automation card is not a route at all, so it has to
         # lose to every claim the graph can account for, including the worst of them.
-        chain = [cost_mod.BASE_RAW_COST, cost_mod.LOOT_COST, cost_mod.DIMENSION_COST,
+        #
+        # THE TOLL ENTERS AS A SUM, NOT AS A TERM, and that is #248's ordering rather than a
+        # convenience. `OVERWORLD_TOLL` is never charged on its own: `_seed` only ever adds it
+        # to `BASE_RAW_COST`, so the figure that has to sit in this chain is the floor an
+        # off-world ore actually lands on. Listing the bare 5.0 here would assert an ordering
+        # nothing in the model ever evaluates.
+        chain = [cost_mod.BASE_RAW_COST,
+                 cost_mod.BASE_RAW_COST + cost_mod.OVERWORLD_TOLL,
+                 cost_mod.LOOT_COST, cost_mod.DIMENSION_COST,
                  cost_mod.GATE_COST, cost_mod.UNSOURCED_COST,
                  cost_mod.MACHINE_COST["unavailable"], cost_mod.NON_PRODUCTION_PENALTY]
         self.assertEqual(chain, sorted(chain))
@@ -142,7 +150,7 @@ class WhatTheGraphCannotExplainCostsTest(unittest.TestCase):
         args = ("graph.json", {}, {}, ())
         before = cost_mod.fingerprint(*args)
         for name in ("UNSOURCED_COST", "GATE_COST", "LOOT_COST", "DIMENSION_COST",
-                     "NON_PRODUCTION_PENALTY"):
+                     "OVERWORLD_TOLL", "NON_PRODUCTION_PENALTY"):
             original = getattr(cost_mod, name)
             try:
                 setattr(cost_mod, name, original + 7.0)
