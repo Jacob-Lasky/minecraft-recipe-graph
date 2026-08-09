@@ -378,7 +378,8 @@ public class NodeRowTextTest {
         // makes the body mean anything. It moved because #193 took 553 keys from infinity to a
         // finite price, so this plan now reaches subtrees it could not before and one more of
         // them bottoms out on a leaf nothing sources. See `PlanJsonTest`'s sibling assertion.
-        assertEquals("the fixture must still hold three unsourced rows", 3, marked);
+        // TWO SINCE #248, three since #193 before that. The oracle moved to `graph-oracle-248.json` in #248 -- the only graph carrying `offworld_ores` -- and every plan fixture was regenerated against it. The two oracles are different builds 621 recipes apart, so figures read off a fixture move with them. That is the ORACLE and not a solver change: verified by running identical code against both graphs.
+        assertEquals("the fixture must still hold two unsourced rows", 2, marked);
         // COUNTED, so a mark that appears on every row would fail here rather than pass. The
         // badge is only believable while it is rare.
         assertEquals("the mark must appear exactly as often as the flag does",
