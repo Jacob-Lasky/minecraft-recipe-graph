@@ -57,7 +57,21 @@ set -eu
 
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-ORACLE=${RECIPEGRAPH_ORACLE:-/coding/.recipegraph-build/graph-oracle.json}
+# THE DEFAULT IS THE GRAPH THE FIXTURES NAME, AND A PINNED FILENAME IS WHY THAT NEEDED SAYING.
+# This defaulted to `graph-oracle.json` while #248 regenerated every plan fixture against
+# `graph-oracle-248.json`, so the golden gate regenerated against a graph the fixtures did not
+# come from and disagreed with itself. It went red on master for anyone running this with no
+# environment set -- not a port defect, an oracle mismatch wearing one, and the most expensive
+# possible disguise because `everyFixturePlansExactlyAsThePythonOracleDoes` is the assertion
+# people trust most.
+#
+# THE CHECK BELOW IS THE POINT, NOT THIS FILENAME. A default that names one file is a second
+# source of truth about which graph is current, and it goes stale the next time anyone
+# regenerates -- which is exactly what happened. So the run now REFUSES when the oracle it is
+# about to use is not the one the fixtures record, and says which file to pass instead. #281
+# tracks making the selection schema-aware; until then, a wrong oracle fails loudly at the top
+# rather than as a mystery in the Java arm twenty minutes later.
+ORACLE=${RECIPEGRAPH_ORACLE:-/coding/.recipegraph-build/graph-oracle-248.json}
 PACK_MODS=${PACK_MODS:-/coding/.recipegraph-build/deps}
 GRADLE_CACHE=${GRADLE_CACHE:-/coding/.recipegraph-build/gradle-cache}
 BUILD_DIR=$(dirname "$ORACLE")
@@ -65,6 +79,31 @@ BUILD_DIR=$(dirname "$ORACLE")
 # below as a plain command rather than with inline assignments so that it can take the
 # container gate itself. See `tools/gate.sh` on why nesting the gate would deadlock.
 export PACK_MODS GRADLE_CACHE
+
+# REFUSE AN ORACLE THE FIXTURES DID NOT COME FROM, BEFORE SPENDING TWENTY MINUTES ON IT.
+# The fixtures record the sha256 of the graph they were generated against, so the mismatch is
+# checkable in a second and is otherwise invisible until the Java arm reports a plan diff --
+# which reads as a port regression and is not one. Silent on any fixture that records no
+# sha256, and on a missing oracle, because both are absence of evidence rather than evidence
+# of mismatch; the arms below already fail loudly on a missing oracle for their own reasons.
+if [ -f "$ORACLE" ]; then
+    want=$(sed -n 's/.*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p' \
+           tests/fixtures/plan/plan-in-stock.json 2>/dev/null | head -1)
+    if [ -n "$want" ]; then
+        have=$(sha256sum "$ORACLE" | cut -d' ' -f1)
+        if [ "$want" != "$have" ]; then
+            echo "!! THE ORACLE IS NOT THE ONE THE FIXTURES WERE GENERATED AGAINST."
+            echo "!!   fixtures name : $want"
+            echo "!!   $ORACLE"
+            echo "!!   hashes to     : $have"
+            echo "!! The golden gate would regenerate against this graph and disagree with the"
+            echo "!! stored plans, which reads as a port regression and is not one. Pass"
+            echo "!! RECIPEGRAPH_ORACLE=<the graph the fixtures name>, or regenerate the"
+            echo "!! fixtures against this one with tools/make-java-fixtures.py."
+            exit 1
+        fi
+    fi
+fi
 
 # One heavy container at a time on this host; `gated` blocks, announces the wait and names the
 # holder. This script's own container is the java arm at the bottom.
