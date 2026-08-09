@@ -222,6 +222,16 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void theRowMenuShotIsReachableByName() {
+        // The name is the whole interface, as with every entry here. It matters more for this
+        // one than for most: #251's change to the TODO panel is invisible in a screenshot by
+        // design -- `ClickableGroup` draws nothing -- so this menu is the ONLY artifact the
+        // issue has, and a dropped registration would leave it with none while every layout
+        // test still passed.
+        assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("row-menu"));
+    }
+
+    @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");
         assertNotNull(problem);

@@ -81,6 +81,36 @@ public interface PlannerActions {
     void toggleFavourite(PlanNode node);
 
     /**
+     * The menu for a SHOPPING ROW, which is not a node and must not be routed through one.
+     *
+     * A SEPARATE TRIO FROM {@link #openNodeMenu}, {@link #addToTodo} AND
+     * {@link #toggleFavourite}, AND DO NOT COLLAPSE THEM. The node-shaped three read
+     * `node.need()`, which is what ONE parent wants of an item; a shopping row's `need` is the
+     * AGGREGATE across every parent that wants it. #251's two rejected designs are one
+     * rejection wearing two hats -- both reach `PlanSelection.selectedNode` and then read a
+     * per-occurrence quantity for a surface whose question is "how many do I still need".
+     * Reusing `addToTodo(PlanNode)` here would be that rejection re-entering through the back
+     * door, silently, because the types would line up and the number would be wrong.
+     *
+     * `solve.py`'s `_need_entry` states the division of labour where the data is made: "The
+     * tree is the diagnosis; this is what gets acted on while gathering." So acting on the row
+     * is the shape the producer already assumed.
+     *
+     * THEY TAKE THE ROW AND NOT `(String key, long need)`, for the reason the first half of
+     * #251 gave for putting the row on `Line` rather than a bare quantity: a loose number is
+     * usable by a caller that has lost track of which surface produced it, and it is only
+     * correct on this one. Keeping it attached to the row it came from makes the wrong call
+     * unspellable instead of merely discouraged.
+     */
+    void openRowMenu(PlanView.EntryRow row);
+
+    /** Put a shopping row's AGGREGATE need in the plan book. See {@link #openRowMenu}. */
+    void addRowToTodo(PlanView.EntryRow row);
+
+    /** Favourite the item a shopping row names. See {@link #openRowMenu}. */
+    void favouriteRow(PlanView.EntryRow row);
+
+    /**
      * Does nothing but record nothing. For the screenshot harness, which has no screen to
      * open a sub-panel on, and for layout tests, which assert geometry rather than behaviour.
      *
@@ -128,6 +158,18 @@ public interface PlannerActions {
 
         @Override
         public void toggleFavourite(PlanNode node) {
+        }
+
+        @Override
+        public void openRowMenu(PlanView.EntryRow row) {
+        }
+
+        @Override
+        public void addRowToTodo(PlanView.EntryRow row) {
+        }
+
+        @Override
+        public void favouriteRow(PlanView.EntryRow row) {
         }
     };
 }

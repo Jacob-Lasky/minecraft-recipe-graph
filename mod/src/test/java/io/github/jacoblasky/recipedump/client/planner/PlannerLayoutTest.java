@@ -73,6 +73,46 @@ public class PlannerLayoutTest {
         }
     }
 
+    /**
+     * #251's witness, and it has TWO clauses because one of them is not enough.
+     *
+     * A shopping row is CLICKABLE, and the click carries THAT ROW'S OWN AGGREGATE `need`.
+     * Asserting only the first clause passes against an implementation that made the row
+     * clickable and then routed the action through `PlanSelection.selectedNode` -- #251's
+     * rejected option 1 -- because a node's `need()` is a perfectly good number and simply the
+     * wrong one. It is the quantity, not the clickability, that this issue is about.
+     *
+     * SO THE EXPECTED NUMBER COMES FROM THE FIXTURE'S OWN ROW rather than being written in
+     * here. A literal would freeze whatever `plan-cycle` happened to hold on the day, and the
+     * assertion would then be about the fixture instead of about the wiring -- and it would
+     * start failing for the wrong reason the next time the oracle moves, which #280 says it is
+     * about to.
+     */
+    @Test
+    public void clickingAShoppingRowOpensItsMenuCarryingTheRowsOwnAggregateNeed() {
+        PlanView plan = PlanFixtures.load("plan-cycle");
+        assertFalse("plan-cycle must have shopping rows or this asserts nothing",
+                    plan.shoppingList().isEmpty());
+        PlanView.EntryRow first = plan.shoppingList().get(0);
+
+        Recorder actions = new Recorder();
+        ModularPanel todo = PlannerWidgets.todoPanel(plan, emptyBook(), actions);
+        HeadlessLayout.layOut(todo);
+
+        List<PlannerWidgets.ClickableGroup> rows = clickables(todo);
+        assertFalse("a shopping row must be clickable at all", rows.isEmpty());
+
+        // The FIRST clickable is the first shopping row: `todoLines` puts the shopping list at
+        // the top and headers carry no row, so nothing clickable precedes it.
+        rows.get(0).onMousePressed(0);
+
+        assertEquals("clicking a shopping row opens the ROW menu, carrying that row's own"
+                     + " aggregate need rather than any node's per-occurrence share",
+                     java.util.Collections.singletonList(
+                             "rowMenu:" + first.key() + ":" + first.need()),
+                     actions.calls);
+    }
+
 
     private static PlanBook emptyBook() {
         return new PlanBook();
@@ -269,7 +309,7 @@ public class PlannerLayoutTest {
         // The TODO panel's own furniture, not the keys in it: a key is a tree label and may
         // legitimately be cut.
         PlanBook book = new PlanBook();
-        ModularPanel todo = PlannerWidgets.todoPanel(PlanFixtures.load("plan-in-stock"), book);
+        ModularPanel todo = PlannerWidgets.todoPanel(PlanFixtures.load("plan-in-stock"), book, PlannerActions.NONE);
         HeadlessLayout.layOut(todo);
         assertFalse(HeadlessLayout.dump(todo), dumpText(todo).contains("still needed for th"
                                                                       + NodeRowText.ELLIPSIS));
@@ -319,7 +359,7 @@ public class PlannerLayoutTest {
         for (String fixture : PlanFixtures.names()) {
             PlanView plan = PlanFixtures.load(fixture);
             ModularPanel picker = pickerFor(plan.tree(), 3);
-            ModularPanel todo = PlannerWidgets.todoPanel(plan, emptyBook());
+            ModularPanel todo = PlannerWidgets.todoPanel(plan, emptyBook(), PlannerActions.NONE);
             HeadlessLayout.layOut(picker);
             HeadlessLayout.layOut(todo);
             for (ModularPanel panel : new ModularPanel[]{picker, todo}) {
@@ -352,7 +392,7 @@ public class PlannerLayoutTest {
         book.addFavourite("minecraft:iron_ingot");
         book.addFavourite("thaumadditions:vis_pod#0116bb2287a7");
         book.setTodo("fluid:water", 934_400L);
-        ModularPanel panel = PlannerWidgets.todoPanel(PlanView.empty(), book);
+        ModularPanel panel = PlannerWidgets.todoPanel(PlanView.empty(), book, PlannerActions.NONE);
         HeadlessLayout.layOut(panel);
         System.out.println("todo:\n" + HeadlessLayout.dump(panel));
         for (IWidget widget : HeadlessLayout.flatten(panel)) {
@@ -395,7 +435,7 @@ public class PlannerLayoutTest {
             PlanView plan = PlanFixtures.load(fixture);
             ModularPanel[] panels = {
                 PlannerWidgets.plannerPanel(plan, book, recorder()),
-                PlannerWidgets.todoPanel(plan, book),
+                PlannerWidgets.todoPanel(plan, book, PlannerActions.NONE),
                 pickerFor(plan.tree(), RecipeChoices.MAX_SHOWN + 7),
                 PlannerWidgets.nodeMenu(plan.tree(), PlannerActions.NONE),
             };
@@ -519,7 +559,7 @@ public class PlannerLayoutTest {
         assertFalse("the fixture must have stock rows to draw", plan.usedFromStock().isEmpty());
         assertTrue("and no EMC rows, so a section is suppressed", plan.fromEmc().isEmpty());
 
-        ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook());
+        ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook(), PlannerActions.NONE);
         HeadlessLayout.layOut(panel);
         ListWidget<?, ?> list = findList(panel);
         int rows = list.getChildren().size();
@@ -550,7 +590,7 @@ public class PlannerLayoutTest {
         PlanView plan = PlanFixtures.load("plan-truncated");
         assertTrue("the fixture should have a long shopping list",
                    plan.shoppingList().size() >= 15);
-        ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook());
+        ModularPanel panel = PlannerWidgets.todoPanel(plan, emptyBook(), PlannerActions.NONE);
         HeadlessLayout.layOut(panel);
         ListWidget<?, ?> list = findList(panel);
         assertTrue("the list must be capped", list.getArea().h()
@@ -735,8 +775,8 @@ public class PlannerLayoutTest {
         PlanBook book = new PlanBook();
         book.setTodo("minecraft:iron_ingot", 64L);
         book.setTodo("fluid:water", 934_400L);
-        ModularPanel empty = PlannerWidgets.todoPanel(plan, emptyBook());
-        ModularPanel full = PlannerWidgets.todoPanel(plan, book);
+        ModularPanel empty = PlannerWidgets.todoPanel(plan, emptyBook(), PlannerActions.NONE);
+        ModularPanel full = PlannerWidgets.todoPanel(plan, book, PlannerActions.NONE);
         HeadlessLayout.layOut(empty);
         HeadlessLayout.layOut(full);
         assertTrue(full.getArea().h() > empty.getArea().h());
@@ -1181,6 +1221,25 @@ public class PlannerLayoutTest {
         @Override
         public void toggleFavourite(PlanNode node) {
             calls.add("favourite:" + node.key());
+        }
+
+        // THE QUANTITY IS RECORDED, and that is what makes the witness below able to fail. A
+        // recorder that logged only the key would pass against an implementation that had
+        // routed the click through a node and taken a per-occurrence `need` -- which is the
+        // defect #251 exists to prevent, and it is invisible unless the number is in the log.
+        @Override
+        public void openRowMenu(PlanView.EntryRow row) {
+            calls.add("rowMenu:" + row.key() + ":" + row.need());
+        }
+
+        @Override
+        public void addRowToTodo(PlanView.EntryRow row) {
+            calls.add("rowTodo:" + row.key() + ":" + row.need());
+        }
+
+        @Override
+        public void favouriteRow(PlanView.EntryRow row) {
+            calls.add("rowFavourite:" + row.key());
         }
     }
 

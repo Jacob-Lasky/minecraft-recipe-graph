@@ -116,6 +116,35 @@ final class PlannerShot {
     }
 
     /**
+     * `row-menu`: the menu a SHOPPING ROW opens, which is the only thing #251 makes visible.
+     *
+     * THE TODO PANEL ITSELF IS NOT THE ARTIFACT, and that is worth stating because it is the
+     * obvious choice and it would prove nothing. `ClickableGroup`'s own header says what it is
+     * for: "a click target the width of the row and no visual change at all". So a screenshot
+     * of the TODO panel is byte-identical before and after a row becomes clickable, and
+     * shooting one would be the failure #252 paid three pack boots for -- a green run whose
+     * picture cannot show the change it was taken for.
+     *
+     * The menu is genuinely new pixels, and it carries the number the whole issue is about:
+     * its title is the row's own aggregate `need`, so a reader can see WHICH quantity the menu
+     * would act on rather than taking the wiring on trust.
+     */
+    static void openRowMenu(String arg) {
+        PlanView plan = fixture(arg);
+        if (plan.shoppingList().isEmpty()) {
+            // LOUDLY, rather than photographing an empty menu. A fixture with no shopping list
+            // cannot exercise this surface at all, and a picture of the fallback would look
+            // like a rendered menu to anyone reading the PNG rather than the log.
+            throw new IllegalStateException(
+                    "row-menu needs a fixture with a shopping list; " + plan.target()
+                    + " has none. `plan-cycle` has twelve rows.");
+        }
+        armNodeActions(plan.tree());
+        PlannerScreen.openPanel(
+                PlannerWidgets.rowMenu(plan.shoppingList().get(0), SHOT_ACTIONS));
+    }
+
+    /**
      * The recipe picker, on the root of a fixture, with candidates from the loaded graph.
      *
      * THE SUBJECT MATTER IS DECIDED BY WHETHER AN ORACLE IS MOUNTED, exactly as
@@ -354,7 +383,7 @@ final class PlannerShot {
         // draws an icon per row now, and a shot taken against `NodeActions.NONE` is a picture
         // of the icon column being charged and never filled.
         armNodeActions(plan.tree());
-        PlannerScreen.openPanel(PlannerWidgets.todoPanel(plan, book(plan)));
+        PlannerScreen.openPanel(PlannerWidgets.todoPanel(plan, book(plan), SHOT_ACTIONS));
     }
 
     /**
@@ -583,6 +612,25 @@ final class PlannerShot {
 
         @Override
         public void toggleFavourite(PlanNode node) {
+        }
+
+        // INERT LIKE THE REST, for the reason above: this seam exists so the icon column and
+        // the recipe-viewer entries are REAL in a shot, not so a screenshot can edit a plan
+        // book. `row-menu` photographs the menu by opening it directly, the way `planner-menu`
+        // photographs the node one.
+        @Override
+        public void openRowMenu(
+                io.github.jacoblasky.recipedump.client.planner.PlanView.EntryRow row) {
+        }
+
+        @Override
+        public void addRowToTodo(
+                io.github.jacoblasky.recipedump.client.planner.PlanView.EntryRow row) {
+        }
+
+        @Override
+        public void favouriteRow(
+                io.github.jacoblasky.recipedump.client.planner.PlanView.EntryRow row) {
         }
     };
 

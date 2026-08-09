@@ -947,6 +947,52 @@ public final class PlannerWidgets {
         return ModularPanel.defaultPanel("mcrecipedump_node_menu", width, height).child(body);
     }
 
+    /**
+     * The menu for a SHOPPING ROW: two entries, and deliberately not the node menu's five.
+     *
+     * TWO ENTRIES BECAUSE ONLY TWO ARE EXPRESSIBLE FROM A ROW. "Show recipes", "Show uses" and
+     * "Choose another recipe" all need a node and a recipe -- an occurrence -- and a shopping
+     * row is the aggregate across every occurrence. Reaching for one would mean picking an
+     * arbitrary parent, which is #251's rejected option 1. A menu offering three entries where
+     * one silently acts on the wrong quantity is worse than one offering two that are right.
+     *
+     * THE TITLE IS THE ROW'S LABEL AND THE NEED IS ON IT, because the number is the whole
+     * reason this menu is separate. A player who opened it from a wrapped row should be able to
+     * see which total they are about to act on without closing it again.
+     */
+    public static ModularPanel rowMenu(final PlanView.EntryRow row, final PlannerActions actions) {
+        List<Entry> entries = new java.util.ArrayList<Entry>();
+        entries.add(new Entry("Add to TODO", new Runnable() {
+            @Override
+            public void run() {
+                actions.addRowToTodo(row);
+            }
+        }));
+        entries.add(new Entry("Favourite", new Runnable() {
+            @Override
+            public void run() {
+                actions.favouriteRow(row);
+            }
+        }));
+
+        int height = PADDING * 2 + LINE + 1 + entries.size() * ROW_HEIGHT;
+        int width = MENU_WIDTH;
+        int inner = width - PADDING * 2;
+        Group body = new Group();
+        body.pos(PADDING, PADDING);
+        body.size(inner, height - PADDING * 2);
+        body.child(line(row.need() + "x " + row.label(), inner, NodeStatus.INK_MUTED).pos(0, 0));
+        int y = LINE + 1;
+        for (Entry entry : entries) {
+            ClickableGroup menuRow = new ClickableGroup(entry.action);
+            menuRow.size(inner, ROW_HEIGHT);
+            menuRow.child(line(entry.text, inner, NodeStatus.INK_CRAFT).pos(0, 0));
+            body.child(menuRow.pos(0, y));
+            y += ROW_HEIGHT;
+        }
+        return ModularPanel.defaultPanel("mcrecipedump_row_menu", width, height).child(body);
+    }
+
     /** One menu line and what it does. */
     private static final class Entry {
         final String text;
@@ -1146,8 +1192,19 @@ public final class PlannerWidgets {
      * there is no bound on that. The layout tests had not caught it because they asserted
      * every widget HAD a box, not that the box was on screen; `everyPanelFitsTheSmallestScreen`
      * is the assertion that does.
+     *
+     * IT TAKES `PlannerActions` RATHER THAN REACHING A HOLDER, and that was a decision rather
+     * than a default (#251). `NodeActionsHolder` is static and `rowList` already calls it for
+     * icons, so the cheap shape was an overload with a no-op default -- and that is precisely
+     * what `SeamInstallationTest.everySettableSeamIsInstalledSomewhereInProduction` gates
+     * against since #205: a seam present, tested, and absent in the running game. Threading it
+     * costs six call sites, five of them tests, and is how `PlannerActions` already travels in
+     * this file. The other rejected shape was hanging the row menu off `NodeActions`, which
+     * needs no plumbing and puts a panel action on the JEI-facing interface -- the two menus
+     * answer different questions and blurring them is how the aggregate-versus-occurrence
+     * confusion finds a fourth place to live.
      */
-    public static ModularPanel todoPanel(PlanView plan, PlanBook book) {
+    public static ModularPanel todoPanel(PlanView plan, PlanBook book, PlannerActions actions) {
         int width = TODO_WIDTH;
         int inner = width - PADDING * 2;
 
@@ -1160,7 +1217,7 @@ public final class PlannerWidgets {
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
         body.child(line("TODO", inner, NodeStatus.INK_MUTED).pos(0, 0));
-        body.child(rowList(lines, inner, listHeight).pos(0, LINE + 1));
+        body.child(rowList(lines, inner, listHeight, actions).pos(0, LINE + 1));
         return ModularPanel.defaultPanel("mcrecipedump_todo", width, height).child(body);
     }
 
@@ -1407,12 +1464,36 @@ public final class PlannerWidgets {
      * The same `ListWidget` reasoning as {@link #tree}.
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static ListWidget<?, ?> rowList(List<Line> lines, int width, int height) {
+    private static ListWidget<?, ?> rowList(List<Line> lines, int width, int height,
+                                            final PlannerActions actions) {
         ListWidget list = new ListWidget();
         list.size(width, height);
         list.crossAxisAlignment(Alignment.CrossAxis.START);
-        for (Line entry : lines) {
-            Group row = new Group();
+        for (final Line entry : lines) {
+            // CLICKABLE ONLY WHERE THERE IS A ROW TO ACT ON (#251). A header, a machine line
+            // and every continuation of a wrapped row carry no `EntryRow` -- see `addEntries`
+            // -- so they stay plain `Group`s and a player gets exactly one click target per
+            // shopping row. Making every line clickable would give a wrapped row two.
+            //
+            // THE SELECTION KEY IS DELIBERATELY NOT PASSED. `ClickableGroup`'s second argument
+            // draws the selection wash for one occurrence, and a shopping row is all of them;
+            // washing it on a per-occurrence selection would say the row IS that occurrence,
+            // which is the confusion this issue exists to remove.
+            // `ParentWidget<?>` AND NOT `Group`, because `ClickableGroup` is not one --
+            // both extend `ParentWidget` with their own self-type, so they share no assignable
+            // type below it. `iconIfAny` already takes the wildcard for the same reason.
+            ParentWidget<?> row;
+            if (entry.row == null) {
+                row = new Group();
+            } else {
+                final PlanView.EntryRow clicked = entry.row;
+                row = new ClickableGroup(new Runnable() {
+                    @Override
+                    public void run() {
+                        actions.openRowMenu(clicked);
+                    }
+                });
+            }
             row.size(width, ROW_HEIGHT);
             if (!entry.key.isEmpty()) {
                 // A `fluid:` key has no item form at all -- 1,198 of this pack's fluids -- so
