@@ -3,7 +3,10 @@ package io.github.jacoblasky.recipedump.client.planner;
 import io.github.jacoblasky.recipedump.graph.Keys;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.plan.Provenance;
+import io.github.jacoblasky.recipedump.plan.Quantities;
 
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -384,6 +387,20 @@ public final class NodeRowText {
         if (node.fromStock() > 0) {
             parts.add(quantityPlain(node.fromStock()) + " from stock");
         }
+        // EARLY IN THE RUN, WHICH IS THE OPPOSITE END FROM `machineWhyBit` AND FOR THE SAME
+        // REASON (#252). That one goes last so `fit` cuts it first, because the machine
+        // and its state are what a reader scans for and the full sentence lives on the TODO
+        // panel. This one has no second home and it is a warning: a fractional yield means the
+        // machine will run and produce nothing, which changes whether the plan is worth
+        // starting. Cutting it first would drop the only thing on the row that says so.
+        //
+        // NO BROWSER ORDER TO MIRROR HERE, unlike everything else in this run. `render.py`
+        // draws neither `runs` nor `per_run` on a row, which is what #190 found and #252 is
+        // fixing, so the placement is argued from this panel rather than copied.
+        String yield = yieldBit(node);
+        if (yield != null) {
+            parts.add(yield);
+        }
         String machine = machineBit(node);
         if (machine != null) {
             parts.add(machine);
@@ -534,6 +551,158 @@ public final class NodeRowText {
             return "search gave up early -- the plan below may be missing branches";
         }
         return "";
+    }
+
+    /**
+     * How much work this node is, and how much of it is wasted, or null on a leaf.
+     *
+     * ONE PART RATHER THAN THREE, so {@link #fit} keeps or drops the whole statement. Split
+     * across three parts, a cut lands mid-sentence and leaves `1,000 runs` standing alone,
+     * which is the number that looks fine and is the reason the other two exist.
+     *
+     * GUARDED ON `runs`, NOT ON `perRun`. A leaf has neither, and `perRun` is the one that can
+     * legitimately be absent on a node that has runs: `solve.py` writes `or 1` rather than
+     * emit a zero yield, so a missing `per_run` means "not recorded" and not "yields nothing".
+     *
+     * THE CHANCE IS ONLY SHOWN BELOW 1. `yield_chance` is written by `solve.Solver._build` as
+     * `per_run / nominal` and only when the expectation falls short, so a present value at 1
+     * would be a plan saying "this yields all of it", which is what every row without the mark
+     * already says. See `PlanNode.yieldChance` for why it is a separate field from `perRun`.
+     */
+    private static String yieldBit(PlanNode node) {
+        if (node.runs() <= 0) {
+            return null;
+        }
+        // NOTHING TO SAY ON A ONE-FOR-ONE CRAFT, AND THE SCREENSHOT IS WHAT SETTLED IT (#252).
+        // "1 run, 1 per run" is the default every reader already assumes, and it is not rare:
+        // measured across the committed fixtures, 400 of 1,406 craft nodes are exactly this
+        // case, 28.4%, and 18 of the 22 in `plan-cycle`. The first shot of this render was a
+        // panel of rows all saying it, with the machine name cut off the end to make room.
+        //
+        // WIDTH IS THE COST, NOT TIDINESS. `fit` cuts the meta run from the right, so a phrase
+        // carrying no information does not merely fail to help, it evicts `machineBit`, which
+        // is what a reader scans for. No test caught this because every part was individually
+        // correct and the defect only exists in aggregate, which is the #190 fluid-adjacency
+        // lesson in a new place: some things are only visible in a picture.
+        boolean singleRun = node.runs() == 1L;
+        boolean unitYield = node.perRun() == 0.0 || node.perRun() == 1.0;
+        boolean certain = !(node.yieldChance() > 0.0 && node.yieldChance() < 1.0);
+        if (singleRun && unitYield && certain) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(quantityPlain(node.runs())).append(node.runs() == 1L ? " run" : " runs");
+        double chance = node.yieldChance();
+        boolean chanced = chance > 0.0 && chance < 1.0;
+        // `per_run` GIVES UP ITS PLACE TO THE CHANCE, and this is measured rather than a taste
+        // call (#252). All three parts plus a realistic label do not fit: at `PANEL_WIDTH` the
+        // label column is 53 characters at depth 0 and 45 at the indent cap, `1,000 runs, 0.004
+        // per run, 0.1%` is 31, and a 20-character name like `Mildly Recursive Goo` puts the
+        // row at 54. The percentage is then cut at EVERY depth, which is how the first two
+        // planner shots came back byte-identical: the cut landed before the part that differed.
+        //
+        // SO THE CHOICE IS WHICH TWO NUMBERS SURVIVE, NOT HOW TO PHRASE THREE. Dropping the
+        // per-run quantity takes the row to 16 characters of meta and the percentage then
+        // survives at every depth for every label in the reference plans. It is the right one
+        // to drop: on a chanced recipe `per_run` is already an EXPECTATION rather than a count
+        // -- `Solver` writes the expected yield there -- so it is the number least likely to be
+        // read literally, and it is recoverable as `need / runs`. How often the machine pays
+        // out is not recoverable from anything else on the row.
+        //
+        // A CERTAIN RECIPE KEEPS IT, because there is no chance competing for the width and
+        // `4 per run` is then a plain fact rather than an expectation.
+        if (node.perRun() > 0.0 && !chanced) {
+            sb.append(", ").append(amount(node.perRun())).append(" per run");
+        }
+        if (chanced) {
+            // A BARE PERCENTAGE, AND THE FIRST SHOT OF THIS RENDER IS WHY (#252). The phrase
+            // was `yields 0.1% of the time`, 23 characters carrying 4 of content, and `fit`
+            // cuts the meta run from the right, so on the shot the cut landed inside the run
+            // count and the yield was gone. Trading "the number is absent" for "the number is
+            // present and unreadable" is not a fix, and the second is worse because it looks
+            // like one. The abbreviation alone was NOT enough; see the width note above for
+            // the measurement and for why `per_run` gives up its place as well.
+            //
+            // UNAMBIGUOUS BECAUSE OF WHAT IT SITS NEXT TO: it always follows a run count, and
+            // a proportion beside a count of runs has only one reading. DO NOT restore the
+            // prose, and DO NOT restore `per_run` beside it, without re-running
+            // `theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond`, which measures
+            // both against real label lengths rather than a short synthetic one.
+            //
+            // THIS DOES NOT FIT ON MOST ROWS, AND THE NUMBER IS HERE RATHER THAN FLATTERING.
+            // The label column is 37 characters at depth 0 and 29 at the indent cap -- the
+            // badge takes 93px of every full-width tree row -- so after a 3-character separator
+            // this 16-character meta leaves 18 characters of label at the top and 10 at the
+            // bottom. Measured over the committed fixtures, the yield is cut from 574 of 769
+            // rows in `plan-fluid-chain` (74.6%) and 35 of 52 in `plan-truncated` (67.3%).
+            //
+            // IT IS STILL THE BEST FORM AVAILABLE, which is the argument for shipping it. The
+            // prose it replaced is 23 characters against this 4, so it was lost on strictly
+            // more rows, and before #252 the number was drawn on NONE. Buying the remainder
+            // means evicting the badge or the machine, which is the trade #232 is under a hard
+            // no-eviction constraint against. Anyone shortening this further should move these
+            // percentages and update them here and in the test.
+            sb.append(", ").append(percent(chance));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A quantity that is usually whole and is sometimes not.
+     *
+     * THE WHOLE CASE GOES THROUGH {@link #quantity}'S COMMA GROUPING, so a per-run yield and
+     * the `need` beside it on the same row are formatted by one rule. A plan rendering
+     * `60,466,176x` above `60466176 per run` is one panel measuring the same thing two ways,
+     * which is the defect a #190 screenshot caught on fluids and is invisible in a diff.
+     */
+    private static String amount(double value) {
+        // `Quantities.isWhole` RATHER THAN A LOCAL COMPARISON, so the row and the wire cannot
+        // drift about which values are whole.
+        //
+        // THE EMITTER'S RULE IS STRICTLY NARROWER THAN THIS PREDICATE, and the difference is
+        // not a rounding detail. It writes an integer only when the value is whole AND the
+        // node carries no `yield_chance`, because a `per_run` that lands on a whole number by
+        // arithmetic accident, two slots of four at 0.5, is still an EXPECTATION and must not
+        // masquerade as a guaranteed count. `solve.py` refuses `float(total).is_integer()` for
+        // exactly that reason. Here it is only ever a display choice, so the narrower clause
+        // does not apply: an expected four and a certain four are drawn the same because a
+        // reader gets the certainty from the `yields ...% of the time` part beside it.
+        if (Quantities.isWhole(value)) {
+            return quantityPlain((long) value);
+        }
+        return significant(value);
+    }
+
+    /**
+     * A fraction as a percentage, with the precision the fraction actually carries.
+     *
+     * THREE SIGNIFICANT FIGURES RATHER THAN A FIXED DECIMAL COUNT, because this field spans
+     * three orders of magnitude: the pack's output chances run from 0.99 down to 0.001, so
+     * `%.1f%%` renders the bottom of that range as `0.1%` and the 0.001 case as `0.0%`, which
+     * reads as "never" for a route that does work. `toPlainString` rather than `toString` so a
+     * small value cannot come out in scientific notation.
+     */
+    private static String percent(double fraction) {
+        return significant(fraction * 100.0) + "%";
+    }
+
+    /**
+     * `value` to three significant figures, with no trailing zeros and never in exponent form.
+     *
+     * ONE COPY, SHARED BY {@link #amount} AND {@link #percent}, which is not tidiness: they
+     * format two numbers a reader compares on the same row, `0.004 per run` beside
+     * `yields 0.1% of the time`. Two copies of the rounding rule would let one of them drift to
+     * a different precision and make the pair look inconsistent rather than merely rounded.
+     *
+     * `toPlainString` RATHER THAN `toString`, because `BigDecimal.toString` switches to
+     * scientific notation for small values and `1E-3` on a crafting row is not a quantity a
+     * player can act on.
+     */
+    private static String significant(double value) {
+        return BigDecimal.valueOf(value)
+                .round(new MathContext(3))
+                .stripTrailingZeros()
+                .toPlainString();
     }
 
     private static String quantityPlain(long value) {

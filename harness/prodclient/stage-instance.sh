@@ -226,6 +226,30 @@ PY
 # and reading it here turns "compare these two numbers yourself" into a check that fires. The
 # previous version of this printed both numbers and asked the reader to compare them, which is
 # the same shape as every other thing on this host that reports success and means nothing.
+# One graph's `dump_schema`, for the case where a run NAMED its graph and the selector's
+# number is therefore about a different file. Same chunked scan as `select_graph`, so the two
+# cannot disagree about how the field is read.
+schema_of() {
+    python3 - "$1" <<'PYEOF'
+import re, sys
+PATTERN = re.compile(rb'"dump_schema"\s*:\s*(\d+)')
+try:
+    with open(sys.argv[1], "rb") as fh:
+        tail = b""
+        while True:
+            chunk = fh.read(1 << 20)
+            if not chunk:
+                break
+            found = PATTERN.search(tail + chunk)
+            if found:
+                print(found.group(1).decode())
+                break
+            tail = chunk[-64:]
+except OSError:
+    pass
+PYEOF
+}
+
 jar_schema() {
     sed -n 's/.*static final int SCHEMA = \([0-9]*\);.*/\1/p' \
         "$(dirname "$0")/../../mod/src/main/java/io/github/jacoblasky/recipedump/DumpCommand.java"
@@ -292,9 +316,24 @@ PYEOF
 }
 
 selected=$(select_graph)
-GRAPH_SCHEMA=$(printf '%s' "$selected" | cut -f2)
-GRAPH_NOTE=$(printf '%s' "$selected" | cut -f3)
 GRAPH_JSON="${RECIPEGRAPH_GRAPH-$(printf '%s' "$selected" | cut -f1)}"
+
+# WHETHER THE GRAPH WAS CHOSEN OR NAMED, because the two get different treatment below: a
+# named graph is somebody's decision and an auto-selected one is a default nobody looked at.
+if [ "${RECIPEGRAPH_GRAPH+named}" = "named" ]; then
+    GRAPH_PINNED=1
+    # THE SCHEMA OF THE GRAPH WE ARE ACTUALLY USING, not of the one `select_graph` preferred.
+    # These are the same file only when nobody pinned one, and the first version of this read
+    # the selector's number unconditionally -- so pinning `graph-oracle-248.json` printed the
+    # schema of `graph-s7.json` beside it. A log line whose entire job is to be the right
+    # number must not be the other file's.
+    GRAPH_SCHEMA=$(schema_of "$GRAPH_JSON")
+    GRAPH_NOTE="named explicitly by RECIPEGRAPH_GRAPH"
+else
+    GRAPH_PINNED=0
+    GRAPH_SCHEMA=$(printf '%s' "$selected" | cut -f2)
+    GRAPH_NOTE=$(printf '%s' "$selected" | cut -f3)
+fi
 
 install_graph() {
     dest="$INSTANCE/config/mcrecipedump"
@@ -312,14 +351,40 @@ install_graph() {
     # SAY WHICH GRAPH AND WHETHER IT FITS THE JAR, on every run and not only when it changes,
     # because the `cmp` shortcut below returns before the copy and a run that skipped the copy
     # still needs to say what it is booting with.
+    # A STALE GRAPH FAILS WHEN IT WAS CHOSEN FOR YOU AND WARNS WHEN YOU CHOSE IT (#279).
+    #
+    # ABSENT IS A CHOICE AND BEHIND IS AN ACCIDENT, and that is the whole distinction. Asking
+    # for no graph takes a deliberate `RECIPEGRAPH_GRAPH=`, and #254 wants exactly that for the
+    # picture a new player sees. Being one schema behind takes nothing at all: it is what every
+    # run on this host did for the length of a schema bump, silently, because the reader is
+    # tolerant and loads a stale graph without a word. #279 measured the consequence -- four
+    # merged changes unobservable on real data, and a `jei-keybind` run reporting a node count
+    # that could not have moved.
+    #
+    # SO THE WARNING BECOMES A REFUSAL, but only where it is nobody's decision. A run that
+    # NAMED its graph gets the warning and proceeds: the #248 agent pins `graph-oracle-248.json`
+    # because it is the only carrier of `offworld_ores`, it is deliberately schema 5, and
+    # failing that run would break the one measurement the pin exists for. Refusing a choice
+    # somebody made on purpose is not a safety feature.
+    #
+    # IT FAILS BEFORE THE BOOT, which is the point: 25 minutes of pack boot to produce an
+    # artifact about data that cannot answer the question is the cost being avoided.
     want=$(jar_schema)
     if [ -n "$GRAPH_SCHEMA" ] && [ -n "$want" ] && [ "$GRAPH_SCHEMA" != "$want" ]; then
         echo "stage-instance: !! $(basename "$GRAPH_JSON") is dump_schema=$GRAPH_SCHEMA and" \
              "this tree's DumpCommand.SCHEMA is $want. GraphJsonReader is tolerant and will" \
              "LOAD it, so nothing downstream will complain -- but a schema that changed how" \
              "keys are spelled makes keyId answer -1 for keys the pack really has, which" \
-             "reads as 'that item is not in the pack'. Dump a current graph, or name one" \
-             "with RECIPEGRAPH_GRAPH." >&2
+             "reads as 'that item is not in the pack'." >&2
+        if [ "$GRAPH_PINNED" -eq 1 ]; then
+            echo "stage-instance: proceeding, because RECIPEGRAPH_GRAPH named this one on" \
+                 "purpose. If that was not deliberate, unset it." >&2
+        else
+            echo "stage-instance: REFUSING, because nothing chose this graph -- it is just" \
+                 "the newest schema on disk and it is behind. Dump a current graph, or name" \
+                 "this one with RECIPEGRAPH_GRAPH=$GRAPH_JSON to say you meant it." >&2
+            return 1
+        fi
     fi
     echo "stage-instance: graph is $(basename "$GRAPH_JSON")" \
          "(dump_schema=${GRAPH_SCHEMA:-unknown}, jar wants ${want:-unknown};" \
@@ -340,9 +405,13 @@ install_graph() {
 # copy would hand another agent a half-built instance, which is the same defect as #265 with a
 # worse blast radius.
 stage_instance() {
+    # `|| return 1` ON BOTH, because `install_graph` REFUSES a stale auto-selected graph and a
+    # refusal nothing propagates is not a refusal. Written out rather than left to `set -e`:
+    # this file has no `set -e`, and a guard that is correct where it is tested and inert where
+    # it is called is the exact shape #279 exists to stop shipping.
     if [ "$MOD_ONLY" -eq 1 ]; then
         install_mod
-        install_graph
+        install_graph || return 1
         return 0
     fi
 
@@ -350,7 +419,7 @@ stage_instance() {
         stage_from_amp
         build_instance
         install_mod
-        install_graph
+        install_graph || return 1
     fi
     apply_headless_overrides
 
