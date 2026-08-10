@@ -173,8 +173,12 @@ final class PlannerRecoveryShot {
         } else if (progress) {
             ShotScreens.expectReport(
                     "the planner's loading panel must be redrawn as the read advances");
-            ShotScreens.holdCapture(progressHold(floor()));
-            ShotScreens.expectDrawn(progressDrawn(floor()));
+            // ONE OBJECT IN BOTH ROLES, not two built from the same floor. The drawn check
+            // reads what the hold recorded the panel being built from; two instances would
+            // leave it reading a null it never filled in. See ProgressWatch.
+            ProgressWatch watch = progressHold(floor());
+            ShotScreens.holdCapture(watch);
+            ShotScreens.expectDrawn(watch);
         } else {
             ShotScreens.expectReport("the planner opened during the load must show the load");
             ShotScreens.holdCapture(loadingHold());
@@ -276,56 +280,100 @@ final class PlannerRecoveryShot {
      * the run that gets it wrong FAILS rather than filing a wrong picture, which is the half
      * that actually had to be true.
      */
-    private static ShotScreens.Hold progressHold(final float floor) {
-        return new ShotScreens.Hold() {
+    private static ProgressWatch progressHold(float floor) {
+        return new ProgressWatch(floor);
+    }
 
-            /** The wrapper last seen on screen. A new one IS a redraw; see the header. */
-            private GuiScreen lastSeen;
-            private int rebuilds;
-            private float firstProgress = -1.0f;
-            private float lastProgress = -1.0f;
-            private boolean sawProgressGoBackwards;
+    /**
+     * The hold and the drawn check as ONE object, because they have to agree about which panel
+     * is on screen and only one of them can see it.
+     *
+     * THE DRAWN CHECK MUST NOT ASK THE SERVICE, AND THE FIRST VERSION OF IT DID. It called
+     * `PlannerEntry.stateFor` at capture time, which reports what the panel WOULD say if it were
+     * rebuilt right now -- and on a build with #271's defect that reads a healthy percentage
+     * while the frozen panel on screen still says 0%. The guard would have passed the very bug
+     * it was added for. That is this issue's own mistake in miniature: trusting the service over
+     * the picture is what let `0%` sit under a log line reading `37%` for a whole release.
+     *
+     * SO THE PANEL'S PROVENANCE IS RECORDED WHEN THE PANEL APPEARS. Each time
+     * `Minecraft.currentScreen` changes identity a new window has been built, and
+     * {@link #drawnState} is the `PlannerState` it was built from. The check reads THAT, so it
+     * is asking about the thing that was photographed rather than about the service that
+     * outran it. Measured: the PNG reads 47% while the service was at 50% by capture and 55% a
+     * moment later, and the recorded state is the 47% one.
+     */
+    private static final class ProgressWatch implements ShotScreens.Hold, ShotScreens.Drawn {
 
-            @Override
-            public boolean busy() {
-                GraphService graphs = GraphService.get();
-                float progress = graphs.progress();
-                GuiScreen onScreen = Minecraft.getMinecraft().currentScreen;
-                if (onScreen != lastSeen) {
-                    lastSeen = onScreen;
-                    rebuilds++;
-                    // THE FIRST ONE IS THE OPEN, NOT A REDRAW, and it is counted anyway so the
-                    // number in the log is "windows this read produced" rather than a quantity
-                    // whose off-by-one the reader has to take on trust. MIN_REBUILDS is 2 for
-                    // exactly this reason.
-                    ShotHarness.log("window #" + rebuilds + " on screen at " + graphs.describe()
-                            + " (" + describeScreen(onScreen) + ")");
-                    if (firstProgress < 0.0f) {
-                        firstProgress = progress;
-                    }
-                    if (progress >= 0.0f && progress < lastProgress) {
-                        sawProgressGoBackwards = true;
-                    }
-                    lastProgress = progress;
+        private final float floor;
+        /** The wrapper last seen on screen. A new one IS a redraw; see the header. */
+        private GuiScreen lastSeen;
+        private int rebuilds;
+        private float firstProgress = -1.0f;
+        private float lastProgress = -1.0f;
+        private boolean sawProgressGoBackwards;
+        /** What the window now on screen was built from. Null until one has been seen. */
+        private PlannerState drawnState;
+
+        ProgressWatch(float floor) {
+            this.floor = floor;
+        }
+
+        @Override
+        public boolean busy() {
+            GraphService graphs = GraphService.get();
+            float progress = graphs.progress();
+            GuiScreen onScreen = Minecraft.getMinecraft().currentScreen;
+            if (onScreen != lastSeen) {
+                lastSeen = onScreen;
+                rebuilds++;
+                // READ IN THE SAME BREATH AS THE IDENTITY CHANGE. This is the closest a probe
+                // can stand to "what that panel says": the window was constructed on the client
+                // tick just gone, from this answer.
+                drawnState = PlannerEntry.stateFor(graphs, PlannerService.get());
+                // THE FIRST ONE IS THE OPEN, NOT A REDRAW, and it is counted anyway so the
+                // number in the log is "windows this read produced" rather than a quantity
+                // whose off-by-one the reader has to take on trust. MIN_REBUILDS is 2 for
+                // exactly this reason.
+                ShotHarness.log("window #" + rebuilds + " on screen at " + graphs.describe()
+                        + " (" + describeScreen(onScreen) + ")");
+                if (firstProgress < 0.0f) {
+                    firstProgress = progress;
                 }
-                boolean stillReading = graphs.state() == GraphService.State.LOADING;
-                if (stillReading && progress < floor) {
-                    return true;
+                if (progress >= 0.0f && progress < lastProgress) {
+                    sawProgressGoBackwards = true;
                 }
-                ShotHarness.log("at capture: " + graphs.describe());
-                ShotHarness.log("windows during the read: " + rebuilds
-                        + "; first at " + percent(firstProgress)
-                        + ", last at " + percent(lastProgress));
-                String problem = progressProblem(stillReading, rebuilds, sawProgressGoBackwards,
-                                                 firstProgress, progress, floor);
-                if (problem == null) {
-                    ShotScreens.reportPass();
-                } else {
-                    ShotScreens.reportFail(problem + " (" + graphs.describe() + ")");
-                }
-                return false;
+                lastProgress = progress;
             }
-        };
+            boolean stillReading = graphs.state() == GraphService.State.LOADING;
+            if (stillReading && progress < floor) {
+                return true;
+            }
+            ShotHarness.log("at capture: " + graphs.describe());
+            ShotHarness.log("windows during the read: " + rebuilds
+                    + "; first at " + percent(firstProgress)
+                    + ", last at " + percent(lastProgress));
+            String problem = progressProblem(stillReading, rebuilds, sawProgressGoBackwards,
+                                             firstProgress, progress, floor);
+            if (problem == null) {
+                ShotScreens.reportPass();
+            } else {
+                ShotScreens.reportFail(problem + " (" + graphs.describe() + ")");
+            }
+            return false;
+        }
+
+        @Override
+        public boolean drewSomething() {
+            return progressNotDrawn(drawnState, floor) == null;
+        }
+
+        @Override
+        public String describe() {
+            String problem = progressNotDrawn(drawnState, floor);
+            return problem == null
+                    ? "the panel on screen was built from \"" + drawnState.message() + "\""
+                    : problem;
+        }
     }
 
     /**
@@ -368,49 +416,6 @@ final class PlannerRecoveryShot {
         return null;
     }
 
-    /**
-     * The {@link ShotScreens.Drawn} half: refuse to call the run green if the panel about to be
-     * photographed is not reporting progress (#293's hook, #271's subject).
-     *
-     * THE SENTENCE, NOT THE PIXELS, and that is `Drawn`'s own argument rather than a weakening
-     * of it. Its javadoc rejects pixel checks because they answer "is this image blank" when the
-     * question is "did the thing under test run" -- a border and a scrollbar pass a pixel check.
-     * `PlannerEntry.stateFor(...).message()` IS the string handed to the widget, and it is the
-     * only readable form of it, because `TextWidget` holds an `IKey` whose rendered string
-     * cannot be read back. So this asks `Drawn`'s question at the one seam that can answer it.
-     *
-     * NO IMAGE, AND DELIBERATELY NO WAY TO GET ONE. `drewSomething()` takes no argument, and the
-     * screen does NOT re-read the PNG it just wrote off `mcrecipedump.shotOut` to get around
-     * that. A method that cannot see the image cannot answer the wrong question; reaching around
-     * the harness for the harness's own output would put the pixel check back with an extra step.
-     */
-    private static ShotScreens.Drawn progressDrawn(final float floor) {
-        return new ShotScreens.Drawn() {
-            @Override
-            public boolean drewSomething() {
-                return problem() == null;
-            }
-
-            @Override
-            public String describe() {
-                String problem = problem();
-                return problem == null
-                        ? "the panel reports \"" + message() + "\""
-                        : problem;
-            }
-
-            private String problem() {
-                return progressNotDrawn(
-                        PlannerEntry.stateFor(GraphService.get(), PlannerService.get()), floor);
-            }
-
-            private String message() {
-                PlannerState state = PlannerEntry.stateFor(GraphService.get(),
-                                                           PlannerService.get());
-                return state == null ? "a plan" : state.message();
-            }
-        };
-    }
 
     /**
      * Is the sentence this panel was built from actually reporting progress? Null means yes.
