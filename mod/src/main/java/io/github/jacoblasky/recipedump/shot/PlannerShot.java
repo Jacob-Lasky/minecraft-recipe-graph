@@ -140,7 +140,14 @@ final class PlannerShot {
                     + "`plan-fluid-chain` has a pair.");
         }
         armNodeActions(plan.tree());
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan), SHOT_ACTIONS);
+        // THE SCHEMA CHECK IS PASSED THROUGH, NOT OMITTED. #285 added it to `plannerPanel` and
+        // this call site was written before that landed; the rebase merged both cleanly because
+        // they are in different files, and the three-argument call compiled against nothing.
+        // `openYield` above passes the same thing, and a shot that skipped it would photograph
+        // a panel with no schema banner -- a difference invisible in this fixture and wrong in
+        // the one that matters.
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan),
+                                                        PlannerScreen.schemaCheck(), SHOT_ACTIONS);
         PlannerScreen.openPanel(panel);
         ShotHarness.log("planner-collide: " + plan.target() + " has its first framable "
                         + "same-name pair at row " + row + " ("

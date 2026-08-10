@@ -181,7 +181,8 @@ public class ShotScreensTest {
         List<String> expected = Arrays.asList(
                 "ae2-probe", "dump", "fixture", "flow", "flow-hit", "flow-selected",
                 "graph", "jei", "jei-keybind", "machines", "machines-detail", "machines-mods",
-                "planner", "planner-caveats", "planner-live", "planner-menu", "planner-recipes",
+                "planner", "planner-caveats", "planner-collide", "planner-live", "planner-menu",
+                "planner-recipes",
                 "planner-recovery", "planner-selected", "planner-stale", "planner-todo",
                 "planner-yield", "row-menu", "sources", "world-probe");
 

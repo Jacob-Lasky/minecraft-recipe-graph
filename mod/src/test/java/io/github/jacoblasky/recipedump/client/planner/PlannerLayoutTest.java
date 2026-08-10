@@ -941,6 +941,10 @@ public class PlannerLayoutTest {
     /**
      * The complaint for a label whose distinct keys draw a line in common, or null.
      *
+     * DO NOT REDUCE THIS TO A COUNT OF DISTINCT STRINGS. That is what it was, it passed
+     * `Iron Ore`, and the count and the correct answer agree on every case except the one
+     * that matters.
+     *
      * COUNTING DISTINCT LINES WAS THE BUG, AND IT WAS MEASURED RATHER THAN SPOTTED. The first
      * version took the label's rows, collected the distinct strings among them, and passed when
      * there were at least as many strings as keys. `Iron Ore` in `plan-fluid-chain` defeats
