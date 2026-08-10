@@ -57,6 +57,21 @@ RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:loading planner-load
 cp $SHOTS/planner-loading.png docs/shots/planner-during-load.png
 RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:recovered planner-recovered
 cp $SHOTS/planner-recovered.png docs/shots/planner-after-load.png
+
+# The INSIDE of that wait (#271): the same panel half-way through the same read. It holds
+# until `progress()` passes 0.5, counting every `Minecraft.currentScreen` it sees on the way,
+# and FAILS the run if the panel was drawn once and never redrawn -- which is what #271 was.
+#
+# `-Dmcrecipedump.shotSettleFrames=2` IS REQUIRED HERE AND IS NOT TIDINESS. The default twenty
+# frames settle a panel's open animation and are spent BEFORE the hold starts, so on a slow
+# rasteriser they come out of the 5.47 s this shot is watching and the hold opens on a read
+# that has nearly finished. It then sees one window and reports "never redrawn" -- the defect's
+# own verdict, produced by a knob. They buy nothing here: the captured frame is chosen by the
+# hold, seconds later. See `PlannerRecoveryShot.progressHold`, which says the same thing at the
+# code, because `requestSettleFrames` can raise the window and has no way to lower it.
+RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:progress planner-progress \
+    -Dmcrecipedump.shotSettleFrames=2
+cp $SHOTS/planner-progress.png docs/shots/planner-mid-load.png
 ```
 
 **`planner-recovery` needs the oracle and says so by failing.** Every other screen degrades
@@ -133,6 +148,7 @@ cp $SHOTS/after.png docs/shots/plan-after-pin.png
 | `plan-before-pin.png` / `plan-after-pin.png` | One hopper, planned twice against the real pack. Iron Ingot goes from Smelting to a Crafting route, the row says `pinned`, and the subtree under it is different. The pin is the only thing that changed. |
 | `planner-during-load.png` / `planner-after-load.png` | The calculator used a second after joining, and the same window a few seconds later, with nothing touched in between (#201). The first is the wait; the second is the plan the window replayed when the graph landed. Before #201 the second picture did not exist -- the window showed the first one until the player closed it and used the item again -- so this pair is the artifact and either half alone is equally consistent with the bug. |
 | `graph-schema-behind.png` / `plan-schema-behind.png` | The same real schema-7 graph read by a schema-8 jar, on the two surfaces that report it (#285). The Graph tab carries `format: OLD GRAPH -- it lacks what this build reads` over `graph is schema 7 and this build reads 8; redump to fix`; the planner carries `graph is schema 7, this build reads 8 -- plans may be wrong` above the tree, because the Graph tab is a screen the player who needs it does not know to open. **The `pack: MISMATCH` line above it is the harness and not a defect** -- `shot.sh` runs a 10-jar dev set against a dump of the full 406, which is what `graph: pack check DIFFERS` in the log says. Taken with `RECIPEGRAPH_ORACLE=$BUILD/graph-s7.json`, a real dump of this pack one schema behind the jar, which is `stage-instance.sh`'s pinned-proceeds case rather than a way around its guard. |
+| `planner-mid-load.png` | The panel above, half-way through the same read instead of at the start of it (#271). Put it beside `planner-during-load.png` and the pair is the number moving: `0%` when the window opens, `50%` a couple of seconds later. Before #271 the second picture could not exist -- every term of the counter the window watches moves on a state TRANSITION, and LOADING is one state, so the panel built at 0% was the panel still on screen at 99%. The run that produced this one also logged the seven windows it replaced on the way, at 20/26/31/35/41/46/50%, because one frame cannot show motion and the picture alone is not the whole artifact. The eyebrow reading `Planner` is the positive control: it is drawn by the same panel and nothing about #271 can change it, so a legible one makes the line under it a reading rather than a hope. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
 
 `planner-stale` is `planner-live` with one extra claim, and the claim is why it is a separate
