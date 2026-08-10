@@ -367,6 +367,18 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void theCollisionShotIsReachableByName() {
+        // Same shape as the yield shot one issue over (#232): the only same-name pair inside an
+        // unscrolled viewport is `plan-variant-table`'s two "Brown Concrete" rows, and both of
+        // those are at capacity, so that fixture can only ever show one branch of the width
+        // rule. Every pair that straddles it is at row 155 or beyond. `planner-collide` is the
+        // only screen that scrolls to one, so a dropped registration takes the artifact with it
+        // while every layout test still passes.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-collide"));
+    }
+
+    @Test
     public void anUnknownNameIsReportedAndListsWhatDoesExist() {
         String problem = ShotScreens.open("definitely-not-a-screen");
         assertNotNull(problem);

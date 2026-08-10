@@ -826,111 +826,211 @@ public class PlannerLayoutTest {
      * THE POPULATION IS MEASURED AND IT IS NOT THE ONE #232 FILED. The issue says
      * `plan-same-name` draws six rows called "Iron Plate"; it draws ONE, because its six keys
      * are on the PACK and the plan routes through exactly one of them -- which is the property
-     * that fixture exists to prove. Counted across every plan fixture instead: 17 labels carry
-     * more than one distinct key, out of 2,488 tree nodes in 21 fixtures, and none is in
-     * `plan-same-name`. The four fixtures below are the ones that hold them.
+     * that fixture exists to prove. Counted across every plan fixture instead: 13 labels carry
+     * more than one distinct key, on 61 tree rows out of 2,288 nodes in 21 fixtures, and none
+     * is in `plan-same-name`.
+     *
+     * AND IT MOVED UNDER THIS BRANCH, WHICH IS WHY THE COUNT IS ASSERTED. The first version of
+     * this test said 17 across 2,488 nodes, and that was true of the base it was written on.
+     * Rebasing onto the schema-8 fixture regeneration retired `Aluminum Ingot` and
+     * `Divination Catalyst` outright and dropped `fluid:crystallized_obsidian` from
+     * `Crystallized Obsidian`, taking 17 collisions to 13. A HARD-CODED FIXTURE LIST WOULD HAVE
+     * SURVIVED THAT SILENTLY, so the loop walks {@link PlanFixtures#names()} and the count
+     * below is what fails: the population is a fact about the fixtures, and a test that lets it
+     * drift is a test measuring a set nobody chose.
      *
      * DISTINCT KEYS, NOT REPEATED ROWS. A tree draws the same key on every row that uses it --
-     * `plan-fluid-chain` is 769 nodes for 269 labels -- so two identical rows are only a defect
+     * `plan-fluid-chain` is 703 nodes for 262 labels -- so two identical rows are only a defect
      * when they are two different ITEMS. The expectation is built from the plan model here, so
      * that the code under test is not also the thing deciding what the answer should be.
      */
     @Test
     public void twoTreeRowsForDifferentItemsAreTellableApart() {
-        String[] fixtures = {"plan-fluid-chain", "plan-multiblock", "plan-no-machine-declared",
-                             "plan-variant-table"};
         List<String> problems = new java.util.ArrayList<String>();
+        List<String> ambiguous = new java.util.ArrayList<String>();
         int checked = 0;
-        for (String fixture : fixtures) {
+        for (String fixture : PlanFixtures.names()) {
             PlanView plan = PlanFixtures.load(fixture);
-            java.util.Map<String, java.util.Set<String>> keysByLabel =
-                    new java.util.HashMap<String, java.util.Set<String>>();
-            collectKeysByLabel(plan.tree(), keysByLabel);
+            if (plan.tree() == null) {
+                continue;
+            }
+            List<PlanNode> nodes = new java.util.ArrayList<PlanNode>();
+            flattenRows(plan.tree(), nodes);
 
             // THE TREE ALONE, NOT `plannerPanel`. The summary lists on that panel already
             // disambiguate their own rows (#190), and their lines start with the same labels --
             // so a whole-panel version of this test would find the shopping list's keys and
             // pass while the tree still drew two identical rows. Built by hand rather than with
-            // `layOutPanel`, which dumps every widget to stdout: 769 rows x 4 fixtures of that
-            // is megabytes of log for no reader.
+            // `layOutPanel`, which dumps every widget to stdout: 2,288 rows of that is
+            // megabytes of log for no reader.
             ModularPanel panel = new ModularPanel("tree-" + fixture);
             panel.size(PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT);
             panel.child(PlannerWidgets.tree(plan, PlannerWidgets.CONTENT_WIDTH,
                                             PlannerWidgets.PANEL_HEIGHT, recorder()));
             HeadlessLayout.layOut(panel);
-            List<String> lines = texts(panel);
+            List<String> lines = rowLabelLines(fixture, nodes, panel);
 
-            for (java.util.Map.Entry<String, java.util.Set<String>> entry
-                    : keysByLabel.entrySet()) {
-                java.util.Set<String> keys = entry.getValue();
-                if (keys.size() < 2) {
+            // KEY -> THE LINES ITS ROWS DRAW, which is the whole correction described above.
+            java.util.Map<String, java.util.Map<String, java.util.Set<String>>> byLabel =
+                    new java.util.LinkedHashMap<String,
+                            java.util.Map<String, java.util.Set<String>>>();
+            for (int i = 0; i < nodes.size(); i++) {
+                String label = NodeRowText.label(nodes.get(i));
+                java.util.Map<String, java.util.Set<String>> linesByKey = byLabel.get(label);
+                if (linesByKey == null) {
+                    linesByKey = new java.util.LinkedHashMap<String, java.util.Set<String>>();
+                    byLabel.put(label, linesByKey);
+                }
+                java.util.Set<String> drawn = linesByKey.get(nodes.get(i).key());
+                if (drawn == null) {
+                    drawn = new java.util.LinkedHashSet<String>();
+                    linesByKey.put(nodes.get(i).key(), drawn);
+                }
+                drawn.add(lines.get(i));
+            }
+
+            for (java.util.Map.Entry<String,
+                    java.util.Map<String, java.util.Set<String>>> entry : byLabel.entrySet()) {
+                if (entry.getValue().size() < 2) {
                     continue;
                 }
                 checked++;
-                String label = entry.getKey();
                 // COLLECTED, NOT THROWN, so one run names every label a player cannot tell
                 // apart instead of the first one. Each of these costs a gated container to
                 // learn, and a fail-fast assertion turns "what does this fix still miss" into
                 // one question per run.
-                String problem = indistinguishable(fixture, label, keys, lines);
+                String problem = indistinguishable(fixture, entry.getKey(), entry.getValue());
                 if (problem != null) {
                     problems.add(problem);
+                    ambiguous.add(fixture + " / " + entry.getKey());
                 }
             }
         }
         // THE CONTROL, ASSERTED FIRST. If the fixtures ever stop holding a collision this test
         // passes while asserting nothing, which is the unearned zero this repository keeps
         // rediscovering -- and it would pass most loudly exactly when the population moved.
-        assertEquals("the fixtures must still carry the collisions this exists to catch",
-                     17, checked);
-        // EMPTY IS THE CLAIM, AND THE RUN IS WHAT SETTLES IT. Under the no-eviction rule a row
-        // at capacity keeps its machine name and declines the fragment -- but that does not
-        // automatically make it indistinguishable, because the SIBLING row it collides with may
-        // have taken one, and two rows differ as soon as one of them is marked. Whether any
-        // label ends up with every one of its rows declining is a measurement, not a deduction,
-        // and the count of ROWS at capacity (11) is not the count of LABELS this loop reports.
-        // So this asserts the strong form; if the run says otherwise, the exact population goes
-        // here with its reason and to #273, deliberately rather than by fitting a number to a
-        // failure.
-        assertTrue("labels whose rows cannot be told apart on their line (see #273):\n  "
-                   + join(problems, "\n  "), problems.isEmpty());
+        assertEquals("the fixtures must still carry the collisions this exists to catch; "
+                     + "if a regeneration moved the population, measure the new one and say so "
+                     + "here rather than editing this number to match",
+                     13, checked);
+
+        // NOT EMPTY, AND THE MEASUREMENT IS WHY. The first version of this asserted the strong
+        // form -- nothing ambiguous at all -- on the strength of a detector that could not see
+        // the case that breaks it. Measured on UNMODIFIED master through this same walk: SIX
+        // labels are ambiguous, not three. Three are `Soul Vial`, whose two rows have empty
+        // meta and both draw the bare label; three are `Iron Ore`, where
+        // `minecraft:iron_ore` and `erebus:ore_iron` both draw
+        //
+        //     Iron Ore · mined, not crafted            29 characters into a 29-column row
+        //
+        // The fix resolves the `Soul Vial` three, which is what it was built to do. It CANNOT
+        // resolve the `Iron Ore` three at any width: that line is already exactly full, so
+        // every fragment is an eviction, and no-eviction means the row keeps what it drew.
+        // That is #273's population stated as a test rather than as a hope -- and the set is
+        // pinned rather than counted, so a NEW ambiguous label fails here just as loudly as a
+        // fixed one, and neither can hide inside a number.
+        assertEquals("labels whose rows still cannot be told apart on their line; these are "
+                     + "#273's, and this list is pinned so that gaining one fails as loudly as "
+                     + "losing one:\n  " + join(problems, "\n  "),
+                     java.util.Arrays.asList("plan-fluid-chain / Iron Ore",
+                                             "plan-multiblock / Iron Ore",
+                                             "plan-no-machine-declared / Iron Ore"),
+                     ambiguous);
     }
 
     /**
-     * The complaint for a label whose distinct keys do not draw distinct rows, or null.
+     * The complaint for a label whose distinct keys draw a line in common, or null.
      *
-     * EXTRACTED SO A CONTROL CAN PROVE IT FIRES, which is the whole reason it is not inline.
-     * `twoTreeRowsForDifferentItemsAreTellableApart` collects these into a list and then
-     * asserts the list is EMPTY -- and an assertion of that shape passes just as happily when
-     * the append can never happen as when nothing is wrong. `assertEquals(17, checked)` guards
-     * the population from collapsing; nothing guards the branch. So
-     * {@link #theCollisionDetectorReportsARowItCannotTellApart} feeds this a case it MUST
-     * report and a case it must NOT, and an empty problem list means something only because
-     * that test passes beside it.
+     * COUNTING DISTINCT LINES WAS THE BUG, AND IT WAS MEASURED RATHER THAN SPOTTED. The first
+     * version took the label's rows, collected the distinct strings among them, and passed when
+     * there were at least as many strings as keys. `Iron Ore` in `plan-fluid-chain` defeats
+     * that exactly:
+     *
+     *     minecraft:iron_ore   draws  `Iron Ore · any of 14 · min...`  AND  `Iron Ore · mined...`
+     *     erebus:ore_iron      draws                                        `Iron Ore · mined...`
+     *
+     * Two keys, two distinct strings, and the old rule said tellable -- while the two rows a
+     * player is actually looking at are the same words for different items. ONE KEY DRAWING
+     * SEVERAL SHAPES CANNOT PAY FOR ANOTHER KEY'S. So this asks the question a player asks: is
+     * there a line that two different items both draw?
+     *
+     * EXTRACTED SO A CONTROL CAN PROVE IT FIRES, which is the other reason it is not inline.
+     * {@link #theCollisionDetectorReportsARowItCannotTellApart} feeds it the cases it must
+     * report and the cases it must not -- including the shape above, which is the one the old
+     * control was missing and the reason the old rule survived.
      */
     private static String indistinguishable(String fixture, String label,
-                                            java.util.Set<String> keys, List<String> lines) {
-        java.util.Set<String> drawn = new java.util.HashSet<String>();
-        for (String line : lines) {
-            // `label (fragment)` COUNTS AS THIS LABEL'S ROW, and leaving it out is how the
-            // first version of this reported a row as MISSING when the fix had worked on it.
-            // Run 5 drew `Soul Vial (32d8050d982c)` and this matcher, which only knew about
-            // the bare label and the separator form, found ZERO rows for two keys and called
-            // that indistinguishable. A detector that cannot see the fix reports its success
-            // as a failure -- the same blindness as reporting a failure as success, and only
-            // luck decides which direction a given bug takes.
-            if (line.equals(label)
-                    || line.startsWith(label + NodeRowText.SEPARATOR)
-                    || line.startsWith(label + " (")) {
-                drawn.add(line);
+                                            java.util.Map<String,
+                                                    java.util.Set<String>> linesByKey) {
+        List<String> keys = new java.util.ArrayList<String>(linesByKey.keySet());
+        for (int i = 0; i < keys.size(); i++) {
+            for (int j = i + 1; j < keys.size(); j++) {
+                for (String line : linesByKey.get(keys.get(i))) {
+                    if (linesByKey.get(keys.get(j)).contains(line)) {
+                        return fixture + " / " + label + ": " + keys.get(i) + " and "
+                               + keys.get(j) + " are different items and both draw ["
+                               + line + "]";
+                    }
+                }
             }
         }
-        if (drawn.size() >= keys.size()) {
-            return null;
+        return null;
+    }
+
+    /**
+     * The label line each tree row draws, in row order, one per node.
+     *
+     * READ PER ROW BECAUSE A LINE HAS TO BE ATTRIBUTED TO A KEY. A flat list of every text on
+     * the panel cannot say which item drew which line, and that is precisely what the question
+     * "do two different items draw the same words" needs.
+     *
+     * THE ANCHOR IS THE QUANTITY AND IT COMES FROM THE PLAN. `PlannerWidgets.row` draws an
+     * optional token mark, then the quantity, then the label, then the badge -- three texts on
+     * an ordinary row and FOUR on a token row -- so the label's index within a row is not
+     * fixed. A probe written against a fixed stride of two was wrong on every fixture and
+     * silently so; it was caught only because it asserted its own mapping. Finding the text
+     * equal to `NodeRowText.quantity(node.need())` and taking the one after it cannot drift,
+     * because the expected string is derived from the node rather than from the widgets.
+     */
+    private static List<String> rowLabelLines(String fixture, List<PlanNode> nodes,
+                                              ModularPanel panel) {
+        List<PlannerWidgets.ClickableGroup> rows =
+                new java.util.ArrayList<PlannerWidgets.ClickableGroup>();
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            if (widget instanceof PlannerWidgets.ClickableGroup) {
+                rows.add((PlannerWidgets.ClickableGroup) widget);
+            }
         }
-        return fixture + ": " + keys.size() + " different items are all called \"" + label
-               + "\" and the tree draws " + drawn.size() + " distinguishable row(s): "
-               + drawn + " for " + keys;
+        assertEquals("the tree must draw exactly one row per node in " + fixture,
+                     nodes.size(), rows.size());
+
+        List<String> lines = new java.util.ArrayList<String>();
+        for (int i = 0; i < rows.size(); i++) {
+            List<String> inRow = new java.util.ArrayList<String>();
+            for (IWidget widget : HeadlessLayout.flatten(rows.get(i))) {
+                if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
+                    inRow.add(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
+                                      .getKey().getFormatted());
+                }
+            }
+            String quantity = NodeRowText.quantity(nodes.get(i).need());
+            int at = inRow.indexOf(quantity);
+            assertTrue("row " + i + " of " + fixture + " must draw its own quantity ["
+                       + quantity + "] so the label beside it can be identified; drew " + inRow,
+                       at >= 0 && at + 1 < inRow.size());
+            lines.add(inRow.get(at + 1));
+        }
+        return lines;
+    }
+
+    private static void flattenRows(PlanNode node, List<PlanNode> into) {
+        if (node == null) {
+            return;
+        }
+        into.add(node);
+        for (PlanNode child : node.children()) {
+            flattenRows(child, into);
+        }
     }
 
     /**
@@ -945,79 +1045,165 @@ public class PlannerLayoutTest {
      */
     @Test
     public void theCollisionDetectorReportsARowItCannotTellApart() {
-        java.util.Set<String> twoItems = new java.util.HashSet<String>();
-        twoItems.add("mod:a");
-        twoItems.add("mod:b");
-
-        String reported = indistinguishable("synthetic", "Widget", twoItems,
-                                            java.util.Arrays.asList("Widget", "Widget"));
+        String reported = indistinguishable("synthetic", "Widget",
+                                            drawn("mod:a", lines("Widget"),
+                                                  "mod:b", lines("Widget")));
         assertTrue("two items drawing one line must be reported", reported != null);
         assertTrue("the complaint must name the label: " + reported,
                    reported.contains("Widget"));
 
         assertTrue("two items drawing two different lines must NOT be reported",
-                   indistinguishable("synthetic", "Widget", twoItems,
-                                     java.util.Arrays.asList("Widget" + NodeRowText.SEPARATOR
-                                                             + "mod:a",
-                                                             "Widget" + NodeRowText.SEPARATOR
-                                                             + "mod:b")) == null);
+                   indistinguishable("synthetic", "Widget",
+                                     drawn("mod:a",
+                                           lines("Widget" + NodeRowText.SEPARATOR + "mod:a"),
+                                           "mod:b",
+                                           lines("Widget" + NodeRowText.SEPARATOR + "mod:b")))
+                           == null);
 
-        // AND THE SHAPE THE FIX ITSELF PRODUCES, which the two cases above do not cover and
-        // which is how this control passed while the detector was blind. Both of them use the
+        // THE SHAPE THE FIX ITSELF PRODUCES, which the two cases above do not cover and which
+        // is how an earlier control passed while the detector was blind. Both of them use the
         // `label · meta` form, so a matcher that recognised only that form satisfied them --
         // and then found ZERO rows for `Soul Vial (32d8050d982c)` and reported the fix working
         // as the fix failing. A CONTROL ONLY COVERS THE INPUTS IT WAS GIVEN: it is not enough
         // for the cases to be one positive and one negative, they have to span the shapes the
         // code under test can emit.
         assertTrue("a disambiguated row must be recognised as one of the label's rows",
-                   indistinguishable("synthetic", "Widget", twoItems,
-                                     java.util.Arrays.asList("Widget (a)", "Widget (b)"))
-                           == null);
+                   indistinguishable("synthetic", "Widget",
+                                     drawn("mod:a", lines("Widget (a)"),
+                                           "mod:b", lines("Widget (b)"))) == null);
         assertTrue("two rows disambiguated to the SAME text are still indistinguishable",
-                   indistinguishable("synthetic", "Widget", twoItems,
-                                     java.util.Arrays.asList("Widget (x)", "Widget (x)"))
-                           != null);
+                   indistinguishable("synthetic", "Widget",
+                                     drawn("mod:a", lines("Widget (x)"),
+                                           "mod:b", lines("Widget (x)"))) != null);
+
+        // AND THE CASE THAT KILLED THE PREVIOUS RULE, WHICH IS A REAL ROW AND NOT A HYPOTHETICAL.
+        // `Iron Ore` in `plan-fluid-chain`: `minecraft:iron_ore` appears at several depths and
+        // draws TWO different lines, `erebus:ore_iron` draws one, and that one is a line
+        // `minecraft:iron_ore` also draws. Counting distinct strings gives two for two keys and
+        // calls it tellable; the player is looking at two identical rows for different items.
+        // ONE KEY DRAWING SEVERAL SHAPES CANNOT PAY FOR ANOTHER KEY'S -- that is the whole
+        // difference between the old rule and this one, and this is the case that says so.
+        assertTrue("a key drawing two shapes must not cover for a second key drawing one of "
+                   + "them",
+                   indistinguishable("synthetic", "Iron Ore",
+                                     drawn("minecraft:iron_ore",
+                                           lines("Iron Ore · any of 14 · min...",
+                                                 "Iron Ore · mined, not crafted"),
+                                           "erebus:ore_iron",
+                                           lines("Iron Ore · mined, not crafted"))) != null);
+    }
+
+    /** A key -> drawn-lines map for two keys, for the control above. */
+    private static java.util.Map<String, java.util.Set<String>> drawn(
+            String firstKey, java.util.Set<String> firstLines,
+            String secondKey, java.util.Set<String> secondLines) {
+        java.util.Map<String, java.util.Set<String>> map =
+                new java.util.LinkedHashMap<String, java.util.Set<String>>();
+        map.put(firstKey, firstLines);
+        map.put(secondKey, secondLines);
+        return map;
+    }
+
+    private static java.util.Set<String> lines(String... drawn) {
+        return new java.util.LinkedHashSet<String>(java.util.Arrays.asList(drawn));
     }
 
     /**
-     * BOTH DIRECTIONS OF THE WIDTH DECISION, on the one fixture small enough to read. #232.
+     * BOTH DIRECTIONS OF THE WIDTH DECISION -- AND THEY NEEDED TWO FIXTURES, NOT ONE. #232.
      *
-     * `plan-variant-table` draws two rows called "Brown Concrete", and they straddle the rule:
+     * THE FIRST VERSION OF THIS TEST ASSERTED A ROW THAT CANNOT EXIST, and it is worth writing
+     * down because the mistake was invisible: it put both branches on `plan-variant-table`,
+     * whose two "Brown Concrete" rows look like they straddle the rule and do not. The depth-0
+     * row is ALREADY over its column before any fragment is offered --
      *
-     *   depth 0, 37 columns -> `Brown Concrete (chisel) · Chiseling`      takes the fragment
-     *   depth 1, 36 columns -> `Brown Concrete · Fluid Transposer - ...`  declines it
+     *     Brown Concrete · Chiseling (buildable)     38 characters into a 37-column row
      *
-     * A test asserting only the first would pass just as happily if the feature never fired on
-     * a tight row -- it would simply never notice that the machine name had been deleted to
-     * make room. The second assertion is the no-eviction rule stated as a test: the row that
-     * cannot afford the fragment must still say WHICH MACHINE, because that is what renders on
-     * master today and #232 must not take it away. Those 11 rows are #273's population.
+     * -- because `machineBit` appends the STATE, `shown + " (" + machineStateLabel(...) + ")"`.
+     * Omit that suffix, as the model that picked this fixture did, and the line measures 27 and
+     * looks like it has room to spare. So BOTH rows decline, the positive branch had nothing to
+     * find, and the test failed against code that was working correctly.
+     *
+     * THE FIX WAS TO MOVE THE TEST, NOT TO LOOSEN IT. Relaxing the assertion until a fixture
+     * with no take-the-fragment row could satisfy it would have deleted the only check that the
+     * feature ever fires. So the positive branch moved to a row measured to have the room:
+     *
+     *   `plan-fluid-chain`,   Soul Vial, empty meta      -> takes `(32d8050d982c)`
+     *   `plan-variant-table`, Brown Concrete, at capacity -> declines, keeps "Fluid Transposer"
+     *
+     * The negative branch is the no-eviction rule stated as a test: a row that cannot afford
+     * the fragment must still say WHICH MACHINE, because that is what renders on master today
+     * and #232 must not take it away. Those rows are #273's population.
      */
     @Test
     public void aRowWithRoomTakesTheFragmentAndARowAtCapacityKeepsItsMachine() {
-        PlanView plan = PlanFixtures.load("plan-variant-table");
-        ModularPanel panel = new ModularPanel("variant-table");
-        panel.size(PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT);
-        panel.child(PlannerWidgets.tree(plan, PlannerWidgets.CONTENT_WIDTH,
-                                        PlannerWidgets.PANEL_HEIGHT, recorder()));
-        HeadlessLayout.layOut(panel);
-        List<String> lines = texts(panel);
-
-        boolean disambiguated = false;
-        boolean keptItsMachine = false;
-        for (String line : lines) {
-            if (line.startsWith("Brown Concrete (chisel)")) {
-                disambiguated = true;
+        // THE DIGEST TAIL, NOT MERELY "SOMETHING IN BRACKETS". Two `enderio:item_soul_vial:1`
+        // keys differ only after the '#', so the fragment rule's whole job here is to skip the
+        // three tokens they share; asserting only that a bracket appeared would pass on
+        // `Soul Vial (1)`, which is unique and tells a player nothing.
+        List<String> fluidChain = treeLines("plan-fluid-chain");
+        boolean firstVial = false;
+        boolean secondVial = false;
+        for (String line : fluidChain) {
+            if (line.startsWith("Soul Vial (")) {
                 assertFalse("a row that took the fragment must not have been cut to fit it: "
                             + line, line.endsWith("..."));
             }
+            if (line.startsWith("Soul Vial (32d8050d982c)")) {
+                firstVial = true;
+            }
+            if (line.startsWith("Soul Vial (40f3a0f3892d)")) {
+                secondVial = true;
+            }
+        }
+        assertTrue("the row with room must say which item it is; drew "
+                   + matching(fluidChain, "Soul Vial"), firstVial);
+        assertTrue("both Soul Vial rows have room, so both must say which item they are; drew "
+                   + matching(fluidChain, "Soul Vial"), secondVial);
+
+        List<String> variantTable = treeLines("plan-variant-table");
+        boolean keptItsMachine = false;
+        for (String line : variantTable) {
+            // AT CAPACITY IS THE PRECONDITION, ASSERTED RATHER THAN ASSUMED. If a future change
+            // gives this row room, this fails -- and that is correct: the row would no longer
+            // be an example of the branch this half exists to cover, and the test must be
+            // re-pointed at one that is, exactly as it was re-pointed here.
+            assertFalse("Brown Concrete is the AT-CAPACITY example and must decline the "
+                        + "fragment; if it now fits, this branch needs a different row: " + line,
+                        line.startsWith("Brown Concrete ("));
             if (line.startsWith("Brown Concrete ") && line.contains("Fluid Transposer")) {
                 keptItsMachine = true;
             }
         }
-        assertTrue("the row with room must say which item it is; drew " + lines, disambiguated);
         assertTrue("the row at capacity must keep its machine name rather than lose it to a "
-                   + "disambiguator it cannot afford; drew " + lines, keptItsMachine);
+                   + "disambiguator it cannot afford; drew "
+                   + matching(variantTable, "Brown Concrete"), keptItsMachine);
+    }
+
+    /** Every text the tree draws for `fixture`, through the widgets the screen builds. */
+    private static List<String> treeLines(String fixture) {
+        PlanView plan = PlanFixtures.load(fixture);
+        ModularPanel panel = new ModularPanel("tree-" + fixture);
+        panel.size(PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT);
+        panel.child(PlannerWidgets.tree(plan, PlannerWidgets.CONTENT_WIDTH,
+                                        PlannerWidgets.PANEL_HEIGHT, recorder()));
+        HeadlessLayout.layOut(panel);
+        return texts(panel);
+    }
+
+    /**
+     * The lines starting with `label`, for a failure message.
+     *
+     * `plan-fluid-chain` draws 703 rows and a failure that pastes all of them is a failure
+     * nobody reads. What a reader needs is the rows the assertion was looking at.
+     */
+    private static String matching(List<String> lines, String label) {
+        List<String> hits = new java.util.ArrayList<String>();
+        for (String line : lines) {
+            if (line.startsWith(label)) {
+                hits.add(line);
+            }
+        }
+        return hits.toString();
     }
 
     private static String join(List<String> lines, String separator) {
@@ -1029,23 +1215,6 @@ public class PlannerLayoutTest {
             sb.append(line);
         }
         return sb.toString();
-    }
-
-    private static void collectKeysByLabel(PlanNode node,
-                                           java.util.Map<String, java.util.Set<String>> into) {
-        if (node == null) {
-            return;
-        }
-        String label = NodeRowText.label(node);
-        java.util.Set<String> keys = into.get(label);
-        if (keys == null) {
-            keys = new java.util.HashSet<String>();
-            into.put(label, keys);
-        }
-        keys.add(node.key());
-        for (PlanNode child : node.children()) {
-            collectKeysByLabel(child, into);
-        }
     }
 
     private static PlannerActions recorder() {

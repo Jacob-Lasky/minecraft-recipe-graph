@@ -261,9 +261,15 @@ public final class NodeRowText {
             // true and it matters, because it is the sentence the next person reasons from.
             // MEASURED over every plan fixture, not reasoned:
             //
-            //     rows carrying `why`         188   (9 from_sources, 179 machines_to_build)
-            //     rows carrying `unsourced`     7   (all of them shopping rows)
+            //     rows carrying `why`         191   (9 from_sources, 182 machines_to_build)
+            //     rows carrying `unsourced`     6   (all of them shopping rows)
             //     rows carrying BOTH            0
+            //
+            // RECOUNTED ON THIS BRANCH'S REBASE, and the two populations moved (188 and 7 on
+            // the base this was first written against). The zero did not, which is the only
+            // one the `else` depends on -- but a comment quoting a measurement has to be
+            // re-measured when the fixtures are regenerated, or it is quoting a set that no
+            // longer exists and reads exactly as confidently.
             //
             // AND THE ZERO IS EARNED, because the same walk returned 188 and 7 for the two
             // populations separately -- a search that had stopped matching would have reported
@@ -401,11 +407,12 @@ public final class NodeRowText {
      * is the whole question a caller has to ask, and there is no second lookup to forget.
      *
      * A FRAGMENT, NOT THE KEY, AND THE REASON IS MEASURED. The first version of this put the
-     * whole key at the front of the meta run, and on every one of the 11 rows that already
-     * carry a machine name that line ALREADY overflows: `Ender Pearl · Crafting · 5...` at 29
-     * columns. `fit` keeps the head, so the key survived and the machine name -- which renders
-     * on master today -- was what got dropped. Fixing a collision by deleting information the
-     * row already showed is a worse row, not a better one.
+     * whole key at the front of the meta run. Measured on UNMODIFIED master over all 21
+     * fixtures, 33 of the 61 colliding tree rows ALREADY overflow their column before anything
+     * is added -- `Ender Pearl · Crafting · 5...` at 29 columns, `Iron Ore · any of 14 · min...`
+     * 15 times over. `fit` keeps the head, so the key survived and the machine name, which
+     * renders on master today, was what got dropped. Fixing a collision by deleting information
+     * the row already showed is a worse row, not a better one.
      *
      * TOKENS, so the fragment MEANS something. Split on ':' and '#', elide the run the
      * colliding keys share, and take the shortest remaining run that is unique among them:

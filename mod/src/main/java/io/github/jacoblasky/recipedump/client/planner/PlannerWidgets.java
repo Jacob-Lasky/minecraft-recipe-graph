@@ -978,13 +978,18 @@ public final class PlannerWidgets {
      * {@link #labelAndMeta(PlanNode)}, disambiguated ONLY IF THE WHOLE LINE STILL FITS. #232.
      *
      * THE WIDTH IS THE WHOLE DECISION, and it is made here because this is the only place that
-     * knows it. Measured across the fixtures: 11 rows carry a machine name on a line that is
-     * ALREADY over its column -- `Ender Pearl · Crafting · 5...` in 29 characters -- so on
-     * those rows there is no spare width at all, and adding a disambiguator of ANY length
-     * removes the machine name that renders on master today. A collision fixed by deleting
-     * information the row already showed is a worse row. #273 carries those 11: they need the
-     * name to arrive already disambiguated from `RecipeGraph.bareName`, where the characters
-     * sit ahead of the cut instead of competing with what is behind it.
+     * knows it. Measured on UNMODIFIED master across all 21 fixtures: of the 61 colliding tree
+     * rows, 33 draw a line that is ALREADY over its column -- `Ender Pearl · Crafting · 5...`
+     * in 29 characters -- so on those rows there is no spare width at all, and adding a
+     * disambiguator of ANY length removes the machine name that renders on master today. A
+     * collision fixed by deleting information the row already showed is a worse row.
+     *
+     * AND BEING UNTRUNCATED IS NOT THE SAME AS HAVING ROOM, which is why this tests the whole
+     * candidate rather than the length of what is there now. `Iron Ore · mined, not crafted` is
+     * 29 characters into a 29-column row: it renders complete, it has nothing spare, and it is
+     * the reason `Iron Ore` stays ambiguous after this change at any width. #273 carries those
+     * rows: they need the name to arrive already disambiguated from `RecipeGraph.bareName`,
+     * where the characters sit ahead of the cut instead of competing with what is behind it.
      *
      * So the test is whether the disambiguated line survives `fit` UNTRUNCATED. If it does,
      * nothing was evicted, by construction rather than by measurement. If it does not, the row

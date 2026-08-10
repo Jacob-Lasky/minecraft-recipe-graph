@@ -359,8 +359,10 @@ public class NodeRowTextTest {
      * THE ISSUE NAMED THE ONE FIXTURE THAT DISPROVES IT. #232 says `plan-same-name` draws six
      * rows called "Iron Plate"; it draws ONE, because its six keys are on the PACK and the plan
      * routes through exactly one of them -- which is what that fixture exists to prove. Measured
-     * across all 21 fixtures instead: 17 labels carry more than one key, out of 2,488 tree
-     * nodes, and NONE is in `plan-same-name`.
+     * across all 21 fixtures instead: 13 labels carry more than one key, out of 2,288 tree
+     * nodes, and NONE is in `plan-same-name`. That population is asserted, and where, by
+     * `PlannerLayoutTest.twoTreeRowsForDifferentItemsAreTellableApart`; it was 17 of 2,488
+     * before the schema-8 fixture regeneration this branch rebased onto.
      */
     @Test
     public void aCollidingKeyGetsTheShortestFragmentThatStillMeansSomething() {
