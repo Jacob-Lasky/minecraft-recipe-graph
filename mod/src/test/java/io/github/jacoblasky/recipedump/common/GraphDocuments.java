@@ -95,6 +95,73 @@ public final class GraphDocuments {
         return file;
     }
 
+    /**
+     * {@link #TINY}, padded with insignificant whitespace until the document is `bytes` long.
+     *
+     * FOR THE ONE TEST THAT HAS TO SAMPLE A LOAD WHILE IT IS STILL RUNNING (#271). Everything
+     * else here wants a graph that is READY as fast as possible; `PlannerScreenTest` wants the
+     * opposite -- a read wide enough that a sampler gets more than one look at it -- because
+     * the defect is that the counter the window watches is frozen for the whole of LOADING and
+     * a single sample cannot tell a frozen counter from a moving one.
+     *
+     * WHITESPACE RATHER THAN MORE RECIPES, so the padding cannot change what the graph MEANS.
+     * A million synthetic recipes would make the read long and would also make every assertion
+     * about the loaded graph a claim about the padding. JSON whitespace between tokens is
+     * skipped by `JsonReader` and the resulting `RecipeGraph` is byte-for-byte the one
+     * {@link #TINY} produces.
+     *
+     * AND IT IS PADDING, NOT A NEW DOCUMENT, which is this class's own rule kept rather than
+     * dodged: the schema is spelled once, above, and this wraps it.
+     *
+     * @param bytes how long the document should be. Sizes below {@link #TINY}'s own length are
+     *              returned unpadded rather than truncated -- truncating would produce a parse
+     *              error, which is a different test's subject entirely.
+     */
+    public static String padded(int bytes) {
+        String tail = TINY.substring(1);
+        int pad = bytes - 1 - tail.length();
+        if (pad <= 0) {
+            return TINY;
+        }
+        StringBuilder sb = new StringBuilder(bytes);
+        sb.append('{');
+        for (int i = 0; i < pad; i++) {
+            sb.append(' ');
+        }
+        return sb.append(tail).toString();
+    }
+
+    /**
+     * Write a {@link #padded} document and START a load, WITHOUT waiting for it to finish.
+     *
+     * THE OPPOSITE OF {@link #loadTinyGraphFrom} AND DELIBERATELY SO. That one exists because
+     * almost every caller needs a READY graph and should not each write its own poll; this one
+     * exists because #271's witness needs the service left in LOADING, and a helper that waited
+     * would hand back exactly the state the test cannot measure anything from.
+     *
+     * THE CALLER MUST STILL DRAIN THE LOAD before it finishes, in an `@After` or at the end of
+     * the test. `GraphService.reset` does not stop a running loader -- it says so on itself --
+     * so a load abandoned mid-read lands READY partway through whichever test runs next and
+     * bumps a generation under it. That is the flake `PlannerScreenTest.awaitPlan` already
+     * exists for, one service over.
+     *
+     * @param dir   a per-test temporary directory, usually `TemporaryFolder.getRoot()`
+     * @param bytes how large to make the document; see {@link #padded}
+     * @return the graph file that was written
+     */
+    public static java.io.File startPaddedLoadFrom(java.io.File dir, int bytes) throws Exception {
+        java.io.File file = new java.io.File(dir, "graph.json");
+        java.io.FileOutputStream out = new java.io.FileOutputStream(file);
+        try {
+            out.write(padded(bytes).getBytes("UTF-8"));
+        } finally {
+            out.close();
+        }
+        System.setProperty(GraphSource.PROPERTY, file.getPath());
+        GraphService.get().startLoad(null);
+        return file;
+    }
+
     private GraphDocuments() {
     }
 }
