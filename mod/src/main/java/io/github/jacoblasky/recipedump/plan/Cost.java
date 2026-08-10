@@ -886,8 +886,15 @@ public strictfp final class Cost {
         // `min`, so this only ever LOWERS a price and can never overrule stock or a generator.
         // Mining is a CEILING on what an ore can cost, not a claim that mining is best: a
         // genuinely cheaper crafted route still wins, because relaxation lowers it further.
+        //
+        // AND THE POPULATION IS `isMineableOre`, NOT `isWorldOre`, WHICH IS #270 AND IS THE
+        // SAME PREDICATE `Solver`'s MINING BRANCH NOW STOPS AT. A shadow ore whose `ore*`
+        // group the pack deleted is absent from the finished registry and present in the
+        // dimension records, so reading the registry alone left the one key in that gap
+        // unpriced HERE and reaching the `UNSOURCED_COST` sweep instead -- 806 of gate and
+        // toll replaced by 2,000. The `min` is unchanged.
         for (int key = 0; key < cost.length; key++) {
-            if (graph.isWorldOre(key)) {
+            if (graph.isMineableOre(key)) {
                 // AND A TOLL ON TOP OF THAT, WHICH IS #248 AND IS A SECOND TERM RATHER THAN A
                 // BIGGER FIRST ONE. The gate expires -- fly to Sedna once and it stops being
                 // charged, correctly -- and the portal does not, so the two have to coexist.

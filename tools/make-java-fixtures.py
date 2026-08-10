@@ -669,6 +669,33 @@ TARGETS = [
             "key, and a port that folds only one of them is wrong in a way the other "
             "fixture cannot see."),
     Target(
+        "dimension-shadow-groupless", "contenttweaker:sub_block_holder_1:8",
+        expect=("raw", "dimension", "!unsourced", "not_truncated"),
+        why="#270, and it is NOT a third spelling of the two fixtures above. Both of those "
+            "target keys the finished oredict registry lists, so both reach the mining "
+            "branch through `world_ores` and neither can see what happens to a key that "
+            "does not. This one is the pack's fourth twin: "
+            "`scripts/OreDictionary.zs:63` registers it into `oreRhenium` and removes it "
+            "again, so `ores_of` is EMPTY -- which is simultaneously why it is absent from "
+            "`world_ores` and why it survives the ore clause of "
+            "`_is_pack_authored_unexplained`. One pack line made the same key both 'an ore "
+            "we know the dimension of' and 'a pack item nothing explains', and the second "
+            "answer won: the plan said 'it comes from a mechanic no recipe can describe' "
+            "about an ore this graph records as mined on Rhenia.\n"
+            "\n"
+            "`!unsourced` IS THE LOAD-BEARING CLAIM AND THE POSITIVE ONES DO NOT REPLACE "
+            "IT. `dimension` alone goes on holding if a port badges the node BOTH ways, "
+            "which is the defect exactly -- the badge claiming impossibility while the note "
+            "names the planet. The pair is the assertion.\n"
+            "\n"
+            "AND IT IS THE ONLY FIXTURE THAT CAN CARRY IT, measured: 0 tree nodes across "
+            "all 21 fixtures before this one hold `dimension` and `unsourced` together, and "
+            "0 hold the gap membership either, so every rule in this area had nothing to "
+            "fail against. The intersection of `pack_authored_unsourced` and "
+            "`dimension_ores` is exactly one key on `graph-s8b.json` and this is it; if the "
+            "pack is ever re-dumped without the removal on line 63, this target stops being "
+            "in the gap and the `dimension` claim is what will say so."),
+    Target(
         "multiblock", "fluid:liquid_void",
         expect=("craft", "raw", "machine", "machine_to_build", "not_truncated"),
         why="Weak Mythic Essence comes out of an Ender Stone Crucible, a Modular Machinery "

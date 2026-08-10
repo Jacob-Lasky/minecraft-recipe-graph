@@ -881,7 +881,58 @@ CRAFTABLE_COST = 0.25
 #     Gold Ingot and Coal move the same way and 15 of the 18 probes do not move at all. Two of
 #     the three that move are in the probe's CONTROL GROUP -- the set chosen because it was
 #     believed already correct -- which is what makes this a fix rather than a retune.
-FORMULA_VERSION = 19
+# 20: the mining floor is applied to `Graph.mineable_ores` rather than `world_ores`, so a
+#     dimension ore the finished oredict registry does not list stops reaching the
+#     `UNSOURCED_COST` sweep (#270).
+#
+#     THIS IS THE CASE THE COUNTER EXISTS FOR AND IT IS WORTH SAYING SO EXPLICITLY: NOT ONE
+#     HASHED INPUT MOVES. No constant is added or changed, `graph.json` is byte-identical --
+#     `dimension_ores` and `world_ores` are both already in it and neither is rebuilt -- and
+#     `fingerprint` hashes the graph file by size and mtime. So a warm `.cost-cache.json`
+#     written yesterday would be served for arithmetic that no longer produces it, silently,
+#     and this number is the ONLY thing that invalidates it. #248's entry above could lean on
+#     `OVERWORLD_TOLL` landing in the hashed tuple and chose not to; here there is no such
+#     accident to decline.
+#
+#     MEASURED, TWO ARMS IN SEPARATE PROCESSES FROM SEPARATE SOURCE TREES rather than one
+#     tree patched between runs -- `tools/cost-probe.py`'s note on FUSE mtime granularity and
+#     same-length edits says why a single tree cannot be trusted here, and this change IS a
+#     same-length-class edit. `origin/master` was exported with `git archive` to its own
+#     directory, so the two arms never share a `__pycache__`. On `graph-s8b.json`, every
+#     dimension unvisited:
+#
+#         priced keys  162,313     moved 1     UP 0     DOWN 1
+#         appeared 0, vanished 0
+#
+#         contenttweaker:sub_block_holder_1:8    2000.0 -> 806.0
+#
+#     ON `graph-s8b.json` AND NOT ON `graph-oracle-248.json`, WHICH IS NOT A DETAIL. The
+#     golden fixtures are generated from s8b -- its sha256 is the one every fixture embeds --
+#     and the first pass of this measurement was taken against oracle-248 purely because #248
+#     is the change this sits on top of. That arm reported the same verdict, so nothing here
+#     changed, but "the same verdict" was luck rather than evidence: `--check` on UNMODIFIED
+#     master against oracle-248 reports 24 of 24 fixtures differing, because each fixture
+#     carries its oracle's identity. A branch measured on one graph and regenerated against
+#     another is #281 exactly. DATE AND HASH THE ORACLE BEFORE BELIEVING A NUMBER FROM IT.
+#
+#     ONE KEY, WHICH IS THE POPULATION AND NOT A SAMPLE. `pack_authored_unsourced` meets
+#     `dimension_ores` in exactly one key on this oracle, and that intersection is itself
+#     exactly `dimension_ores - world_ores` -- measured both ways round rather than assumed
+#     from the shape of the rule.
+#
+#     DOWN IS THE DIRECTION THE FIX PREDICTS AND THE ONLY ONE IT CAN PRODUCE. The key was
+#     paying `UNSOURCED_COST` = 2,000 for "nothing knows where this comes from" while the
+#     graph recorded it as mined on Rhenia; 806 is `BASE_RAW_COST + DIMENSION_COST +
+#     OVERWORLD_TOLL`, the gate and toll it always should have paid, and it is the price its
+#     sibling `sub_block_holder_1:2` and its anchor `rhenium_ore` were already at. A rise here
+#     would have meant the mining floor was raising something, which `min` cannot do.
+#
+#     THE DIGEST COMPARISON WAS MADE TO FAIL FIRST. Three sha256 digests over every finite
+#     price, sorted, all on `graph-s8b.json`: master `9b194353…`, this branch `d30a0678…`,
+#     and master with `BASE_RAW_COST` perturbed to 1.0001 `2fb7d810…`. All three differ, so
+#     the digest is sensitive to a 1e-4 nudge and the master-vs-branch difference is earned
+#     rather than an artefact of a comparison that could not have reported equality anyway.
+FORMULA_VERSION = 20
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry
 # runs 10+ hops deep (borax -> ... -> molten sugar), so 6 passes left the deep end of every
@@ -1427,7 +1478,15 @@ def _seed(graph, have, free_sources, token_kinds=None, dimension_gates=None,
     # combined: the largest thing this line can produce is BASE_RAW_COST + DIMENSION_COST +
     # OVERWORLD_TOLL = 806, still far below `UNSOURCED_COST` and the `unavailable` wall, and
     # `tests/test_dimensions.py` asserts that band rather than leaving it to the reader.
-    for key in graph.world_ores:
+    #
+    # AND THE POPULATION IS `mineable_ores`, NOT `world_ores`, WHICH IS #270 AND IS THE SAME
+    # SET `Solver.expand`'s MINING BRANCH NOW STOPS AT. A shadow ore whose `ore*` group the
+    # pack deleted is absent from the finished registry and present in `dimension_ores`, so
+    # reading the registry alone left the one key in that gap unpriced HERE and reaching the
+    # `UNSOURCED_COST` sweep below instead -- 806 of gate and toll replaced by 2,000, which is
+    # the ordering complaint in #270 stated as arithmetic. The `min` is unchanged and still
+    # cannot overrule stock or a generator.
+    for key in graph.mineable_ores:
         cost[key] = min(cost.get(key, math.inf), raw_floor(key, gates, tolled))
 
     # AND EVERY KEY THE TRANSMUTATION NETWORK CAN MAKE, for the same reason and by the same

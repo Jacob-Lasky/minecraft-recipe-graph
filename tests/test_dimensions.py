@@ -1293,5 +1293,266 @@ class TheModOfAKeyTest(unittest.TestCase):
         self.assertIn("mod_of", inspect.getsource(api.FIELDS["mod"][0]))
 
 
+def groupless_twin_graph(declare_worldgen=True):
+    """`shadow_graph`'s deleted-group case, with the twin in NO oredict group at all.
+
+    THE DIFFERENCE FROM `shadow_graph(same_group=False)` IS ONE LINE AND IT IS THE WHOLE OF
+    #270. That fixture parks the twin in `blockSednanite` so the group clause has something
+    to decline; the real key parks in nothing. `contenttweaker:sub_block_holder_1:8` belongs
+    to no `ore*` group AND no `block*` group -- measured on `graph-oracle-248.json`,
+    `ores_of` is the empty list -- because `scripts/OreDictionary.zs:63` registers it into
+    `oreRhenium` and removes it again, and nothing else ever claims it.
+
+    THAT EMPTY GROUP SET IS WHAT PUTS THE KEY IN TWO PLACES AT ONCE, which is why the
+    fixture has to reproduce it exactly rather than approximately. An empty `ores_of` is the
+    reason the key is absent from `world_ores` -- membership of the finished registry -- and
+    it is ALSO the reason it survives `_is_pack_authored_unexplained`'s ore clause. So one
+    pack script line makes the same key both "an ore the graph knows the dimension of" and
+    "a pack item nothing explains", and before #270 the second answer won.
+
+    `declare_worldgen=False` IS THE CONTROL AND IS NOT OPTIONAL FURNITURE. It builds the
+    identical graph minus the dimension record, where the unsourced badge is the CORRECT
+    answer -- nothing then knows where the key comes from. Without it these tests would pass
+    just as well against a change that disabled the unsourced badge outright, which is a
+    different and much worse fix for the same symptom.
+    """
+    g = gated_graph()
+    g.names[HOLDER] = "Sednanite Ore"
+    # NO entry for HOLDER anywhere in `ore_members`: not `oreSednanite`, not `blockSednanite`.
+    # `gated_graph` leaves `oreSednanite` holding the anchor alone, which is what the pack's
+    # finished registry looks like after the removal.
+    g.add(Recipe("melt", "t", [("fluid:sednanite", 100)],
+                 [Ingredient([HOLDER], 1)], category="minecraft.crafting"))
+    if declare_worldgen:
+        g.dimension_ores.update(
+            dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
+    return g
+
+
+class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
+    """#270: the unsourced rule outranked a dimension the same graph had already recorded.
+
+    The plan said "the pack defines this item and nothing in the dump makes it; it comes
+    from a mechanic no recipe can describe" about `contenttweaker:sub_block_holder_1:8`,
+    while `dimension_ores` held `[163, 'Rhenia']` for that exact key. The note was not
+    merely less useful than the dimension one, it was FALSE: there is a mechanic and it is
+    named two fields away.
+
+    THE SIBLING IS WHAT MAKES IT A PRECEDENCE BUG RATHER THAN A MEMBERSHIP ONE. `:2` and
+    `:8` are two metas of one ContentTweaker holder block and they took opposite paths --
+    `:2` badged Sedna, `:8` badged unsourced -- because `:2` kept its `oreSednanite`
+    registration and `:8` did not. Nothing about the two rocks differs; only which of two
+    rules got to answer first.
+    """
+
+    def _plan(self, g, key, visited=None):
+        gates = dimensions.gates_for(g, visited or {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        return Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve(key, 1)["tree"]
+
+    def test_the_fixture_reproduces_the_double_membership(self):
+        """THE POSITIVE CONTROL ON THE FIXTURE ITSELF, and it runs first deliberately.
+
+        Every other test here is meaningless if the twin is not simultaneously a recorded
+        dimension ore and a key that would otherwise be called pack-authored-unsourced. A
+        fixture that quietly lost one of the two would make all of them pass by describing a
+        case the bug never had.
+        """
+        g = groupless_twin_graph()
+        self.assertIn(HOLDER, g.dimension_ores)
+        self.assertEqual(list(g.ores_of(HOLDER)), [])
+        self.assertNotIn(HOLDER, g.world_ores)
+        # THE SECOND MEMBERSHIP, SHOWN ON THE GRAPH THAT DIFFERS BY THE DIMENSION RECORD
+        # ALONE rather than by reaching into the predicate's internals. If withholding that
+        # one record puts the key in `pack_authored_unsourced`, then every OTHER clause of
+        # that predicate accepts it -- which is precisely the collision #270 is about, and it
+        # is stated through the public API so a refactor of the clauses cannot hide it.
+        self.assertIn(HOLDER, groupless_twin_graph(
+            declare_worldgen=False).pack_authored_unsourced)
+
+    def test_the_twin_is_no_longer_called_pack_authored_unsourced(self):
+        g = groupless_twin_graph()
+        self.assertNotIn(HOLDER, g.pack_authored_unsourced)
+
+    def test_the_plan_names_the_dimension_instead_of_denying_one_exists(self):
+        node = self._plan(groupless_twin_graph(), HOLDER)
+        # `.get`, NOT `[...]`, SO A REGRESSION READS AS A DIFF RATHER THAN A KeyError.
+        # Reverting the fix makes these fields ABSENT, and a traceback saying
+        # `KeyError: 'dimension'` is indistinguishable at a glance from a test that has
+        # itself broken. `None != 'Sedna'` names the regression.
+        self.assertEqual(node.get("dimension"), "Sedna")
+        self.assertIn("Sedna", node.get("note") or "")
+        self.assertNotIn("unsourced", node)
+
+    def test_the_two_ids_of_one_rock_take_the_same_path(self):
+        """The issue's own requirement: `:8` and `:2` must not be separable again.
+
+        Built as ONE graph holding both twins so the comparison is between two keys under
+        identical rules, rather than between two fixtures that could drift apart.
+        """
+        g = groupless_twin_graph()
+        registered = "contenttweaker:sub_block_holder_1:1"
+        g.names[registered] = "Sednanite Ore"
+        g.ore_members["oreSednanite"] = [SEDNANITE, registered]
+        g.add(Recipe("melt2", "t", [("fluid:sednanite2", 100)],
+                     [Ingredient([registered], 1)], category="minecraft.crafting"))
+        g.dimension_ores.update(
+            dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
+        groupless = self._plan(g, HOLDER)
+        keeps_its_group = self._plan(g, registered)
+        self.assertEqual(groupless.get("dimension"), keeps_its_group.get("dimension"))
+        self.assertEqual(groupless.get("note"), keeps_its_group.get("note"))
+        self.assertEqual(groupless.get("unsourced"), keeps_its_group.get("unsourced"))
+
+    def test_it_is_priced_for_the_trip_and_not_as_unsourced(self):
+        g = groupless_twin_graph()
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        self.assertAlmostEqual(costs[HOLDER],
+                               cost.BASE_RAW_COST + cost.DIMENSION_COST, places=6)
+        # AND THE ASSERTION THAT WOULD HAVE CAUGHT IT, stated separately because the equality
+        # above would also hold if UNSOURCED_COST were ever tuned down to 801.
+        self.assertLess(costs[HOLDER], cost.UNSOURCED_COST)
+
+    def test_a_twin_something_claims_to_produce_still_gets_the_mining_floor(self):
+        """THE CASE `_seed`'s MINING LOOP EXISTS FOR, and the only one that can witness it.
+
+        The loop above it prices a leaf as obtainable only when NO recipe outputs the key --
+        "the only way to get a thing is to make it", which is false for an ore. So on a
+        producerless twin the leaf rule already charges the floor and the mining loop is
+        invisible: revert it and the price test above still passes.
+
+        `contenttweaker:sednanite_ore` is the reported shape of exactly this (#106): two
+        Plasmatic Condenser recipes emit the ore, each wanting 160,000 mB of Dense Plasma, so
+        it counts as produced, every route prices near infinity, and an ore you MINE ends up
+        unreachable. Give the groupless twin the same treatment and the mining loop is the
+        only rule left that can price it -- which is what makes this a witness for reading
+        `mineable_ores` there rather than a second spelling of the test above.
+        """
+        g = groupless_twin_graph()
+        g.add(Recipe("condense-twin", "t", [(HOLDER, 1)],
+                     [Ingredient(["mod:plasma"], 160000)], category="mod.condenser"))
+        self.assertTrue(g.real_producers(HOLDER), "fixture must make the twin PRODUCED")
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        self.assertAlmostEqual(costs[HOLDER],
+                               cost.BASE_RAW_COST + cost.DIMENSION_COST, places=6)
+
+    def test_the_price_and_the_badge_agree(self):
+        """The property every rule in `cost._seed` claims and this one broke.
+
+        A node the solver stops at as mining, priced by the sweep that means "nothing knows
+        where this comes from", is the tool steering away from a route while telling the
+        reader to go and gather it.
+        """
+        g = groupless_twin_graph()
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        node = Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve(HOLDER, 1)["tree"]
+        self.assertIsNone(node.get("unsourced"))
+        self.assertNotEqual(costs[HOLDER], cost.UNSOURCED_COST)
+
+    def test_the_shopping_row_is_not_marked_unsourced_either(self):
+        """THE THIRD SURFACE, and the one a player actually carries into the world.
+
+        `shopping_row` recomputes the mark off the graph rather than copying it from the tree
+        node, deliberately, so the list and the tree cannot disagree. That means it reads
+        `pack_authored_unsourced` a second time and would have gone on marking this row even
+        after the tree node was fixed -- the divergence #178 spent a PR removing, reappearing
+        one surface over.
+        """
+        g = groupless_twin_graph()
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        plan = Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve(HOLDER, 1)
+        rows = [r for r in plan["shopping_list"] if r["key"] == HOLDER]
+        self.assertEqual(len(rows), 1, "the twin must reach the shopping list at all")
+        self.assertNotIn("unsourced", rows[0])
+        self.assertNotIn("provenance", rows[0])
+
+    def test_visiting_the_dimension_leaves_an_ordinary_mined_ore(self):
+        """Not a special case bolted on: it lifts exactly as a registered ore's gate does."""
+        node = self._plan(groupless_twin_graph(), HOLDER, visited={"DIM147": 3})
+        self.assertEqual(node.get("note"), "mined, not crafted")
+        self.assertNotIn("dimension", node)
+        self.assertNotIn("unsourced", node)
+
+    def test_a_route_resting_on_it_is_still_ore_backed(self):
+        """`ore_backed` is the third reader of the mining question and it moved too.
+
+        A recipe whose only dead end is this twin rested on an ore you mine, and scored 0 as
+        though it rested on junk, while the identical recipe through a registered sibling
+        scored 1.
+        """
+        g = groupless_twin_graph()
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        solver = Solver(g, machine_states=STATES, costs=costs, dimension_gates=gates)
+        melt = [r for r in g.recipes if r.rid == "melt"][0]
+        self.assertEqual(solver.ore_backed(melt), 1)
+
+    def test_without_the_worldgen_record_the_unsourced_badge_still_fires(self):
+        """THE CONTROL, AND THE ONE TEST HERE THAT MUST NOT GO GREEN FOR THE WRONG REASON.
+
+        Identical graph, dimension record withheld. Now nothing in the graph knows where the
+        key comes from and "no recipe can describe this" is the true and useful answer. A fix
+        that simply stopped badging unsourced keys, or that widened the mining population to
+        anything producerless, passes every other test in this class and fails this one.
+        """
+        g = groupless_twin_graph(declare_worldgen=False)
+        self.assertNotIn(HOLDER, g.dimension_ores)
+        self.assertIn(HOLDER, g.pack_authored_unsourced)
+        node = self._plan(g, HOLDER)
+        self.assertTrue(node.get("unsourced"))
+        self.assertIn("no recipe can describe", node.get("note") or "")
+        self.assertNotIn("dimension", node)
+
+
+class TheMiningPopulationIsOneDefinitionTest(unittest.TestCase):
+    """`Graph.mineable_ores`: what `Solver.expand` stops at and what `cost._seed` prices.
+
+    #270 was two readers of one question disagreeing, so the question now has one spelling
+    and these pin what it may and may not contain.
+    """
+
+    def test_a_registered_world_ore_is_in_it(self):
+        self.assertIn(SEDNANITE, gated_graph().mineable_ores)
+
+    def test_a_dimension_ore_outside_the_registry_is_in_it(self):
+        g = groupless_twin_graph()
+        self.assertNotIn(HOLDER, g.world_ores)
+        self.assertIn(HOLDER, g.mineable_ores)
+
+    def test_it_is_a_superset_of_the_registry_and_of_the_records(self):
+        g = groupless_twin_graph()
+        self.assertTrue(set(g.world_ores) <= g.mineable_ores)
+        self.assertTrue(set(g.dimension_ores) <= g.mineable_ores)
+
+    def test_an_ordinary_crafted_item_is_not_in_it(self):
+        """The screen has to be able to say no, or its yes means nothing."""
+        g = groupless_twin_graph()
+        self.assertNotIn("mod:ingot", g.mineable_ores)
+        self.assertNotIn("mod:plasma", g.mineable_ores)
+
+    def test_a_toll_alone_does_not_make_a_key_mineable(self):
+        """`offworld_ores` is a statement about the TRIP, not about how you acquire the
+        block, and it is a superset -- folding it in would widen the mining population on
+        evidence that does not mean mining."""
+        g = gated_graph()
+        g.offworld_ores = {"mod:ingot": [147, "Sedna"]}
+        self.assertNotIn("mod:ingot", g.mineable_ores)
+
+    def test_both_readers_ask_this_property_and_not_the_registry(self):
+        """DRY enforced where it broke. `expand`'s mining branch and `_seed`'s mining loop
+        each read `world_ores` directly before #270, which is what let them diverge."""
+        import inspect
+        from recipegraph import solve as solve_mod
+        self.assertIn("mineable_ores", inspect.getsource(solve_mod.Solver.expand))
+        self.assertIn("for key in graph.mineable_ores", inspect.getsource(cost._seed))
+
+
 if __name__ == "__main__":
     unittest.main()

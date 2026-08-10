@@ -24,10 +24,10 @@
   "UNPRICED_MACHINE_COST": 111.0,
   "UNSOURCED_COST": 2000.0
  },
- "digest": "f10d10fade8f5f3ec401cf95f9b99594573ce9bc7ba3d82b86334d9715d13e90",
+ "digest": "c517057184e630b4342e5ac3239dfa12e89beaf625f92376a4522255a53194bb",
  "digest_format": "sha256 over '<key> <%.17e of the cost>\\n' for every key in sorted order, with a non-finite cost written as the literal 'inf'. NOT repr: 33% of doubles render differently as text in Python and Java while differing in value in 0% of cases. 17 significant digits is injective over binary64, so this detects a one-ULP drift.",
  "entries": 162313,
- "formula_version": 19,
+ "formula_version": 20,
  "graph": {
   "bytes": 121243322,
   "dimension_ores": 10,
@@ -548,6 +548,7 @@
   "contenttweaker:material_part:77": 114.02583231743552,
   "contenttweaker:sednanite_ore": 427.835205666889,
   "contenttweaker:sub_block_holder_1:2": 806.0,
+  "contenttweaker:sub_block_holder_1:8": 806.0,
   "erebus:materials": 401.0,
   "erebus:materials:1": 2.0,
   "fluid:liquid_void": 111.58892430796968,

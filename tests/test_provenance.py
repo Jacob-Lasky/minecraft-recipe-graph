@@ -655,13 +655,32 @@ class AgainstTheRealPackTest(unittest.TestCase):
         # recipes apart -- so a reader seeing this number move again should check WHICH graph
         # before concluding a parser broke. That is the whole reason the figure is hardcoded:
         # deriving it from the graph under test would make the tripwire assert nothing.
+        #
+        # AND #270 MOVES BOTH BY ONE, WHICH IS THE TRIPWIRE DOING ITS JOB RATHER THAN NEEDING
+        # A REPAIR. `_is_pack_authored_unexplained` grew a sixth clause -- a key the graph
+        # records a DIMENSION for is one the pack said how to obtain, so it is not
+        # unexplained -- and exactly one key on this pack satisfies every other clause while
+        # having one: `contenttweaker:sub_block_holder_1:8`, whose `ore*` group the pack
+        # registers and then deletes. Both figures fall by one and NEITHER falls by more,
+        # which is what says the clause is narrow.
+        #
+        # Measured with the same code on both arms of `graph-s8b.json`, the graph the golden
+        # fixtures come from:
+        #
+        #     master     before=284   after=232
+        #     with #270  before=283   after=231
+        #
+        # BOTH LINES MATTER AND THE SECOND IS NOT REDUNDANT. `before` is the population with
+        # the pack's declarations withheld and `after` is with them applied; a clause that
+        # wrongly interacted with `declared_provenance` would move the two by different
+        # amounts, and the pair is what rules that out.
         graph = Graph.load(os.environ["RECIPEGRAPH_ORACLE"])
         graph.declared_provenance = {}
         before = len(graph.pack_authored_unsourced)
         graph.declared_provenance = self.declared
         after = len(graph.pack_authored_unsourced)
-        self.assertEqual(284, before)
-        self.assertEqual(232, after)
+        self.assertEqual(283, before)
+        self.assertEqual(231, after)
 
     def test_the_example_the_issue_names_is_one_of_them(self):
         # #171 says `contenttweaker:curious_bullet` "is priced 1.0 and is obtained from a

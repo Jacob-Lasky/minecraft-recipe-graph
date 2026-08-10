@@ -38,14 +38,14 @@ public class PlanJsonTest {
         // THIS NUMBER MOVES WHENEVER A TARGET IS ADDED, and that is the point rather than a
         // maintenance cost -- a fixture added without anyone noticing is one the port was
         // never held to. 19 at #135, 20 at #170's `plan-unsourced-variant`, 21 at #176's
-        // `plan-unsourced-price`.
-        assertEquals("21 plan fixtures; found " + names, 21, names.size());
+        // `plan-unsourced-price`, 22 at #270's `plan-dimension-shadow-groupless`.
+        assertEquals("22 plan fixtures; found " + names, 22, names.size());
         for (String name : names) {
             PlanView plan = PlanFixtures.load(name);
             assertNotNull(name + " has no tree", plan.tree());
             assertFalse(name + " has no target", plan.target().isEmpty());
             // `nodes` is the solver's own count. If the reader dropped a child, or read one
-            // twice, this is where it shows -- across 863 nodes and 21 trees.
+            // twice, this is where it shows -- across 2,289 nodes and 22 trees.
             assertEquals(name + " lost or gained nodes in the read",
                          plan.nodes(), plan.flatten().size());
         }

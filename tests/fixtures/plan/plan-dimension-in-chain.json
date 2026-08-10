@@ -53,7 +53,7 @@
   "qty": 1,
   "shopping_list": [
    {
-    "key": "contenttweaker:rhenium_ore",
+    "key": "contenttweaker:sub_block_holder_1:8",
     "kind": "item",
     "label": "Rhenium Ore",
     "name": "Rhenium Ore",
@@ -77,7 +77,7 @@
        "children": [
         {
          "dimension": "Rhenia",
-         "key": "contenttweaker:rhenium_ore",
+         "key": "contenttweaker:sub_block_holder_1:8",
          "kind": "item",
          "label": "Rhenium Ore",
          "name": "Rhenium Ore",
@@ -95,7 +95,7 @@
        "name": "[fluid] Molten Rhenium",
        "need": 144,
        "per_run": 360,
-       "recipe": "hei:nuclearcraft_melter:334051",
+       "recipe": "hei:nuclearcraft_melter:333813",
        "runs": 1,
        "status": "craft"
       }
