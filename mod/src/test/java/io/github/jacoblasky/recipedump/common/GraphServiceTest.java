@@ -298,6 +298,22 @@ public class GraphServiceTest {
      * EVERY OUTCOME, and FAILED is the one worth naming: MISSING is decided synchronously,
      * before any window can be opened against it, while a parse error arrives seconds later
      * under a window that is already showing a progress bar.
+     *
+     * THE OFF-THREAD ARMS COUNT BUMPS FROM A BASELINE TAKEN BEFORE `startLoad`, AND COUNT THEM
+     * EXACTLY, and #291 is both halves of why. The two arms used to read their baseline
+     * BETWEEN `startLoad` and `settle` and then assert the counter had moved since. `startLoad`
+     * returns immediately and by design, so on a busy host the loader could reach FAILED before
+     * the next statement in this method ran -- at which point the baseline ALREADY CONTAINED
+     * the bump being waited for and the assertion failed on a service that had done everything
+     * right. Measured on this file before the change: 13 failures in 1,000 runs under
+     * contention, 1 in 1,000 on an idle host, always at the FAILED arm.
+     *
+     * The same read is a FALSE GREEN in the other direction, which is the half worth being
+     * angry about. `beforeReady` was taken before `startLoad`, so `generation() > beforeReady`
+     * was satisfied by the LOADING bump alone and the READY bump it names was never required:
+     * deleting `generation++` from the READY path left this test PASSING. An assertion that
+     * cannot fail for the reason its message gives is not evidence. `+ 2L` is: it names both
+     * transitions, so either one going missing is a red test rather than a quieter one.
      */
     @Test
     public void everyLoadOutcomeMovesTheCounterAndNoneMovesItBack() throws Exception {
@@ -307,26 +323,24 @@ public class GraphServiceTest {
         service.startLoad(folder.getRoot());
         assertEquals(GraphService.State.MISSING, service.state());
         long missing = service.generation();
-        assertTrue("MISSING must be noticeable; " + start + " -> " + missing,
-                   missing > start);
+        assertEquals("MISSING must be noticeable, and exactly once; " + start + " -> "
+                     + missing, start + 1L, missing);
 
         service.reset();
         long afterReset = service.generation();
-        assertTrue("reset must move FORWARD -- a counter that returns to a value an open"
-                   + " window has already recorded as drawn leaves that window frozen on a"
-                   + " graph that has been dropped; " + missing + " -> " + afterReset,
-                   afterReset > missing);
+        assertEquals("reset must move FORWARD -- a counter that returns to a value an open"
+                     + " window has already recorded as drawn leaves that window frozen on a"
+                     + " graph that has been dropped; " + missing + " -> " + afterReset,
+                     missing + 1L, afterReset);
 
         System.setProperty(GraphSource.PROPERTY,
                 write("broken.json", "{\"dump_schema\":5,\"names\":{").getPath());
         service.startLoad(null);
-        long loading = service.generation();
-        assertTrue("starting a load is itself something new to say; " + afterReset + " -> "
-                   + loading, loading > afterReset);
         assertEquals(GraphService.State.FAILED, settle());
-        assertTrue("a load that stops five seconds in must move the window off a progress"
-                   + " bar that is never going to finish; " + loading + " -> "
-                   + service.generation(), service.generation() > loading);
+        assertEquals("starting a load is itself something new to say, and a load that stops"
+                     + " five seconds in must move the window off a progress bar that is never"
+                     + " going to finish -- so that is TWO things said, not one; " + afterReset
+                     + " -> " + service.generation(), afterReset + 2L, service.generation());
 
         service.reset();
         System.setProperty(GraphSource.PROPERTY,
@@ -334,17 +348,111 @@ public class GraphServiceTest {
         long beforeReady = service.generation();
         service.startLoad(null);
         assertEquals(GraphService.State.READY, settle());
-        assertTrue("READY is the transition #201 is about; " + beforeReady + " -> "
-                   + service.generation(), service.generation() > beforeReady);
+        assertEquals("READY is the transition #201 is about, and it is the SECOND of the two"
+                     + " here -- the first is the load starting; " + beforeReady + " -> "
+                     + service.generation(), beforeReady + 2L, service.generation());
     }
 
     /**
-     * The counter is bumped LAST, after the graph and after the state it describes.
+     * A reader that catches the transition at its narrowest never sees the new state beside the
+     * old counter.
      *
-     * Same discipline as the `graph`-before-`state` note on the class, extended by one field:
-     * a reader that sees a new number must see everything behind it. The listener runs before
-     * READY is published, so it is the one place in the process that can observe the ordering
-     * from the inside.
+     * THIS IS THE ONE THAT SAMPLES THE GAP RATHER THAN WAITING OUT. Every other test here polls
+     * `state()` every 5 ms, which is thousands of times wider than the window between two
+     * adjacent writes, so all of them passed against a `GraphService` that published the state
+     * and the counter separately -- and #291 is what that cost: not a test failure, but a
+     * production reader (`PlannerScreen.stamp`, #201) able to read a fresh state with a count it
+     * has already drawn, and skip the rebuild that state was published to cause.
+     *
+     * MEASURED BEFORE IT COULD BE ASSERTED. A spinning reader saw the torn pair 739 times in
+     * 2,000 loads on an IDLE host, so 30 loads is a witness that fails essentially every time
+     * against the old seam -- (1 - 0.37)^30 is about one in a hundred thousand -- rather than a
+     * test that catches the defect on a bad day.
+     *
+     * IT COUNTS ITS OWN OBSERVATIONS AND FAILS ON ZERO. A reader that never caught the
+     * transition would pass this vacuously, which is the shape of every instrument in this
+     * repository that has ever reported a comfortable answer it was not capable of disagreeing
+     * with. `observed` has to reach the loop count or the assertion below says so instead.
+     */
+    @Test
+    public void theStateAndTheCounterArriveTogetherEvenToAReaderThatSamplesTheGap()
+            throws Exception {
+        System.setProperty(GraphSource.PROPERTY,
+                write("broken.json", "{\"dump_schema\":5,\"names\":{").getPath());
+        final GraphService service = GraphService.get();
+        final int loads = 30;
+        int observed = 0;
+        int torn = 0;
+
+        for (int i = 0; i < loads; i++) {
+            service.reset();
+            final long loadingGeneration = service.generation() + 1L;
+            final java.util.concurrent.atomic.AtomicLong caught =
+                    new java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE);
+            final java.util.concurrent.CountDownLatch spinning =
+                    new java.util.concurrent.CountDownLatch(1);
+
+            Thread reader = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    long deadline = System.currentTimeMillis() + 30_000L;
+                    spinning.countDown();
+                    while (System.currentTimeMillis() < deadline) {
+                        GraphService.State seen = service.state();
+                        if (seen != GraphService.State.LOADING
+                                && seen != GraphService.State.IDLE) {
+                            // The pair, read the way a client tick reads it: the state first,
+                            // then the counter. Nothing may have moved backwards between them.
+                            caught.set(service.generation());
+                            return;
+                        }
+                    }
+                }
+            }, "graphservice-seam-reader");
+            reader.setDaemon(true);
+            reader.start();
+            spinning.await();
+
+            service.startLoad(null);
+            assertEquals(GraphService.State.FAILED, settle());
+            reader.join(30_000L);
+
+            long seenGeneration = caught.get();
+            if (seenGeneration == Long.MIN_VALUE) {
+                continue;
+            }
+            observed++;
+            if (seenGeneration <= loadingGeneration) {
+                torn++;
+            }
+        }
+
+        // A SHORTFALL IS A FAILURE, NOT A SMALLER SAMPLE. Every load the reader missed is a
+        // load this test did not check, and quietly averaging over the ones it did catch is how
+        // an instrument reports a comfortable number it never earned. The message says the
+        // count rather than claiming none, because "caught 28 of 30" and "caught 0 of 30" are
+        // different problems -- the first is a starved thread, the second is a broken test.
+        assertEquals("the reader caught " + observed + " of " + loads + " transitions, so this"
+                     + " run did not watch the seam it exists to watch", loads, observed);
+        assertEquals("a reader that sees the load has stopped must see the counter that says"
+                     + " so; " + torn + " of " + observed + " observations had the new state"
+                     + " beside the old count", 0, torn);
+    }
+
+    /**
+     * The counter moves LAST, after the graph and with the state it describes.
+     *
+     * Same discipline as the `graph`-before-the-publication note on the class: a reader that
+     * sees a new number must see everything behind it. The listener runs before READY is
+     * published, so it is the one place in the process that can observe the ordering from the
+     * inside.
+     *
+     * THE `- 1L` IS WHY THIS TEST CAUGHT SOMETHING ITS NEIGHBOUR COULD NOT. Deleting the READY
+     * bump left `everyLoadOutcomeMovesTheCounterAndNoneMovesItBack` green, because that test
+     * asked whether the counter had moved AT ALL since before the load and the LOADING bump had
+     * already answered yes. This one names the exact distance, so a missing bump is arithmetic
+     * that stops working rather than a threshold still being cleared by something else. Both
+     * are exact now (#291); do not relax either back to a `>`.
      */
     @Test
     public void theCounterIsBumpedAfterTheStateItDescribes() throws Exception {
