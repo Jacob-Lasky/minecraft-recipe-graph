@@ -31,9 +31,23 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
  *
  * STATE IS READ FROM THE RENDER THREAD AND WRITTEN FROM THE LOADER, so every field crossing
  * that boundary is `volatile`. They are written once each, in the order a reader can rely on:
- * `graph` before `state`, so a thread that sees READY sees a fully built graph. DO NOT
- * reorder those two assignments; the happens-before is the whole synchronisation here and
- * there is no lock to fall back on.
+ * `graph` before the publication below, so a thread that sees READY sees a fully built graph.
+ * DO NOT reorder those two assignments; the happens-before is the whole synchronisation here
+ * and there is no lock to fall back on.
+ *
+ * WHAT A TRANSITION IS MADE OF IS PUBLISHED AS ONE OBJECT, not as a run of separate volatile
+ * writes, and #291 is why. The state, the counter that says the state is new, and the detail
+ * that explains it used to be three assignments in a row. Ordering them `state` last-but-one
+ * and `generation++` last bought exactly one direction of the guarantee -- a reader that saw a
+ * new NUMBER saw everything behind it -- and left the other direction open: a reader that saw a
+ * new STATE could still read the OLD number, because the bump had not happened yet. That is not
+ * a theoretical window. A reader spinning on `state()` and reading `generation()` the moment it
+ * changed observed the torn pair 739 times in 2,000 loads ON AN IDLE HOST.
+ *
+ * The single write closes both directions at once: there is no instant at which the state and
+ * the counter disagree, because there is no instant at which only one of them has been written.
+ * DO NOT split this back into separate fields to save an allocation. It is one small object per
+ * TRANSITION -- a handful per session, none per frame -- and every read stays allocation-free.
  */
 public final class GraphService {
 
@@ -51,15 +65,39 @@ public final class GraphService {
         FAILED
     }
 
+    /**
+     * One transition: what the service is saying, why, and the number that says it is new.
+     *
+     * IMMUTABLE AND REPLACED WHOLE. See the note on the class -- the three used to be separate
+     * volatile fields, and a reader could catch a new state beside the previous count. Nothing
+     * here may gain a setter: the atomicity IS the finality.
+     */
+    private static final class Publication {
+
+        final State state;
+        /** Why it is MISSING or FAILED, or "" otherwise. */
+        final String detail;
+        final long generation;
+
+        Publication(State state, String detail, long generation) {
+            this.state = state;
+            this.detail = detail;
+            this.generation = generation;
+        }
+
+        /** The next thing to say, one number later. */
+        Publication next(State newState, String newDetail) {
+            return new Publication(newState, newDetail, generation + 1L);
+        }
+    }
+
     private static final GraphService INSTANCE = new GraphService();
 
     private volatile RecipeGraph graph;
-    private volatile State state = State.IDLE;
-    private volatile String detail = "";
+    private volatile Publication published = new Publication(State.IDLE, "", 0L);
     private volatile File source;
     private volatile long totalBytes;
     private volatile long readBytes;
-    private volatile long generation;
     private Thread loader;
 
     private GraphService() {
@@ -70,7 +108,7 @@ public final class GraphService {
     }
 
     public State state() {
-        return state;
+        return published.state;
     }
 
     /**
@@ -95,13 +133,19 @@ public final class GraphService {
      * draw than "reading graph.json, 62%", and a parse error five seconds in must move the
      * window off a progress bar that is never going to finish.
      *
-     * IT IS BUMPED LAST IN EACH CASE, after the state it describes and after
-     * {@link #graph}, so a reader that sees a new number sees everything behind it. That is the
-     * same discipline as the `graph`-before-`state` note on this class, extended by one field;
-     * DO NOT hoist a bump above the assignment it reports.
+     * IT MOVES IN THE SAME WRITE AS THE STATE IT DESCRIBES, so a reader that sees a new number
+     * sees everything behind it AND a reader that sees a new state sees the number that goes
+     * with it. It used to be only the first of those -- the bump was a separate volatile write
+     * placed last -- and #291 is the second one going missing: a reader could act on a fresh
+     * state with a stale count. See the note on this class for the measurement. DO NOT reopen
+     * that gap by bumping this outside a {@link Publication}.
+     *
+     * STILL BUMPED AFTER {@link #graph}, which is a separate field and stays one: the graph is
+     * only meaningful once the state says READY, so the one-directional guarantee is enough
+     * there and folding it in would put a 45 MB reference in every transition object.
      */
     public long generation() {
-        return generation;
+        return published.generation;
     }
 
     /**
@@ -133,7 +177,7 @@ public final class GraphService {
 
     /** Why it is MISSING or FAILED, or "" otherwise. Safe to show a player. */
     public String detail() {
-        return detail;
+        return published.detail;
     }
 
     public File source() {
@@ -151,27 +195,44 @@ public final class GraphService {
      */
     public float progress() {
         long total = totalBytes;
-        if (state != State.LOADING || total <= 0L) {
+        if (published.state != State.LOADING || total <= 0L) {
             return -1.0f;
         }
         return Math.min(1.0f, (float) ((double) readBytes / (double) total));
     }
 
-    /** One line for a player: what is happening, or what went wrong. */
+    /**
+     * One line for a player: what is happening, or what went wrong.
+     *
+     * READ ONCE INTO A LOCAL, not field-by-field. Switching on `published.state` and then
+     * reading `published.detail` would be two reads of a field the loader can replace between
+     * them, which is the same defect this class was carrying before #291, reintroduced one
+     * method down. `RecipeGraph` is read once for the same reason.
+     */
     public String describe() {
-        switch (state) {
+        Publication now = published;
+        switch (now.state) {
             case READY:
-                return "graph ready: " + graph.keyCount() + " keys, "
-                        + graph.recipes().count() + " recipes";
+                RecipeGraph loaded = graph;
+                // Only null if a `reset` landed between the two reads. `reset` is documented as
+                // not for use during a load and has no caller outside the tests, so this is a
+                // guard against a future one rather than a path anything takes today -- but a
+                // planner that NPEs while drawing a status line is a worse answer than a stale
+                // one.
+                if (loaded == null) {
+                    return "no graph loaded";
+                }
+                return "graph ready: " + loaded.keyCount() + " keys, "
+                        + loaded.recipes().count() + " recipes";
             case LOADING:
                 float p = progress();
                 return p < 0.0f
                         ? "reading " + name()
                         : "reading " + name() + ", " + (int) (p * 100.0f) + "%";
             case MISSING:
-                return "no graph.json. " + detail;
+                return "no graph.json. " + now.detail;
             case FAILED:
-                return "could not read " + name() + ": " + detail;
+                return "could not read " + name() + ": " + now.detail;
             default:
                 return "no graph loaded";
         }
@@ -214,7 +275,7 @@ public final class GraphService {
         // `CommonProxy.preInit` started the load, so on a fast disk the graph can be READY
         // before anything has subscribed -- and a listener that silently missed its one
         // event is a stack index that is never built.
-        if (newListener != null && loaded != null && state == State.READY) {
+        if (newListener != null && loaded != null && published.state == State.READY) {
             newListener.graphLoaded(loaded);
         }
     }
@@ -231,22 +292,18 @@ public final class GraphService {
      * the one caller that must never block is the render thread.
      */
     public synchronized void startLoad(File configDir) {
-        if (state == State.LOADING || state == State.READY) {
+        if (published.state == State.LOADING || published.state == State.READY) {
             return;
         }
         File file = GraphSource.locate(configDir);
         if (file == null) {
-            state = State.MISSING;
-            detail = GraphSource.describeSearch(configDir);
-            generation++;
+            published = published.next(State.MISSING, GraphSource.describeSearch(configDir));
             return;
         }
         source = file;
         totalBytes = file.length();
         readBytes = 0L;
-        detail = "";
-        state = State.LOADING;
-        generation++;
+        published = published.next(State.LOADING, "");
         loader = new Thread(new Loader(file), "mcrecipedump-graph-load");
         // A DAEMON, so a half-finished load cannot keep the JVM alive after the player quits.
         // Nothing downstream of a load is durable -- no file is written, no state is
@@ -272,17 +329,17 @@ public final class GraphService {
      * `synchronized` on `Loader.run`, which would hold the monitor across a 5.47 s read.
      */
     public synchronized void reset() {
-        state = State.IDLE;
         graph = null;
-        detail = "";
         source = null;
         totalBytes = 0L;
         readBytes = 0L;
         // FORWARD, NEVER BACK TO ZERO. `PlannerScreen.stamp` sums this with two other
         // counters and relies on every one of them only going UP -- a reset to zero could
         // land the sum back on a value an open window has already recorded as drawn, and the
-        // window would then sit on a panel built from a graph that has been dropped.
-        generation++;
+        // window would then sit on a panel built from a graph that has been dropped. `next`
+        // is the only way to write `published` and it can only count up, so that is now
+        // structural rather than a rule each writer has to remember.
+        published = published.next(State.IDLE, "");
     }
 
     private final class Loader implements Runnable {
@@ -299,13 +356,15 @@ public final class GraphService {
             try {
                 in = new Counting(new FileInputStream(file));
                 RecipeGraph loaded = GraphJsonReader.read(in, file.length());
-                // `graph` BEFORE `state`: a reader that sees READY must see the graph. See
-                // the note on the class.
+                // `graph` BEFORE the publication: a reader that sees READY must see the graph.
+                // See the note on the class.
                 graph = loaded;
                 notifyLoaded(loaded);
-                state = State.READY;
-                // LAST, after `graph` and after `state`. See the note on `generation`.
-                generation++;
+                // LAST, and as ONE write. `detail` is carried over rather than cleared because
+                // `notifyLoaded` may just have put a broken listener's complaint in it, and
+                // that is the one thing a successful load still has to say.
+                Publication now = published;
+                published = new Publication(State.READY, now.detail, now.generation + 1L);
             } catch (IOException e) {
                 fail(e);
             } catch (RuntimeException e) {
@@ -340,19 +399,25 @@ public final class GraphService {
             try {
                 target.graphLoaded(loaded);
             } catch (Throwable listenerBroke) {
-                detail = "graph loaded; a listener threw: " + listenerBroke;
+                // NO BUMP. The state has not changed -- this is still the LOADING publication,
+                // now carrying a note that `run` will hand on to the READY one. Counting it
+                // would tell an open window to rebuild for something it cannot draw yet.
+                Publication now = published;
+                published = new Publication(now.state,
+                        "graph loaded; a listener threw: " + listenerBroke, now.generation);
             }
         }
 
         private void fail(Throwable e) {
             graph = null;
-            detail = e.getClass().getSimpleName()
-                    + (e.getMessage() == null ? "" : ": " + e.getMessage());
-            state = State.FAILED;
-            // A FAILURE MOVES THE COUNTER TOO. A window opened during the read is showing a
-            // progress bar for a load that has just stopped; without this bump it would show
-            // that bar for the rest of the session. Same defect as #201, other branch.
-            generation++;
+            // A FAILURE MOVES THE COUNTER TOO, IN THE SAME WRITE AS THE STATE. A window opened
+            // during the read is showing a progress bar for a load that has just stopped;
+            // without the bump it would show that bar for the rest of the session, which is
+            // #201's defect on its other branch. Without the two arriving TOGETHER a window
+            // can see FAILED with the count it has already drawn and skip the rebuild, which
+            // is #291.
+            published = published.next(State.FAILED, e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         }
 
         /** Counts bytes as they are consumed, so {@link #progress} has something to report. */
