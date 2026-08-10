@@ -239,6 +239,9 @@ def main():
     ap.add_argument("--seconds", type=int, default=60,
                     help="wall-clock cap per key; 0 disables. A capped key is recorded "
                          "UNMEASURED, never negative. See the Timeout docstring.")
+    ap.add_argument("--only", default=None,
+                    help="a file of keys, one per line: sweep ONLY these. For closing the "
+                         "wall-clock holes with --seconds 0 once the capped pass has run.")
     ap.add_argument("--controls", action="store_true",
                     help="run the controls and exit without sweeping")
     ap.add_argument("--enumerate-only", action="store_true")
@@ -326,10 +329,25 @@ def main():
         return 0
 
     # --- the sweep --------------------------------------------------------------
-    keys = [k for i, layer in enumerate(layers) for k in layer
-            if args.max_hop is None or i <= args.max_hop]
-    sys.stderr.write("sweeping %d keys (hops 0..%s)\n"
-                     % (len(keys), args.max_hop if args.max_hop is not None else len(layers) - 1))
+    if args.only:
+        with open(args.only) as fh:
+            wanted = [line.strip() for line in fh if line.strip()]
+        # STILL CHECKED AGAINST THE ENUMERATION. A key list is a convenience for re-running
+        # holes, not a second population: anything not in the closure would be a key this
+        # sweep never claimed to cover, and silently accepting it would put a row in the
+        # output that the coverage denominator cannot account for.
+        stray = [k for k in wanted if k not in hop_of]
+        if stray:
+            sys.stderr.write("!! --only names %d keys outside the enumerated closure: %s\n"
+                             % (len(stray), stray[:5]))
+            return 6
+        keys = wanted
+        sys.stderr.write("re-sweeping %d named keys, cap=%ss\n" % (len(keys), args.seconds))
+    else:
+        keys = [k for i, layer in enumerate(layers) for k in layer
+                if args.max_hop is None or i <= args.max_hop]
+        sys.stderr.write("sweeping %d keys (hops 0..%s)\n"
+                         % (len(keys), args.max_hop if args.max_hop is not None else len(layers) - 1))
     sys.stderr.flush()
 
     done = set()

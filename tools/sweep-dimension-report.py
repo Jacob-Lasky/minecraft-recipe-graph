@@ -17,20 +17,36 @@ SEVEN = ("craft", "raw", "dimension", "machine", "not_truncated", "oredict", "al
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rows", required=True)
+    ap.add_argument("--rows", required=True, nargs="+",
+                    help="one or more JSONL files. A LATER FILE SUPERSEDES AN EARLIER ONE "
+                         "for the same key, which is how an uncapped re-run of the timed-out "
+                         "keys replaces their holes rather than being counted twice.")
     ap.add_argument("--enum", required=True, help="the --enumerate-only JSON, for denominators")
+    ap.add_argument("--max-hop", type=int, default=None,
+                    help="scope the population to hops 0..N. The assigned question is "
+                         "hop1|hop2, and reporting it against the full 48,663-key closure "
+                         "would understate coverage of the thing actually asked.")
+    ap.add_argument("--min-gate-depth", type=int, default=2,
+                    help="how deep the gate must sit to count. `dimension-gate` already "
+                         "covers depth 0, so a candidate needs to be below it.")
     args = ap.parse_args()
 
     enum = json.load(open(args.enum))
     layers = enum["layers"]
     hop_of = enum["hop_of"]
+    if args.max_hop is not None:
+        layers = layers[:args.max_hop + 1]
 
-    rows = []
-    with open(args.rows) as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+    by_key = {}
+    for path in args.rows:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    row = json.loads(line)
+                    by_key[row["key"]] = row
+    rows = [r for r in by_key.values()
+            if args.max_hop is None or r["hop"] <= args.max_hop]
 
     by_hop = collections.Counter(r["hop"] for r in rows)
     print("POPULATION AND COVERAGE")
@@ -61,12 +77,15 @@ def main():
     print("\nMEASURED: %d of %d rows written, %d of %d in the population (%.1f%%)"
           % (len(ok), len(rows), len(ok), total_pop, 100.0 * len(ok) / total_pop))
     gated = [r for r in ok if r["held"]["dimension"]]
-    below = [r for r in gated if r["gate_below_root"]]
-    print("\nPLANS THAT REACH A GATE AT ALL: %d of %d swept" % (len(gated), len(ok)))
-    print("  of those, gate BELOW the root:  %d" % len(below))
+    below = [r for r in gated
+             if [d for d in (r["gate_depths"] or []) if d >= args.min_gate_depth]]
+    print("\nPLANS THAT REACH A GATE AT ALL: %d of %d measured" % (len(gated), len(ok)))
+    print("  of those, gate at depth >= %d:  %d" % (args.min_gate_depth, len(below)))
+    print("  (depth 0 is what `dimension-gate` already covers; depth 1 is the shape #248")
+    print("   rejected in `nuclearcraft:dust:4` for the same reason)")
 
     dist = collections.Counter(r["n_held"] for r in below)
-    print("\nCLAIMS HELD, among the %d with a gate below the root:" % len(below))
+    print("\nCLAIMS HELD, among the %d with a deep enough gate:" % len(below))
     for n in sorted(dist, reverse=True):
         print("  %d of 7: %4d" % (n, dist[n]))
 
@@ -75,7 +94,7 @@ def main():
         print("  %-14s %4d" % (tag, sum(1 for r in below if r["held"][tag])))
 
     sevens = [r for r in below if r["n_held"] == 7]
-    print("\n7-OF-7 CANDIDATES WITH A GATE BELOW THE ROOT: %d" % len(sevens))
+    print("\n7-OF-7 CANDIDATES WITH GATE DEPTH >= %d: %d" % (args.min_gate_depth, len(sevens)))
     for r in sorted(sevens, key=lambda r: (min(r["gate_depths"] or [99]), r["nodes"], r["key"])):
         print("  %-45s hop=%d depths=%s nodes=%d work=%d"
               % (r["key"], r["hop"], r["gate_depths"], r["nodes"], r["work"]))
