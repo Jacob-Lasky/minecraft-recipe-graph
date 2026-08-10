@@ -141,6 +141,14 @@ cp $SHOTS/before.png docs/shots/plan-before-pin.png
 RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-live:minecraft:hopper after \
   -Dmcrecipedump.pins=/shots/pins-demo.json
 cp $SHOTS/after.png docs/shots/plan-after-pin.png
+
+# Two rows sharing a name, SCROLLED, because no unscrolled shot can show the rule (#232).
+# The only same-name pair inside a 14-row viewport is `plan-variant-table`'s two Brown
+# Concretes and BOTH of those are at capacity, so that fixture can only ever photograph one
+# branch. `planner-collide` scrolls to the first pair with a same-label, different-key
+# partner in frame, which in `plan-fluid-chain` is Ender Pearl at row 159.
+harness/shot.sh planner-collide collide
+cp $SHOTS/collide.png docs/shots/planner-same-name.png
 ```
 
 | File | What it shows |
@@ -154,6 +162,7 @@ cp $SHOTS/after.png docs/shots/plan-after-pin.png
 | `planner-during-load.png` / `planner-after-load.png` | The calculator used a second after joining, and the same window a few seconds later, with nothing touched in between (#201). The first is the wait; the second is the plan the window replayed when the graph landed. Before #201 the second picture did not exist -- the window showed the first one until the player closed it and used the item again -- so this pair is the artifact and either half alone is equally consistent with the bug. |
 | `graph-schema-behind.png` / `plan-schema-behind.png` | The same real schema-7 graph read by a schema-8 jar, on the two surfaces that report it (#285). The Graph tab carries `format: OLD GRAPH -- it lacks what this build reads` over `graph is schema 7 and this build reads 8; redump to fix`; the planner carries `graph is schema 7, this build reads 8 -- plans may be wrong` above the tree, because the Graph tab is a screen the player who needs it does not know to open. **The `pack: MISMATCH` line above it is the harness and not a defect** -- `shot.sh` runs a 10-jar dev set against a dump of the full 406, which is what `graph: pack check DIFFERS` in the log says. Taken with `RECIPEGRAPH_ORACLE=$BUILD/graph-s7.json`, a real dump of this pack one schema behind the jar, which is `stage-instance.sh`'s pinned-proceeds case rather than a way around its guard. |
 | `planner-mid-load.png` | The panel above, half-way through the same read instead of at the start of it (#271). Put it beside `planner-during-load.png` and the pair is the number moving: `0%` when the window opens, `50%` a couple of seconds later. Before #271 the second picture could not exist -- every term of the counter the window watches moves on a state TRANSITION, and LOADING is one state, so the panel built at 0% was the panel still on screen at 99%. The run that produced this one also logged the seven windows it replaced on the way, at 23/25/31/35/40/46/50%, because one frame cannot show motion and the picture alone is not the whole artifact. The eyebrow reading `Planner` is the positive control: it is drawn by the same panel and nothing about #271 can change it, so a legible one makes the line under it a reading rather than a hope. **The panel lags the service by at most one twentieth and that is the design, not a defect** -- this capture reads `50%` while the log's `at capture` line reads `51%`, because the panel is the one built at the last step boundary. Before #271 that gap was `0%` against `37%` and unbounded. |
+| `planner-same-name.png` | BOTH BRANCHES OF #232's WIDTH RULE, on adjacent rows, which is the only arrangement that argues anything. `Ender Pearl · Crafting · 5…` is at capacity and declines the fragment, keeping the machine name it draws on master; `Ender Pearl (itemblacklist)` has an empty meta run and takes it. A shot of the taking row alone would be equally consistent with a fix that evicts the machine name to make room, which is the regression the no-eviction rule exists to prevent -- so the row that DOESN'T change is half the evidence. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
 
 `planner-stale` is `planner-live` with one extra claim, and the claim is why it is a separate

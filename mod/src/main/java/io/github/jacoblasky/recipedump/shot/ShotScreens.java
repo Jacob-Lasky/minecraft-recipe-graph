@@ -458,9 +458,6 @@ public final class ShotScreens {
                 PlannerShot.openSelectedFlow(arg);
             }
         });
-        // The shopping row's menu (#251). Registered beside the node menu because they are the
-        // same KIND of artifact and differ only in which quantity they act on, which is the
-        // distinction the issue exists to keep.
         // A chance-yielded row, scrolled into frame (#280). Its own screen rather than a flag
         // on `planner`, because the scroll is not the state a freshly opened planner is in.
         register("planner-yield", new Opener() {
@@ -469,6 +466,20 @@ public final class ShotScreens {
                 PlannerShot.openYield(arg);
             }
         });
+        // Two rows sharing a name, scrolled into frame (#232). Its own screen for
+        // `planner-yield`'s reason: every same-name pair that straddles the width rule is
+        // hundreds of rows down, so an unscrolled `planner` shot cannot photograph the rule.
+        register("planner-collide", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openCollision(arg);
+            }
+        });
+        // The shopping row's menu (#251). Registered beside the node menu because they are the
+        // same KIND of artifact and differ only in which quantity they act on, which is the
+        // distinction the issue exists to keep. THIS COMMENT BELONGS TO `row-menu`: #280 landed
+        // `planner-yield` between the two and left it describing the wrong registration, which
+        // is the failure mode of a comment that names its subject only by position.
         register("row-menu", new Opener() {
             @Override
             public void open(String arg) {

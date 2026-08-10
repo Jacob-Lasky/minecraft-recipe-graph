@@ -181,7 +181,8 @@ public class ShotScreensTest {
         List<String> expected = Arrays.asList(
                 "ae2-probe", "dump", "fixture", "flow", "flow-hit", "flow-selected",
                 "graph", "jei", "jei-keybind", "machines", "machines-detail", "machines-mods",
-                "planner", "planner-caveats", "planner-live", "planner-menu", "planner-recipes",
+                "planner", "planner-caveats", "planner-collide", "planner-live", "planner-menu",
+                "planner-recipes",
                 "planner-recovery", "planner-selected", "planner-stale", "planner-todo",
                 "planner-yield", "row-menu", "sources", "world-probe");
 
@@ -364,6 +365,18 @@ public class ShotScreensTest {
         // layout test still passes.
         assertTrue(ShotScreens.names().toString(),
                    ShotScreens.names().contains("planner-yield"));
+    }
+
+    @Test
+    public void theCollisionShotIsReachableByName() {
+        // Same shape as the yield shot one issue over (#232): the only same-name pair inside an
+        // unscrolled viewport is `plan-variant-table`'s two "Brown Concrete" rows, and both of
+        // those are at capacity, so that fixture can only ever show one branch of the width
+        // rule. Every pair that straddles it is at row 155 or beyond. `planner-collide` is the
+        // only screen that scrolls to one, so a dropped registration takes the artifact with it
+        // while every layout test still passes.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-collide"));
     }
 
     @Test

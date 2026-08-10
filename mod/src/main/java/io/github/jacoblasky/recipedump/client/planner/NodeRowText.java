@@ -254,9 +254,48 @@ public final class NodeRowText {
         if (row.why() != null && !row.why().isEmpty()) {
             parts.add(row.why());
         } else if (row.unsourced()) {
-            // NEVER BOTH, which `render._rows` states as a rule rather than a coincidence:
-            // `why` is set only on the infinite-sources list, whose rows are by definition
-            // sourced. The `else` keeps that true here rather than restating it.
+            // NEVER BOTH, which `render._rows` states as a rule rather than a coincidence.
+            //
+            // THE REASON IS LIST DISJOINTNESS, NOT WHERE `why` COMES FROM, and the previous
+            // wording here said `why` is set only on the infinite-sources list. That is not
+            // true and it matters, because it is the sentence the next person reasons from.
+            // MEASURED over every plan fixture, not reasoned:
+            //
+            //     rows carrying `why`         191   (9 from_sources, 182 machines_to_build)
+            //     rows carrying `unsourced`     6   (all of them shopping rows)
+            //     rows carrying BOTH            0
+            //
+            // RECOUNTED ON THIS BRANCH'S REBASE, and the two populations moved (188 and 7 on
+            // the base this was first written against). The zero did not, which is the only
+            // one the `else` depends on -- but a comment quoting a measurement has to be
+            // re-measured when the fixtures are regenerated, or it is quoting a set that no
+            // longer exists and reads exactly as confidently.
+            //
+            // AND THE ZERO IS EARNED, because the same walk returned 188 and 7 for the two
+            // populations separately -- a search that had stopped matching would have reported
+            // the same 0 while seeing nothing at all. The `else` is safe because those three
+            // lists are DISJOINT, not because of what sets `why`.
+            //
+            // SO THE THING THAT WOULD BREAK IT IS A `why` ON A SHOPPING ROW, which is the one
+            // list that can be unsourced -- and this `else` would then silently drop the
+            // UNSOURCED badge, the marker saying nothing in the pack can make the item. #270
+            // is about exactly that badge on a dimension-gated ore. If you add a `why` to
+            // that list, split this into two `if`s and check what a row carrying both should
+            // read as; do not assume the old sentence was the reason.
+            //
+            // THE CHAIN IS THREE WIDE NOW AND THE THIRD ARM IS UNMEASURED AGAINST THIS ONE.
+            // #262 added the `provenance` branch below, and its argument is sound on today's
+            // data: the pack saying how you get something makes "no known source" a lie. But
+            // the numbers above are `why` against `unsourced`; NOBODY HAS COUNTED A ROW
+            // CARRYING BOTH `provenance` AND `unsourced`, and if one exists it takes this arm
+            // and the provenance word is dropped in silence. #270 carries that, together with
+            // `NodeStatus.badge` testing `unsourced()` ahead of the status entry, which is the
+            // same precedence question one layer up.
+            //
+            // AND NOTE HOW THAT BRANCH ARRIVED: the paragraph above says to check the
+            // both-carrying case before adding an arm, it was in the right place, and it still
+            // did not fire -- because the next author was working in another file and had no
+            // reason to read this one. A warning only reaches someone already looking at it.
             parts.add(NodeStatus.UNSOURCED_BADGE);
         } else if (row.provenance() != null && !row.provenance().isEmpty()) {
             // THE COMPLEMENT OF THE BADGE ABOVE, NOT A SECOND ONE. #171/#262: the pack says
@@ -359,6 +398,151 @@ public final class NodeRowText {
         // A key with no label is a planner bug rather than a rendering one, but a blank row
         // hides it. The key at least says which node.
         return node.label() == null || node.label().isEmpty() ? node.key() : node.label();
+    }
+
+    /**
+     * KEY -> the shortest fragment that tells it apart from the others sharing its label. #232.
+     *
+     * ABSENT MEANS NOTHING COLLIDES WITH THIS ROW, so {@link java.util.Map#get} returning null
+     * is the whole question a caller has to ask, and there is no second lookup to forget.
+     *
+     * A FRAGMENT, NOT THE KEY, AND THE REASON IS MEASURED. The first version of this put the
+     * whole key at the front of the meta run. Measured on UNMODIFIED master over all 21
+     * fixtures, 33 of the 61 colliding tree rows ALREADY overflow their column before anything
+     * is added -- `Ender Pearl · Crafting · 5...` at 29 columns, `Iron Ore · any of 14 · min...`
+     * 15 times over. `fit` keeps the head, so the key survived and the machine name, which
+     * renders on master today, was what got dropped. Fixing a collision by deleting information
+     * the row already showed is a worse row, not a better one.
+     *
+     * TOKENS, so the fragment MEANS something. Split on ':' and '#', elide the run the
+     * colliding keys share, and take the shortest remaining run that is unique among them:
+     *
+     *     chisel:concrete_brown:1  against  minecraft:concrete:12     ->  chisel / minecraft
+     *     enderio:item_soul_vial:1#32d8050d982c  against  ...#40f3..  ->  32d8050d982c
+     *
+     * The shortest LOCALLY unique suffix would be "1" against "2", which is unique and tells a
+     * reader nothing. A disambiguator a player cannot interpret has not disambiguated the rows,
+     * it has only made them differ. The mod that owns the item is the question a player
+     * actually has when two things share a name.
+     */
+    public static java.util.Map<String, String> disambiguators(PlanNode root) {
+        java.util.Map<String, java.util.Set<String>> keysByLabel =
+                new java.util.LinkedHashMap<String, java.util.Set<String>>();
+        collectKeys(root, keysByLabel);
+        java.util.Map<String, String> fragments = new java.util.HashMap<String, String>();
+        for (java.util.Map.Entry<String, java.util.Set<String>> entry : keysByLabel.entrySet()) {
+            java.util.Set<String> keys = entry.getValue();
+            if (keys.size() < 2) {
+                continue;
+            }
+            for (String key : keys) {
+                fragments.put(key, fragment(key, keys));
+            }
+        }
+        return fragments;
+    }
+
+    private static void collectKeys(PlanNode node,
+                                    java.util.Map<String, java.util.Set<String>> into) {
+        if (node == null) {
+            return;
+        }
+        String text = label(node);
+        java.util.Set<String> keys = into.get(text);
+        if (keys == null) {
+            keys = new java.util.HashSet<String>();
+            into.put(text, keys);
+        }
+        keys.add(node.key());
+        for (PlanNode child : node.children()) {
+            collectKeys(child, into);
+        }
+    }
+
+    /** `key` split on the two characters a mod id uses to qualify itself. */
+    private static List<String> tokens(String key) {
+        List<String> out = new ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < key.length(); i++) {
+            char c = key.charAt(i);
+            if (c == ':' || c == '#') {
+                out.add(current.toString());
+                current = new StringBuilder();
+            } else {
+                current.append(c);
+            }
+        }
+        out.add(current.toString());
+        return out;
+    }
+
+    /**
+     * The shortest run of whole tokens that separates `key` from the rest of `siblings`.
+     *
+     * Leading tokens every sibling shares are dropped first: they are identical by definition,
+     * so they spend the row's width saying nothing. What is left is the first place the keys
+     * actually diverge, which is the only part a reader needs.
+     */
+    static String fragment(String key, java.util.Set<String> siblings) {
+        List<String> mine = tokens(key);
+        List<List<String>> others = new ArrayList<List<String>>();
+        for (String sibling : siblings) {
+            if (!sibling.equals(key)) {
+                others.add(tokens(sibling));
+            }
+        }
+        int shared = 0;
+        while (shared < mine.size()) {
+            boolean allMatch = true;
+            for (List<String> other : others) {
+                if (shared >= other.size() || !other.get(shared).equals(mine.get(shared))) {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (!allMatch) {
+                break;
+            }
+            shared++;
+        }
+        for (int end = shared + 1; end <= mine.size(); end++) {
+            boolean unique = true;
+            for (List<String> other : others) {
+                if (other.size() >= end && other.subList(shared, end)
+                        .equals(mine.subList(shared, end))) {
+                    unique = false;
+                    break;
+                }
+            }
+            if (unique) {
+                return join(mine.subList(shared, end), ":");
+            }
+        }
+        return key;
+    }
+
+    private static String join(List<String> parts, String separator) {
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (sb.length() > 0) {
+                sb.append(separator);
+            }
+            sb.append(part);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The label, with its disambiguating fragment in brackets when it has one.
+     *
+     * BRACKETS BESIDE THE LABEL RATHER THAN A PART OF THE META RUN, which is what makes the
+     * no-eviction rule satisfiable at all. `fit` cuts the tail, so anything placed in the meta
+     * run competes with the machine name behind it; anything placed here sits AHEAD of the cut
+     * and the rest of the line is unchanged. `RecipeGraph.bareName` already writes `Wool (3)`
+     * and `<base> (<variant>)`, so this is the house spelling rather than a new one.
+     */
+    public static String labelWith(PlanNode node, String fragment) {
+        return fragment == null ? label(node) : label(node) + " (" + fragment + ")";
     }
 
     /**

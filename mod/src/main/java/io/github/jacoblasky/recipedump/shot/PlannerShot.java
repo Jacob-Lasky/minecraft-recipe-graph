@@ -7,6 +7,7 @@ import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
 import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
+import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
 import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
@@ -104,6 +105,93 @@ final class PlannerShot {
 
     /** The fixture `planner-yield` uses when none is named: the smallest tree with a chance. */
     private static final String YIELD_FIXTURE = "plan-truncated";
+
+    /**
+     * `planner-collide`: TWO ROWS THAT SHARE A NAME, IN ONE FRAME, so #232's rule can be seen.
+     *
+     * SAME ARITHMETIC AS `planner-yield` AND THE SAME CONCLUSION. Counted over the committed
+     * fixtures, the only same-name pair inside an unscrolled viewport is `plan-variant-table`'s
+     * two "Brown Concrete" rows at indices 0 and 1 -- and BOTH of those are at capacity, so
+     * that fixture can only ever photograph one branch of the width rule. Every pair that
+     * straddles the rule sits at index 155 or beyond in a 675-to-703-row tree, off the bottom
+     * of a 14-row panel. So this scrolls, for the reason #280 scrolls: the alternative is a
+     * perfectly good picture of the wrong fourteen rows.
+     *
+     * NEAREST PAIR, NOT FIRST COLLISION, and that distinction is the whole selection rule. The
+     * first colliding row in `plan-fluid-chain` is an "Iron Ore" at index 25 whose partner is
+     * at 617 -- a shot of it shows ONE row and proves nothing about telling two apart. What a
+     * reader needs is two rows carrying one name close enough to appear together, so this picks
+     * the first row that HAS a same-label, different-key partner within a viewport of it.
+     *
+     * IT DOES NOT DECIDE WHICH BRANCH EACH ROW TAKES, deliberately. That is the width rule's
+     * job and photographing it is the point; a shot that selected rows by predicting the answer
+     * would be a picture of this method's opinion. It logs the pair it framed so the PNG can be
+     * checked against what was asked for.
+     */
+    static void openCollision(String arg) {
+        PlanView plan = fixture(arg == null || arg.trim().isEmpty() ? COLLIDE_FIXTURE : arg);
+        int row = firstNearbyCollidingRow(plan);
+        if (row < 0) {
+            // LOUDLY, for `planner-yield`'s reason: a fixture with no framable pair cannot
+            // exercise this surface, and an unscrolled tree would look like a successful shot.
+            throw new IllegalStateException(
+                    "planner-collide needs two rows sharing a label within " + VIEWPORT_ROWS
+                    + " rows of each other; " + plan.target() + " has none. "
+                    + "`plan-fluid-chain` has a pair.");
+        }
+        armNodeActions(plan.tree());
+        // THE SCHEMA CHECK IS PASSED THROUGH, NOT OMITTED. #285 added it to `plannerPanel` and
+        // this call site was written before that landed; the rebase merged both cleanly because
+        // they are in different files, and the three-argument call compiled against nothing.
+        // `openYield` above passes the same thing, and a shot that skipped it would photograph
+        // a panel with no schema banner -- a difference invisible in this fixture and wrong in
+        // the one that matters.
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan),
+                                                        PlannerScreen.schemaCheck(), SHOT_ACTIONS);
+        PlannerScreen.openPanel(panel);
+        ShotHarness.log("planner-collide: " + plan.target() + " has its first framable "
+                        + "same-name pair at row " + row + " ("
+                        + NodeRowText.label(plan.flatten().get(row))
+                        + "); scrolling it into a viewport of about " + VIEWPORT_ROWS + " rows");
+        ShotScreens.holdCapture(new ScrollToRow(panel, row));
+    }
+
+    /** The fixture `planner-collide` uses when none is named. */
+    private static final String COLLIDE_FIXTURE = "plan-fluid-chain";
+
+    /**
+     * The tree viewport in rows, as `planner-yield`'s reasoning already counts it.
+     *
+     * APPROXIMATE ON PURPOSE AND USED ONLY AS A SEARCH RADIUS. The exact height depends on how
+     * many footer lines the plan draws, and a pair four rows apart is in frame under any of
+     * them; a pair thirteen apart may not be. Erring small picks a tighter pair, which is the
+     * safe direction -- the failure this can produce is a good picture of a closer pair, not a
+     * picture missing half of what it claims.
+     */
+    static final int VIEWPORT_ROWS = 14;
+
+    /**
+     * The first row in display order that shares its label with a DIFFERENT key nearby, or -1.
+     *
+     * DIFFERENT KEY, NOT MERELY THE SAME LABEL. A tree draws the same key on every row that
+     * uses it, so `plan-fluid-chain` repeats "Iron Ore" seven times for one item; those rows
+     * SHOULD read alike and framing them would photograph correct behaviour as the bug.
+     */
+    static int firstNearbyCollidingRow(PlanView plan) {
+        java.util.List<PlanNode> rows = plan.flatten();
+        for (int i = 0; i < rows.size(); i++) {
+            String label = NodeRowText.label(rows.get(i));
+            int from = Math.max(0, i - VIEWPORT_ROWS);
+            int to = Math.min(rows.size(), i + VIEWPORT_ROWS + 1);
+            for (int j = from; j < to; j++) {
+                if (j != i && NodeRowText.label(rows.get(j)).equals(label)
+                        && !rows.get(j).key().equals(rows.get(i).key())) {
+                    return Math.min(i, j);
+                }
+            }
+        }
+        return -1;
+    }
 
     /**
      * Index of the first chance-yielded row in display order, or -1.

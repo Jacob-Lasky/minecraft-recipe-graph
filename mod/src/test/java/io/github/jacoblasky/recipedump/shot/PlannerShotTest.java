@@ -335,4 +335,59 @@ public class PlannerShotTest {
         assertSame("the same fixture must give the same picture every time",
                    picked, PlannerShot.mostAlternatives(plan.tree()));
     }
+
+    /**
+     * `planner-collide` FRAMES A PAIR, NOT MERELY A COLLIDING ROW. #232.
+     *
+     * THE ROW IT MUST NOT PICK IS THE CHEAP ONE. `plan-fluid-chain`'s first colliding row is an
+     * "Iron Ore" at index 25 whose only different-key partner is at 617 -- 592 rows away, six
+     * screens down. A selection rule that stopped at "this row's label collides" would return
+     * 25, the shot would come back a perfectly ordinary picture of one Iron Ore row, and it
+     * would prove nothing about telling two rows apart while looking like a successful shot.
+     * That is #252's failure exactly: a good picture of the wrong thing.
+     *
+     * ASSERTED THROUGH THE PLAN RATHER THAN AGAINST A REMEMBERED INDEX, because the fixture
+     * regeneration on this branch's own rebase moved every one of these numbers. What must hold
+     * is the PROPERTY -- the returned row has a same-label, different-key partner within a
+     * viewport, and no earlier row does.
+     */
+    @Test
+    public void theCollisionShotFramesTwoRowsThatShareANameRatherThanOne() {
+        PlanView plan = PlanFixtureFiles.load("plan-fluid-chain");
+        java.util.List<PlanNode> rows = plan.flatten();
+        int picked = PlannerShot.firstNearbyCollidingRow(plan);
+        assertTrue("plan-fluid-chain must still carry a framable same-name pair", picked >= 0);
+
+        assertTrue("the framed row must have a same-label, different-key partner within "
+                   + PlannerShot.VIEWPORT_ROWS + " rows; row " + picked + " has none",
+                   hasNearbyTwin(rows, picked));
+        for (int i = 0; i < picked; i++) {
+            assertTrue("row " + i + " has a framable twin and comes first, so the shot is "
+                       + "framing a later pair than it should", !hasNearbyTwin(rows, i));
+        }
+
+        // THE NEGATIVE, AND IT IS THE FIXTURE #232 WAS FILED ABOUT. `plan-same-name` carries
+        // zero colliding labels -- its six same-named keys are on the PACK and the plan routes
+        // through exactly one of them -- so a rule that returned a row here would be matching
+        // repeated ROWS of one item, which is correct behaviour photographed as a bug.
+        assertEquals(-1, PlannerShot.firstNearbyCollidingRow(
+                PlanFixtureFiles.load("plan-same-name")));
+    }
+
+    /** Whether `rows.get(index)` shares its label, but not its key, with a row in frame. */
+    private static boolean hasNearbyTwin(java.util.List<PlanNode> rows, int index) {
+        PlanNode row = rows.get(index);
+        String label = io.github.jacoblasky.recipedump.client.planner.NodeRowText.label(row);
+        int from = Math.max(0, index - PlannerShot.VIEWPORT_ROWS);
+        int to = Math.min(rows.size(), index + PlannerShot.VIEWPORT_ROWS + 1);
+        for (int j = from; j < to; j++) {
+            if (j != index
+                    && io.github.jacoblasky.recipedump.client.planner.NodeRowText
+                            .label(rows.get(j)).equals(label)
+                    && !rows.get(j).key().equals(row.key())) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

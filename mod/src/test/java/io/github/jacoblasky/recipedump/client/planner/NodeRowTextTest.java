@@ -354,6 +354,109 @@ public class NodeRowTextTest {
     }
 
     /**
+     * The fragment that tells two same-named rows apart is short and it MEANS something. #232.
+     *
+     * THE ISSUE NAMED THE ONE FIXTURE THAT DISPROVES IT. #232 says `plan-same-name` draws six
+     * rows called "Iron Plate"; it draws ONE, because its six keys are on the PACK and the plan
+     * routes through exactly one of them -- which is what that fixture exists to prove. Measured
+     * across all 21 fixtures instead: 13 labels carry more than one key, out of 2,288 tree
+     * nodes, and NONE is in `plan-same-name`. That population is asserted, and where, by
+     * `PlannerLayoutTest.twoTreeRowsForDifferentItemsAreTellableApart`; it was 17 of 2,488
+     * before the schema-8 fixture regeneration this branch rebased onto.
+     */
+    @Test
+    public void aCollidingKeyGetsTheShortestFragmentThatStillMeansSomething() {
+        PlanView plan = PlanFixtures.load("plan-variant-table");
+        java.util.Map<String, String> fragments = NodeRowText.disambiguators(plan.tree());
+        assertEquals("the mod that owns it is the question a player has",
+                     "chisel", fragments.get("chisel:concrete_brown:1"));
+        assertEquals("minecraft", fragments.get("minecraft:concrete:12"));
+
+        // NOT the shortest locally-unique suffix, which here would be "1" against "2" --
+        // unique, and telling the reader nothing at all.
+        assertFalse("a fragment must not be a bare disambiguating digit",
+                    "1".equals(fragments.get("chisel:concrete_brown:1")));
+    }
+
+    /**
+     * Two NBT variants differ only in the digest at the END, so the shared run is elided.
+     *
+     * `enderio:item_soul_vial:1#32d8050d982c` against `...#40f3a0f3892d`: everything before the
+     * digest is identical and spends width saying nothing. The fragment is the digest alone,
+     * which fits the narrowest column this panel draws.
+     */
+    @Test
+    public void twoNbtVariantsAreToldApartByTheirDigestAlone() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        java.util.Map<String, String> fragments = NodeRowText.disambiguators(plan.tree());
+        assertEquals("32d8050d982c", fragments.get("enderio:item_soul_vial:1#32d8050d982c"));
+        assertEquals("40f3a0f3892d", fragments.get("enderio:item_soul_vial:1#40f3a0f3892d"));
+
+        java.util.List<PlanNode> nodes = new java.util.ArrayList<PlanNode>();
+        flatten(plan.tree(), nodes);
+        java.util.Set<String> drawn = new java.util.HashSet<String>();
+        for (PlanNode node : nodes) {
+            if ("Soul Vial".equals(NodeRowText.label(node))) {
+                drawn.add(NodeRowText.fit(NodeRowText.labelWith(node, fragments.get(node.key())),
+                                          NARROWEST_LABEL_COLUMN_PX));
+            }
+        }
+        assertEquals("both variants must survive the narrowest column as different lines: "
+                     + drawn, 2, drawn.size());
+    }
+
+    /**
+     * The fixture #232 named has no colliding tree row at all, and that is the point of it.
+     */
+    @Test
+    public void theSameNameFixtureDrawsOneIronPlateAndNoCollisions() {
+        PlanView plan = PlanFixtures.load("plan-same-name");
+        assertTrue("plan-same-name must stay collision-free on the tree",
+                   NodeRowText.disambiguators(plan.tree()).isEmpty());
+        java.util.List<PlanNode> nodes = new java.util.ArrayList<PlanNode>();
+        flatten(plan.tree(), nodes);
+        int ironPlates = 0;
+        for (PlanNode node : nodes) {
+            if ("Iron Plate".equals(NodeRowText.label(node))) {
+                ironPlates++;
+            }
+        }
+        assertEquals("the plan routes through exactly one Iron Plate", 1, ironPlates);
+    }
+
+    /**
+     * The narrowest label column the tree draws: a badged row at the indent cap.
+     *
+     * DERIVED, NOT QUOTED, because a quoted number goes stale the moment somebody edits a
+     * constant and nothing says so. `PlannerWidgets.row` charges the icon, the quantity column
+     * and two gaps out of `CONTENT_WIDTH` before the label gets what is left, and then the
+     * badge takes its column too.
+     *
+     * THE BADGE IS ALWAYS DRAWN ON A TREE ROW, WHICH IS WHY IT IS SUBTRACTED HERE, and that is
+     * not an assumption -- `PlannerLayoutTest.aFullWidthTreeRowStillCarriesItsBadgeEvenAtThe
+     * IndentCap` asserts `badgeWidthFor(CONTENT_WIDTH, deepestStart) == BADGE`, at the worst
+     * case, and it passes. So the label column is 37 characters at depth 0 falling to 29 at the
+     * cap. A derivation that omits the badge gives 53 and 45 and is measuring a row this panel
+     * never draws.
+     */
+    private static final int NARROWEST_LABEL_COLUMN_PX =
+            PlannerWidgets.CONTENT_WIDTH
+            - (PlannerWidgets.MAX_INDENT_DEPTH * PlannerWidgets.INDENT
+               + PlannerWidgets.ICON + PlannerWidgets.GAP
+               + PlannerWidgets.QTY + PlannerWidgets.GAP)
+            - (PlannerWidgets.BADGE + PlannerWidgets.GAP);
+
+    private static void flatten(PlanNode node, java.util.List<PlanNode> into) {
+        if (node == null) {
+            return;
+        }
+        into.add(node);
+        for (PlanNode child : node.children()) {
+            flatten(child, into);
+        }
+    }
+
+    /**
      * An unsourced shopping row says so, in the same words the tree badge uses.
      *
      * ONE VOCABULARY FOR BOTH SURFACES, which is why this asserts against
