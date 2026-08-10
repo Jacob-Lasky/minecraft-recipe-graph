@@ -72,11 +72,22 @@ public final class ShotHarness {
     /**
      * Frames between opening the screen and capturing it.
      *
-     * NOT ZERO, and not a wall-clock delay either. ModularUI animates a panel open, and a
-     * capture on the opening frame catches it mid-fade -- which produces a PNG that looks
-     * like a rendering bug rather than like a timing one. Frames rather than milliseconds
-     * because llvmpipe's frame rate depends on the host's spare CPU, so a fixed sleep would
-     * settle a different amount of animation on a busy Tower than on an idle one.
+     * NOT ZERO, and not a wall-clock delay either. A capture on the opening frame catches a
+     * panel before it has finished arriving -- which produces a PNG that looks like a rendering
+     * bug rather than like a timing one. Frames rather than milliseconds because llvmpipe's
+     * frame rate depends on the host's spare CPU, so a fixed sleep would settle a different
+     * amount of work on a busy Tower than on an idle one.
+     *
+     * IT IS NOT AN OPEN ANIMATION, WHICH IS WHAT THIS SAID FOR AS LONG AS IT EXISTED.
+     * `ModularPanel` does animate a panel open, and it gates that on
+     * `ModularUI.Mods.NEA.isLoaded` -- NeverEnoughAnimations -- which is in NEITHER mod set on
+     * this host: not in `stageDevMods`' five jars and not in the 368 of `prodinstance/mods`.
+     * Measured in #271: a capture taken TWO settle frames after opening a panel, and
+     * immediately after that panel was rebuilt, came out fully opaque
+     * (`docs/shots/planner-mid-load.png`). The default is still worth having and this number is
+     * not the thing being corrected -- what is corrected is the REASON, because a wrong reason
+     * sends the next person diagnosing a thin PNG after a fade that cannot happen, and it
+     * nearly sent #271's shot down a redesign to dodge one.
      */
     private static final int DEFAULT_SETTLE_FRAMES = 20;
 

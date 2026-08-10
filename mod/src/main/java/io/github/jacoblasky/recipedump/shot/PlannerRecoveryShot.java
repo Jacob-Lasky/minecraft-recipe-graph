@@ -80,13 +80,22 @@ final class PlannerRecoveryShot {
 
     /**
      * Polls to keep holding AFTER the criteria are met, so the rebuilt panel is not caught
-     * mid-fade.
+     * half-drawn.
      *
      * The window that gets photographed here is not the one that was opened: it is a REPLACEMENT
-     * opened by `onUpdate` when the plan landed, and ModularUI animates every panel open. The
-     * harness's own settle window was spent on the first window, so without this the capture is
-     * of a tree fading in -- which reads as a rendering defect rather than as a timing one, the
-     * same trap `ShotHarness.DEFAULT_SETTLE_FRAMES` exists for.
+     * opened by `onUpdate` when the plan landed, so the harness's own settle window was spent on
+     * the FIRST window and the one being captured has had none. What that costs is a tree caught
+     * before its rows have laid out, which reads as a rendering defect rather than as a timing
+     * one -- the same trap `ShotHarness.DEFAULT_SETTLE_FRAMES` exists for.
+     *
+     * IT IS NOT A FADE, AND THIS COMMENT USED TO SAY IT WAS. "ModularUI animates every panel
+     * open" is true of ModularUI and false of both harnesses here: `ModularPanel`'s animator is
+     * gated on `ModularUI.Mods.NEA.isLoaded` -- NeverEnoughAnimations -- and that mod is in
+     * neither mod set, not in `stageDevMods`' five jars and not in the 368 of
+     * `prodinstance/mods`. Measured in #271, which captured a panel TWO settle frames after
+     * opening it and immediately after a rebuild, and got a fully opaque panel: see
+     * `docs/shots/planner-mid-load.png`. The thirty polls still earn their keep for the layout
+     * reason above; DO NOT diagnose a thin or missing panel on this host as a fade.
      */
     private static final int SETTLE_POLLS_AFTER_RECOVERY = 30;
 
@@ -249,12 +258,13 @@ final class PlannerRecoveryShot {
      *
      * <h2>RUN IT WITH `-Dmcrecipedump.shotSettleFrames=2`, AND THIS SCREEN CANNOT MAKE YOU</h2>
      *
-     * The harness's twenty settle frames exist to let a panel finish its open animation, and
-     * they are spent BEFORE the hold starts -- so on a slow rasteriser they come out of the
+     * The harness's twenty settle frames exist to let a freshly opened panel finish arriving,
+     * and they are spent BEFORE the hold starts -- so on a slow rasteriser they come out of the
      * 5.47 s this screen is trying to watch, and the hold can open on a read that is nearly
      * finished. It then sees one or two windows and reports "never redrawn", which is the
      * defect's own verdict produced by a mis-set knob. The frames buy nothing here either way:
-     * the captured frame is chosen by the hold, seconds after the settle window closed.
+     * the captured frame is chosen by the hold, seconds after the settle window closed, and
+     * this panel is two lines of text with nothing in it that takes a frame to arrive.
      *
      * IT IS A FLAG THE CALLER HAS TO REMEMBER, WHICH {@link ShotScreens#requestSettleFrames}
      * CALLS A FOOTGUN AND IS RIGHT TO. That method takes the LARGER of the screen's request and
