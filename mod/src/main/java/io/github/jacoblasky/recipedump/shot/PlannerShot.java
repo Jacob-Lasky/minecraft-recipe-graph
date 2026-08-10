@@ -358,8 +358,24 @@ final class PlannerShot {
      * traverses the diagram exactly once. A longer run simply sweeps it again rather than
      * running off the end and parking, which would report a stationary viewport as the cost of
      * panning.
+     *
+     * AND THAT EQUALITY IS ALSO WHY THE SCREENSHOT WAS BLANK FOR FIVE RUNS (#293). Traversing
+     * exactly once means ENDING WHERE YOU STARTED: both fractions are periodic in this number,
+     * so the last driven frame is at (0, 0), and `FlowCanvas.panToFraction`'s header explains
+     * that (0, 0) of this layout is the one place guaranteed to hold nothing. The timing is
+     * unaffected -- every frame in between is real -- but the photograph taken afterwards was
+     * of an empty corner, every time, deterministically.
+     *
+     * DO NOT "FIX" THAT BY DETUNING THIS NUMBER so the run stops somewhere luckier. The
+     * one-traversal property above is the reason it is 300 and it is worth more than a
+     * coincidental stopping point, which the next edit to `PASSES` or the frame budget would
+     * silently remove anyway. The capture poses instead, through
+     * {@link ShotScreens.PreCapture}.
+     *
+     * PACKAGE-PRIVATE SO THE TEST CAN DERIVE THE STOPPING FRAME rather than hard-code a 0 that
+     * stops meaning anything the moment either constant moves.
      */
-    private static final int SWEEP = 300;
+    static final int SWEEP = 300;
 
     /**
      * Horizontal passes per vertical descent.
@@ -369,8 +385,11 @@ final class PlannerShot {
      * descent is a diagonal, and a diagonal over a shape like this is a sweep of the empty
      * corner. Eight is enough that every pass crosses the leaf column while the descent is
      * still fine-grained.
+     *
+     * PACKAGE-PRIVATE FOR THE SAME REASON AS {@link #SWEEP}: the test that pins the stopping
+     * frame computes it from these two, so the two cannot drift apart from what it asserts.
      */
-    private static final int PASSES = 8;
+    static final int PASSES = 8;
 
     /**
      * `flow`, or `flow:<fixture>`: the plan as a pannable diagram.
@@ -453,6 +472,38 @@ final class PlannerShot {
                             + " of " + canvas.nodeCount() + " nodes drawn in one frame, by "
                             + "frame " + frame);
                 }
+            }
+        });
+        ShotScreens.preCapture(new ShotScreens.PreCapture() {
+            @Override
+            public void beforeCapture() {
+                canvas.panToBox(canvas.rootBox());
+                ShotHarness.log("flow: composed on the root box for the capture");
+            }
+        });
+        ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+            /**
+             * THE POSITIVE CONTROL, and it is the half of #293 that outlives the pan fix.
+             *
+             * Moving the camera onto the root stops THIS blank screenshot. It does not make a
+             * blank screenshot DETECTABLE, and that is the property that was actually missing:
+             * an empty grey rectangle is what a correct render of an empty viewport looks
+             * like, so for five artifacts across two PRs a broken probe and a true negative
+             * were the same picture and the picture was believed.
+             *
+             * A run that photographs the root and drew nothing has one of those two problems
+             * and cannot say which, so it must not pass. Zero here fails the run.
+             */
+            @Override
+            public boolean drewSomething() {
+                return canvas.drawnLastFrame() > 0;
+            }
+
+            @Override
+            public String describe() {
+                return "flow: " + canvas.drawnLastFrame() + " node(s) drawn on the composed "
+                        + "frame, centred on box " + canvas.rootBox() + " of "
+                        + canvas.nodeCount();
             }
         });
     }

@@ -186,4 +186,61 @@ public class FlowCanvasTest {
         assertTrue("two pans past the end that differ by 37 must land in different places",
                 first != canvas.getScrollArea().getScrollY().getScroll());
     }
+
+    /**
+     * Centring on a box puts that box on screen, at a depth the canvas found rather than
+     * guessed (#293).
+     *
+     * WHAT THIS DELIBERATELY DOES NOT ASSERT: that the corner the timing sweep stops in is
+     * empty. That is a fact about `PlannerShot`'s sweep against `PlannerShot.synthetic`, not
+     * about this class, and asserting it here would need a tree shaped like the harness's --
+     * which is how the first version of this test got it wrong. It used `fan`, whose leaf
+     * column is column ONE and therefore sits inside the viewport at scroll (0, 0), so the
+     * corner it claimed was empty held 400 nodes. The claim moved to `PlannerShotTest`, where
+     * it can be made against the real generator; what is left here is the mechanism.
+     *
+     * A DEEP FAN AND NOT A WIDE ONE, so `rootBox` has more than one depth to be wrong about.
+     */
+    @Test
+    public void centringOnABoxPutsItOnScreenAndTheRootIsFoundNotAssumed() {
+        PlanNode tree = PlanTrees.deepFan(3, 7);
+        FlowCanvas canvas = new FlowCanvas(tree);
+        canvas.pos(0, 0).size(300, 180);
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
+
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+        assertTrue("the fixture must be taller than the viewport or a centred box would be on "
+                + "screen whatever this method did", laid.height > canvas.getArea().height * 4);
+
+        // THE INDEX IS SEARCHED, AND WHAT IS ASSERTED IS THE DEPTH. `rootBox` returning 0
+        // today is not the property worth pinning; that whatever it returns is the shallowest
+        // box is, because that is what survives the layout walking in another order.
+        int root = canvas.rootBox();
+        assertEquals("rootBox must return a box at depth 0", 0, laid.boxes.get(root).depth);
+
+        // THE NEGATIVE FIRST, because "a box is visible after centring on it" is a claim only
+        // a viewport that was NOT already showing it can make. Park somewhere the root is not,
+        // confirm it is not, and only then centre. Without this the assertion below passes on
+        // a `panToBox` that does nothing at all.
+        canvas.panToFraction(1, 1);
+        assertFalse("the far corner must not already be showing the root, or the pan below "
+                + "proves nothing", visible(canvas, laid).contains(root));
+
+        canvas.panToBox(root);
+        assertTrue("centring on a box must put that box on screen",
+                visible(canvas, laid).contains(root));
+    }
+
+    /** Which boxes the culler says are on screen right now. */
+    private static java.util.List<Integer> visible(FlowCanvas canvas, FlowLayout.Laid laid) {
+        io.github.jacoblasky.recipedump.graph.IntArray shown = new FlowCulling(laid).visibleIn(
+                canvas.getScrollArea().getScrollX().getScroll(),
+                canvas.getScrollArea().getScrollY().getScroll(),
+                canvas.getArea().width, canvas.getArea().height);
+        java.util.List<Integer> out = new java.util.ArrayList<Integer>(shown.size());
+        for (int i = 0; i < shown.size(); i++) {
+            out.add(shown.get(i));
+        }
+        return out;
+    }
 }

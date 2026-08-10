@@ -52,6 +52,112 @@ public final class ShotScreens {
     }
 
     /**
+     * A driven screen's chance to POSE before the photograph, because where a sweep stops is
+     * not where it should be photographed.
+     *
+     * BECAUSE THE SWEEP'S PERIOD KEPT LANDING THE CAMERA ON THE EMPTIEST PIXEL IN THE PLAN.
+     * `openFlow` rasters the viewport with a period of `SWEEP` frames on both axes, and a
+     * timing run is driven for `-Dmcrecipedump.shotTimedFrames` of them. Run the two at the
+     * same number -- 300, which is what every flow timing run has used -- and the last frame
+     * is at `(300*8) % 300 == 0` across and `300 % 300 == 0` down, so the capture happens at
+     * fraction (0, 0). {@link io.github.jacoblasky.recipedump.client.flow.FlowCanvas#panToFraction}'s
+     * own header says what is at (0, 0): column zero, holding one node, "centred on the pixel
+     * midpoint of the whole diagram and therefore nowhere near the top". The photograph was
+     * therefore GUARANTEED to be an empty grey rectangle, deterministically, every run.
+     *
+     * It was. `flow-4000{,-final,-run3,-run4}.png` are four attempts at the same picture and
+     * all four are 8,723 bytes of nothing, and so is `peak-final.png`, which #183 cited as the
+     * artifact for its instrumented run. Nobody caught it because nobody opened them, and a
+     * blank panel is exactly what a correct render of an empty viewport looks like.
+     *
+     * THE FIX IS NOT TO STOP THE SWEEP AT A LUCKIER FRAME. A frame index that happens to be
+     * off the period is a coincidence one edit to `SWEEP`, `PASSES` or the frame budget
+     * silently removes, and it would fail the same way: quietly, with a plausible picture.
+     * The screen is asked instead, and it answers with a position it can justify.
+     */
+    public interface PreCapture {
+        /**
+         * Move to whatever this screen should be photographed showing. Called once, after the
+         * timed frames and before the capture, with {@link #COMPOSE_FRAMES} render ticks left
+         * to draw in.
+         */
+        void beforeCapture();
+    }
+
+    /**
+     * Render ticks between {@link PreCapture#beforeCapture} and the capture.
+     *
+     * TWO AND NOT ONE, so the frame that is photographed is not the frame the pan happened
+     * on. One is enough for `panToFraction`, which only writes scroll offsets, but it leaves
+     * no margin for a screen whose reposition costs a layout pass, and the failure that buys
+     * is a photograph of a half-moved viewport -- which is again a plausible picture.
+     */
+    public static final int COMPOSE_FRAMES = 2;
+
+    /**
+     * A screen that can tell the harness whether it actually DREW anything, so a blank
+     * screenshot fails the run instead of being filed as an artifact.
+     *
+     * BECAUSE A ZERO FROM A PROBE IS A CLAIM ABOUT THE PROBE UNTIL THE PROBE HAS BEEN MADE TO
+     * FAIL ON PURPOSE. An empty grey panel is what a correct render of an empty viewport looks
+     * like AND what a broken renderer, an unarmed seam, a bad zoom or a screen that never
+     * finished laying out looks like. There is no way to tell them apart by looking, which is
+     * why five blank flow screenshots survived across two PRs while both PR bodies described
+     * what the pictures showed.
+     *
+     * SO THE SCREEN IS ASKED, RATHER THAN THE IMAGE BEING INSPECTED. Counting non-background
+     * pixels in the PNG would catch the same cases and is the tempting version; it is worse,
+     * because it answers "is this image blank" when the question is "did the thing under test
+     * run". A panel border and a scrollbar are enough pixels to pass a pixel check, and every
+     * one of the five blank artifacts has both.
+     *
+     * A screen that registers nothing is unaffected: silence means the harness cannot tell,
+     * which is where it already was.
+     */
+    public interface Drawn {
+        /** @return false if this screen is about to be photographed showing nothing. */
+        boolean drewSomething();
+
+        /** What to log either way, so a pass is quotable and not just quiet. */
+        String describe();
+    }
+
+    /** See {@link Drawn}. Null when the screen cannot answer. */
+    private static Drawn drawn;
+
+    /**
+     * Offer the harness a way to check the capture is not blank. Call from inside an
+     * {@link Opener}. Cleared by {@link #open}, for {@link #animate}'s reason.
+     */
+    public static void expectDrawn(Drawn screen) {
+        drawn = screen;
+    }
+
+    /** What the last opened screen registered, or null. */
+    public static Drawn drawnCheck() {
+        return drawn;
+    }
+
+    /** See {@link PreCapture}. Null when the screen did not ask to pose. */
+    private static PreCapture preCapture;
+
+    /**
+     * Offer the harness a pose to strike before the capture. Call from inside an
+     * {@link Opener}.
+     *
+     * CLEARED BY {@link #open} BEFORE EVERY OPEN, for the reason {@link #animate} gives: a
+     * leftover would have one screen posed by another's idea of where the interesting part is.
+     */
+    public static void preCapture(PreCapture screen) {
+        preCapture = screen;
+    }
+
+    /** What the last opened screen registered, or null. */
+    public static PreCapture preCaptureScreen() {
+        return preCapture;
+    }
+
+    /**
      * A screen that is not finished yet, so the harness must not capture or exit.
      *
      * BECAUSE A FRAME COUNT IS A GUESS AND THIS PROJECT KEEPS PAYING FOR GUESSES.
@@ -452,6 +558,8 @@ public final class ShotScreens {
             return "no screen named '" + name + "'; known screens: " + names();
         }
         animated = null;
+        preCapture = null;
+        drawn = null;
         hold = null;
         noScreenExpected = false;
         settleRequest = 0;

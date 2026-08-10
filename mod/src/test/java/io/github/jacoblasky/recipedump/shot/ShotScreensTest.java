@@ -146,6 +146,59 @@ public class ShotScreensTest {
     }
 
     @Test
+    public void aPoseAndADrawnCheckAreRegisteredAndNeitherSurvivesTheNextScreen() {
+        final int[] posed = {0};
+        ShotScreens.register("test-pose", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+                ShotScreens.preCapture(new ShotScreens.PreCapture() {
+                    @Override
+                    public void beforeCapture() {
+                        posed[0]++;
+                    }
+                });
+                ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+                    @Override
+                    public boolean drewSomething() {
+                        return posed[0] > 0;
+                    }
+
+                    @Override
+                    public String describe() {
+                        return "posed " + posed[0] + " time(s)";
+                    }
+                });
+            }
+        });
+        assertNull(ShotScreens.open("test-pose"));
+        assertNotNull(ShotScreens.preCaptureScreen());
+        assertNotNull(ShotScreens.drawnCheck());
+
+        // THE CHECK MUST BE ABLE TO SAY NO, which is the property #293 is about. A drawn check
+        // that only ever returns true is the blank screenshot again with an extra step, so the
+        // test asserts the false BEFORE the true rather than only confirming the happy path.
+        assertFalse("nothing has posed yet, so nothing was drawn",
+                ShotScreens.drawnCheck().drewSomething());
+        ShotScreens.preCaptureScreen().beforeCapture();
+        assertTrue(ShotScreens.drawnCheck().drewSomething());
+        assertEquals(1, posed[0]);
+
+        // SAME ARGUMENT AS `animate` AND `holdCapture`. A leftover pose would move a screen
+        // that never asked to be moved, and a leftover drawn check would answer for a canvas
+        // that is no longer open -- which is a green run certified by the previous screen.
+        ShotScreens.register("test-nopose", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+        assertNull(ShotScreens.open("test-nopose"));
+        assertNull("a screen that asked for no pose must not inherit one",
+                ShotScreens.preCaptureScreen());
+        assertNull("a screen that cannot answer must not inherit an answer",
+                ShotScreens.drawnCheck());
+    }
+
+    @Test
     public void onlyAnEntryThatSaysSoIsAllowedToOpenNoScreen() {
         // THE DEFAULT MUST STAY FALSE. This flag suppresses the harness's check that an opener
         // actually did something, and for the ten entries that photograph a GUI that check is

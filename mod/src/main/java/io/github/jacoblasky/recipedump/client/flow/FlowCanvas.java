@@ -352,6 +352,47 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
     }
 
     /**
+     * Centre the viewport on box `index`, so a screenshot is of something rather than of the
+     * gap between things.
+     *
+     * THE OPPOSITE DIRECTION TO {@link #parkCursorOverBox}, and both are correct for their own
+     * job. The hit probe must NOT scroll, because scrolling a node to a fixed cursor is what
+     * made every probe land on the same empty middle and agree about nothing. A photograph has
+     * no such constraint and the reverse problem: nothing is under the camera unless something
+     * is put there.
+     *
+     * A BOX INDEX RATHER THAN A FRACTION, because a fraction is a claim about where the
+     * content is and a box is the content. `panToFraction(0, 0)` is the whole of #293: it is a
+     * position nobody checked was occupied, on a layout whose top-left corner is guaranteed
+     * empty, and it produced five identical blank screenshots that were cited as artifacts.
+     */
+    public void panToBox(int index) {
+        FlowLayout.Box box = laid.boxes.get(index);
+        panTo((int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
+                        - getArea().width / 2,
+                (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
+                        - getArea().height / 2);
+    }
+
+    /**
+     * The index of the shallowest box, which is the root.
+     *
+     * SEARCHED RATHER THAN ASSUMED TO BE ZERO. It is zero today, and a caller that hard-codes
+     * that is a caller which keeps compiling and starts photographing the wrong thing the day
+     * the layout walks in another order -- the silent-wrong-picture failure this whole area
+     * has already paid for once.
+     */
+    public int rootBox() {
+        int best = 0;
+        for (int i = 1; i < laid.size(); i++) {
+            if (laid.boxes.get(i).depth < laid.boxes.get(best).depth) {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /**
      * Put the real cursor over the centre of box `index`. Returns false if it is off screen.
      *
      * FOR THE HIT-TEST PROBE, and it is the first thing in this project to move a mouse.

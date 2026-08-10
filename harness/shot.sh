@@ -210,6 +210,13 @@ if [ "$STATUS" -ne 0 ]; then
     # valid capture on disk -- see `ShotHarness.EXIT_VERDICT_FAILED`. Tested by presence rather
     # than by exit code because `runClient` is a Gradle task, so every harness code arrives
     # here as Gradle's own 1; the log says which, and so does the PNG.
+    #
+    # `ShotHarness.EXIT_DREW_NOTHING` (#293) arrives here the same way and is the case where
+    # the PNG is NOT worth believing: the screen photographed an empty viewport and said so.
+    # DO NOT soften this branch into "the picture is fine, just read the log" -- five blank
+    # flow screenshots were cited as artifacts in two PR bodies precisely because a blank panel
+    # and a correct render of nothing are the same image. The log line to look for is
+    # `DRAWN CHECK FAILED`.
     if [ -s "$OUT_PNG" ]; then
         echo "shot.sh: FAILED after ${ELAPSED}s (exit $STATUS); the PNG at $OUT_PNG IS this" \
              "run's -- read the verdict in the log above before believing the picture" >&2
