@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -236,6 +237,86 @@ public class ProvenanceFixtureTest {
         }
         assertEquals("the fixture must exercise all three kinds and the unknown-kind fallback",
                 4, seen);
+    }
+
+    @Test
+    public void noShoppingRowCarriesBothMarksEither() {
+        // #298, AND IT IS THE SURFACE WITH THE DISAGREEING ORDER. The assertion above walks
+        // `result.tree`, which is what `NodeStatus.badge` renders, and that method tests
+        // provenance FIRST. `NodeRowText.entryLine` renders a shopping ROW and tests
+        // unsourced first. So on a row carrying both, the tree would say "puzzle" and the
+        // list would say "no known source" about one key -- and until now the half with the
+        // wrong-way ordering was the half with no assertion.
+        //
+        // NOT REDUNDANT WITH THE TREE WALK, because `Solver.shopping_row` RECOMPUTES the mark
+        // off the graph rather than copying it from the node -- deliberately, so the list and
+        // the tree cannot disagree about a key. Two readers of one predicate need two
+        // assertions; one of them passing says nothing about the other.
+        //
+        // THE COUNTS ARE GUARDS. An empty shopping list satisfies "no row carries both"
+        // perfectly, and so does one that has quietly stopped carrying either mark.
+        int declared = 0;
+        int unsourced = 0;
+        for (JsonElement row : fixture.getAsJsonObject("result").getAsJsonArray("shopping_list")) {
+            JsonObject o = row.getAsJsonObject();
+            if (o.has("provenance")) {
+                declared++;
+            }
+            if (o.has("unsourced")) {
+                unsourced++;
+            }
+        }
+        assertEquals("the shopping list must carry all three kinds and the unknown-kind "
+                + "fallback, or this assertion has nothing to be about", 4, declared);
+        assertEquals("the shopping list must also carry an UNSOURCED row, or only half of the "
+                + "pair this is about is present", 1, unsourced);
+        assertEquals("a row carrying both marks makes the two renderers disagree about one key",
+                new ArrayList<String>(),
+                rowsCarryingBothMarks(
+                        fixture.getAsJsonObject("result").getAsJsonArray("shopping_list")));
+    }
+
+    @Test
+    public void theBothMarksScreenCanActuallySeeARowThatCarriesBoth() {
+        // THE POSITIVE CONTROL, because the assertion above is a search for something absent.
+        // A screen over rows that never carry both is green whether or not it can detect one.
+        //
+        // THROUGH `rowsCarryingBothMarks`, WHICH IS WHY THE HELPER EXISTS. A control that
+        // re-spelled the condition would prove the CONTROL's copy works and say nothing about
+        // the copy the real assertion runs. `Unsourced.reachableForm` is in this codebase as
+        // one function for exactly that reason. Mirrors
+        // `test_the_both_marks_screen_can_actually_see_a_row_that_carries_both` in python.
+        JsonArray rows = new JsonArray();
+        JsonObject ordinary = new JsonObject();
+        ordinary.addProperty("key", "mod:ordinary");
+        rows.add(ordinary);
+        JsonObject planted = new JsonObject();
+        planted.addProperty("key", "contenttweaker:planted_impossible_row");
+        planted.addProperty("provenance", "puzzle");
+        planted.addProperty("unsourced", true);
+        rows.add(planted);
+
+        List<String> both = rowsCarryingBothMarks(rows);
+        assertEquals(1, both.size());
+        assertEquals("contenttweaker:planted_impossible_row", both.get(0));
+    }
+
+    /**
+     * Every row carrying BOTH the unsourced mark and a provenance, by key. #298.
+     *
+     * ONE SPELLING, EXERCISED FROM BOTH SIDES -- the assertion that this is empty and the
+     * control that proves it need not be must run the same code, or the control is green
+     * about its own copy. Keys rather than rows, so a failure names the item to go and look at.
+     */
+    private static List<String> rowsCarryingBothMarks(JsonArray rows) {
+        List<String> out = new ArrayList<String>();
+        for (JsonElement row : rows) {
+            JsonObject o = row.getAsJsonObject();
+            if (o.has("provenance") && o.has("unsourced")) {
+                out.add(o.get("key").getAsString());
+            }
+        }
+        return out;
     }
 
     // -- helpers ---------------------------------------------------------------------------

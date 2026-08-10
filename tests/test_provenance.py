@@ -505,6 +505,20 @@ class BuildWiresItInTest(unittest.TestCase):
         self.assertEqual(g.declared_provenance, Graph.load(out).declared_provenance)
 
 
+def _rows_with_both(rows):
+    """Every row carrying BOTH the unsourced mark and a provenance, by key. #298.
+
+    ONE SPELLING, EXERCISED FROM BOTH SIDES. The assertion that this returns nothing and the
+    control that proves it can return something must run the same code, or the control is
+    green about its own copy while the real screen quietly stops detecting anything. That is
+    the `reachable_form` drift restated: a second spelling of a predicate is a second thing
+    to be wrong, and nothing says which one a passing test exercised.
+
+    Keys rather than rows, because a failure has to name the item a reader can go and look at.
+    """
+    return [row["key"] for row in rows if row.get("provenance") and row.get("unsourced")]
+
+
 class TheSyntheticGraphTheJavaPortIsHeldToTest(unittest.TestCase):
     """`tests/fixtures/provenance.json`, which is this feature's cross-language contract. #262.
 
@@ -591,6 +605,56 @@ class TheSyntheticGraphTheJavaPortIsHeldToTest(unittest.TestCase):
         self.assertNotIn(dead[0], graph.pack_authored_unsourced)
         self.assertNotIn(dead[0], graph.pack_authored_declared)
         self.assertNotIn(dead[0], self.doc["costs"])
+
+    def test_no_shopping_row_carries_both_marks(self):
+        """#298, on the surface that has no other assertion and the WRONG precedence.
+
+        THE TWO SURFACES ORDER THIS PAIR OPPOSITELY. `NodeStatus.badge` tests provenance
+        first; `NodeRowText.entryLine` tests unsourced first, so on a row carrying both the
+        tree would say "puzzle" and the shopping list would say "no known source" about one
+        key. The tree half is already pinned -- `ProvenanceFixtureTest`'s
+        `theDeclaredLeafIsNotAlsoBadgedUnsourced` walks `result.tree` -- and the ROW half,
+        which is the one whose ordering disagrees, had nothing.
+
+        `shopping_row` RECOMPUTES THE MARK RATHER THAN COPYING THE NODE'S, deliberately, so
+        the list and the tree cannot disagree about a key. That is also why a tree-only
+        assertion does not cover this: the two surfaces run the predicate twice, and it is the
+        second reader that the second ordering belongs to.
+
+        THE COUNTS ARE GUARDS AND NOT DECORATION. Both marks must be PRESENT on this list, or
+        an empty shopping list satisfies "no row carries both" perfectly.
+        """
+        rows = self.doc["result"]["shopping_list"]
+        declared = [r for r in rows if r.get("provenance")]
+        unsourced = [r for r in rows if r.get("unsourced")]
+        self.assertEqual(4, len(declared),
+                         "the fixture must put all three kinds and the unknown one on the "
+                         "shopping list, or this assertion has nothing to be about")
+        self.assertEqual(1, len(unsourced),
+                         "the fixture must also carry an UNSOURCED row, or the pair this is "
+                         "about is only half present")
+        self.assertEqual([], _rows_with_both(rows),
+                         "a row carrying both marks makes the two renderers disagree about "
+                         "one key")
+
+    def test_the_both_marks_screen_can_actually_see_a_row_that_carries_both(self):
+        """THE POSITIVE CONTROL, because the test above is a search for something absent.
+
+        A screen over rows that never carry both is green whether or not it can detect one,
+        so this feeds it one it must reject and the zero above becomes earned.
+
+        THROUGH `_rows_with_both`, WHICH IS THE WHOLE POINT OF THE HELPER EXISTING. A control
+        that re-spelled the predicate would prove that the CONTROL's copy works and say
+        nothing about the copy the real assertion uses -- the two-spellings drift that
+        `reachable_form` cost this repo two releases. One function, exercised from both sides.
+        """
+        rows = list(self.doc["result"]["shopping_list"])
+        planted = dict(rows[0])
+        planted["key"] = "contenttweaker:planted_impossible_row"
+        planted["provenance"] = "puzzle"
+        planted["unsourced"] = True
+        rows.append(planted)
+        self.assertEqual(["contenttweaker:planted_impossible_row"], _rows_with_both(rows))
 
     def test_it_covers_all_three_kinds_and_the_unknown_one(self):
         # A fixture that quietly stopped exercising a kind would leave the Java band for it
