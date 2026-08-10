@@ -80,8 +80,15 @@ final class BrowseShot {
         // reviewer seeing red in the screenshot needs the log line to tell that apart from a
         // real defect. See harness/README.md.
         ShotHarness.log("graph: pack check " + check.verdict() + " -- " + check.detail());
+        GraphFacts.SchemaCheck schema = GraphFacts.checkSchema(
+                facts.dumpSchema(), io.github.jacoblasky.recipedump.DumpCommand.SCHEMA);
+        // AND THE SCHEMA VERDICT, for the same reason one line up and with a sharper edge: the
+        // oracle graphs on this host have run several schemas behind the jar for weeks (#279),
+        // so `OLD GRAPH` in the picture is usually the truth about the harness rather than a
+        // defect -- and the only way to tell is a log line naming both numbers.
+        ShotHarness.log("graph: schema check " + schema.verdict() + " -- " + schema.detail());
         BrowseScreen.openPanel(GraphWidgets.graphPanel(
-                facts, path, check, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH)));
+                facts, path, check, schema, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH)));
     }
 
     /**

@@ -65,7 +65,8 @@ public final class GraphWidgets {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static ModularPanel graphPanel(GraphFacts facts, String path,
-                                          GraphFacts.PackCheck check, BrowseActions nav) {
+                                          GraphFacts.PackCheck check,
+                                          GraphFacts.SchemaCheck schema, BrowseActions nav) {
         PlannerWidgets.Group body = new PlannerWidgets.Group();
         body.pos(PADDING, PADDING);
         body.size(CONTENT_WIDTH, PANEL_HEIGHT - PADDING * 2);
@@ -83,6 +84,26 @@ public final class GraphWidgets {
                            .pos(0, y));
         y += LINE;
         body.child(PlannerWidgets.line(check == null ? "" : check.detail(), CONTENT_WIDTH,
+                                       NodeStatus.INK_MUTED).pos(0, y));
+        y += LINE;
+
+        // THE SECOND VERDICT, AND IT IS A DIFFERENT QUESTION FROM THE FIRST (#285). The pack
+        // check asks whether the dump saw the jars this game runs; this asks whether the FORMAT
+        // it wrote is the one this build reads. Both can be wrong independently -- a dump taken
+        // from the right pack by a mod two versions old passes the first and fails this -- so
+        // one verdict cannot stand in for the other.
+        //
+        // THE SAME TWO-LINE SHAPE AS THE PACK CHECK, verdict word then numbers and fix, because
+        // they are two answers to one question and a reader comparing them should not have to
+        // learn a second layout. It costs the by-source table one row and that was the trade
+        // made knowingly: the table is a fingerprint, and a verdict nobody can see is the
+        // defect this issue exists to fix.
+        //
+        // MATCHES DRAWS TOO. A screen has no equivalent of silence -- see `GraphFacts.Verdict`.
+        body.child(PlannerWidgets.line(schemaLine(schema), CONTENT_WIDTH, schemaColour(schema))
+                           .pos(0, y));
+        y += LINE;
+        body.child(PlannerWidgets.line(schema == null ? "" : schema.detail(), CONTENT_WIDTH,
                                        NodeStatus.INK_MUTED).pos(0, y));
         y += LINE + 1;
 
@@ -167,6 +188,51 @@ public final class GraphWidgets {
             case MATCHES:
                 return NodeStatus.INK_OK;
             case DIFFERS:
+                return NodeStatus.INK_NEED;
+            default:
+                return NodeStatus.INK_WARN;
+        }
+    }
+
+    /**
+     * The schema verdict, as a word a reader cannot misread.
+     *
+     * `format:` AND NOT `schema:`, because the line four below it already says
+     * "dumped by: 0.10.0 -- schema 7" and two lines both leading with the same word read as one
+     * statement repeated rather than as a verdict and its evidence. The reader is being told
+     * about the FORMAT of the file; the number is what the format is called.
+     *
+     * A DISTINCT WORD PER STATE, as {@link #verdictLine} argues at length -- and here the word
+     * carries more than the colour could. `OLD GRAPH` and `OLD MOD` name WHICH ARTIFACT is
+     * behind, which is the half the player acts on and the half a shared red would erase; the
+     * numbers and the fix are on `detail()` under it, exactly as the pack check splits them.
+     */
+    static String schemaLine(GraphFacts.SchemaCheck schema) {
+        if (schema == null) {
+            return "format: UNCHECKED";
+        }
+        switch (schema.verdict()) {
+            case MATCHES:
+                return "format: OK";
+            case BEHIND:
+                return "format: OLD GRAPH -- it lacks what this build reads";
+            case AHEAD:
+                return "format: OLD MOD -- this build skips what it carries";
+            default:
+                return "format: UNCHECKED";
+        }
+    }
+
+    /** Green, red, amber, on {@link #verdictColour}'s rules. */
+    static int schemaColour(GraphFacts.SchemaCheck schema) {
+        if (schema == null) {
+            return NodeStatus.INK_WARN;
+        }
+        switch (schema.verdict()) {
+            case MATCHES:
+                return NodeStatus.INK_OK;
+            case BEHIND:
+            case AHEAD:
                 return NodeStatus.INK_NEED;
             default:
                 return NodeStatus.INK_WARN;

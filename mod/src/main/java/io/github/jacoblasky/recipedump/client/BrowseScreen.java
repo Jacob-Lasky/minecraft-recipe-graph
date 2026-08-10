@@ -152,7 +152,12 @@ public final class BrowseScreen {
             java.util.List<String> live = DumpCommand.activeModIds();
             GraphFacts.PackCheck check = facts.checkAgainst(
                     DumpCommand.modDigest(live), live == null ? 0 : live.size());
-            return avoidedByJei(GraphWidgets.graphPanel(facts, path, check, navFor(tab)));
+            // AND THE SECOND HALF OF THE SAME QUESTION (#285). `DumpCommand.SCHEMA` is this
+            // build's own dump format and lives beside `activeModIds` for the same reason: the
+            // live half is measured here, the comparison is decided in `plan/`.
+            GraphFacts.SchemaCheck schema =
+                    GraphFacts.checkSchema(facts.dumpSchema(), DumpCommand.SCHEMA);
+            return avoidedByJei(GraphWidgets.graphPanel(facts, path, check, schema, navFor(tab)));
         }
         return avoidedByJei(SourcesWidgets.sourcesPanel(
                 ScenarioService.get().sources(), navFor(tab)));

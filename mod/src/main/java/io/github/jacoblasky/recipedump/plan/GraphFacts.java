@@ -23,11 +23,16 @@ import java.util.Map;
  * the operator picked the file explicitly. In game `graph.json` is a file the player copied
  * into `config/mcrecipedump/`, where -- as `GraphSource`'s own header notes -- it "survives a
  * pack update", so the live failure is a STALE graph confidently answering for a pack that has
- * moved underneath it. Nothing in the mod reports that today.
+ * moved underneath it.
  *
  * So this carries identity first and size second: the instance the dump came from, the mod
  * version that wrote it, the schema, and then the totals as a fingerprint rather than as
  * statistics. Two graphs are told apart by those numbers far more readably than by a sha.
+ *
+ * AND IT ANSWERS THE QUESTION RATHER THAN ONLY SUPPLYING THE EVIDENCE FOR IT, in two checks
+ * that a caller measures the live half of and this decides: {@link #checkAgainst} against the
+ * running jar set (#255) and {@link #checkSchema} against this build's own dump format (#285).
+ * Both exist because a player will not diff two numbers they were not told to compare.
  *
  * WHAT IS DELIBERATELY DROPPED: `stats_page`'s twenty-five biggest categories. That is a
  * maintainer's curiosity in a 1,424px browser table and noise on a 388px panel, and it is
@@ -225,6 +230,139 @@ public final class GraphFacts {
         // direction they are wrong in.
         return new PackCheck(Verdict.DIFFERS,
                 "built from " + modCount + " mods; this game runs " + liveCount);
+    }
+
+    /**
+     * How the graph's dump format compares with the one this build of the mod reads.
+     *
+     * FOUR STATES, AND THE TWO MISMATCHES ARE NOT ONE STATE WITH A SIGN. `GraphJsonReader`
+     * skips a top-level section it does not recognise, and its own note says why -- "a reader
+     * that refuses to load a graph carrying a field it does not use is a self-inflicted
+     * outage". That tolerance is what makes the two directions different failures rather than
+     * one:
+     *
+     *   BEHIND -- the graph is older. The sections this build reads are simply NOT THERE, so
+     *             every key they would have supplied answers -1, which the planner reports as
+     *             "not in the pack" rather than as an error (#279 measured exactly this).
+     *             The player redumps.
+     *   AHEAD  -- the graph is newer. The data IS there and this build silently steps over
+     *             it, by design. The player updates the mod; redumping would make it worse.
+     *
+     * Naming one "mismatch" would leave a reader guessing which of two opposite fixes to
+     * apply, and would put the tolerant reader's deliberate behaviour on the wrong side of the
+     * argument.
+     *
+     * AND NEITHER ONE REFUSES TO LOAD. Refusing would satisfy the harness rule from #279 --
+     * absent is a choice, behind is an accident -- but that rule was written for a prodshot,
+     * where a refusal costs one queued boot. Here it costs a player their planner in the
+     * middle of a session, and for AHEAD it would directly contradict the constraint
+     * `GraphJsonReader` records above. So the mod loads and SAYS SO where the wrong answer is
+     * read; see `PlannerWidgets.staleGraphWarning`.
+     */
+    public enum SchemaVerdict {
+        /** The dump wrote the format this build reads. */
+        MATCHES,
+        /** The graph is OLDER than this build; sections this build reads are absent. */
+        BEHIND,
+        /** The graph is NEWER than this build; the reader steps over what it does not know. */
+        AHEAD,
+        /** The graph records no format number, so nothing could be compared. */
+        UNRECORDED
+    }
+
+    /**
+     * A schema verdict, the sentence that explains it, and the two numbers behind both.
+     *
+     * IT CARRIES THE NUMBERS AS WELL AS THE SENTENCE, unlike {@link PackCheck}, and that is not
+     * symmetry going wrong. There are two surfaces (#285) and they have different budgets: the
+     * Graph tab draws `detail()` under a verdict word, and the planner has one 64-character line
+     * above the tree in which the fix does not fit but the numbers must. Handing the second one
+     * the two ints beats either re-deriving them -- which is a second comparison to keep in step
+     * with this one -- or parsing them back out of a sentence.
+     */
+    public static final class SchemaCheck {
+
+        private final SchemaVerdict verdict;
+        private final String detail;
+        private final int graphSchema;
+        private final int jarSchema;
+
+        SchemaCheck(SchemaVerdict verdict, String detail, int graphSchema, int jarSchema) {
+            this.verdict = verdict;
+            this.detail = detail;
+            this.graphSchema = graphSchema;
+            this.jarSchema = jarSchema;
+        }
+
+        public SchemaVerdict verdict() {
+            return verdict;
+        }
+
+        /** Shown verbatim. Never empty, including for {@link SchemaVerdict#MATCHES}. */
+        public String detail() {
+            return detail;
+        }
+
+        /** What the graph says it is, as read; 0 or less when it records nothing. */
+        public int graphSchema() {
+            return graphSchema;
+        }
+
+        /** What this build reads, as the caller reported it. */
+        public int jarSchema() {
+            return jarSchema;
+        }
+    }
+
+    /**
+     * Compare the format a graph was written in against the one this build reads.
+     *
+     * THE FIELD WAS READ AND NEVER COMPARED UNTIL #285. `GraphJsonReader` has parsed
+     * `dump_schema` since the first port and `DumpCommand.SCHEMA` has been the mod's own
+     * number the whole time, and nothing in the mod put the two side by side -- so a graph
+     * built by a different version loaded cleanly and planned confidently. `stage-instance.sh`
+     * catches that for the harness. A player has no `stage-instance.sh`.
+     *
+     * STATIC, AND BOTH HALVES ARE ARGUMENTS, which is deliberate on two counts. The jar's
+     * number lives on `DumpCommand`, which imports Minecraft and JEI -- `plan/` may not name
+     * it and `tools/ci-java.sh` could not compile it, the same split `checkAgainst` makes for
+     * the running mod list. And the graph's number is passed rather than read off a
+     * {@link GraphFacts} instance because the planner needs this check on every plan, while
+     * building a `GraphFacts` walks all 124,467 recipes; a check that costs that much would be
+     * a check somebody moves off the hot path and thereby switches off.
+     *
+     * DO NOT ADD AN INSTANCE OVERLOAD that fills in `dumpSchema` for you. It is a second way
+     * to ask one question -- the thing `PlanCaveats` refuses an `any()` over -- and the one it
+     * would save a caller is `facts.dumpSchema()`.
+     *
+     * @param graphSchema the graph's `dump_schema`, or 0 when it records none
+     * @param jarSchema   this build's `DumpCommand.SCHEMA`
+     */
+    public static SchemaCheck checkSchema(int graphSchema, int jarSchema) {
+        if (graphSchema <= 0) {
+            // NOT SILENCE, for `checkAgainst`'s reason one field over: whatever is drawn for
+            // the un-compared case is read as a pass. `GraphBuilder` leaves this 0 both when
+            // the field is absent and when it is null, and neither is a format number.
+            return new SchemaCheck(SchemaVerdict.UNRECORDED,
+                    "this graph records no schema, so nothing to compare against",
+                    graphSchema, jarSchema);
+        }
+        if (graphSchema == jarSchema) {
+            return new SchemaCheck(SchemaVerdict.MATCHES,
+                    "schema " + graphSchema + ", which is the format this build reads",
+                    graphSchema, jarSchema);
+        }
+        // BOTH NUMBERS IN BOTH SENTENCES, and a DIFFERENT fix named in each. The counts are
+        // what let a reader tell the two directions apart at a glance, and the fix is the
+        // half they can act on -- see the note on `SchemaVerdict`.
+        if (graphSchema < jarSchema) {
+            return new SchemaCheck(SchemaVerdict.BEHIND,
+                    "graph is schema " + graphSchema + " and this build reads " + jarSchema
+                            + "; redump to fix", graphSchema, jarSchema);
+        }
+        return new SchemaCheck(SchemaVerdict.AHEAD,
+                "graph is schema " + graphSchema + " and this build reads " + jarSchema
+                        + "; update the mod", graphSchema, jarSchema);
     }
 
     /** The recorded jar-set digest, or "" when the dump predates schema 6. */

@@ -112,7 +112,13 @@ public class BrowseLayoutTest {
 
     private static ModularPanel laidOutGraph(GraphFacts facts, String path,
                                              GraphFacts.PackCheck check) {
-        ModularPanel panel = GraphWidgets.graphPanel(facts, path, check, BrowseActions.NONE);
+        // THE SCHEMA CHECK IS RESOLVED FROM THE FACTS RATHER THAN PASSED NULL, so these layout
+        // assertions run over the panel a player sees. `checkSchema` never answers null, and a
+        // null here would exercise the one branch the live screen cannot reach.
+        ModularPanel panel = GraphWidgets.graphPanel(
+                facts, path, check,
+                GraphFacts.checkSchema(facts.dumpSchema(), facts.dumpSchema()),
+                BrowseActions.NONE);
         HeadlessLayout.layOut(panel);
         return panel;
     }
@@ -385,5 +391,65 @@ public class BrowseLayoutTest {
                         GraphWidgets.verdictLine(unchecked));
         assertNotEquals(GraphWidgets.verdictColour(matching),
                         GraphWidgets.verdictColour(unchecked));
+    }
+
+    @Test
+    public void everySchemaVerdictLaysOutAndNamesWhichArtifactIsBehind() {
+        // #285. FOUR STATES AND FOUR DIFFERENT WORDS: the fix for BEHIND is to redump and the
+        // fix for AHEAD is to update the mod, so a shared "MISMATCH" would leave a reader
+        // holding two opposite instructions. UNRECORDED must not read as OK, for the reason
+        // `GraphFacts.Verdict` gives about a screen having no equivalent of silence.
+        GraphFacts facts = stampedFacts("recorded", 367, "mod:a", "mod:b");
+        GraphFacts.SchemaCheck[] checks = {
+            GraphFacts.checkSchema(8, 8),   // MATCHES
+            GraphFacts.checkSchema(7, 8),   // BEHIND
+            GraphFacts.checkSchema(9, 8),   // AHEAD
+            GraphFacts.checkSchema(0, 8),   // UNRECORDED
+        };
+        assertEquals("the fixture must produce every verdict, or the comparison is vacuous",
+                     GraphFacts.SchemaVerdict.values().length, checks.length);
+        List<String> lines = new ArrayList<String>();
+        for (GraphFacts.SchemaCheck check : checks) {
+            ModularPanel panel = GraphWidgets.graphPanel(
+                    facts, LONG_PATH, facts.checkAgainst("recorded", 367), check,
+                    BrowseActions.NONE);
+            HeadlessLayout.layOut(panel);
+            assertNothingOverflowsSideways(panel);
+            assertChromeStaysInside(panel);
+            assertTrue("the panel must draw the verdict: " + GraphWidgets.schemaLine(check),
+                       texts(panel).contains(GraphWidgets.schemaLine(check)));
+            assertTrue("and the numbers under it: " + check.detail(),
+                       texts(panel).contains(check.detail()));
+            lines.add(GraphWidgets.schemaLine(check));
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            for (int j = i + 1; j < lines.size(); j++) {
+                assertNotEquals(lines.get(i), lines.get(j));
+            }
+        }
+    }
+
+    @Test
+    public void aStaleFormatIsNeverDrawnInTheColourOfAGoodOne() {
+        // The colour half of the same rule. A BEHIND graph sharing MATCHES' green would make
+        // the one state a player must act on the one that looks fine at a glance.
+        assertNotEquals(GraphWidgets.schemaColour(GraphFacts.checkSchema(8, 8)),
+                        GraphWidgets.schemaColour(GraphFacts.checkSchema(7, 8)));
+        assertNotEquals(GraphWidgets.schemaColour(GraphFacts.checkSchema(8, 8)),
+                        GraphWidgets.schemaColour(GraphFacts.checkSchema(9, 8)));
+        assertNotEquals(GraphWidgets.schemaColour(GraphFacts.checkSchema(8, 8)),
+                        GraphWidgets.schemaColour(GraphFacts.checkSchema(0, 8)));
+    }
+
+    /** Every string the panel's text widgets ended up holding, after truncation. */
+    private static List<String> texts(ModularPanel panel) {
+        List<String> lines = new ArrayList<String>();
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
+                lines.add(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
+                                  .getKey().getFormatted());
+            }
+        }
+        return lines;
     }
 }
