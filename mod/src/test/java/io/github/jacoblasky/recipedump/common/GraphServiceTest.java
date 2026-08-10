@@ -427,8 +427,13 @@ public class GraphServiceTest {
             }
         }
 
-        assertEquals("the reader never caught a single transition, so this test proved nothing"
-                     + " about the seam it exists to watch", loads, observed);
+        // A SHORTFALL IS A FAILURE, NOT A SMALLER SAMPLE. Every load the reader missed is a
+        // load this test did not check, and quietly averaging over the ones it did catch is how
+        // an instrument reports a comfortable number it never earned. The message says the
+        // count rather than claiming none, because "caught 28 of 30" and "caught 0 of 30" are
+        // different problems -- the first is a starved thread, the second is a broken test.
+        assertEquals("the reader caught " + observed + " of " + loads + " transitions, so this"
+                     + " run did not watch the seam it exists to watch", loads, observed);
         assertEquals("a reader that sees the load has stopped must see the counter that says"
                      + " so; " + torn + " of " + observed + " observations had the new state"
                      + " beside the old count", 0, torn);

@@ -48,6 +48,14 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
  * the counter disagree, because there is no instant at which only one of them has been written.
  * DO NOT split this back into separate fields to save an allocation. It is one small object per
  * TRANSITION -- a handful per session, none per frame -- and every read stays allocation-free.
+ *
+ * THIS IS THE SECOND TIME THIS REPOSITORY HAS PAID FOR TWO UNORDERED FIELDS, and the first fix
+ * is the shape of this one: `client.jei.JeiBridge` holds the graph and its stack index as one
+ * object behind one volatile field, because once the index began being built on THIS class's
+ * loader thread, two fields let the client thread see the new graph beside the old index and
+ * every key resolved -- to the wrong item. Same seam, same thread pair, same answer. The note
+ * on {@link #graph} already forbids handing those two out separately; this extends the rule to
+ * the fields describing the transition itself.
  */
 public final class GraphService {
 
@@ -59,9 +67,9 @@ public final class GraphService {
         LOADING,
         /** {@link #graph} is usable. */
         READY,
-        /** No file at any candidate path. {@link #detail} says where it looked. */
+        /** No file at any candidate path. {@link GraphService#detail()} says where it looked. */
         MISSING,
-        /** A file was found and could not be read. {@link #detail} says why. */
+        /** A file was found and could not be read. {@link GraphService#detail()} says why. */
         FAILED
     }
 
@@ -149,7 +157,7 @@ public final class GraphService {
     }
 
     /**
-     * The loaded graph, or null unless {@link #state} is READY.
+     * The loaded graph, or null unless {@link #state()} is READY.
      *
      * NULL RATHER THAN AN EMPTY GRAPH, because an empty one answers `keyId(...) == -1` for
      * every key, which is indistinguishable from "loaded, and this item is not in it". One
@@ -288,7 +296,7 @@ public final class GraphService {
      * whether it is the first. Two concurrent reads would be 90 MB of transient garbage and
      * two 45 MB graphs, one of which gets dropped.
      *
-     * Returns immediately. Callers poll {@link #state}; nothing here blocks a caller, because
+     * Returns immediately. Callers poll {@link #state()}; nothing here blocks a caller, because
      * the one caller that must never block is the render thread.
      */
     public synchronized void startLoad(File configDir) {
@@ -320,8 +328,8 @@ public final class GraphService {
      *
      * IT DOES NOT STOP A LOAD THAT IS ALREADY RUNNING, and calling it during one is a defect
      * waiting to happen rather than a supported thing to do. The loader thread writes `graph`
-     * and `state` without this monitor -- that is deliberate and documented on the class, the
-     * happens-before is the whole synchronisation here -- so a `reset` mid-read is overwritten
+     * and `published` without this monitor -- that is deliberate and documented on the class,
+     * the happens-before is the whole synchronisation here -- so a `reset` mid-read is overwritten
      * seconds later by the load it was meant to cancel, and the service comes back READY with
      * a graph nobody asked for. Nothing in the mod does this today: every caller either runs
      * before a load has started or after one has settled. If a caller ever needs to cancel a
