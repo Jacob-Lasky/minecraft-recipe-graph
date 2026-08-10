@@ -475,6 +475,24 @@ final class PlannerShot {
             }
         });
         ShotScreens.preCapture(new ShotScreens.PreCapture() {
+            /**
+             * THE ROOT, AND THE PICTURE IS STILL MOSTLY EMPTY -- WHICH IS THE PLAN AND NOT THE
+             * CAMERA. Measured on `synthetic:4000` after this fix: one node in frame, and the
+             * sweep's own peak over 300 frames is 20 of 4,000. A layered layout caps depth at
+             * 24 columns while the leaf level is thousands of rows, so it is roughly 2,200 by
+             * 69,000 and every column except the last spreads its nodes at a pitch far larger
+             * than a 372px viewport. There is no viewport position at zoom 1.0 from which a
+             * 4,000 node plan looks like a diagram.
+             *
+             * SAID HERE SO THE ARTIFACT IS NOT MISREAD AS THE BUG COMING BACK. A reviewer who
+             * opens `flow293b.png`, sees one node on grey, and concludes the pose failed would
+             * be wrong -- and would very reasonably reach that conclusion, because the picture
+             * this fix produces and the picture the fix replaced differ by one node. The
+             * difference that matters is that the run now SAYS which it is, and can fail.
+             *
+             * For a diagram that reads as a diagram, shoot a real fixture rather than the
+             * synthetic ceiling case: `flow:plan-in-stock` fits five columns on screen.
+             */
             @Override
             public void beforeCapture() {
                 canvas.panToBox(canvas.rootBox());
