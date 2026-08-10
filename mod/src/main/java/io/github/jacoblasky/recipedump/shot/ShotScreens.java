@@ -113,6 +113,28 @@ public final class ShotScreens {
      *
      * A screen that registers nothing is unaffected: silence means the harness cannot tell,
      * which is where it already was.
+     *
+     * DELIBERATELY NO `BufferedImage` PARAMETER, AND THE ABSENCE IS THE DESIGN. Handing the
+     * captured image in would let an implementation count pixels, which is the check the
+     * paragraph above rejects -- so the API would invite precisely the weak version and then
+     * the argument for not using it would live only in a comment. A method that cannot see
+     * the image cannot answer the wrong question.
+     *
+     * THE RIGHT SHAPE FOR A TEXT PANEL IS THE SENTENCE IT WAS BUILT FROM, not the pixels it
+     * became. `planner-recovery:progress` asserts the string `PlannerEntry.stateFor(...)`
+     * handed to the widget: LOADING kind, contains a `%`, parsed number non-zero. That is not
+     * "some widget exists" -- it is the claim the artifact makes, checked directly. It is also
+     * the only readable seam, because `TextWidget` holds an `IKey` whose rendered string
+     * cannot be read back.
+     *
+     * AND IT HAS A REAL NEGATIVE, WHICH IS WHY THIS SHAPE IS SAFE. `GraphService.describe()`
+     * returns `"no graph loaded"` with no percentage when the service is IDLE, and `stateFor`
+     * still wraps that as a LOADING-kind state -- a reachable production case that renders a
+     * fully opaque, entirely non-blank panel saying nothing about progress. A pixel check
+     * passes it. The sentence check must reject it, and that rejection is the control.
+     *
+     * DO NOT add the image parameter to "make pixel checks possible". If a screen ever needs
+     * one, the question to answer first is what it would catch that its own model cannot.
      */
     public interface Drawn {
         /** @return false if this screen is about to be photographed showing nothing. */
