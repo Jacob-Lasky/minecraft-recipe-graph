@@ -382,6 +382,14 @@ public class PlannerScreenTest {
         Set<Long> whileLoading = new LinkedHashSet<Long>();
         Set<GraphService.State> statesSeen = new LinkedHashSet<GraphService.State>();
         boolean chooserSaidLoading = false;
+        // COUNTED AND REPORTED, NOT JUST THRESHOLDED. `k distinct` is the MARGIN this witness
+        // has over its own `>= 2`, and it is the only number that says whether the next run is
+        // safe: a k of 17 has fifteen steps of headroom and a k of 3 is one bad schedule from
+        // red, and a green run reports neither unless it is asked to. #291 measured this class
+        // of test at 13 failures in 1,000 runs under contention, so re-running until it passes
+        // proves almost nothing and the count proves nearly everything. Observed on the rebased
+        // tree: see the commit message.
+        int samples = 0;
         long deadline = System.currentTimeMillis() + 30_000L;
         while (System.currentTimeMillis() < deadline) {
             GraphService.State state = GraphService.get().state();
@@ -389,6 +397,7 @@ public class PlannerScreenTest {
             if (state != GraphService.State.LOADING) {
                 break;
             }
+            samples++;
             whileLoading.add(PlannerScreen.stamp(book));
             // THE OTHER HALF OF `PlannerWindow`'s EXCEPTION, asked of the live service rather
             // than assumed: while the graph is being read the chooser must want a state panel,
@@ -401,12 +410,19 @@ public class PlannerScreenTest {
         }
         awaitGraph();
 
-        assertTrue("the sampler never saw the load at all, so this run says nothing either way"
-                   + " -- raise PADDED_GRAPH_BYTES. States seen: " + statesSeen,
-                   whileLoading.size() >= 1);
-        assertTrue("the stamp was " + whileLoading + " for the whole read: every term of it"
-                   + " moves on a state TRANSITION and LOADING is one state, so the panel built"
-                   + " at 0% is the panel shown at 99% -- #271",
+        String margin = samples + " samples, " + whileLoading.size() + " distinct";
+        // PRINTED ON EVERY RUN AND NOT ONLY ON FAILURE, for `HeadlessLayout.dump`'s reason one
+        // class over: an assertion message is invisible exactly when the run passes, and a pass
+        // is when the margin is worth reading. Without this the only way to learn k is to break
+        // the test on purpose.
+        System.out.println("[#271] stamp during the read: " + margin + " -> " + whileLoading);
+        assertTrue("the sampler never saw the load at all (" + margin + "), so this run says"
+                   + " nothing either way -- raise PADDED_GRAPH_BYTES. States seen: "
+                   + statesSeen,
+                   samples >= 1);
+        assertTrue("the stamp was " + whileLoading + " for the whole read (" + margin + "):"
+                   + " every term of it moves on a state TRANSITION and LOADING is one state,"
+                   + " so the panel built at 0% is the panel shown at 99% -- #271",
                    whileLoading.size() >= 2);
         assertTrue("while the graph is being read the chooser must want a state panel",
                    chooserSaidLoading);

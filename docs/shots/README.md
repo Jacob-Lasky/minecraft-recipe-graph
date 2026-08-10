@@ -69,6 +69,11 @@ cp $SHOTS/planner-recovered.png docs/shots/planner-after-load.png
 # own verdict, produced by a knob. They buy nothing here: the captured frame is chosen by the
 # hold, seconds later. See `PlannerRecoveryShot.progressHold`, which says the same thing at the
 # code, because `requestSettleFrames` can raise the window and has no way to lower it.
+# It also registers a `Drawn` check (#293's hook), so the run EXITS 7 rather than 0 if the panel
+# it is about to photograph carries no percentage -- and rejects `0%` by name, because #271's own
+# defect artifact reads `reading oracle.json, 0%` and would satisfy a guard that merely looked
+# for a percentage. A green exit here is a claim about what the picture says, not just that one
+# was written.
 RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh planner-recovery:progress planner-progress \
     -Dmcrecipedump.shotSettleFrames=2
 cp $SHOTS/planner-progress.png docs/shots/planner-mid-load.png

@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
 
 import io.github.jacoblasky.recipedump.client.PlannerEntry;
+import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
@@ -173,6 +174,7 @@ final class PlannerRecoveryShot {
             ShotScreens.expectReport(
                     "the planner's loading panel must be redrawn as the read advances");
             ShotScreens.holdCapture(progressHold(floor()));
+            ShotScreens.expectDrawn(progressDrawn(floor()));
         } else {
             ShotScreens.expectReport("the planner opened during the load must show the load");
             ShotScreens.holdCapture(loadingHold());
@@ -364,6 +366,117 @@ final class PlannerRecoveryShot {
                     + " so this is not a progress bar";
         }
         return null;
+    }
+
+    /**
+     * The {@link ShotScreens.Drawn} half: refuse to call the run green if the panel about to be
+     * photographed is not reporting progress (#293's hook, #271's subject).
+     *
+     * THE SENTENCE, NOT THE PIXELS, and that is `Drawn`'s own argument rather than a weakening
+     * of it. Its javadoc rejects pixel checks because they answer "is this image blank" when the
+     * question is "did the thing under test run" -- a border and a scrollbar pass a pixel check.
+     * `PlannerEntry.stateFor(...).message()` IS the string handed to the widget, and it is the
+     * only readable form of it, because `TextWidget` holds an `IKey` whose rendered string
+     * cannot be read back. So this asks `Drawn`'s question at the one seam that can answer it.
+     *
+     * NO IMAGE, AND DELIBERATELY NO WAY TO GET ONE. `drewSomething()` takes no argument, and the
+     * screen does NOT re-read the PNG it just wrote off `mcrecipedump.shotOut` to get around
+     * that. A method that cannot see the image cannot answer the wrong question; reaching around
+     * the harness for the harness's own output would put the pixel check back with an extra step.
+     */
+    private static ShotScreens.Drawn progressDrawn(final float floor) {
+        return new ShotScreens.Drawn() {
+            @Override
+            public boolean drewSomething() {
+                return problem() == null;
+            }
+
+            @Override
+            public String describe() {
+                String problem = problem();
+                return problem == null
+                        ? "the panel reports \"" + message() + "\""
+                        : problem;
+            }
+
+            private String problem() {
+                return progressNotDrawn(
+                        PlannerEntry.stateFor(GraphService.get(), PlannerService.get()), floor);
+            }
+
+            private String message() {
+                PlannerState state = PlannerEntry.stateFor(GraphService.get(),
+                                                           PlannerService.get());
+                return state == null ? "a plan" : state.message();
+            }
+        };
+    }
+
+    /**
+     * Is the sentence this panel was built from actually reporting progress? Null means yes.
+     *
+     * "HAS A PERCENTAGE" IS NOT ENOUGH, AND THAT IS THE WHOLE POINT OF THIS GUARD. #271's own
+     * defect artifact -- `docs/shots/planner-during-load.png`, the frozen panel this issue was
+     * filed about -- reads `reading oracle.json, 0%`. It CONTAINS a percentage. A check that
+     * looked for one would have passed the exact picture the issue exists to prevent, gone
+     * green, and agreed with the bug. So the number must be NON-ZERO and at or past the floor
+     * the hold released on, and `0%` is rejected by name below rather than by arithmetic that
+     * someone later relaxes.
+     *
+     * THE CONTROL IS A REAL STATE AND NOT A FABRICATED ONE. `GraphService.describe()` returns
+     * "no graph loaded" while the service is IDLE, and `PlannerEntry.stateFor` still wraps that
+     * as a LOADING-KIND state -- so the case this must reject is a fully opaque, entirely
+     * non-blank, perfectly legible panel that says nothing whatever about progress. A pixel
+     * check passes it happily. `PlannerShotTest` drives that string and every other real
+     * `describe()` output through here, and the live run is not believed until it has been seen
+     * refusing one.
+     *
+     * @param drawn what the chooser wants on screen, from `PlannerEntry.stateFor`
+     */
+    static String progressNotDrawn(PlannerState drawn, float floor) {
+        if (drawn == null) {
+            return "the chooser wants to draw a plan rather than a loading panel, so whatever"
+                    + " was photographed is not a picture of a read";
+        }
+        if (drawn.kind() != PlannerState.Kind.LOADING) {
+            return "the panel on screen is a " + drawn.kind() + " panel reading \""
+                    + drawn.message() + "\", which is not a picture of a read";
+        }
+        int percent = percentIn(drawn.message());
+        if (percent < 0) {
+            return "the panel reads \"" + drawn.message() + "\" and carries no percentage at"
+                    + " all, so the picture cannot show a number that moved";
+        }
+        if (percent == 0) {
+            return "the panel reads 0%, which is EXACTLY what the #271 defect photographs: a"
+                    + " percentage is present and it has not moved";
+        }
+        int wanted = (int) (floor * 100.0f);
+        if (percent < wanted) {
+            return "the panel reads " + percent + "%, below the " + wanted + "% the hold"
+                    + " released on, so the capture and the hold disagree about when this is";
+        }
+        return null;
+    }
+
+    /**
+     * The integer written immediately before a `%` in a `describe()` line, or -1 when there is
+     * none. Deliberately tolerant of the prefix, because the file name in front of it changes
+     * with whatever `$RECIPEGRAPH_ORACLE` points at.
+     */
+    private static int percentIn(String message) {
+        int mark = message.lastIndexOf('%');
+        if (mark < 0) {
+            return -1;
+        }
+        int start = mark;
+        while (start > 0 && Character.isDigit(message.charAt(start - 1))) {
+            start--;
+        }
+        if (start == mark) {
+            return -1;
+        }
+        return Integer.parseInt(message.substring(start, mark));
     }
 
     /** For the log: which window this is, without leaning on a private class's name. */

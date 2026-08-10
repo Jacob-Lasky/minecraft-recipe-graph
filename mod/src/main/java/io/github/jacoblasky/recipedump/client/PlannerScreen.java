@@ -136,13 +136,27 @@ public final class PlannerScreen {
      */
     static long stamp(PlanBook book) {
         GraphService graphs = GraphService.get();
-        // A SEQLOCK, AND NOT TWO PLAIN READS. `generation` and `progress` are separate
-        // volatile fields, so a load finishing between them hands back a pair that never
-        // existed -- the OLD generation with the NEW `progress() == -1`, which is numerically
-        // BELOW a stamp this window has already drawn. That is the one thing the note above
-        // forbids, and it would cost a tick of staleness at the exact moment the graph lands,
-        // which is the moment #201 is about. Re-reading the counter and discarding the
-        // progress when it moved pairs the two or pairs neither.
+        // A SEQLOCK, AND NOT TWO PLAIN READS. `generation()` and `progress()` each load
+        // `GraphService.published` SEPARATELY -- one volatile field, read twice -- so a load
+        // finishing between the two reads hands back a pair that never existed: the OLD
+        // generation beside the NEW `progress() == -1`. That sum is numerically BELOW a stamp
+        // this window has already drawn, which is the one thing the note above forbids, and it
+        // costs a tick of staleness at the exact moment the graph lands -- the moment #201 is
+        // about. Re-reading the counter and dropping the progress when it moved pairs the two
+        // or pairs neither.
+        //
+        // TWO READS OF ONE PUBLICATION, NOT TWO FIELDS, AND THE DISTINCTION IS #291'S. Before
+        // #291 those really were separate volatiles and this comment said so; #291 welded state,
+        // detail and the counter into one `Publication` and its note on `GraphService.describe`
+        // names exactly this hazard surviving the weld -- "two reads of a field the loader can
+        // replace between them, which is the same defect this class was carrying before #291,
+        // reintroduced one method down". This is that defect a third time, in a third class.
+        //
+        // #291'S OWN FIX IS NOT AVAILABLE HERE. `describe` reads the publication ONCE into a
+        // local; this cannot, because `Publication` is private with no accessor. DO NOT add one
+        // to `GraphService` to tidy this away -- that is a change to `common/` for a caller's
+        // convenience, and the seqlock is correct without it. If an accessor ever lands, collapse
+        // these three reads into one and delete this note rather than keeping both.
         long graphGeneration = graphs.generation();
         float progress = graphs.progress();
         if (graphs.generation() != graphGeneration) {

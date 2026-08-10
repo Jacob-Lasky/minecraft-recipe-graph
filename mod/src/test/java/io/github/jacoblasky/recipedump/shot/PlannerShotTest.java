@@ -18,6 +18,7 @@ import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import org.junit.After;
@@ -220,6 +221,76 @@ public class PlannerShotTest {
         String problem = PlannerRecoveryShot.progressProblem(true, 6, true, 0.02f, 0.61f, 0.5f);
         assertNotNull("a bar that goes backwards is not a bar", problem);
         assertTrue(problem, problem.contains("LESS progress"));
+    }
+
+    // -- #271: the drawn check, driven with REAL `GraphService.describe()` output --------------
+
+    /**
+     * THE CONTROL, AND IT IS A REAL STATE RATHER THAN A FABRICATED ONE.
+     *
+     * `GraphService.describe()` returns "no graph loaded" while the service is IDLE, and
+     * `PlannerEntry.stateFor` still wraps that as a LOADING-KIND state. So this string renders a
+     * fully opaque, entirely non-blank, perfectly legible planner panel that says nothing
+     * whatever about progress -- **a pixel check passes it**, which is the whole argument for
+     * `ShotScreens.Drawn` asking about the sentence instead.
+     *
+     * If the guard cannot say no to this, it is not checking the percentage, and every green
+     * `planner-recovery:progress` run afterwards means nothing. That is the test of the test.
+     */
+    @Test
+    public void theDrawnCheckRejectsTheRealPanelThatCarriesNoPercentage() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("no graph loaded"), 0.5f);
+        assertNotNull("IDLE's own describe() renders a perfectly good panel about nothing",
+                      problem);
+        assertTrue(problem, problem.contains("no percentage at all"));
+    }
+
+    /**
+     * AND IT REJECTS `0%`, WHICH IS THE ONE A LOOSER CHECK WOULD PASS.
+     *
+     * `docs/shots/planner-during-load.png` -- the artifact #271 was filed about -- reads
+     * `reading oracle.json, 0%`. It CONTAINS a percentage. A guard that asked "is a percentage
+     * present" would have gone green on the picture of the bug and agreed with it.
+     */
+    @Test
+    public void theDrawnCheckRejectsTheDefectsOwnZeroPercentPanel() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("reading oracle.json, 0%"), 0.5f);
+        assertNotNull("0% is what the frozen panel reads, and it has a percentage in it",
+                      problem);
+        assertTrue(problem, problem.contains("0%"));
+    }
+
+    @Test
+    public void theDrawnCheckRejectsAPanelBelowTheFloorTheHoldReleasedOn() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("reading oracle.json, 12%"), 0.5f);
+        assertNotNull("the capture and the hold must not disagree about when this is", problem);
+        assertTrue(problem, problem.contains("below the 50%"));
+    }
+
+    /** MISSING's real `describe()`, which `stateFor` wraps as FAILED rather than LOADING. */
+    @Test
+    public void theDrawnCheckRejectsANotYetPanelThatIsNotALoadAtAll() {
+        assertNotNull("a failed panel is not a picture of a read",
+                      PlannerRecoveryShot.progressNotDrawn(
+                              PlannerState.failed("no graph.json. looked in: /x/graph.json"),
+                              0.5f));
+        // READY: `stateFor` returns null because a PLAN should be drawn, so there is no loading
+        // panel on screen and the capture is of something else entirely.
+        assertNotNull("a plan on screen is not a picture of a read",
+                      PlannerRecoveryShot.progressNotDrawn(null, 0.5f));
+    }
+
+    @Test
+    public void theDrawnCheckAcceptsAPanelReportingRealProgressPastTheFloor() {
+        assertNull("this is the artifact: a loading panel reading a moved, non-zero percentage",
+                   PlannerRecoveryShot.progressNotDrawn(
+                           PlannerState.loading("reading oracle.json, 50%"), 0.5f));
+        assertNull("and the file name in front of it is whatever $RECIPEGRAPH_ORACLE points at",
+                   PlannerRecoveryShot.progressNotDrawn(
+                           PlannerState.loading("reading graph-oracle-248.json, 97%"), 0.5f));
     }
 
     /** Nodes in the tree. Iterative, since the trees under test are thousands deep-ish. */
