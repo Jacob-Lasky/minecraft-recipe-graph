@@ -44,14 +44,22 @@ def main():
     print("   ores; #259 calls hops 1-2 alone -- %d keys here -- 'the transitive population')"
           % (layers[1] + layers[2]))
 
-    errors = [r for r in rows if r.get("error")]
-    print("\nERRORS: %d" % len(errors))
-    for r in errors[:10]:
+    # UNMEASURED IS ITS OWN COLUMN, and folding it into either "swept" or "clean" is the
+    # whole failure mode. A key whose plan raised and a key whose plan ran out of wall clock
+    # both produced no answer; counting them among the negatives is how a probe reports a
+    # confident `0 of 10` while every plan is throwing.
+    timeouts = [r for r in rows if r.get("timeout")]
+    errors = [r for r in rows if r.get("error") and not r.get("timeout")]
+    print("\nUNMEASURED: %d timed out, %d raised" % (len(timeouts), len(errors)))
+    for r in (errors + timeouts)[:10]:
         print("  %s  %s" % (r["key"], r["error"]))
-    if errors:
-        print("  !! A RAISED PLAN IS NOT A NEGATIVE. These keys are unmeasured, not clean.")
+    if timeouts or errors:
+        print("  !! These keys have NO ANSWER. They are not negatives and any verdict below")
+        print("     is a verdict about the measured keys only.")
 
     ok = [r for r in rows if not r.get("error")]
+    print("\nMEASURED: %d of %d rows written, %d of %d in the population (%.1f%%)"
+          % (len(ok), len(rows), len(ok), total_pop, 100.0 * len(ok) / total_pop))
     gated = [r for r in ok if r["held"]["dimension"]]
     below = [r for r in gated if r["gate_below_root"]]
     print("\nPLANS THAT REACH A GATE AT ALL: %d of %d swept" % (len(gated), len(ok)))

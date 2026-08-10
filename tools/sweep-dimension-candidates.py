@@ -31,6 +31,7 @@ import argparse
 import collections
 import json
 import os
+import signal
 import sys
 import time
 
@@ -167,13 +168,36 @@ def build_env(graph):
     return derived
 
 
-def solve_one(graph, env, key, max_nodes):
+class Timeout(Exception):
+    """A key that ran out of wall clock. UNMEASURED, and never a negative.
+
+    THE CAP IS NOT A SMALLER BUDGET. Lowering `max_nodes` or `work_budget` would make slow
+    keys finish, and it would finish them into a DIFFERENT answer: `not_truncated` is one of
+    the seven claims, so a key capped into truncation reports 6 of 7 and looks like a
+    measured near-miss. That is a fabricated finding. A wall-clock cap leaves the solver's
+    parameters exactly as the fixture's and records that this key has no answer yet, which is
+    a hole the report has to print rather than a result it gets to keep.
+    """
+
+
+def _alarm(signum, frame):                                     # noqa: ARG001
+    raise Timeout()
+
+
+def solve_one(graph, env, key, max_nodes, seconds=0):
     solver = Solver(graph, have=env["have"], craftables=env["craftables"],
                     raw=env["raw"], machine_states=env["states"], costs=env["costs"],
                     free_sources=env["free"], token_kinds=env["tokens"],
                     pinned={}, max_nodes=max_nodes,
                     dimension_gates=env["gates"], emc_available=env["emc_available"])
-    return solver.solve(key, 1)
+    if not seconds:
+        return solver.solve(key, 1)
+    signal.signal(signal.SIGALRM, _alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return solver.solve(key, 1)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 def population(graph, gated):
@@ -212,6 +236,9 @@ def main():
     ap.add_argument("--max-hop", type=int, default=None,
                     help="stop the walk after this many hops; default is the full closure")
     ap.add_argument("--max-nodes", type=int, default=DEFAULT_MAX_NODES)
+    ap.add_argument("--seconds", type=int, default=60,
+                    help="wall-clock cap per key; 0 disables. A capped key is recorded "
+                         "UNMEASURED, never negative. See the Timeout docstring.")
     ap.add_argument("--controls", action="store_true",
                     help="run the controls and exit without sweeping")
     ap.add_argument("--enumerate-only", action="store_true")
@@ -320,15 +347,21 @@ def main():
                 continue
             t = time.time()
             try:
-                row = score(solve_one(graph, env, key, args.max_nodes))
+                row = score(solve_one(graph, env, key, args.max_nodes, args.seconds))
                 row["error"] = None
+                row["timeout"] = False
+            except Timeout:
+                row = {"held": None, "n_held": None, "gate_depths": None,
+                       "gate_below_root": None, "nodes": None, "work": None,
+                       "truncated": None, "exhausted": None, "timeout": True,
+                       "error": "TIMEOUT after %ss" % args.seconds}
             except Exception as exc:                       # noqa: BLE001
                 # A RAISED PLAN IS NOT A NEGATIVE. #248's probe printed a confident `0 of 10`
                 # because every plan raised and the exception was swallowed; recorded here so
                 # a broken probe and a real absence cannot look the same in the output.
                 row = {"held": None, "n_held": None, "gate_depths": None,
                        "gate_below_root": None, "nodes": None, "work": None,
-                       "truncated": None, "exhausted": None,
+                       "truncated": None, "exhausted": None, "timeout": False,
                        "error": "%s: %s" % (type(exc).__name__, exc)}
             row["key"] = key
             row["hop"] = hop_of[key]
