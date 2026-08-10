@@ -1713,8 +1713,18 @@ public class DumpCommand extends CommandBase {
      *
      * Use `mod_version` for a capability the pipeline does not depend on; that is what
      * `summary.json` stamps it for.
+     *
+     * PUBLIC FOR THE GRAPH SCREEN AND THE PLANNER (#285), on {@link #activeModIds}'s precedent
+     * from #255. `client.PlannerScreen` and `client.BrowseScreen` compare it against the loaded
+     * graph's `dump_schema`, which is the whole point of writing it: for the number to tell a
+     * reader whether their graph still agrees, something has to read both.
+     *
+     * IT STAYS A LITERAL IN THIS FILE. `tests/test_catalysts.py` greps
+     * `SCHEMA\\s*=\\s*(\\d+)` out of `DumpCommand.java` and pins it to `dump_meta.SCHEMA`, which
+     * is what keeps the Java and Python sides from drifting apart -- so DO NOT move this to a
+     * shared constants class or compute it from anything.
      */
-    static final int SCHEMA = 8;
+    public static final int SCHEMA = 8;
 
     /**
      * WHICH JARS THIS DUMP CAN SEE, as modids. Null when Forge will not say. #194

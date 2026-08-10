@@ -197,7 +197,7 @@ public final class GraphWidgets {
     /**
      * The schema verdict, as a word a reader cannot misread.
      *
-     * `format:` AND NOT `schema:`, because the line four below it already says
+     * `format:` AND NOT `schema:`, because {@link #builtLine} lower down already says
      * "dumped by: 0.10.0 -- schema 7" and two lines both leading with the same word read as one
      * statement repeated rather than as a verdict and its evidence. The reader is being told
      * about the FORMAT of the file; the number is what the format is called.

@@ -659,9 +659,16 @@ public final class PlannerWidgets {
      * from, so null does not reach a player; `PlannerScreen.planPanel` is where that is decided
      * and it is decided ONCE.
      *
-     * DO NOT make this fall back to reading `GraphService`. The class note above is explicit
-     * that no client state reaches any method here, and it is why `PlannerLayoutTest` can run
-     * ModularUI's real sizer over the whole panel with no window.
+     * AND IT IS AN ARGUMENT RATHER THAN A GLOBAL READ, which is not the free choice it looks
+     * like. This class states that no client state reaches any method here -- that is what lets
+     * `PlannerLayoutTest` run ModularUI's real sizer over the whole panel with no window -- and
+     * `plannerPanel` already makes ONE exception, for `PlanCaveats`, on the grounds
+     * `MachinesWidgets` spells out: whether an input was read is a fact about the SCENARIO and
+     * there is nothing in the arguments to derive it from. That reasoning does NOT extend here.
+     * The graph is a thing the caller has in hand, so `PlannerScreen` measures it and passes it,
+     * and the four verdicts stay reachable from a test. DO NOT make this reach for
+     * `GraphService` instead; it would buy one shorter call site and cost the only assertion
+     * that the warning ever renders.
      */
     static String staleGraphWarning(GraphFacts.SchemaCheck schema) {
         if (schema == null) {
