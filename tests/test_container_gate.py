@@ -599,5 +599,198 @@ class TheGiveUpMessageTellsBusyFromWedgedTest(unittest.TestCase):
                                 "actually runs; see #214" % seconds)
 
 
+class TheLockSaysWhoIsHoldingItTest(unittest.TestCase):
+    """The identity line has to name a WORKTREE, not a script. #266.
+
+    Every worktree on this host runs a byte-identical `tools/check.sh` and
+    `mod/tools/build-jar.sh`, so `$0` says what KIND of job holds the gate and nothing about
+    whose. #266 records the cost: half an hour of a holder attributed to `mrg-228` when the
+    actual holder was `mrg-240`, because `$0` is whatever the caller happened to type -- an
+    absolute path from a script that used `$(dirname "$0")`, a relative one from a repository
+    root -- and a reader carried the earlier, absolute line forward.
+
+    DRIVEN AND CONTENDED, not grepped. An assertion that the script CONTAINS the word `cwd`
+    would pass against a line that never gets written, and a lock-identity change exercised
+    only on a free gate has not been exercised at all: every question #266 is about is a
+    question asked while somebody else is holding it.
+    """
+
+    def _run(self, script, timeout=90):
+        return subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True, text=True,
+                              timeout=timeout)
+
+    def test_the_identity_line_names_the_holders_worktree(self):
+        # TWO HOLDERS FROM TWO DIRECTORIES, SEQUENTIALLY, because one holder proves only that
+        # SOME string was written. The second must overwrite the first with its OWN directory
+        # -- which is the exact failure #266 measured, a stale attribution surviving a handover.
+        script = r'''
+        L=$(mktemp /tmp/gatetest-cwd-XXXXXX)
+        A=$(mktemp -d /tmp/gatetest-wtA-XXXXXX)
+        B=$(mktemp -d /tmp/gatetest-wtB-XXXXXX)
+        . tools/gate.sh
+        ( cd "$A" && GATE_LOCK="$L" gated true )
+        echo "FIRST: $(cat "$L")"
+        ( cd "$B" && GATE_LOCK="$L" gated true )
+        echo "SECOND: $(cat "$L")"
+        echo "A=$A"
+        echo "B=$B"
+        rm -rf "$L" "$A" "$B"
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        first = [l for l in combined.splitlines() if l.startswith("FIRST: ")][0]
+        second = [l for l in combined.splitlines() if l.startswith("SECOND: ")][0]
+        a = [l for l in combined.splitlines() if l.startswith("A=")][0][2:]
+        b = [l for l in combined.splitlines() if l.startswith("B=")][0][2:]
+        self.assertIn("cwd " + a, first, "the line must name the holder's directory:\n" + combined)
+        self.assertIn("cwd " + b, second,
+                      "a handover must overwrite the previous holder's attribution, which is "
+                      "the half-hour misattribution #266 measured:\n" + combined)
+        self.assertNotIn("cwd " + a, second, combined)
+
+    def test_a_waiter_is_told_which_worktree_it_is_behind(self):
+        """The announcement, which is where the question is actually asked."""
+        script = r'''
+        L=$(mktemp /tmp/gatetest-behind-XXXXXX)
+        H=$(mktemp -d /tmp/gatetest-holder-XXXXXX)
+        . tools/gate.sh
+        ( cd "$H" && GATE_LOCK="$L" gated sleep 4 ) > /dev/null 2>&1 &
+        sleep 1
+        GATE_LOCK="$L" GATE_WAIT=30 gated true
+        echo "H=$H"
+        wait
+        rm -rf "$L" "$H"
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        holder = [l for l in combined.splitlines() if l.startswith("H=")][0][2:]
+        self.assertIn("waiting for the container gate", combined, combined)
+        self.assertIn("cwd " + holder, combined,
+                      "a queued run must be told WHOSE job it is behind:\n" + combined)
+
+    def test_the_queue_depth_counts_waiters_and_not_the_holder(self):
+        """`N ahead of you`, and the two numbers that make it a real count.
+
+        THE CONTROL IS THE FIRST WAITER'S ZERO. A counter that returned a constant, or that
+        counted every process with the lock file open, could not produce 0 then 1: measured on
+        this host, one holder plus two waiters shows FIVE processes holding the descriptor,
+        because each waiter contributes both its `gated` subshell and its `flock` child and the
+        holder contributes the command it is running. Only `comm = flock` is the queue.
+
+        STAGGERED BY A SECOND, deliberately. A waiter is not yet blocked in `flock` while it is
+        still printing its own announcement, so simultaneous arrivals can each see zero. The
+        window is the ~70ms the scan takes against a wait measured in minutes, and the honest
+        way to say so is a test that arrives the way real runs do rather than one tuned to hide
+        it.
+        """
+        script = r'''
+        L=$(mktemp /tmp/gatetest-depth-XXXXXX)
+        . tools/gate.sh
+        ( GATE_LOCK="$L" gated sleep 6 ) > /dev/null 2>&1 &
+        sleep 1
+        ( GATE_LOCK="$L" GATE_WAIT=30 gated sleep 0.1 ) > /tmp/gatetest-depth-w1 2>&1 &
+        sleep 1
+        ( GATE_LOCK="$L" GATE_WAIT=30 gated true ) > /tmp/gatetest-depth-w2 2>&1 &
+        sleep 1
+        echo "STATUS: $(gate_status "$L" | tr '\n' '|')"
+        wait
+        echo "W1: $(tr '\n' '|' < /tmp/gatetest-depth-w1)"
+        echo "W2: $(tr '\n' '|' < /tmp/gatetest-depth-w2)"
+        rm -f "$L" /tmp/gatetest-depth-w1 /tmp/gatetest-depth-w2
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        w1 = [l for l in combined.splitlines() if l.startswith("W1: ")][0]
+        w2 = [l for l in combined.splitlines() if l.startswith("W2: ")][0]
+        status = [l for l in combined.splitlines() if l.startswith("STATUS: ")][0]
+        self.assertIn("0 ahead of you", w1,
+                      "the FIRST waiter has nobody in front of it, and this is the control -- "
+                      "a counter that included the holder, or the descriptor-holding shells, "
+                      "could not report zero here:\n" + combined)
+        self.assertIn("1 ahead of you", w2,
+                      "the SECOND waiter is behind the first:\n" + combined)
+        self.assertIn("2 waiting behind it", status,
+                      "and the holder's own view is both of them:\n" + combined)
+
+    def test_a_finished_holder_is_not_reported_as_holding_the_gate(self):
+        """The trap #266's own proposal sharpens, and the reason `gate_status` exists.
+
+        The lock lives on an open descriptor and the identity line is ordinary file content, so
+        a released holder's line stays in the file until the next holder overwrites it. #266
+        wants "who holds this" answered by a `cat` -- which is precisely the reading that cannot
+        tell a current holder from a finished one, and is how a reader ends up chasing a pid
+        that exited. Measured here: a `gated` that ran for 0.2s leaves its own line behind with
+        the lock provably free.
+        """
+        script = r'''
+        L=$(mktemp /tmp/gatetest-stale-XXXXXX)
+        . tools/gate.sh
+        GATE_LOCK="$L" gated sleep 0.2
+        echo "RAW: $(cat "$L")"
+        echo "STATUS: $(gate_status "$L" | tr '\n' '|')"
+        echo "RC=$?"
+        rm -f "$L"
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        raw = [l for l in combined.splitlines() if l.startswith("RAW: ")][0]
+        status = [l for l in combined.splitlines() if l.startswith("STATUS: ")][0]
+        # The premise, asserted rather than assumed: the file really does still name a holder.
+        self.assertIn("pid ", raw,
+                      "if the file were empty this test would prove nothing:\n" + combined)
+        self.assertIn("gate FREE", status,
+                      "a released gate must not read as a held one:\n" + combined)
+        self.assertIn("LAST holder", status,
+                      "and the leftover line must be labelled as the previous holder rather "
+                      "than printed bare, which is what makes it misread:\n" + combined)
+
+    def test_a_held_gate_is_reported_as_held(self):
+        """The control for the test above. Without it that one passes on a function that
+        always says FREE, which would be a worse defect than the one it is fixing: it would
+        tell a reader the gate is free while a run is inside it."""
+        script = r'''
+        L=$(mktemp /tmp/gatetest-heldctl-XXXXXX)
+        . tools/gate.sh
+        ( GATE_LOCK="$L" gated sleep 4 ) > /dev/null 2>&1 &
+        sleep 1
+        gate_status "$L"
+        echo "RC=$?"
+        wait
+        rm -f "$L"
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        self.assertIn("gate HELD", combined, combined)
+        self.assertNotIn("gate FREE", combined, combined)
+        self.assertIn("RC=1", combined,
+                      "a held gate must also be non-zero, so a script can branch on it:\n"
+                      + combined)
+
+    def test_the_status_helper_does_not_disturb_a_real_holder(self):
+        """It attempts the lock, so the one thing it must never do is take it from somebody.
+
+        A failed `flock -n` changes nothing, but "nothing" is the claim, so it is asserted: the
+        holder must still be holding after `gate_status` has looked at it.
+        """
+        script = r'''
+        L=$(mktemp /tmp/gatetest-nodisturb-XXXXXX)
+        . tools/gate.sh
+        ( GATE_LOCK="$L" gated sleep 4 ) > /dev/null 2>&1 &
+        sleep 1
+        gate_status "$L" > /dev/null 2>&1
+        gate_status "$L" > /dev/null 2>&1
+        gate_status "$L" > /dev/null 2>&1
+        # Still held after three looks?
+        if ( flock -n 9 ) 9< "$L"; then echo "AFTER=FREE"; else echo "AFTER=HELD"; fi
+        wait
+        rm -f "$L"
+        '''
+        out = self._run(script)
+        combined = out.stdout + out.stderr
+        self.assertIn("AFTER=HELD", combined,
+                      "gate_status must not release or steal a lock it is only reporting on:\n"
+                      + combined)
+
+
 if __name__ == "__main__":
     unittest.main()
