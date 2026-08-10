@@ -436,7 +436,10 @@ public final class ShotScreens {
         });
         // The only screen that photographs the planner RECOVERING rather than a finished
         // state. See PlannerRecoveryShot: `:loading` and `:recovered` are one artifact in two
-        // runs, and the second one is a probe as well as a picture (#201).
+        // runs, and the second one is a probe as well as a picture (#201). `:progress` is the
+        // inside of that wait (#271) and is the only screen here that measures the CLIENT --
+        // it counts `Minecraft.currentScreen` identities, because the thing under test is
+        // whether the panel is redrawn and no service can be asked that.
         register("planner-recovery", new Opener() {
             @Override
             public void open(String arg) {

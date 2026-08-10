@@ -1,7 +1,9 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -168,6 +170,56 @@ public class PlannerShotTest {
                 canvas.getScrollArea().getScrollX().getScroll(),
                 canvas.getScrollArea().getScrollY().getScroll(),
                 canvas.getArea().width, canvas.getArea().height).size();
+    }
+
+    // -- #271: the `planner-recovery:progress` verdict, in all four directions -----------------
+
+    /**
+     * A run that saw the panel redrawn as the read advanced is the only one that passes.
+     *
+     * THE THREE FAILING DIRECTIONS ARE THE POINT OF THIS TEST, not the passing one. A live
+     * `planner-recovery:progress` exercises exactly one branch per run, so the other three are
+     * read-off-the-code until something drives them -- and the last unexecuted guard in this
+     * package, `ShotScreens`' first `reported()`, had been wired to invert its own signal and
+     * would have reported every failure as a pass and every pass as a failure. That is the
+     * defect this file exists to make impossible, so the verdict is driven both ways here.
+     */
+    @Test
+    public void theProgressShotPassesOnlyWhenThePanelWasActuallyRedrawn() {
+        assertNull("still reading, redrawn five times, monotone: this is the artifact",
+                   PlannerRecoveryShot.progressProblem(true, 5, false, 0.02f, 0.61f, 0.5f));
+    }
+
+    @Test
+    public void theProgressShotFailsWhenTheReadFinishedBeforeTheFloor() {
+        // A perfectly good picture of a READY planner. It is not a picture of a load, and the
+        // whole reason `loadingHold` has the same guard is that nothing else would notice.
+        String problem = PlannerRecoveryShot.progressProblem(false, 9, false, 0.02f, 1.0f, 0.5f);
+        assertNotNull("a finished read must not be filed as the loading panel at 50%", problem);
+        assertTrue(problem, problem.contains("finished before"));
+    }
+
+    /**
+     * #271 ITSELF: the read is half done and the window is still the one opened at 0%.
+     *
+     * This is the assertion that goes red against a build without the fix, and it is red for
+     * the right reason -- one window for the whole read -- rather than because a number came
+     * out low.
+     */
+    @Test
+    public void theProgressShotFailsWhenTheWindowWasNeverRebuilt() {
+        String problem = PlannerRecoveryShot.progressProblem(true, 1, false, 0.0f, 0.5f, 0.5f);
+        assertNotNull("one window for a whole read IS the defect", problem);
+        assertTrue(problem, problem.contains("never redrawn"));
+        assertNull("and two is enough, because one is what the defect produces",
+                   PlannerRecoveryShot.progressProblem(true, 2, false, 0.0f, 0.5f, 0.5f));
+    }
+
+    @Test
+    public void theProgressShotFailsWhenProgressWentBackwards() {
+        String problem = PlannerRecoveryShot.progressProblem(true, 6, true, 0.02f, 0.61f, 0.5f);
+        assertNotNull("a bar that goes backwards is not a bar", problem);
+        assertTrue(problem, problem.contains("LESS progress"));
     }
 
     /** Nodes in the tree. Iterative, since the trees under test are thousands deep-ish. */

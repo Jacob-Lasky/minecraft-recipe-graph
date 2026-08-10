@@ -1,5 +1,8 @@
 package io.github.jacoblasky.recipedump.shot;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiScreen;
+
 import io.github.jacoblasky.recipedump.client.PlannerEntry;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
@@ -12,6 +15,12 @@ import io.github.jacoblasky.recipedump.common.PlannerService;
  * right-click the calculator a second after joining, and `planner-recovery:recovered` is the
  * same window a few seconds later. Two runs rather than one because the harness captures one
  * frame, and the pair IS the artifact: either picture alone is consistent with the bug.
+ *
+ * `planner-recovery:progress` is the third, and it is about the INSIDE of that wait rather than
+ * its ends (#271): the same window part-way through the read, with the panel's redraws counted
+ * on the way. See {@link #progressHold} -- it is the one of the three that had to stop trusting
+ * `GraphService` and start watching the client, because #271 is precisely a disagreement
+ * between what the service reported and what the panel drew.
  *
  * <h2>Why this is a probe and not only a picture</h2>
  *
@@ -84,9 +93,34 @@ final class PlannerRecoveryShot {
     private PlannerRecoveryShot() {
     }
 
-    /** `planner-recovery`, `planner-recovery:loading` or `planner-recovery:recovered`. */
+    /**
+     * `planner-recovery:progress` holds until this much of the file has been read (#271).
+     *
+     * HALF, SO THE PHOTOGRAPHED NUMBER CANNOT BE MISTAKEN FOR THE OPENING ONE. The window is
+     * opened microseconds after `startLoad`, so a build with the defect photographs `0%`; a
+     * floor near the start would produce a picture that reads as low single digits either way
+     * and leave the reader deciding whether `2%` is motion or rounding. Overridable, because a
+     * host or a graph that makes half unreachable inside the run timeout should be able to shoot
+     * this without editing the mod.
+     */
+    private static final String PROP_FLOOR = "mcrecipedump.progressFloor";
+    private static final float DEFAULT_FLOOR = 0.5f;
+
+    /**
+     * Window rebuilds `progress` must observe during the read before it will pass.
+     *
+     * TWO, AND TWO IS THE WHOLE ASSERTION. #271 is a panel that is rebuilt ONCE -- when the
+     * window opens -- and then never again for the rest of the read, so one is what the defect
+     * produces and any number above one is what it cannot. Asking for more would be asking the
+     * host to be slow rather than asking the code to be right.
+     */
+    private static final int MIN_REBUILDS = 2;
+
+    /** `planner-recovery`, `:loading`, `:progress` or `:recovered`. */
     static void open(String arg) {
-        boolean recovered = "recovered".equalsIgnoreCase(trimmed(arg));
+        String mode = trimmed(arg);
+        boolean recovered = "recovered".equalsIgnoreCase(mode);
+        boolean progress = "progress".equalsIgnoreCase(mode);
         String target = System.getProperty(PROP_TARGET, DEFAULT_TARGET);
 
         // BUT NOT UNDER preInit'S OWN READ. `GraphService.reset` does not stop a running loader
@@ -122,10 +156,26 @@ final class PlannerRecoveryShot {
         // photograph a window a player cannot get to.
         PlannerEntry.open(book);
 
-        ShotScreens.expectReport(recovered
-                ? "the planner opened during the load must end up showing the plan"
-                : "the planner opened during the load must show the load");
-        ShotScreens.holdCapture(recovered ? recoveryHold(target) : loadingHold());
+        if (recovered) {
+            ShotScreens.expectReport(
+                    "the planner opened during the load must end up showing the plan");
+            ShotScreens.holdCapture(recoveryHold(target));
+        } else if (progress) {
+            ShotScreens.expectReport(
+                    "the planner's loading panel must be redrawn as the read advances");
+            ShotScreens.holdCapture(progressHold(floor()));
+        } else {
+            ShotScreens.expectReport("the planner opened during the load must show the load");
+            ShotScreens.holdCapture(loadingHold());
+        }
+    }
+
+    private static float floor() {
+        String raw = System.getProperty(PROP_FLOOR);
+        if (raw == null || raw.trim().isEmpty()) {
+            return DEFAULT_FLOOR;
+        }
+        return Float.parseFloat(raw.trim());
     }
 
     /**
@@ -156,6 +206,163 @@ final class PlannerRecoveryShot {
                 return false;
             }
         };
+    }
+
+    /**
+     * `progress`: watch the loading panel being REDRAWN, then photograph it part-way through.
+     *
+     * <h2>Why `loading` was not enough, and why it is the cautionary tale rather than the model</h2>
+     *
+     * `loading` captures one frame and logs `at capture: reading graph.json, 37%` beside it. On
+     * #201's branch it did exactly that and the PNG said `0%`. Two sources of truth for one
+     * frame, disagreeing -- and the log is the one that was believed, because nobody opened the
+     * picture. #271 is that disagreement: the log reads `GraphService`, which was right all
+     * along, and the panel was built once at 0% and never rebuilt.
+     *
+     * SO THIS PROBE MUST NOT ASK `GraphService` WHETHER THE PANEL MOVED. It asks the client.
+     * `PlannerScreen.PlannerWindow.onUpdate` refreshes by constructing a NEW window and handing
+     * it to `ClientGUI.open`, which wraps it in a NEW `GuiScreenWrapper` and displays that -- so
+     * a redraw is an IDENTITY CHANGE on `Minecraft.currentScreen` and a frozen panel is the same
+     * object for the whole read. Counting those is a measurement of the defect itself rather
+     * than of the number the defect never reached.
+     *
+     * ONE FRAME CANNOT SHOW MOTION, WHICH IS WHY THERE ARE TWO ARTIFACTS AND NOT ONE. The PNG
+     * is a single percentage well away from zero, which a build with the defect cannot produce
+     * because its panel was built microseconds after `startLoad`. The log is the sequence: every
+     * rebuild, with what the service said at the moment it appeared. Neither alone is the
+     * evidence; the pair is.
+     *
+     * <h2>The picture has its own positive control, in frame</h2>
+     *
+     * `PlannerWidgets.statePanel` draws an eyebrow reading "Planner" above the message line, and
+     * NOTHING about #271 can change it. So a legible "Planner" in the PNG proves the panel, the
+     * font, the rasteriser and the capture all worked, and makes the line under it a real
+     * reading rather than a hope -- which matters because a blank panel and a correct render of
+     * nothing are the same image, and this repository has filed one of those as an artifact.
+     * DO NOT report a `progress` PNG without saying what the eyebrow looked like.
+     *
+     * <h2>It fails rather than photographing something else</h2>
+     *
+     * A read that finishes before the floor produces a perfectly good picture of a READY
+     * planner, which is not this artifact. Same reasoning as {@link #loadingHold}, and the same
+     * outcome: a stated verdict, so the run cannot be filed as "the loading panel at 60%".
+     *
+     * <h2>RUN IT WITH `-Dmcrecipedump.shotSettleFrames=2`, AND THIS SCREEN CANNOT MAKE YOU</h2>
+     *
+     * The harness's twenty settle frames exist to let a panel finish its open animation, and
+     * they are spent BEFORE the hold starts -- so on a slow rasteriser they come out of the
+     * 5.47 s this screen is trying to watch, and the hold can open on a read that is nearly
+     * finished. It then sees one or two windows and reports "never redrawn", which is the
+     * defect's own verdict produced by a mis-set knob. The frames buy nothing here either way:
+     * the captured frame is chosen by the hold, seconds after the settle window closed.
+     *
+     * IT IS A FLAG THE CALLER HAS TO REMEMBER, WHICH {@link ShotScreens#requestSettleFrames}
+     * CALLS A FOOTGUN AND IS RIGHT TO. That method takes the LARGER of the screen's request and
+     * the default, so a screen can raise the window and has no way to lower it, and giving it
+     * one means changing the harness every other shot on this host shares. So this is written
+     * down in two places instead -- here and in `docs/shots/README.md`'s command block -- and
+     * the run that gets it wrong FAILS rather than filing a wrong picture, which is the half
+     * that actually had to be true.
+     */
+    private static ShotScreens.Hold progressHold(final float floor) {
+        return new ShotScreens.Hold() {
+
+            /** The wrapper last seen on screen. A new one IS a redraw; see the header. */
+            private GuiScreen lastSeen;
+            private int rebuilds;
+            private float firstProgress = -1.0f;
+            private float lastProgress = -1.0f;
+            private boolean sawProgressGoBackwards;
+
+            @Override
+            public boolean busy() {
+                GraphService graphs = GraphService.get();
+                float progress = graphs.progress();
+                GuiScreen onScreen = Minecraft.getMinecraft().currentScreen;
+                if (onScreen != lastSeen) {
+                    lastSeen = onScreen;
+                    rebuilds++;
+                    // THE FIRST ONE IS THE OPEN, NOT A REDRAW, and it is counted anyway so the
+                    // number in the log is "windows this read produced" rather than a quantity
+                    // whose off-by-one the reader has to take on trust. MIN_REBUILDS is 2 for
+                    // exactly this reason.
+                    ShotHarness.log("window #" + rebuilds + " on screen at " + graphs.describe()
+                            + " (" + describeScreen(onScreen) + ")");
+                    if (firstProgress < 0.0f) {
+                        firstProgress = progress;
+                    }
+                    if (progress >= 0.0f && progress < lastProgress) {
+                        sawProgressGoBackwards = true;
+                    }
+                    lastProgress = progress;
+                }
+                boolean stillReading = graphs.state() == GraphService.State.LOADING;
+                if (stillReading && progress < floor) {
+                    return true;
+                }
+                ShotHarness.log("at capture: " + graphs.describe());
+                ShotHarness.log("windows during the read: " + rebuilds
+                        + "; first at " + percent(firstProgress)
+                        + ", last at " + percent(lastProgress));
+                String problem = progressProblem(stillReading, rebuilds, sawProgressGoBackwards,
+                                                 firstProgress, progress, floor);
+                if (problem == null) {
+                    ShotScreens.reportPass();
+                } else {
+                    ShotScreens.reportFail(problem + " (" + graphs.describe() + ")");
+                }
+                return false;
+            }
+        };
+    }
+
+    /**
+     * Did the run see what it came to see? Null means yes.
+     *
+     * A PURE FUNCTION AND NOT THREE `reportFail` CALLS INSIDE THE HOLD, for the reason
+     * {@link ShotScreens#expectReport} records at length: a live run exercises exactly ONE of
+     * these branches, so the other three are read-off-the-code until something executes them.
+     * The last guard in this package that was never executed had been wired to invert its own
+     * signal and would have lied in both directions at once. `PlannerShotTest` drives all four.
+     *
+     * @param stillReading whether the graph was still LOADING when the hold released
+     * @param rebuilds     distinct windows seen on screen during the read, the open included
+     * @param progress     how far through the read the capture happens
+     * @return why the run proves nothing, or null if it proves what it claims
+     */
+    static String progressProblem(boolean stillReading, int rebuilds, boolean wentBackwards,
+                                  float firstProgress, float progress, float floor) {
+        if (!stillReading) {
+            // A perfectly good picture of a READY planner, which is a different artifact. Same
+            // reasoning as `loadingHold`, and it must not be filed as "the panel at 60%".
+            return "the read finished before " + percent(floor) + ", so there was no loading"
+                    + " panel left to photograph. Rebuilds seen: " + rebuilds + ". Lower -D"
+                    + PROP_FLOOR + ", or point $RECIPEGRAPH_ORACLE at the full graph";
+        }
+        if (rebuilds < MIN_REBUILDS) {
+            // #271 EXACTLY. The read is half done and the window the player is looking at is
+            // the one built before any of it had happened.
+            return "the panel was drawn once and never redrawn: the read reached "
+                    + percent(progress) + " and `Minecraft.currentScreen` is still the window"
+                    + " opened at " + percent(firstProgress) + ", so whatever the PNG says is"
+                    + " what it said at 0%";
+        }
+        if (wentBackwards) {
+            // Not #271, and worth its own sentence: a counter that can decrease lets a window
+            // match a value it has already drawn and sit on a stale panel with nothing to say so.
+            return "the read reported LESS progress at a later rebuild than at an earlier one,"
+                    + " so this is not a progress bar";
+        }
+        return null;
+    }
+
+    /** For the log: which window this is, without leaning on a private class's name. */
+    private static String describeScreen(GuiScreen screen) {
+        return screen == null ? "no screen" : screen.toString();
+    }
+
+    private static String percent(float progress) {
+        return progress < 0.0f ? "no read" : (int) (progress * 100.0f) + "%";
     }
 
     /**
