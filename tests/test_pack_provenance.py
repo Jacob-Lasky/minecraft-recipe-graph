@@ -45,6 +45,12 @@ NUGGET = "contenttweaker:material_part:53"        # Sednanite Nugget, #136's own
 WORN = "contenttweaker:bloodmaster_metal_chest:28400"   # a durability variant
 WORN_BASE = "contenttweaker:bloodmaster_metal_chest"
 OUTSIDER = "somemod:gravel"                       # not pack-authored: a mod's own raw leaf
+# The OTHER side of the same five clauses. #171/#262: the pack states how you get this one,
+# so it leaves `pack_authored_unsourced` and lands in `pack_authored_declared` instead. It is
+# here so the disjointness assertions below have TWO non-empty sets to be disjoint about --
+# without it `pack_authored_declared` is empty and every one of them passes vacuously, which
+# is the shape #298 exists to stop rather than to reproduce.
+DECLARED = "contenttweaker:curious_bullet"        # a puzzle reward, #171's own example
 TARGET = "mod:widget"
 
 
@@ -58,10 +64,11 @@ def pack_graph():
     g.names = {TARGET: "Widget", MARKER: "Multiblock Preview (Uncraftable)",
                CURATED: "Boss Drop", WORLD_ORE: "Candyte Ore", NUGGET: "Sednanite Nugget",
                WORN: "Bloodmaster Metal Chestplate", WORN_BASE: "Bloodmaster Metal Chestplate",
-               OUTSIDER: "Gravel"}
+               OUTSIDER: "Gravel", DECLARED: "Curious Bullet"}
     for name, ingredient in (("via_marker", MARKER), ("via_curated", CURATED),
                              ("via_ore", WORLD_ORE), ("via_nugget", NUGGET),
-                             ("via_worn", WORN), ("via_outsider", OUTSIDER)):
+                             ("via_worn", WORN), ("via_outsider", OUTSIDER),
+                             ("via_declared", DECLARED)):
         g.add(Recipe(name, "t", [(TARGET, 1)], [Ingredient([ingredient], 1)],
                      category="minecraft.crafting"))
     # The undamaged chestplate IS produced, which is what makes its worn variant an ordinary
@@ -70,6 +77,10 @@ def pack_graph():
                  category="minecraft.crafting"))
     g.ore_members = {"oreCandyte": [WORLD_ORE], "nuggetSednanite": [NUGGET]}
     g.max_damage = {"contenttweaker:bloodmaster_metal_chest": 32767}
+    # THE ONE CLAUSE THAT SPLITS THE PREDICATE, and the only difference between `DECLARED` and
+    # `MARKER` above: both are pack-authored, live, producerless, in no oredict group and are
+    # nobody's durability variant. The pack says where one of them comes from.
+    g.declared_provenance = {DECLARED: "puzzle"}
     return g
 
 
@@ -112,6 +123,48 @@ class TheRuleSeparatesFourPopulationsTest(unittest.TestCase):
         # varies between processes, so overlap would make the result order-dependent.
         self.assertEqual(set(), self.population & self.graph.unsourced_keys)
         self.assertEqual(set(), self.population & self.graph.produced_in_name_only)
+
+    def test_a_declared_key_is_in_the_other_arm_and_not_this_one(self):
+        # The precondition for the disjointness assertion below, stated separately so a
+        # failure says WHICH half broke. `DECLARED` and `MARKER` differ by one clause.
+        self.assertIn(DECLARED, self.graph.pack_authored_declared)
+        self.assertNotIn(DECLARED, self.population)
+        self.assertIn(MARKER, self.population)
+        self.assertNotIn(MARKER, self.graph.pack_authored_declared)
+
+    def test_the_two_provenance_sets_cannot_share_a_key(self):
+        """#298. The invariant two renderers rely on, asserted where it is CONSTRUCTED.
+
+        `NodeStatus.badge` puts provenance ahead of unsourced; `NodeRowText.entryLine` puts
+        unsourced ahead of provenance. The two surfaces apply OPPOSITE precedence to the same
+        pair of facts, and neither can misfire only because a key cannot carry both. That
+        invariant is enforced here -- one clause of `_is_pack_authored_unexplained`'s split --
+        and was relied on two files away with nothing asserting the coupling.
+
+        SO THE FIX IS THIS ASSERTION AND NOT A REORDERING. Teaching the two renderers to
+        agree would encode a case that must never occur as one they are expected to handle;
+        pinning the disjointness makes the case fail loudly at the point it becomes possible.
+
+        BOTH SETS ARE ASSERTED NON-EMPTY FIRST, because an intersection of two empty sets is
+        empty and would pass on a graph where the whole feature had stopped working. That is
+        the same vacuous-zero failure this file's neighbours keep finding.
+        """
+        unsourced = set(self.population)
+        declared = set(self.graph.pack_authored_declared)
+        self.assertTrue(unsourced, "the unsourced arm is empty, so this proves nothing")
+        self.assertTrue(declared, "the declared arm is empty, so this proves nothing")
+        self.assertEqual(set(), unsourced & declared)
+
+    def test_no_key_the_pack_explains_also_has_another_form_to_point_at(self):
+        # THE OTHER HALF OF "UNSOURCED", and it is easy to miss. A row is badged unsourced on
+        # `reachable_form(key) OR key in pack_authored_unsourced` -- see `Solver.shopping_row`
+        # -- so disjointness against the first arm alone would leave the second able to
+        # collide with provenance. It cannot, because `_is_pack_authored_unexplained` requires
+        # `reachable_form` to be None and the declared set runs the same clauses; this says so
+        # rather than leaving it to be re-derived.
+        wrong = [k for k in self.graph.pack_authored_declared
+                 if self.graph.reachable_form(k)]
+        self.assertEqual([], wrong)
 
 
 class ThePriceMovesOneWayTest(unittest.TestCase):
@@ -275,6 +328,31 @@ class TheRealGraphAgreesWithTheMeasurementTest(unittest.TestCase):
                          self.graph.pack_authored_unsourced & self.graph.unsourced_keys)
         self.assertEqual(set(),
                          self.graph.pack_authored_unsourced & self.graph.produced_in_name_only)
+
+    def test_the_two_provenance_sets_cannot_share_a_key_on_real_data(self):
+        """#298, on the pack rather than on a fixture built to demonstrate it.
+
+        THE SYNTHETIC ARM PROVES THE RULE AND THIS PROVES THE POPULATION. A hand-built graph
+        exercises one declared key and one marker; the pack has hundreds of each, and the
+        exclusions that keep them apart -- oredict membership, durability variants, liveness,
+        and since #270 a worldgen record -- only meet real data here.
+
+        NON-EMPTY FIRST, for the reason the synthetic version gives, and it is not theoretical
+        on this arm: `declared_provenance` is EMPTY in `graph-oracle-248.json` and in
+        `graph-oracle.json`, so on either of those oracles the declared set is 0 and an
+        unguarded intersection would report a clean pass while asserting nothing at all.
+        """
+        unsourced = set(self.graph.pack_authored_unsourced)
+        declared = set(self.graph.pack_authored_declared)
+        self.assertTrue(unsourced, "the unsourced arm is empty, so this proves nothing")
+        self.assertTrue(declared, "this oracle carries no declared_provenance, so this "
+                                  "assertion cannot fail and must not be believed")
+        self.assertEqual(set(), unsourced & declared)
+
+    def test_no_declared_key_on_real_data_has_another_form_to_point_at(self):
+        # The `reachable_form` arm of the unsourced badge, measured. See the synthetic twin.
+        wrong = [k for k in self.graph.pack_authored_declared if self.graph.reachable_form(k)]
+        self.assertEqual([], wrong[:10])
 
     def test_no_key_carrying_oredict_membership_is_in_the_set(self):
         # 47 keys on the reference graph, of which only 11 are ores. The Sednanite Nugget is
