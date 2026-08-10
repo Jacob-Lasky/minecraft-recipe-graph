@@ -426,6 +426,128 @@ def check_name(tag):
     return tag[1:] if tag.startswith("!") else tag
 
 
+def sole_claims(covers_by_fixture):
+    """`{fixture: [tags nothing else claims]}`. The claims that justify each fixture.
+
+    WHAT MAKES A FIXTURE'S CASE CHECKABLE, WHICH IS #284'S QUESTION AND THIS IS THE ANSWER.
+    `holds` re-proves what a fixture SAYS about itself, and every one of #284's three
+    instances still satisfied everything it said -- `plan-same-name` claims `craft, raw,
+    oredict, not_truncated` and all four hold against a plan containing zero colliding
+    labels. The claim that would have failed was never written down: it lived in the
+    filename, in the prose `why`, and in the issue the fixture was filed for.
+
+    So the property is not "does each claim hold" but "is any claim this fixture's ALONE".
+    If every tag a fixture declares is also declared elsewhere, then deleting the fixture
+    outright loses the suite no declared coverage -- and a fixture whose disappearance costs
+    nothing measurable is one whose case can evaporate without measuring anything either.
+    That is `plan-same-name` exactly: it claims a strict subset of `plan-fluid-chain`, so the
+    suite noticed nothing when the labels stopped colliding.
+
+    NOT "IS ITS SET A SUBSET OF ANOTHER'S", WHICH IS THE VERSION THAT LOOKS EQUIVALENT AND IS
+    GAMEABLE. Seven of these fixtures have true-but-unclaimed tags sitting right there --
+    `plan-dimension-shadow` really does have a `shopping_list` -- so a subset rule is
+    satisfiable by padding a fixture with a tag that is true and has nothing to do with why
+    the fixture exists. Sole bearership cannot be padded: adding a tag someone else already
+    claims changes nothing, and the only way to pass is to declare something no other fixture
+    does, which is the fixture's case or nothing.
+
+    A SET, NOT A COUNT, and deliberately. "22 fixtures declare 25 checks" stays true while
+    the assignment underneath it rots, which is the shape of every guard in this file that
+    failed. This names WHICH fixture and WHICH tag, so a regression reads as the sentence a
+    reader needs rather than as a number that moved.
+
+    ON THE TAG AS WRITTEN AND NOT THROUGH `check_name`, which is the opposite of what
+    `test_no_check_is_dead` wants and is correct for the opposite reason. That test asks
+    whether a check is exercised at all, and `!emc` exercises the `emc` check as surely as
+    `emc` does. This one asks what would stop being asserted if a fixture vanished, and a
+    negative claim cannot stand in for the positive one: `emc-terminator` is the only fixture
+    asserting that a plan DOES terminate on EMC, while `emc-not-learned` and `emc-unvalued`
+    both assert that one does not. Folding the three together reports the one fixture holding
+    that assertion up as needing no case of its own -- measured, not hypothetical; it was the
+    first version of this function.
+    """
+    bearers = collections.defaultdict(list)
+    for fixture, covers in covers_by_fixture.items():
+        for tag in covers:
+            bearers[tag].append(fixture)
+    return dict((fixture, sorted(t for t in covers if len(bearers[t]) == 1))
+                for fixture, covers in covers_by_fixture.items())
+
+
+# Fixtures whose case is real and is NOT yet expressible as a tag, each with what it would
+# take to express it. #284 measured 13 of 22 on the day it was written.
+#
+# AN EXEMPTION TABLE AND NOT A SOFTENED CHECK, for the reason `NOT_PINNED` gives one file
+# down: a new fixture now fails until somebody decides, and both decisions -- declare a
+# distinguishing claim, or write down why you cannot yet -- are cheap and neither is silent.
+# The alternative considered was to let the guard pass on a subset rule, which every one of
+# these already satisfies and which would therefore have reported all thirteen as fine.
+#
+# DELETING A LINE FROM HERE IS THE INTENDED WAY TO USE IT. Each entry is a debt with the
+# repayment written next to it, so the table shrinks as the vocabulary grows; it is not a
+# list of fixtures that have been excused.
+CASE_UNDECLARED = {
+    "same-name": (
+        "#232. Six keys share the label 'Iron Plate' and the plan is supposed to contain "
+        "more than one of them, but the stored tree has 21 rows, 18 distinct labels and ZERO "
+        "collisions -- measured under both `label` and `name`. The premise is BROKEN, not "
+        "merely undeclared, and a `same_name` check added today would go red rather than "
+        "green. Expressing it needs a target whose plan actually collides; that is #232's "
+        "work, and this line is what stops the gap being invisible until then."),
+    "dimension-gate": (
+        "A dimension gate ON THE REQUESTED KEY, as against `dimension-in-chain`'s gate found "
+        "below the root. `dimension` counts any gated node anywhere, so the two are "
+        "indistinguishable by tag. Needs `dimension_at_root` / `dimension_below_root`, which "
+        "are a two-line predicate over the tree and would retire this entry and the next."),
+    "dimension-in-chain": (
+        "The other half of the pair above: a gate reached three levels down. This fixture has "
+        "now lost its premise TWICE -- #171 and #248 -- and the generator's refusal caught it "
+        "both times while the suite stayed green, which is the whole of #284 in one fixture."),
+    "dimension-shadow": (
+        "#117: a node gated through a SHADOW key the pack registers twice, rather than "
+        "through the declared one. Distinguishing it needs the check to know which key was "
+        "declared in `dimension_ores`, i.e. graph knowledge the stored result does not "
+        "carry. The hardest of these to express and the one most worth expressing."),
+    "dimension-shadow-groupless": (
+        "The groupless variant of the above, and it differs from it only by `!unsourced`, "
+        "which `variant-table` and `unsourced-price` also claim. Retired by the same "
+        "shadow-key predicate."),
+    "emc-not-learned": (
+        "EMC exists on the pack and this plan does not terminate on it. The negative pair "
+        "`!emc, !from_emc` is shared with `emc-unvalued`, whose case is the DIFFERENT reason "
+        "for the same absence -- unvalued rather than unlearned. Needs a claim about WHY the "
+        "absence holds, which no predicate over the result can currently see."),
+    "emc-unvalued": (
+        "The other half of that pair. Same remedy."),
+    "machine-choice": (
+        "A slot with a genuine choice among a chemical reactor, a crystallizer, a world "
+        "transmutation and plain crafting. `alternatives` would say this and IS true of the "
+        "stored plan -- but `fluid-chain` already claims it, so claiming it here is padding "
+        "rather than a case. Needs `machine_alternatives`: a slot whose alternatives span "
+        "more than one machine."),
+    "machine-override": (
+        "A manual override winning over detected evidence. Its `covers` set is IDENTICAL to "
+        "`no-machine-declared`'s, and the two share a scenario -- they exercise opposite "
+        "halves of it. Needs a predicate that can see the scenario as well as the result, "
+        "which `holds(tag, result)` currently cannot; that signature change is the work."),
+    "no-machine-declared": (
+        "The other half of that scenario: a category declared to need no machine at all. "
+        "Same remedy, same signature change."),
+    "token-gate": (
+        "#105: a quest placeholder priced above `BASE_RAW_COST` and reported on its own. The "
+        "ONLY fixture here with no true-but-unclaimed tag available -- its case is genuinely "
+        "inexpressible in the current vocabulary rather than merely undeclared, which makes "
+        "it the cleanest argument that the vocabulary is what needs extending."),
+    "unsourced-price": (
+        "A display mark that a price removed, and that must STAY removed. Differs from "
+        "`variant-table` by `shopping_list` alone, which a dozen fixtures could claim."),
+    "variant-table": (
+        "#110: a Chisel variant key with a real producer rather than a `BASE_RAW_COST` "
+        "orphan. Needs a claim about the PRICE of a node, and every check in the table above "
+        "reads structure rather than cost."),
+}
+
+
 class Target(object):
     """One fixture: a request, the scenario it runs in, and the claims it makes."""
 

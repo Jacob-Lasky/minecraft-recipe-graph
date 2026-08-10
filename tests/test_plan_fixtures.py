@@ -190,6 +190,77 @@ class EveryClaimAFixtureMakesIsStillTrueOfItTest(unittest.TestCase):
         missing = sorted(set(REQUIRED_COVERAGE) - seen)
         self.assertFalse(missing, "no fixture exercises %s any more" % missing)
 
+    def test_every_fixture_bears_a_claim_alone_or_is_named_as_undeclared(self):
+        """#284. A fixture nothing would miss is one whose case can vanish unmeasured.
+
+        THE CHECK ABOVE RE-PROVES WHAT A FIXTURE SAYS; THIS ONE ASKS WHETHER IT SAYS ANYTHING
+        ONLY IT SAYS. All three of #284's instances passed every declared check while having
+        stopped exercising the thing they are named for, because the thing they are named for
+        was never a tag. `plan-same-name` claims a strict subset of `plan-fluid-chain`, so the
+        suite lost nothing measurable when its labels stopped colliding -- and measured
+        nothing when they did.
+        """
+        covers = dict((name[len("plan-"):-len(".json")],
+                       set(json.loads(load(name)).get("covers") or ()))
+                      for name in fixture_names() if name.startswith("plan-"))
+        sole = maker.sole_claims(covers)
+        undeclared = sorted(f for f, tags in sole.items() if not tags)
+        self.assertEqual(
+            sorted(maker.CASE_UNDECLARED), undeclared,
+            "these fixtures declare no claim of their own, so nothing would go red if they "
+            "stopped exercising their case. Either give one a distinguishing tag, or name it "
+            "in maker.CASE_UNDECLARED with what expressing it would take.")
+
+    def test_the_undeclared_table_names_only_fixtures_that_exist(self):
+        # A stale entry is worse than none: it excuses a fixture that has been renamed or
+        # deleted, and it does it silently, which is the defect this whole class is about.
+        on_disk = set(n[len("plan-"):-len(".json")]
+                      for n in fixture_names() if n.startswith("plan-"))
+        self.assertFalse(sorted(set(maker.CASE_UNDECLARED) - on_disk),
+                         "maker.CASE_UNDECLARED names fixtures that are not on disk")
+
+    def test_the_undeclared_table_does_not_cover_the_whole_set(self):
+        # A ZERO FROM THIS GUARD WOULD BE A CLAIM ABOUT THE GUARD. If every fixture were
+        # exempt the check above would pass while asserting nothing whatever, which is the
+        # exact failure mode it was written to catch, one level up. The same argument as
+        # `ci-java.sh`'s IMPURE_CONTROL and this file's `test_no_check_is_dead`.
+        plans = [n for n in fixture_names() if n.startswith("plan-")]
+        self.assertLess(len(maker.CASE_UNDECLARED), len(plans),
+                        "every plan fixture is exempt, so the sole-bearer check asserts "
+                        "nothing at all")
+
+    def test_the_sole_bearer_rule_names_the_fixture_that_stops_bearing(self):
+        """FED A CASE IT MUST REJECT, rather than trusted for having returned a clean answer.
+
+        The rule is arithmetic over a dict, so it can be exercised directly instead of by
+        breaking a file on disk -- and it is exercised in both directions, because a rule that
+        flags everything discriminates exactly as poorly as one that flags nothing.
+        """
+        # `b` is the only fixture claiming `cycle`, so it stands on its own; `a` claims
+        # nothing `b` does not, so it does not.
+        covers = {"a": {"craft"}, "b": {"craft", "cycle"}}
+        sole = maker.sole_claims(covers)
+        self.assertEqual(["cycle"], sole["b"])
+        self.assertEqual([], sole["a"])
+
+        # Now let `b` lose the case it existed for. It must go from standing alone to not.
+        lapsed = {"a": {"craft"}, "b": {"craft"}}
+        self.assertEqual([], maker.sole_claims(lapsed)["b"])
+
+        # And padding must NOT rescue it: `raw` is true of plenty of plans, so adding it to
+        # BOTH buys `b` nothing. This is the property a subset rule lacks -- under a subset
+        # rule `b` would now pass, because its set is no longer contained in `a`'s.
+        padded = {"a": {"craft", "raw"}, "b": {"craft", "raw"}}
+        self.assertEqual([], maker.sole_claims(padded)["b"])
+
+        # A negative claim does not stand in for the positive one. `emc-terminator` is the
+        # only fixture asserting EMC termination HAPPENS; keying through `check_name` would
+        # fold it in with the two asserting it does not, and report the one fixture holding
+        # that assertion up as needing no case of its own.
+        emc = {"terminator": {"emc"}, "not-learned": {"!emc"}, "unvalued": {"!emc"}}
+        self.assertEqual(["emc"], maker.sole_claims(emc)["terminator"])
+        self.assertEqual([], maker.sole_claims(emc)["not-learned"])
+
     def test_each_plan_records_the_scenario_its_target_declares(self):
         # The Java side builds its solver from the fixture's own `scenario` block, so a
         # fixture whose scenario has drifted from the generator's is one that cannot be
