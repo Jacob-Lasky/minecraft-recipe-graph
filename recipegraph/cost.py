@@ -898,13 +898,22 @@ CRAFTABLE_COST = 0.25
 #     tree patched between runs -- `tools/cost-probe.py`'s note on FUSE mtime granularity and
 #     same-length edits says why a single tree cannot be trusted here, and this change IS a
 #     same-length-class edit. `origin/master` was exported with `git archive` to its own
-#     directory, so the two arms never share a `__pycache__`. On `graph-oracle-248.json`,
-#     every dimension unvisited:
+#     directory, so the two arms never share a `__pycache__`. On `graph-s8b.json`, every
+#     dimension unvisited:
 #
-#         priced keys  162,312     moved 1     UP 0     DOWN 1
+#         priced keys  162,313     moved 1     UP 0     DOWN 1
 #         appeared 0, vanished 0
 #
 #         contenttweaker:sub_block_holder_1:8    2000.0 -> 806.0
+#
+#     ON `graph-s8b.json` AND NOT ON `graph-oracle-248.json`, WHICH IS NOT A DETAIL. The
+#     golden fixtures are generated from s8b -- its sha256 is the one every fixture embeds --
+#     and the first pass of this measurement was taken against oracle-248 purely because #248
+#     is the change this sits on top of. That arm reported the same verdict, so nothing here
+#     changed, but "the same verdict" was luck rather than evidence: `--check` on UNMODIFIED
+#     master against oracle-248 reports 24 of 24 fixtures differing, because each fixture
+#     carries its oracle's identity. A branch measured on one graph and regenerated against
+#     another is #281 exactly. DATE AND HASH THE ORACLE BEFORE BELIEVING A NUMBER FROM IT.
 #
 #     ONE KEY, WHICH IS THE POPULATION AND NOT A SAMPLE. `pack_authored_unsourced` meets
 #     `dimension_ores` in exactly one key on this oracle, and that intersection is itself
@@ -919,10 +928,10 @@ CRAFTABLE_COST = 0.25
 #     would have meant the mining floor was raising something, which `min` cannot do.
 #
 #     THE DIGEST COMPARISON WAS MADE TO FAIL FIRST. Three sha256 digests over every finite
-#     price, sorted: master `446ad31a…`, this branch `a29b149f…`, and master with
-#     `BASE_RAW_COST` perturbed to 1.0001 `0e2a4b75…`. All three differ, so the digest is
-#     sensitive to a 1e-4 nudge and the master-vs-branch difference is earned rather than an
-#     artefact of a comparison that could not have reported equality anyway.
+#     price, sorted, all on `graph-s8b.json`: master `9b194353…`, this branch `d30a0678…`,
+#     and master with `BASE_RAW_COST` perturbed to 1.0001 `2fb7d810…`. All three differ, so
+#     the digest is sensitive to a 1e-4 nudge and the master-vs-branch difference is earned
+#     rather than an artefact of a comparison that could not have reported equality anyway.
 FORMULA_VERSION = 20
 
 # Bellman-Ford needs one pass per edge in the longest useful path. MeatballCraft's chemistry

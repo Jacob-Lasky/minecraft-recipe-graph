@@ -692,9 +692,9 @@ TARGETS = [
             "all 21 fixtures before this one hold `dimension` and `unsourced` together, and "
             "0 hold the gap membership either, so every rule in this area had nothing to "
             "fail against. The intersection of `pack_authored_unsourced` and "
-            "`dimension_ores` is exactly one key on this oracle and this is it; if the pack "
-            "is ever re-dumped without the removal on line 63, this target stops being in "
-            "the gap and the `dimension` claim is what will say so."),
+            "`dimension_ores` is exactly one key on `graph-s8b.json` and this is it; if the "
+            "pack is ever re-dumped without the removal on line 63, this target stops being "
+            "in the gap and the `dimension` claim is what will say so."),
     Target(
         "multiblock", "fluid:liquid_void",
         expect=("craft", "raw", "machine", "machine_to_build", "not_truncated"),

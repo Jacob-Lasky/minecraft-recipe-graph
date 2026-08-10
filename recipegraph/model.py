@@ -982,7 +982,7 @@ class Graph:
         that is NOT in the registry. `contenttweaker:sub_block_holder_1:8` is the case --
         Rhenium Ore, registered into `oreRhenium` by `scripts/OreDictionary.zs:63` and
         removed again on the next line, so it belongs to no `ore*` group at all. It is the
-        ONLY key in that gap on the reference oracle, measured both ways round -- the
+        ONLY key in that gap on `graph-s8b.json`, measured both ways round -- the
         intersection of `pack_authored_unsourced` with `dimension_ores` is the same single
         key as `dimension_ores - world_ores` -- and it was reaching the unsourced branch of
         `expand`: the plan said "it comes from a mechanic no recipe can describe" about an
@@ -994,6 +994,27 @@ class Graph:
         `shadow_ores` test -- same display name, same mod, and a shared or deliberately
         deleted `ore*` group. Both arms say "this block generates in the ground"; only the
         registry lookup can miss it.
+
+        WHAT THIS EXPOSES AND DOES NOT SETTLE, RECORDED HERE BECAUSE IT IS A CONSEQUENCE OF
+        THIS SET AND NOT OF THE CALLER THAT TRIPS OVER IT. Pricing the twin correctly makes
+        it TIE with its anchor -- `contenttweaker:rhenium_ore` and
+        `contenttweaker:sub_block_holder_1:8` are both 806.0 on `graph-s8b.json`, both
+        labelled "Rhenium Ore", both now noted "mined on Rhenia" -- and a perfect tie falls
+        to dump order, which is #248's own complaint one level down. Measured: the
+        `dimension-in-chain` fixture's Molten Rhenium route moves from
+        `hei:nuclearcraft_melter:334051` (the anchor) to `hei:nuclearcraft_melter:333813`
+        (the twin), because the two melters are otherwise identical recipes.
+
+        THAT TIE IS NOT A DEFECT INTRODUCED HERE, it is the pre-existing one this uncovers.
+        Before, the anchor won because the twin was mispriced at `UNSOURCED_COST` -- the right
+        answer for the wrong reason, and the wrong reason is what #270 removes.
+
+        DO NOT BREAK THE TIE BY PREFERRING THE ANCHOR WITHOUT DECIDING IT PROPERLY FIRST.
+        `dimensions.shadow_ores` states in as many words that it does not claim the two keys
+        are one node and that "the canonical direction is genuinely unsettled: 26 recipes
+        consume the holder and 30 the block". `Graph.shadow_ores` records which id is the
+        twin, so the data for such a rule exists and the rule is deliberately absent. Adding
+        it is a design decision about which id a plan should name, not a tidy-up.
 
         DELIBERATELY NOT `offworld_ores`. That set says a portal is on the route, which is a
         statement about the TRIP and not about how the block is acquired, and it is a
@@ -1507,17 +1528,17 @@ class Graph:
                 # with a puzzle-reward note instead of a false unsourced one, which is a
                 # different wrong answer rather than a fix. `Solver.expand` returns at the
                 # mining branch before it reaches either, and this keeps the price agreeing
-                # with that. Measured on `graph-oracle-248.json`: removes exactly 1 key from
-                # `pack_authored_unsourced`, 284 -> 283.
+                # with that. Measured on `graph-s8b.json`, the oracle the golden fixtures are
+                # generated from: removes exactly 1 key from `pack_authored_unsourced`,
+                # 232 -> 231, and 0 from `pack_authored_declared`, which holds at 52.
                 #
-                # THE DECLARED HALF IS UNMEASURED ON THIS ORACLE AND THAT IS RECORDED RATHER
-                # THAN REPORTED AS A ZERO. `declared_provenance` is EMPTY in both
-                # `graph-oracle-248.json` and `graph-oracle.json` -- neither dump carries the
-                # field -- so `pack_authored_declared` is 0 there before this clause and 0
-                # after, and "0 keys moved" on that side is the source being absent rather
-                # than the intersection being empty. `tests/test_dimensions.py` pins the
-                # declared arm on a hand-built graph instead, which is the only place the two
-                # sides can be exercised together today.
+                # THAT SECOND ZERO IS EARNED RATHER THAN VACUOUS, and it is worth saying which
+                # oracle bought it. The same measurement on `graph-oracle-248.json` also
+                # returns 0 declared keys removed, and there it means NOTHING: that dump
+                # carries no `declared_provenance` at all, so `pack_authored_declared` is 0
+                # before the clause and 0 after. On `graph-s8b.json` the field is populated --
+                # 896 declarations, 52 surviving into the set -- so a dimension ore landing on
+                # the declared side WOULD have shown up, and none does.
                 and key not in self.dimension_ores
                 and self.damage_base(key) == key)
 
