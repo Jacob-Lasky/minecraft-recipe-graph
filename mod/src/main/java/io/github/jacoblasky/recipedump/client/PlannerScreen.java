@@ -7,6 +7,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.ModularScreen;
 import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 
+import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
@@ -17,6 +18,8 @@ import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
+import io.github.jacoblasky.recipedump.plan.GraphFacts;
 
 /**
  * Opens the planner's windows. Everything they contain is built by {@link PlannerWidgets},
@@ -145,9 +148,39 @@ public final class PlannerScreen {
 
     private static ModularPanel planPanel(PlanView plan, PlanBook book) {
         LivePlannerActions actions = new LivePlannerActions();
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, actions);
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, schemaCheck(), actions);
         actions.attachTo(panel);
         return avoidedByJei(panel);
+    }
+
+    /**
+     * How the loaded graph's dump format compares with this build's, or null when no graph is
+     * loaded. The measuring half of #285; `GraphFacts.checkSchema` is the deciding half.
+     *
+     * THE JAR'S NUMBER IS READ HERE AND NOT IN `plan/`, exactly as `BrowseScreen` reads the
+     * running mod list for the pack check: `DumpCommand` imports Minecraft and JEI, so `plan/`
+     * may not name it and `tools/ci-java.sh` could not compile it. `DumpCommand.SCHEMA` is a
+     * compile-time constant, so this reference costs no class load on top of that.
+     *
+     * TWO INTS AND NOT A `GraphFacts`. Building one walks all 124,467 recipes, and this runs
+     * every time the planner window rebuilds itself -- which is once per plan, per book change,
+     * and per graph generation. The Graph tab pays that walk because it prints the totals; this
+     * needs one field.
+     *
+     * NULL WHERE THERE IS NO GRAPH, AND IT IS NOT A SILENCE THAT HIDES ANYTHING. `openPlanner`
+     * draws a not-yet panel for every graph state that is not READY, so a tree on screen means a
+     * graph was loaded; the reachable null is `openPlan`, the screenshot harness drawing a
+     * stored fixture that never came from one. See `PlannerWidgets.staleGraphWarning`.
+     *
+     * PUBLIC ONLY SO `shot.PlannerShot` CAN ASK THE SAME QUESTION. It builds one panel by hand
+     * rather than through {@link #openPlan}, and its own note says that panel is "the same panel
+     * `openPlan` would have built" -- a claim that stops being true the moment the two disagree
+     * about what to pass here. DO NOT let a caller supply its own answer instead.
+     */
+    public static GraphFacts.SchemaCheck schemaCheck() {
+        RecipeGraph graph = GraphService.get().graph();
+        return graph == null ? null
+                : GraphFacts.checkSchema(graph.dumpSchema(), DumpCommand.SCHEMA);
     }
 
     /**

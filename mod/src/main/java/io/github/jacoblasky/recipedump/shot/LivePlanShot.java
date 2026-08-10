@@ -7,10 +7,14 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 
 import io.github.jacoblasky.recipedump.client.PlannerEntry;
+import io.github.jacoblasky.recipedump.client.PlannerScreen;
+import io.github.jacoblasky.recipedump.client.planner.PlannerState;
+import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PinStore;
 import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
+import io.github.jacoblasky.recipedump.plan.GraphFacts;
 import io.github.jacoblasky.recipedump.plan.Solver;
 
 /**
@@ -101,6 +105,67 @@ final class LivePlanShot {
         // failure panel naming the path it looked in, which is the second shot in
         // docs/shots/ and is worth photographing for exactly that reason.
         PlannerEntry.open(book);
+    }
+
+    /**
+     * `planner-stale`: the same solve, over a graph whose format really disagrees with the jar.
+     *
+     * THE PICTURE #285 NEEDS, AND THE ONE IT MUST NOT ACCEPT INSTEAD. The warning line only
+     * renders on a mismatch, so a run against a current graph produces a perfectly good
+     * photograph of the case this shot is not about -- which is the failure `PlannerShot`'s
+     * yield note and #293 both describe, a correct render of the wrong subject being filed as
+     * the artifact. So the mismatch is a PRECONDITION the run asserts rather than a hope.
+     *
+     * NOTHING IS FAKED TO GET THERE. `graph-s7.json` on this host is a real dump of this pack
+     * at schema 7 and the jar reads 8, which is exactly a player who updated the mod and kept
+     * their graph. `stage-instance.sh` has a pinned-proceeds branch for precisely this -- #279's
+     * rule is that an AUTO-SELECTED stale graph refuses and a DELIBERATELY PINNED one warns --
+     * so pinning one is a supported operation rather than a way around the guard.
+     *
+     * IT CHECKS THE CHOOSER'S ANSWER, NOT THE PIXELS, and that is a real limitation stated
+     * rather than hidden. This opener does not build the panel -- `PlannerEntry.open` does,
+     * three layers down, which is the whole reason the picture is worth having -- so it cannot
+     * walk the widget tree the way `BrowseShot` does. What it can establish is the chain that
+     * makes the line certain: the graph is READY, the plan is DONE, the chooser is drawing the
+     * PLAN panel rather than one of the four not-yet panels, and the verdict is a real
+     * mismatch. Given those, `plannerPanel` draws the line unconditionally -- the only branch
+     * that omits it is `staleGraphWarning` answering "", which is fully determined by the
+     * verdict this check has just read.
+     */
+    static void openAgainstAStaleGraph(String arg) {
+        open(arg);
+        final GraphFacts.SchemaCheck schema = PlannerScreen.schemaCheck();
+        final String expected = PlannerWidgets.staleGraphWarning(schema);
+        log("schema: " + (schema == null ? "no graph loaded"
+                : schema.verdict() + " -- " + schema.detail()));
+        ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+            @Override
+            public boolean drewSomething() {
+                return !expected.isEmpty()
+                        && PlannerEntry.stateFor(GraphService.get(), PlannerService.get()) == null;
+            }
+
+            @Override
+            public String describe() {
+                if (schema == null) {
+                    return "no graph loaded, so there is no schema to disagree with the jar"
+                            + " and nothing for this shot to photograph";
+                }
+                if (expected.isEmpty()) {
+                    return "the staged graph is " + schema.verdict() + " (" + schema.detail()
+                            + "), so no warning renders. Pin a graph whose dump_schema differs"
+                            + " from the jar's, e.g. RECIPEGRAPH_ORACLE=.../graph-s7.json";
+                }
+                PlannerState notYet =
+                        PlannerEntry.stateFor(GraphService.get(), PlannerService.get());
+                if (notYet != null) {
+                    return "the chooser is drawing a not-yet panel (" + notYet.message()
+                            + "), so the plan panel that carries the warning is not on screen";
+                }
+                return "the plan panel is on screen over a " + schema.verdict()
+                        + " graph, so it carries: " + expected;
+            }
+        });
     }
 
     /**

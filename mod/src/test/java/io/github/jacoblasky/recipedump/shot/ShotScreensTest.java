@@ -182,8 +182,8 @@ public class ShotScreensTest {
                 "ae2-probe", "dump", "fixture", "flow", "flow-hit", "flow-selected",
                 "graph", "jei", "jei-keybind", "machines", "machines-detail", "machines-mods",
                 "planner", "planner-caveats", "planner-live", "planner-menu", "planner-recipes",
-                "planner-recovery", "planner-selected", "planner-todo", "planner-yield",
-                "row-menu", "sources", "world-probe");
+                "planner-recovery", "planner-selected", "planner-stale", "planner-todo",
+                "planner-yield", "row-menu", "sources", "world-probe");
 
         List<String> actual = new ArrayList<String>(ShotScreens.names());
         // SORTED ON BOTH SIDES, because `names()` is documented as registration ORDER and that

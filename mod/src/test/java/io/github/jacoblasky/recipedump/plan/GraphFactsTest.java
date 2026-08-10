@@ -254,4 +254,93 @@ public class GraphFactsTest {
                        check.detail().length() <= 64);
         }
     }
+
+    // -- the schema check (#285) ---------------------------------------------------------------
+    //
+    // THE JAR'S NUMBER IS A LITERAL HERE AND `DumpCommand.SCHEMA` IS NOT REACHABLE FROM IT, on
+    // purpose and not for want of an import. `DumpCommand` imports Minecraft and JEI, so `plan/`
+    // may not name it and `tools/ci-java.sh` -- the only job that runs on a stock runner --
+    // could not compile it. The constant is pinned to the Python side by
+    // `tests/test_catalysts.py`, which greps it out of `DumpCommand.java`; that is what stops
+    // the number drifting, and it is a stronger check than an equality assertion in this file
+    // would be, because it spans the two languages that have to agree.
+
+    @Test
+    public void aGraphWrittenInThisBuildsFormatMatches() {
+        GraphFacts.SchemaCheck check = GraphFacts.checkSchema(8, 8);
+        assertEquals(GraphFacts.SchemaVerdict.MATCHES, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("8"));
+    }
+
+    @Test
+    public void anOlderGraphIsBehindAndIsToldToRedump() {
+        // THE #279 FAILURE, and the one a player actually hits: `GraphJsonReader` skips
+        // sections it does not recognise, so a schema-7 graph loads cleanly under a schema-8
+        // jar and then answers -1 for keys the pack really has -- which reads as "that item is
+        // not in the pack" rather than as an error.
+        GraphFacts.SchemaCheck check = GraphFacts.checkSchema(7, 8);
+        assertEquals(GraphFacts.SchemaVerdict.BEHIND, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("7"));
+        assertTrue(check.detail(), check.detail().contains("8"));
+        assertTrue(check.detail(), check.detail().contains("redump"));
+    }
+
+    @Test
+    public void aNewerGraphIsAheadAndIsToldToUpdateTheModInstead() {
+        // THE OPPOSITE FIX, which is why this is not one signed mismatch. Redumping an AHEAD
+        // graph rewrites the newer file with an older dump and makes the situation worse; the
+        // jar is the half that is behind.
+        GraphFacts.SchemaCheck check = GraphFacts.checkSchema(9, 8);
+        assertEquals(GraphFacts.SchemaVerdict.AHEAD, check.verdict());
+        assertTrue(check.detail(), check.detail().contains("9"));
+        assertTrue(check.detail(), check.detail().contains("8"));
+        assertTrue(check.detail(), check.detail().contains("update the mod"));
+        assertFalse("an AHEAD graph must not be told to redump: " + check.detail(),
+                    check.detail().contains("redump"));
+    }
+
+    @Test
+    public void theTwoDirectionsAreDistinguishableRatherThanOneMismatch() {
+        // The whole reason there are four verdicts. A single MISMATCH would leave a reader
+        // holding two opposite fixes and no way to tell which one is theirs.
+        assertNotEquals(GraphFacts.checkSchema(7, 8).verdict(),
+                        GraphFacts.checkSchema(9, 8).verdict());
+        assertNotEquals(GraphFacts.checkSchema(7, 8).detail(),
+                        GraphFacts.checkSchema(9, 8).detail());
+    }
+
+    @Test
+    public void anUnrecordedSchemaIsItsOwnVerdictAndNeverReadsAsAMatch() {
+        // `GraphBuilder` leaves `dumpSchema` 0 both when the field is absent and when it is
+        // JSON null -- `GraphJsonReader.zeroAfterNull`. Zero is not a format number, and
+        // comparing it as one would report BEHIND with a confident "graph is schema 0".
+        for (int absent : new int[] {0, -1}) {
+            GraphFacts.SchemaCheck check = GraphFacts.checkSchema(absent, 8);
+            assertEquals(GraphFacts.SchemaVerdict.UNRECORDED, check.verdict());
+            assertNotEquals("it must not read as a match", GraphFacts.SchemaVerdict.MATCHES,
+                            check.verdict());
+            assertFalse("it must not name a schema it does not have: " + check.detail(),
+                        check.detail().contains("schema " + absent));
+        }
+    }
+
+    @Test
+    public void everySchemaVerdictCarriesANonEmptyReasonThatFitsThePanel() {
+        // Same two rules the pack check is held to: the panel draws `detail()` unconditionally,
+        // and 64 characters is 388px at 6px a character. Two-digit schema numbers are the
+        // longest case and are the ones checked, since 8 is one bump from 10.
+        GraphFacts.SchemaCheck[] all = {
+            GraphFacts.checkSchema(12, 12),
+            GraphFacts.checkSchema(11, 12),
+            GraphFacts.checkSchema(13, 12),
+            GraphFacts.checkSchema(0, 12),
+        };
+        assertEquals("every verdict must be covered, or this proves less than it claims",
+                     GraphFacts.SchemaVerdict.values().length, all.length);
+        for (GraphFacts.SchemaCheck check : all) {
+            assertFalse(check.verdict().toString(), check.detail().isEmpty());
+            assertTrue(check.detail() + " is " + check.detail().length() + " chars",
+                       check.detail().length() <= 64);
+        }
+    }
 }

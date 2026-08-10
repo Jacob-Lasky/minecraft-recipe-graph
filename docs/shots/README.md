@@ -132,7 +132,18 @@ cp $SHOTS/after.png docs/shots/plan-after-pin.png
 | `recipe-picker-no-graph.png` | No graph loaded. The picker says which of the three reasons it has nothing to offer, rather than showing an empty box. |
 | `plan-before-pin.png` / `plan-after-pin.png` | One hopper, planned twice against the real pack. Iron Ingot goes from Smelting to a Crafting route, the row says `pinned`, and the subtree under it is different. The pin is the only thing that changed. |
 | `planner-during-load.png` / `planner-after-load.png` | The calculator used a second after joining, and the same window a few seconds later, with nothing touched in between (#201). The first is the wait; the second is the plan the window replayed when the graph landed. Before #201 the second picture did not exist -- the window showed the first one until the player closed it and used the item again -- so this pair is the artifact and either half alone is equally consistent with the bug. |
+| `graph-schema-behind.png` / `plan-schema-behind.png` | The same real schema-7 graph read by a schema-8 jar, on the two surfaces that report it (#285). The Graph tab carries `format: OLD GRAPH -- it lacks what this build reads` over `graph is schema 7 and this build reads 8; redump to fix`; the planner carries `graph is schema 7, this build reads 8 -- plans may be wrong` above the tree, because the Graph tab is a screen the player who needs it does not know to open. **The `pack: MISMATCH` line above it is the harness and not a defect** -- `shot.sh` runs a 10-jar dev set against a dump of the full 406, which is what `graph: pack check DIFFERS` in the log says. Taken with `RECIPEGRAPH_ORACLE=$BUILD/graph-s7.json`, a real dump of this pack one schema behind the jar, which is `stage-instance.sh`'s pinned-proceeds case rather than a way around its guard. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
+
+`planner-stale` is `planner-live` with one extra claim, and the claim is why it is a separate
+screen: the staged graph must REALLY disagree with the jar, or there is no warning on the panel
+and the run is red rather than a good picture of the wrong case. Verified both ways --
+`graph-s7.json` gives `drawn check PASSED`, and `graph-s8b.json`, which matches the jar, gives
+`DRAWN CHECK FAILED ... so no warning renders` with the reason and the fix in the line. Note
+that a harness exit code arrives through Gradle as 1 whatever the screen said, so
+**`DRAWN CHECK FAILED` in the log is the thing to grep for**, exactly as `shot.sh`'s own note
+says. `planner-live` is deliberately left alone: its header pays for succeeding without a
+graph at all, which is every CI run.
 
 `planner-live` is the only shot that SOLVES. `planner`, `planner-menu`, `planner-todo` and
 `flow` read a frozen fixture and nothing else, which is the right subject for a layout

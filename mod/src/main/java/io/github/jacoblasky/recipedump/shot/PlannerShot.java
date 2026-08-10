@@ -94,7 +94,8 @@ final class PlannerShot {
         // `Minecraft.currentScreen` means unwrapping ModularUI's `GuiScreenWrapper` -- the
         // indirection `ShotScreens.Animated` exists to avoid. This is the same panel `openPlan`
         // would have built; `openMenu` opens a hand-built panel for the same reason.
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan), SHOT_ACTIONS);
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan),
+                                                        PlannerScreen.schemaCheck(), SHOT_ACTIONS);
         PlannerScreen.openPanel(panel);
         ShotHarness.log("planner-yield: " + plan.target() + " has its first chanced row at "
                         + row + "; scrolling it into a viewport of about 14 rows");

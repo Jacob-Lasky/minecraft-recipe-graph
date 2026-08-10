@@ -5,6 +5,7 @@ import io.github.jacoblasky.recipedump.plan.Pins;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -145,7 +146,8 @@ public class PlannerLayoutTest {
 
     private static ModularPanel laidOut(String fixture) {
         ModularPanel panel =
-                PlannerWidgets.plannerPanel(PlanFixtures.load(fixture), emptyBook(), recorder());
+                PlannerWidgets.plannerPanel(PlanFixtures.load(fixture), emptyBook(),
+                                            matching(), recorder());
         HeadlessLayout.layOut(panel);
         return panel;
     }
@@ -436,7 +438,8 @@ public class PlannerLayoutTest {
     /** An empty plan is a normal state, not an error one. */
     @Test
     public void anEmptyPlanRendersRatherThanThrowing() {
-        ModularPanel panel = PlannerWidgets.plannerPanel(PlanView.empty(), emptyBook(), recorder());
+        ModularPanel panel = PlannerWidgets.plannerPanel(PlanView.empty(), emptyBook(),
+                                                          matching(), recorder());
         HeadlessLayout.layOut(panel);
         assertEquals(PlannerWidgets.PANEL_WIDTH, panel.getArea().w());
         for (IWidget widget : HeadlessLayout.flatten(panel)) {
@@ -463,7 +466,7 @@ public class PlannerLayoutTest {
         for (String fixture : PlanFixtures.names()) {
             PlanView plan = PlanFixtures.load(fixture);
             ModularPanel[] panels = {
-                PlannerWidgets.plannerPanel(plan, book, recorder()),
+                PlannerWidgets.plannerPanel(plan, book, behind(), recorder()),
                 PlannerWidgets.todoPanel(plan, book, PlannerActions.NONE),
                 pickerFor(plan.tree(), RecipeChoices.MAX_SHOWN + 7),
                 PlannerWidgets.nodeMenu(plan.tree(), PlannerActions.NONE),
@@ -900,7 +903,7 @@ public class PlannerLayoutTest {
                      PlannerWidgets.warnings(plan));
 
         ModularPanel panel =
-                PlannerWidgets.plannerPanel(plan, emptyBook(), PlannerActions.NONE);
+                PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), PlannerActions.NONE);
         HeadlessLayout.layOut(panel);
         assertTrue("the panel must say it: " + dumpText(panel),
                    texts(panel).contains("every recipe you pinned for Thing 0 loops back"));
@@ -929,7 +932,7 @@ public class PlannerLayoutTest {
                      shown.subList(0, 2));
 
         ModularPanel panel =
-                PlannerWidgets.plannerPanel(plan, emptyBook(), PlannerActions.NONE);
+                PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), PlannerActions.NONE);
         HeadlessLayout.layOut(panel);
         for (IWidget widget : HeadlessLayout.flatten(panel)) {
             Area area = widget.getArea();
@@ -969,6 +972,121 @@ public class PlannerLayoutTest {
             assertFalse("a wrapped line must not also be cut: " + line,
                         line.endsWith(NodeRowText.ELLIPSIS));
         }
+    }
+
+    // -- the stale-graph warning (#285) --------------------------------------------------------
+    //
+    // WHY THESE ARE HERE AND NOT ONLY IN `GraphFactsTest`. That file proves the COMPARISON, and
+    // `tools/ci-java.sh` runs it on every pull request. What it cannot prove is that the verdict
+    // reaches a player: `GraphJsonReader` has read `dump_schema` since the first port and
+    // `DumpCommand.SCHEMA` has sat beside it the whole time, and the defect #285 names is
+    // precisely that nothing put the two on a screen. A check whose result is computed and
+    // dropped is the shape this repository keeps re-finding -- `stage-instance.sh`'s swallowed
+    // refusal, `missingNotes` with no caller but a test -- so the assertion that matters is over
+    // the laid-out panel, not over the string.
+
+    /** The in-game normal: the graph was written by a dump of this build's own format. */
+    private static io.github.jacoblasky.recipedump.plan.GraphFacts.SchemaCheck matching() {
+        return io.github.jacoblasky.recipedump.plan.GraphFacts.checkSchema(8, 8);
+    }
+
+    /** The #279 failure: a graph one schema behind the jar reading it. */
+    private static io.github.jacoblasky.recipedump.plan.GraphFacts.SchemaCheck behind() {
+        return io.github.jacoblasky.recipedump.plan.GraphFacts.checkSchema(7, 8);
+    }
+
+    @Test
+    public void aStaleGraphIsSaidOnThePlanItselfRatherThanOnlyOnTheGraphTab() {
+        ModularPanel panel = PlannerWidgets.plannerPanel(
+                PlanFixtures.load("plan-in-stock"), emptyBook(), behind(), recorder());
+        HeadlessLayout.layOut(panel);
+
+        String expected = PlannerWidgets.staleGraphWarning(behind());
+        assertFalse("a BEHIND graph must produce a line at all", expected.isEmpty());
+        assertTrue("the plan must say the graph is stale: " + dumpText(panel),
+                   texts(panel).contains(expected));
+        // BOTH NUMBERS, because "this plan may be wrong" with nothing to check is a scare rather
+        // than a report, and the player cannot act on it or dismiss it.
+        assertTrue(expected, expected.contains("7") && expected.contains("8"));
+    }
+
+    @Test
+    public void aMatchingSchemaPutsNoLineOnThePlanAndCostsTheTreeNothing() {
+        // THE OTHER HALF OF THE ASSERTION, and the reason the line is conditional. A green
+        // "graph is fine" on every plan for the rest of the game is noise that gets tuned out,
+        // and it takes the red one with it.
+        assertEquals("", PlannerWidgets.staleGraphWarning(matching()));
+
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel ok = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder());
+        ModularPanel stale = PlannerWidgets.plannerPanel(plan, emptyBook(), behind(), recorder());
+        HeadlessLayout.layOut(ok);
+        HeadlessLayout.layOut(stale);
+
+        // RESERVED, NOT DRAWN OVER THE TREE. ModularUI neither clamps nor clips a child (#125),
+        // so a line appended without taking its height out first looks correct in a screenshot
+        // and overlaps the first row. The tree must be exactly one line shorter.
+        assertEquals("the warning must come out of the tree's height",
+                     PlannerWidgets.LINE,
+                     treeHeight(ok) - treeHeight(stale));
+    }
+
+    @Test
+    public void aGraphAheadOfTheModSaysTheOppositeThingRatherThanTheSameThing() {
+        // Redumping an AHEAD graph overwrites the newer file with an older dump. Two mismatches
+        // with two opposite fixes cannot share one sentence.
+        String ahead = PlannerWidgets.staleGraphWarning(
+                io.github.jacoblasky.recipedump.plan.GraphFacts.checkSchema(9, 8));
+        assertFalse(ahead.isEmpty());
+        assertNotEquals(PlannerWidgets.staleGraphWarning(behind()), ahead);
+    }
+
+    @Test
+    public void theStaleWarningIsNotSwallowedByAFullWarningList() {
+        // THE CAP IS THE HAZARD, and it is why this line is not an entry in `warnings`. Nine
+        // overruled pins saturate MAX_WARNINGS and roll the rest up as "+7 more recipe
+        // choice(s) could not be used" -- a sentence that would be describing the wrong thing
+        // if it had eaten a schema warning, and a plan that would then be silently stale.
+        PlanView plan = planWithOverruledPins(9);
+        assertEquals("the fixture must saturate the cap, or this proves nothing",
+                     PlannerWidgets.MAX_WARNINGS, PlannerWidgets.warnings(plan).size());
+
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), behind(), recorder());
+        HeadlessLayout.layOut(panel);
+        assertTrue("the schema warning must survive a full warning list: " + dumpText(panel),
+                   texts(panel).contains(PlannerWidgets.staleGraphWarning(behind())));
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            Area area = widget.getArea();
+            assertTrue(widget.getClass().getSimpleName() + " has no box: " + area,
+                       area.w() > 0 && area.h() > 0);
+        }
+    }
+
+    @Test
+    public void everyStaleWarningFitsOneLineAndTheHarnessCaseIsSilent() {
+        // 64 characters is CONTENT_WIDTH at 6px a character. `line()` CUTS rather than wraps,
+        // and the cut lands at the end -- which is where the numbers are.
+        for (int graphSchema : new int[] {7, 9, 0}) {
+            String said = PlannerWidgets.staleGraphWarning(
+                    io.github.jacoblasky.recipedump.plan.GraphFacts.checkSchema(graphSchema, 8));
+            assertFalse("schema " + graphSchema + " must not be silent", said.isEmpty());
+            assertTrue(said + " is " + said.length() + " chars",
+                       said.length() <= PlannerWidgets.CONTENT_WIDTH / NodeRowText.CHAR_WIDTH);
+        }
+        // NULL IS THE ONLY SILENCE, and it is the harness drawing a stored fixture that never
+        // came from a loaded graph. In game `PlannerScreen.openPlanner` draws a not-yet panel
+        // for every graph state that is not READY, so a tree on screen means a graph was loaded.
+        assertEquals("", PlannerWidgets.staleGraphWarning(null));
+    }
+
+    /** The height ModularUI gave the tree's scrolling list. */
+    private static int treeHeight(ModularPanel panel) {
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            if (widget instanceof ListWidget) {
+                return widget.getArea().h();
+            }
+        }
+        throw new AssertionError("no ListWidget in the planner panel");
     }
 
     /** A plan carrying `count` overruled pins and nothing else out of the ordinary. */
@@ -1301,7 +1419,7 @@ public class PlannerLayoutTest {
     public void clickingATreeRowOpensThatNodesMenu() {
         PlanView plan = PlanFixtures.load("plan-in-stock");
         Recorder recorder = new Recorder();
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder);
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder);
         HeadlessLayout.layOut(panel);
 
         List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
@@ -1341,7 +1459,7 @@ public class PlannerLayoutTest {
         assertFalse("the fixture for this test is the real caveat; it must not be empty",
                     PlanCaveats.summaryLine().isEmpty());
         Recorder recorder = new Recorder();
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder);
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder);
         HeadlessLayout.layOut(panel);
 
         List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
@@ -1362,7 +1480,7 @@ public class PlannerLayoutTest {
     @Test
     public void theCaveatsClickTargetCoversItsLines() {
         PlanView plan = PlanFixtures.load("plan-in-stock");
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder());
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder());
         HeadlessLayout.layOut(panel);
 
         List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
@@ -1653,7 +1771,7 @@ public class PlannerLayoutTest {
         assertTrue("the fixture must use " + repeated + " more than once, saw " + occurrences,
                    occurrences > 1);
 
-        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), recorder());
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder());
         HeadlessLayout.layOut(panel);
         List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
         try {

@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
 import io.github.jacoblasky.recipedump.graph.Keys;
+import io.github.jacoblasky.recipedump.plan.GraphFacts;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.plan.Pins;
 
@@ -538,9 +539,13 @@ public final class PlannerWidgets {
     /**
      * The whole planner window for a solved plan.
      *
-     * @param book the player's plan book, for the "still needed" column; may be empty.
+     * @param book   the player's plan book, for the "still needed" column; may be empty.
+     * @param schema how the graph's dump format compares with this build's, or null when the
+     *               plan did not come from a graph this process loaded. See
+     *               {@link #staleGraphWarning}.
      */
     public static ModularPanel plannerPanel(PlanView plan, PlanBook book,
+                                            GraphFacts.SchemaCheck schema,
                                             final PlannerActions actions) {
         Group body = new Group();
         body.pos(PADDING, PADDING);
@@ -549,6 +554,18 @@ public final class PlannerWidgets {
         int y = 0;
         body.child(heading(NodeRowText.heading(plan), CONTENT_WIDTH).pos(0, y));
         y += LINE + 1;
+
+        // ABOVE THE OTHER WARNINGS, AND NOT INSIDE THEM (#285). `warnings` is capped at
+        // MAX_WARNINGS and rolls the overflow up as "+N more recipe choice(s)", so a stale-graph
+        // line handed to it could be dropped by a pin the player made -- and dropped under a
+        // sentence that would then be describing the wrong thing. It also outranks them: a
+        // truncated plan is wrong about how MUCH it found, and a graph in the wrong format is a
+        // reason the whole tree may be answering from data this build cannot read.
+        String stale = staleGraphWarning(schema);
+        if (!stale.isEmpty()) {
+            body.child(line(stale, CONTENT_WIDTH, NodeStatus.INK_NEED).pos(0, y));
+            y += LINE;
+        }
 
         // RED, AND ABOVE THE TREE rather than under it. Both of these are reasons the tree
         // below is not what it appears to be -- a truncated plan is shaped like a complete
@@ -613,6 +630,71 @@ public final class PlannerWidgets {
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
                 .child(body);
+    }
+
+    /**
+     * The one line that says this plan may be answering from the wrong graph, or "".
+     *
+     * WHY THIS IS ON THE PLANNER AND NOT ONLY ON THE GRAPH TAB (#285). The Graph tab shows both
+     * verdicts in full and is the right place to read them -- but it is a screen a player has to
+     * go and open, and the player who needs it is the one who does not yet suspect anything.
+     * That is the same defect `PlanCaveats` names about a detail panel nobody knows exists, and
+     * the same shape as the swallowed refusal #279 found in `stage-instance.sh`: a check whose
+     * output never reaches the caller is not a check. So the verdict is repeated where the wrong
+     * answer is actually read.
+     *
+     * IT DOES NOT REPEAT THE FIX, which the Graph tab's `detail()` carries. Both fixes -- redump,
+     * or update the mod -- are several minutes of work a player is not going to start from a
+     * planner window mid-session, and the line has 64 characters to establish the far more
+     * urgent fact: the tree under it may be wrong. Naming the schema numbers is what makes that
+     * checkable rather than a bare scare.
+     *
+     * EMPTY FOR `MATCHES`, AND EMPTY FOR NULL, which are the only two silences here and they are
+     * different things. MATCHES is a check that ran and passed, and a green line on every plan
+     * for the rest of the game is noise that gets tuned out, taking the red one with it -- the
+     * Graph tab is where a reader goes to confirm a pass. NULL is a plan that never came from a
+     * loaded graph: the screenshot harness and `PlannerLayoutTest` draw stored fixtures, and
+     * inventing a verdict for them would put a warning on every shot that says something about
+     * a comparison nobody made. In game a plan cannot exist without the graph it was solved
+     * from, so null does not reach a player; `PlannerScreen.planPanel` is where that is decided
+     * and it is decided ONCE.
+     *
+     * AND IT IS AN ARGUMENT RATHER THAN A GLOBAL READ, which is not the free choice it looks
+     * like. This class states that no client state reaches any method here -- that is what lets
+     * `PlannerLayoutTest` run ModularUI's real sizer over the whole panel with no window -- and
+     * `plannerPanel` already makes ONE exception, for `PlanCaveats`, on the grounds
+     * `MachinesWidgets` spells out: whether an input was read is a fact about the SCENARIO and
+     * there is nothing in the arguments to derive it from. That reasoning does NOT extend here.
+     * The graph is a thing the caller has in hand, so `PlannerScreen` measures it and passes it,
+     * and the four verdicts stay reachable from a test. DO NOT make this reach for
+     * `GraphService` instead; it would buy one shorter call site and cost the only assertion
+     * that the warning ever renders.
+     */
+    public static String staleGraphWarning(GraphFacts.SchemaCheck schema) {
+        if (schema == null) {
+            return "";
+        }
+        switch (schema.verdict()) {
+            case BEHIND:
+                // THE GRAPH'S NUMBER LEADS, and on AHEAD the jar's does, so the first thing
+                // named is the artifact that is behind. `GraphFacts.detail()` cannot do this --
+                // it has room for the fix and reads in one fixed order -- and 64 characters
+                // here is not enough for both the order and the instruction. Counted at 6px a
+                // character with two-digit schema numbers, which is one bump away.
+                return "graph is schema " + schema.graphSchema() + ", this build reads "
+                        + schema.jarSchema() + " -- plans may be wrong";
+            case AHEAD:
+                return "this build reads schema " + schema.jarSchema() + ", graph is "
+                        + schema.graphSchema() + " -- plans may be wrong";
+            case UNRECORDED:
+                // NOT SILENT, even though it is the rarest state. `model.Graph.save` always
+                // writes `dump_schema`, so a graph without one has been truncated or edited by
+                // hand -- which is a stronger reason to distrust the tree than either mismatch,
+                // not a weaker one.
+                return "this graph records no schema -- plans cannot be checked";
+            default:
+                return "";
+        }
     }
 
     /**
