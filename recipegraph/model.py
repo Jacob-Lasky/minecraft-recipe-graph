@@ -981,10 +981,12 @@ class Graph:
         `dimensions.shadow_ores`, whose whole purpose is to reach a second id for a rock
         that is NOT in the registry. `contenttweaker:sub_block_holder_1:8` is the case --
         Rhenium Ore, registered into `oreRhenium` by `scripts/OreDictionary.zs:63` and
-        removed again on the next line, so it belongs to no `ore*` group at all. It is one
-        of exactly one such key on the reference oracle, measured, and it was reaching the
-        unsourced branch of `expand`: the plan said "it comes from a mechanic no recipe can
-        describe" about an ore the same graph records as mined on Rhenia.
+        removed again on the next line, so it belongs to no `ore*` group at all. It is the
+        ONLY key in that gap on the reference oracle, measured both ways round -- the
+        intersection of `pack_authored_unsourced` with `dimension_ores` is the same single
+        key as `dimension_ores - world_ores` -- and it was reaching the unsourced branch of
+        `expand`: the plan said "it comes from a mechanic no recipe can describe" about an
+        ore the same graph records as mined on Rhenia.
 
         A DIMENSION RECORD IS POSITIVE EVIDENCE OF MINING, which is what makes the union
         sound rather than merely convenient. Nothing enters `dimension_ores` without the
