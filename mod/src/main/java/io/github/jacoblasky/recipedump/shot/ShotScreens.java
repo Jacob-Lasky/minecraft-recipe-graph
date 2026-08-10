@@ -422,6 +422,18 @@ public final class ShotScreens {
                 LivePlanShot.open(arg);
             }
         });
+        // `planner-live` OVER A GRAPH THAT IS DELIBERATELY THE WRONG FORMAT (#285), and a
+        // SEPARATE screen rather than a flag on that one. The claim here is strict -- the
+        // staged graph must really disagree with the jar, or there is no warning to photograph
+        // and the run is not evidence -- and `planner-live`'s own header pays for the opposite
+        // property: "WITHOUT A GRAPH IT SHOOTS THE EMPTY PLANNER AND SUCCEEDS", which is every
+        // CI run. Folding a refusal into it would break that for everyone to save a line here.
+        register("planner-stale", new Opener() {
+            @Override
+            public void open(String arg) {
+                LivePlanShot.openAgainstAStaleGraph(arg);
+            }
+        });
         // The only screen that photographs the planner RECOVERING rather than a finished
         // state. See PlannerRecoveryShot: `:loading` and `:recovered` are one artifact in two
         // runs, and the second one is a probe as well as a picture (#201).

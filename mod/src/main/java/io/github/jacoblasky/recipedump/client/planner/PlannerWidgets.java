@@ -670,7 +670,7 @@ public final class PlannerWidgets {
      * `GraphService` instead; it would buy one shorter call site and cost the only assertion
      * that the warning ever renders.
      */
-    static String staleGraphWarning(GraphFacts.SchemaCheck schema) {
+    public static String staleGraphWarning(GraphFacts.SchemaCheck schema) {
         if (schema == null) {
             return "";
         }

@@ -87,8 +87,65 @@ final class BrowseShot {
         // so `OLD GRAPH` in the picture is usually the truth about the harness rather than a
         // defect -- and the only way to tell is a log line naming both numbers.
         ShotHarness.log("graph: schema check " + schema.verdict() + " -- " + schema.detail());
-        BrowseScreen.openPanel(GraphWidgets.graphPanel(
-                facts, path, check, schema, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH)));
+        final com.cleanroommc.modularui.screen.ModularPanel panel = GraphWidgets.graphPanel(
+                facts, path, check, schema, BrowseScreen.navFor(BrowseTabs.Tab.GRAPH));
+        // THE POSITIVE CONTROL FOR #285, ON THE ONE SURFACE THAT CAN ANSWER IT HONESTLY. This
+        // opener builds the panel itself, so the check can ask the drawn widget tree for the
+        // two strings rather than asking a proxy -- which is #293's rule, and its own note says
+        // why a proxy is not good enough: `> 0` shipped and passed a blank picture.
+        //
+        // BOTH LINES, NOT JUST THE VERDICT WORD. The word and the numbers under it are laid out
+        // separately -- `schemaLine` then `detail()` -- so a regression that reserved one line
+        // and dropped the other would leave the word on screen and pass a one-line check.
+        final String word = GraphWidgets.schemaLine(schema);
+        final String reason = schema.detail();
+        ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+            @Override
+            public boolean drewSomething() {
+                java.util.List<String> said = textOf(panel);
+                return said.contains(word) && said.contains(reason);
+            }
+
+            @Override
+            public String describe() {
+                java.util.List<String> said = textOf(panel);
+                return "the graph tab must carry the schema verdict and its reason: "
+                        + "verdict line " + (said.contains(word) ? "drawn" : "MISSING")
+                        + " (" + word + "), reason line "
+                        + (said.contains(reason) ? "drawn" : "MISSING") + " (" + reason + ")";
+            }
+        });
+        BrowseScreen.openPanel(panel);
+    }
+
+    /**
+     * Every string the panel's text widgets are actually holding, after truncation.
+     *
+     * AFTER TRUNCATION IS THE POINT, and it is why this compares whole strings rather than
+     * searching for a substring. `PlannerWidgets.line` CUTS to the content width, so a sentence
+     * two characters too long reaches the screen with its tail replaced by an ellipsis -- and
+     * the tail is where the schema numbers are. An equality check fails on that; a `contains`
+     * on the first few words would not, which would leave the harness passing a picture whose
+     * one job is to be readable.
+     */
+    private static java.util.List<String> textOf(com.cleanroommc.modularui.api.widget.IWidget root) {
+        java.util.List<String> said = new java.util.ArrayList<String>();
+        collectText(root, said);
+        return said;
+    }
+
+    private static void collectText(com.cleanroommc.modularui.api.widget.IWidget widget,
+                                    java.util.List<String> into) {
+        if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
+            into.add(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
+                             .getKey().getFormatted());
+        }
+        if (widget instanceof com.cleanroommc.modularui.widget.ParentWidget) {
+            for (com.cleanroommc.modularui.api.widget.IWidget child
+                    : ((com.cleanroommc.modularui.widget.ParentWidget<?>) widget).getChildren()) {
+                collectText(child, into);
+            }
+        }
     }
 
     /**

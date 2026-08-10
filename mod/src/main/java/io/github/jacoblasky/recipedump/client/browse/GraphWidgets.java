@@ -207,7 +207,7 @@ public final class GraphWidgets {
      * behind, which is the half the player acts on and the half a shared red would erase; the
      * numbers and the fix are on `detail()` under it, exactly as the pack check splits them.
      */
-    static String schemaLine(GraphFacts.SchemaCheck schema) {
+    public static String schemaLine(GraphFacts.SchemaCheck schema) {
         if (schema == null) {
             return "format: UNCHECKED";
         }
