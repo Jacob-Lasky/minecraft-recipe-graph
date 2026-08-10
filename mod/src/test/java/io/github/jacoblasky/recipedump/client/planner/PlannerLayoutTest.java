@@ -939,6 +939,74 @@ public class PlannerLayoutTest {
     }
 
     /**
+     * HOW FAR THE FIX ACTUALLY REACHES, ASSERTED RATHER THAN READ OFF A RUN. #232.
+     *
+     * THIS EXISTS BECAUSE THE NUMBER HAD NO HOME. The reach was quoted for two rounds of review
+     * as "23 of 88" and then as "22 of 61", and neither was ever asserted anywhere: the first
+     * came from a model that omitted `machineBit`'s state suffix, the second from reading a
+     * throwaway probe's summary line during a green run. A number nothing checks is a number
+     * that is true until the day it is not, and nothing tells you which day that was -- which
+     * is exactly what happened to the first one.
+     *
+     * IT ALSO PINS THE DENOMINATOR, and that half matters as much. 61 is the size of the
+     * population the fix operates on; if a fixture regeneration moves it, a reach of 22 means
+     * something different and this fails rather than quietly re-scaling. The same regeneration
+     * already took the collision count from 17 to 13 under this branch once.
+     *
+     * The counted property is the row SHAPE the fix emits -- `label (fragment)` -- read off the
+     * widgets the screen builds, not off the helper that writes the string.
+     */
+    @Test
+    public void twentyTwoOfSixtyOneCollidingRowsCanAffordTheFragment() {
+        int collidingRows = 0;
+        int tookFragment = 0;
+        for (String fixture : PlanFixtures.names()) {
+            PlanView plan = PlanFixtures.load(fixture);
+            if (plan.tree() == null) {
+                continue;
+            }
+            List<PlanNode> nodes = new java.util.ArrayList<PlanNode>();
+            flattenRows(plan.tree(), nodes);
+
+            java.util.Map<String, java.util.Set<String>> keysByLabel =
+                    new java.util.HashMap<String, java.util.Set<String>>();
+            for (PlanNode node : nodes) {
+                String label = NodeRowText.label(node);
+                java.util.Set<String> keys = keysByLabel.get(label);
+                if (keys == null) {
+                    keys = new java.util.HashSet<String>();
+                    keysByLabel.put(label, keys);
+                }
+                keys.add(node.key());
+            }
+
+            ModularPanel panel = new ModularPanel("reach-" + fixture);
+            panel.size(PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT);
+            panel.child(PlannerWidgets.tree(plan, PlannerWidgets.CONTENT_WIDTH,
+                                            PlannerWidgets.PANEL_HEIGHT, recorder()));
+            HeadlessLayout.layOut(panel);
+            List<String> lines = rowLabelLines(fixture, nodes, panel);
+
+            for (int i = 0; i < nodes.size(); i++) {
+                String label = NodeRowText.label(nodes.get(i));
+                if (keysByLabel.get(label).size() < 2) {
+                    continue;
+                }
+                collidingRows++;
+                if (lines.get(i).startsWith(label + " (")) {
+                    tookFragment++;
+                }
+            }
+        }
+        assertEquals("the population the fix operates on; if a fixture regeneration moved it, "
+                     + "re-measure the reach below rather than rescaling it",
+                     61, collidingRows);
+        assertEquals("rows that can afford to say which item they are; the other "
+                     + (61 - 22) + " are at capacity and keep what they drew, which is #273",
+                     22, tookFragment);
+    }
+
+    /**
      * The complaint for a label whose distinct keys draw a line in common, or null.
      *
      * DO NOT REDUCE THIS TO A COUNT OF DISTINCT STRINGS. That is what it was, it passed
