@@ -57,6 +57,34 @@ OVERWORLD_ONLY = {".": 1}
 # this sweep exists to find a home for.
 SEVEN = ("craft", "raw", "dimension", "machine", "not_truncated", "oredict", "alternatives")
 
+# THE ANSWER, AND THE SENTENCE TO READ BEFORE REPOINTING ANY FIXTURE AT IT.
+#
+# `contenttweaker:etherium_ingot` holds all seven with its gate below the root -- Sedna at
+# plan depth 4, down `material_part:55` -> `:54` -> `fluid:sednanite` -> `sednanite_ore`, in
+# 131 nodes and 563 work against a budget of 80,000.
+#
+# IT IS 7-OF-7 BY THE TREE-LEVEL DEFINITION, WHICH IS WHAT `CHECKS` MEASURES AND NOT WHAT THE
+# PROSE SUGGESTS. Every counter in `make-java-fixtures.CHECKS` walks the whole tree, so a
+# claim is satisfied by ANY node anywhere in it. Here `oredict` and `alternatives` are
+# satisfied on OTHER BRANCHES -- `ore:ballMud` at depth 8, and a 4-way
+# `forestry:bee_princess_ge` slot at depth 4 -- and NOT on the spine that reaches the gate.
+# That is 7-of-7 by the definition the generator and both test suites already share, and it
+# is the definition every other fixture in the set is scored against.
+#
+# "ALL SEVEN COINCIDE ON ONE PATH" IS A STRICTER QUESTION AND NOBODY HAS ASKED IT. This sweep
+# does not answer it and neither does the fixture generator; answering it would mean a
+# per-path claim table, which `CHECKS` cannot express today. Anyone repointing
+# `dimension-in-chain` here needs to have decided which of the two they wanted first.
+#
+# AND `dimension-in-chain`'s OWN `why` IS NOW FALSE WHERE IT EXPLAINS THE DROP. It says
+# `oredict` and `alternatives` were dropped because "all four candidates reach the gate
+# through a straight chain and hold 5 of the old 7" -- true of the four #248 found, and not
+# true of the pack. Do NOT repoint the fixture from here; that is a separate change with its
+# own blast radius (a regenerated golden file, a moved `covers` list, and the Java side's
+# `everyFixturePlansExactlyAsThePythonOracleDoes`). This comment exists so the stale claim is
+# on record where the next reader of that `why` will meet it.
+CANDIDATE = "contenttweaker:etherium_ingot"
+
 # The four keys #248 found by exhaustive hop-0/hop-1 enumeration, one per dimension, all at
 # depth 3. THE POSITIVE CONTROL FOR THE POPULATION GENERATOR: if the walk does not enumerate
 # these, its zeroes mean nothing.
