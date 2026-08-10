@@ -229,6 +229,59 @@ public class FlowCanvasTest {
         canvas.panToBox(root);
         assertTrue("centring on a box must put that box on screen",
                 visible(canvas, laid).contains(root));
+
+        // WHOLLY, NOT PARTLY, AND THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE FIRST
+        // VERSION. `panToBox` originally went through `panTo`, which WRAPS: centring on the
+        // root asks for a negative offset, because the root is at x=0 and half a viewport to
+        // its left is off the layout, and `Math.abs(-202 % range)` is +202. The box was then
+        // clipped to a sliver at the left edge -- still "visible" to the culler, which is why
+        // the line above passed, and still an unreadable photograph. Partial visibility is the
+        // exact state both the bug and the fix produce, so only the stronger question separates
+        // them.
+        assertTrue("a centred box must be WHOLLY in frame; a clipped sliver satisfies the "
+                + "culler and photographs as nothing", canvas.fullyShowing(root));
+    }
+
+    /**
+     * Aiming at a box near an edge clamps, and does not wrap to the far side (#293).
+     *
+     * SEPARATE FROM THE TEST ABOVE BECAUSE IT PINS THE MECHANISM RATHER THAN THE OUTCOME. The
+     * root is the case that bit, but any box within half a viewport of an edge asks for an
+     * out-of-range offset, and `panTo`'s wrap answers with a position on the OPPOSITE side --
+     * the furthest possible point from what was asked for. A future edit that routes this back
+     * through `panTo` to save the four lines fails here with the direction named, rather than
+     * failing somewhere downstream as a screenshot nobody opens.
+     */
+    @Test
+    public void aimingAtABoxNearAnEdgeClampsRatherThanWrappingToTheFarSide() {
+        PlanNode tree = PlanTrees.deepFan(3, 7);
+        FlowCanvas canvas = new FlowCanvas(tree);
+        canvas.pos(0, 0).size(300, 180);
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+
+        int root = canvas.rootBox();
+        assertEquals("the fixture's root must sit at x=0 or this is not the edge case",
+                0, laid.boxes.get(root).x);
+
+        canvas.panToBox(root);
+        assertEquals("an offset left of the layout must clamp to the start, not wrap past it",
+                0, canvas.getScrollArea().getScrollX().getScroll());
+
+        // AND THE OTHER EDGE, so the clamp is shown to hold at both ends rather than just
+        // happening to return 0 for everything.
+        int deepest = 0;
+        for (int i = 1; i < laid.size(); i++) {
+            if (laid.boxes.get(i).x > laid.boxes.get(deepest).x) {
+                deepest = i;
+            }
+        }
+        canvas.panToBox(deepest);
+        int range = FlowZoom.scaledExtent(laid.width, canvas.zoom()) - canvas.getArea().width;
+        assertTrue("the far edge must clamp inside the range, not past it",
+                canvas.getScrollArea().getScrollX().getScroll() <= range);
+        assertTrue("and a box at the far edge must still be reachable",
+                canvas.fullyShowing(deepest));
     }
 
     /** Which boxes the culler says are on screen right now. */

@@ -368,10 +368,42 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      */
     public void panToBox(int index) {
         FlowLayout.Box box = laid.boxes.get(index);
-        panTo((int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
-                        - getArea().width / 2,
-                (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
-                        - getArea().height / 2);
+        // CLAMPED, AND EXPLICITLY NOT THROUGH `panTo`, WHICH WRAPS. This was the first version
+        // and it produced a screenshot that passed the drawn check and was still unreadable.
+        // Centring on the ROOT asks for a negative offset -- the root sits at x=0 and half a
+        // viewport to its left is off the layout -- and `wrap`'s `Math.abs(value % range)`
+        // turns -202 into +202, which pans AWAY from the box by almost its own width. What
+        // landed was a two-pixel sliver of one node against the left edge, on a panel that
+        // still read as empty.
+        //
+        // `wrap` is right for `panTo`, whose caller is a sweep that must keep moving rather
+        // than park at an edge, and its comment says so. It is wrong for aiming, where running
+        // off the end means "as far as it goes", not "reappear on the other side". DO NOT
+        // route this back through `panTo` to save four lines.
+        int x = (int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
+                - getArea().width / 2;
+        int y = (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
+                - getArea().height / 2;
+        getScrollArea().getScrollX().scrollTo(getScrollArea(),
+                clampToRange(x, FlowZoom.scaledExtent(laid.width, zoom), getArea().width));
+        getScrollArea().getScrollY().scrollTo(getScrollArea(),
+                clampToRange(y, FlowZoom.scaledExtent(laid.height, zoom), getArea().height));
+    }
+
+    /** An offset held inside the scrollable range, rather than wrapped around it. */
+    private static int clampToRange(int value, int extent, int viewport) {
+        return Math.max(0, Math.min(value, Math.max(0, extent - viewport)));
+    }
+
+    /** Is box `index` wholly inside the viewport right now? */
+    public boolean fullyShowing(int index) {
+        FlowLayout.Box box = laid.boxes.get(index);
+        int left = (int) Math.round(box.x * zoom) - getScrollX();
+        int top = (int) Math.round(box.y * zoom) - getScrollY();
+        int right = (int) Math.round(box.right() * zoom) - getScrollX();
+        int bottom = (int) Math.round(box.bottom() * zoom) - getScrollY();
+        return left >= 0 && top >= 0
+                && right <= getArea().width && bottom <= getArea().height;
     }
 
     /**

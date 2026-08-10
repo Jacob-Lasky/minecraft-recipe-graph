@@ -491,19 +491,31 @@ final class PlannerShot {
              * like, so for five artifacts across two PRs a broken probe and a true negative
              * were the same picture and the picture was believed.
              *
-             * A run that photographs the root and drew nothing has one of those two problems
-             * and cannot say which, so it must not pass. Zero here fails the run.
+             * IT ASKS WHETHER THE AIMED-AT BOX IS WHOLLY ON SCREEN, NOT WHETHER THE COUNT IS
+             * ABOVE ZERO, AND THE DIFFERENCE IS NOT PEDANTRY -- `> 0` SHIPPED AND PASSED A
+             * BLANK PICTURE. The first `panToBox` wrapped a negative offset instead of
+             * clamping it, so the run reported `drawn check PASSED -- 1 node(s) drawn`,
+             * exited 0, and wrote a panel holding a two-pixel sliver of one node jammed
+             * against the left edge. A human calling that image blank and a check calling it a
+             * pass were both right about their own question, which means the check was asking
+             * the wrong one.
+             *
+             * "The thing I aimed at is fully in frame" is the question with no such gap. It
+             * cannot be satisfied by a clipped edge, by a neighbour that happens to overlap
+             * the viewport, or by a culler that returns a box it is not drawing.
              */
             @Override
             public boolean drewSomething() {
-                return canvas.drawnLastFrame() > 0;
+                return canvas.drawnLastFrame() > 0 && canvas.fullyShowing(canvas.rootBox());
             }
 
             @Override
             public String describe() {
+                int root = canvas.rootBox();
                 return "flow: " + canvas.drawnLastFrame() + " node(s) drawn on the composed "
-                        + "frame, centred on box " + canvas.rootBox() + " of "
-                        + canvas.nodeCount();
+                        + "frame; box " + root + " of " + canvas.nodeCount()
+                        + (canvas.fullyShowing(root) ? " is wholly in frame"
+                                                     : " is NOT wholly in frame");
             }
         });
     }
