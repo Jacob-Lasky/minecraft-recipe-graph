@@ -8,6 +8,11 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * The screen registry, exercised with no window and no game.
  *
@@ -143,6 +148,125 @@ public class ShotScreensTest {
         });
         assertNull(ShotScreens.open("test-nohold"));
         assertNull("a screen that asked for no hold must not inherit one", ShotScreens.hold());
+    }
+
+    /**
+     * Every screen that ships is named here, so a registration cannot go missing quietly.
+     *
+     * BECAUSE THE PER-SCREEN TESTS COVER 6 OF 24 AND NOTHING SAID SO. `ShotScreens` registers
+     * twenty-four screens; six have a `...IsReachableByName` test. The other eighteen -- `flow`,
+     * `flow-hit`, `graph`, `machines`, `planner`, `sources` and the rest -- could have their
+     * `register(...)` block deleted and every test here would still pass, because a screen with
+     * no test has nothing to notice its absence. The harness would then report `no screen named
+     * 'flow'` at the far end of a twelve-minute container run, which is where this project's own
+     * header says a five-minute confusion becomes an afternoon.
+     *
+     * THE RISK IS NOT HYPOTHETICAL AND IT IS NOT DECAY, IT IS MERGES. These registrations are
+     * append-only blocks in one file, and three branches are adding to them at once. A conflict
+     * resolver that takes one side wholesale drops the other side's screen AND the test that
+     * would have caught it, in the same edit, leaving a green suite and a missing screen. This
+     * assertion is the thing that survives that, because it fails on the SET rather than on
+     * whether some particular test still exists.
+     *
+     * A LIST AND NOT A COUNT. A count passes when one screen is dropped and another added,
+     * which is exactly what a bad three-way merge produces. It also could not say WHICH.
+     *
+     * ADDING A SCREEN MEANS EDITING THIS LIST, and that is the feature. It costs one line and
+     * it makes "is this screen meant to exist" a decision somebody made rather than a thing
+     * that drifted. DO NOT replace this with `assertEquals(24, names().size())` to avoid the
+     * maintenance; the count is the version that cannot tell you what changed.
+     */
+    @Test
+    public void everyRegisteredScreenIsAccountedForByName() {
+        List<String> expected = Arrays.asList(
+                "ae2-probe", "dump", "fixture", "flow", "flow-hit", "flow-selected",
+                "graph", "jei", "jei-keybind", "machines", "machines-detail", "machines-mods",
+                "planner", "planner-caveats", "planner-live", "planner-menu", "planner-recipes",
+                "planner-recovery", "planner-selected", "planner-todo", "planner-yield",
+                "row-menu", "sources", "world-probe");
+
+        List<String> actual = new ArrayList<String>(ShotScreens.names());
+        // SORTED ON BOTH SIDES, because `names()` is documented as registration ORDER and that
+        // is a property of where a `register` call sits in the file. Asserting the order would
+        // make this fail on a harmless reordering, which trains people to update the list
+        // without reading it -- and a list nobody reads is the count again.
+        Collections.sort(actual);
+        List<String> want = new ArrayList<String>(expected);
+        Collections.sort(want);
+
+        // BY PREFIX, NOT BY AN ENUMERATED LIST OF FIXTURE NAMES. Other tests in this class
+        // register into the same static map, and JUnit does not promise an order, so which of
+        // them have run by the time this one does is not fixed. The first version of this
+        // hard-coded seven names, four of which do not exist and five of which it missed -- a
+        // guessed expected value, which is the defect this whole test is about, committed
+        // inside the test itself.
+        //
+        // The prefix is the contract: a SHIPPED screen must never be named `test-...`, and
+        // none is. Anything that is gets filtered here and would also be invisible to the
+        // harness user, so the two rules point the same way.
+        List<String> shipped = new ArrayList<String>();
+        for (String name : actual) {
+            if (!name.startsWith("test-")) {
+                shipped.add(name);
+            }
+        }
+        actual = shipped;
+
+        assertEquals("a screen was added or dropped; if this was deliberate, edit the list "
+                + "above and say why in the commit", want, actual);
+    }
+
+    @Test
+    public void aPoseAndADrawnCheckAreRegisteredAndNeitherSurvivesTheNextScreen() {
+        final int[] posed = {0};
+        ShotScreens.register("test-pose", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+                ShotScreens.preCapture(new ShotScreens.PreCapture() {
+                    @Override
+                    public void beforeCapture() {
+                        posed[0]++;
+                    }
+                });
+                ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+                    @Override
+                    public boolean drewSomething() {
+                        return posed[0] > 0;
+                    }
+
+                    @Override
+                    public String describe() {
+                        return "posed " + posed[0] + " time(s)";
+                    }
+                });
+            }
+        });
+        assertNull(ShotScreens.open("test-pose"));
+        assertNotNull(ShotScreens.preCaptureScreen());
+        assertNotNull(ShotScreens.drawnCheck());
+
+        // THE CHECK MUST BE ABLE TO SAY NO, which is the property #293 is about. A drawn check
+        // that only ever returns true is the blank screenshot again with an extra step, so the
+        // test asserts the false BEFORE the true rather than only confirming the happy path.
+        assertFalse("nothing has posed yet, so nothing was drawn",
+                ShotScreens.drawnCheck().drewSomething());
+        ShotScreens.preCaptureScreen().beforeCapture();
+        assertTrue(ShotScreens.drawnCheck().drewSomething());
+        assertEquals(1, posed[0]);
+
+        // SAME ARGUMENT AS `animate` AND `holdCapture`. A leftover pose would move a screen
+        // that never asked to be moved, and a leftover drawn check would answer for a canvas
+        // that is no longer open -- which is a green run certified by the previous screen.
+        ShotScreens.register("test-nopose", new ShotScreens.Opener() {
+            @Override
+            public void open(String arg) {
+            }
+        });
+        assertNull(ShotScreens.open("test-nopose"));
+        assertNull("a screen that asked for no pose must not inherit one",
+                ShotScreens.preCaptureScreen());
+        assertNull("a screen that cannot answer must not inherit an answer",
+                ShotScreens.drawnCheck());
     }
 
     @Test

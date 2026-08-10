@@ -5,6 +5,11 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import io.github.jacoblasky.recipedump.HeadlessLayout;
+import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
+import io.github.jacoblasky.recipedump.client.flow.FlowCulling;
+import io.github.jacoblasky.recipedump.client.flow.FlowLayout;
+import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.client.jei.JeiNodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
@@ -105,6 +110,64 @@ public class PlannerShotTest {
         for (int n = 1000; n <= 5000; n += 137) {
             assertEquals("synthetic(" + n + ")", n, count(PlannerShot.synthetic(n)));
         }
+    }
+
+    /**
+     * The frame the flow sweep STOPS on is fraction (0, 0), and (0, 0) of a real plan is
+     * empty. That is the whole of #293.
+     *
+     * THE ARITHMETIC IS THE DEFECT, and it is worth writing out because it reads as harmless.
+     * `openFlow` pans to `((frame * PASSES) % SWEEP) / SWEEP` across and `(frame % SWEEP) /
+     * SWEEP` down, so both axes are periodic in `SWEEP` frames. A timing run is driven for
+     * `-Dmcrecipedump.shotTimedFrames` frames and every flow run has used 300, which is
+     * `SWEEP`. Both fractions are therefore 0 on the last frame, and the capture happens on
+     * the frame after the last step. The camera was aimed at the origin every single run.
+     *
+     * AND THE ORIGIN IS THE ONE PLACE GUARANTEED TO HOLD NOTHING, which `FlowCanvas`'s own
+     * header already said before this test existed: column zero holds one node, the root,
+     * "centred on the pixel midpoint of the whole diagram and therefore nowhere near the top".
+     * Five screenshots -- `flow-4000{,-final,-run3,-run4}.png` and the `peak-final.png` that
+     * #183 cited as its artifact -- are all blank for this reason, and byte-identical in size
+     * because a deterministic end state photographs the same nothing every time.
+     *
+     * ASSERTED AGAINST `synthetic(4000)` AT THE HARNESS'S OWN VIEWPORT, not against a
+     * convenient tree. The first version of this used `PlanTrees.fan(400)`, whose leaf column
+     * is column ONE and therefore inside the viewport at the origin -- so the corner it called
+     * empty held four hundred nodes and the test failed. A case picked for convenience is
+     * immune to the defect, which is the same lesson `tools/gate.sh`'s header records about a
+     * probe run on the wrong filesystem.
+     */
+    @Test
+    public void theFrameTheFlowSweepStopsOnShowsNothingAndTheRootBoxDoes() {
+        PlanNode tree = PlannerShot.synthetic(4000);
+        FlowCanvas canvas = new FlowCanvas(tree);
+        // THE SIZE `openFlow` USES. A different viewport is a different question.
+        canvas.pos(4, 4).size(612, 372);
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+
+        // The stopping frame, derived rather than written as 0. If SWEEP, PASSES or the frame
+        // budget ever stop coinciding this line changes with them and the test still asks the
+        // real question, instead of asserting something about a hard-coded 0 nobody rechecks.
+        int last = PlannerShot.SWEEP;
+        double x = ((last * PlannerShot.PASSES) % PlannerShot.SWEEP) / (double) PlannerShot.SWEEP;
+        double y = (last % PlannerShot.SWEEP) / (double) PlannerShot.SWEEP;
+        canvas.panToFraction(x, y);
+        assertEquals("the flow sweep stops where it started, and a timing run is driven for "
+                + "exactly one period", 0, visibleCount(canvas, laid));
+
+        // AND THE POSE FIXES IT. Same canvas, same plan, one call: this is the difference
+        // between an artifact and a grey rectangle.
+        canvas.panToBox(canvas.rootBox());
+        assertTrue("centring on the root must photograph something",
+                visibleCount(canvas, laid) > 0);
+    }
+
+    private static int visibleCount(FlowCanvas canvas, FlowLayout.Laid laid) {
+        return new FlowCulling(laid).visibleIn(
+                canvas.getScrollArea().getScrollX().getScroll(),
+                canvas.getScrollArea().getScrollY().getScroll(),
+                canvas.getArea().width, canvas.getArea().height).size();
     }
 
     /** Nodes in the tree. Iterative, since the trees under test are thousands deep-ish. */

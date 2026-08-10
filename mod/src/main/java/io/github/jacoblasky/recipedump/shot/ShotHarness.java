@@ -135,6 +135,16 @@ public final class ShotHarness {
     private static final int EXIT_NO_VERDICT = 5;
     /** A screen reported that its own criteria did not hold. See {@link #EXIT_NO_VERDICT}. */
     private static final int EXIT_VERDICT_FAILED = 6;
+    /**
+     * The PNG was written and the screen says it drew nothing into it.
+     * See {@link ShotScreens#expectDrawn}.
+     *
+     * ITS OWN CODE, for the reason {@link #EXIT_NO_VERDICT} gives twice over. This is neither
+     * "the harness broke" nor "the thing under test is wrong": it is "the picture cannot tell
+     * you which", and that is a third outcome. Folding it into {@link #EXIT_WRITE_FAILED}
+     * would say the write failed, when the write is the one part that demonstrably worked.
+     */
+    private static final int EXIT_DREW_NOTHING = 7;
 
     private ShotHarness() {
     }
@@ -202,6 +212,12 @@ public final class ShotHarness {
 
         /** null until the screen has been asked for; then counts frames down to the capture. */
         private Integer framesLeft;
+        /**
+         * null until {@link ShotScreens.PreCapture#beforeCapture} has run; then counts render
+         * ticks down to the capture. Null-vs-zero is doing real work here: it is what makes
+         * the pose happen exactly once rather than on every tick until the countdown expires.
+         */
+        private Integer composeLeft;
         private long lastReportNanos;
 
         Runner(String spec) {
@@ -295,7 +311,42 @@ public final class ShotHarness {
                 measure();
                 return;
             }
+            if (composing()) {
+                return;
+            }
             capture();
+        }
+
+        /**
+         * Let a {@link ShotScreens.PreCapture} screen pose, and hold the shutter while it does.
+         *
+         * @return true while the capture must wait.
+         */
+        private boolean composing() {
+            ShotScreens.PreCapture screen = ShotScreens.preCaptureScreen();
+            if (screen == null) {
+                return false;
+            }
+            if (composeLeft == null) {
+                composeLeft = ShotScreens.COMPOSE_FRAMES;
+                try {
+                    screen.beforeCapture();
+                } catch (Throwable t) {
+                    // LOUDLY, AND WITHOUT CAPTURING. A screen that threw while posing is a
+                    // screen in an unknown position, and photographing it anyway produces
+                    // exactly the artifact this hook exists to stop being possible: a
+                    // plausible picture of somewhere nobody chose.
+                    log("the screen threw while composing the capture: " + t);
+                    exit(EXIT_WRITE_FAILED);
+                    return true;
+                }
+                return true;
+            }
+            if (composeLeft > 0) {
+                composeLeft = composeLeft - 1;
+                return true;
+            }
+            return false;
         }
 
         /**
@@ -583,7 +634,23 @@ public final class ShotHarness {
                 }
                 log("wrote " + out.getAbsolutePath() + " (" + image.getWidth() + "x"
                         + image.getHeight() + ", " + out.length() + " bytes)");
-                exit(EXIT_OK);
+                // THE PNG IS WRITTEN EITHER WAY, AND THAT IS DELIBERATE. A blank capture is
+                // the evidence for why the run failed, so deleting it or skipping the write
+                // would leave the operator with an exit code and nothing to look at. What
+                // changes is only whether the run is allowed to call it a pass.
+                ShotScreens.Drawn check = ShotScreens.drawnCheck();
+                if (check == null) {
+                    exit(EXIT_OK);
+                    return;
+                }
+                boolean drew = check.drewSomething();
+                log((drew ? "drawn check PASSED -- " : "DRAWN CHECK FAILED -- ")
+                        + check.describe());
+                if (!drew) {
+                    log("the screen photographed nothing, so this PNG is not evidence of "
+                            + "anything and the run is red rather than green");
+                }
+                exit(drew ? EXIT_OK : EXIT_DREW_NOTHING);
             } catch (IOException e) {
                 log("could not write " + out + ": " + e);
                 exit(EXIT_WRITE_FAILED);

@@ -358,8 +358,24 @@ final class PlannerShot {
      * traverses the diagram exactly once. A longer run simply sweeps it again rather than
      * running off the end and parking, which would report a stationary viewport as the cost of
      * panning.
+     *
+     * AND THAT EQUALITY IS ALSO WHY THE SCREENSHOT WAS BLANK FOR FIVE RUNS (#293). Traversing
+     * exactly once means ENDING WHERE YOU STARTED: both fractions are periodic in this number,
+     * so the last driven frame is at (0, 0), and `FlowCanvas.panToFraction`'s header explains
+     * that (0, 0) of this layout is the one place guaranteed to hold nothing. The timing is
+     * unaffected -- every frame in between is real -- but the photograph taken afterwards was
+     * of an empty corner, every time, deterministically.
+     *
+     * DO NOT "FIX" THAT BY DETUNING THIS NUMBER so the run stops somewhere luckier. The
+     * one-traversal property above is the reason it is 300 and it is worth more than a
+     * coincidental stopping point, which the next edit to `PASSES` or the frame budget would
+     * silently remove anyway. The capture poses instead, through
+     * {@link ShotScreens.PreCapture}.
+     *
+     * PACKAGE-PRIVATE SO THE TEST CAN DERIVE THE STOPPING FRAME rather than hard-code a 0 that
+     * stops meaning anything the moment either constant moves.
      */
-    private static final int SWEEP = 300;
+    static final int SWEEP = 300;
 
     /**
      * Horizontal passes per vertical descent.
@@ -369,8 +385,11 @@ final class PlannerShot {
      * descent is a diagonal, and a diagonal over a shape like this is a sweep of the empty
      * corner. Eight is enough that every pass crosses the leaf column while the descent is
      * still fine-grained.
+     *
+     * PACKAGE-PRIVATE FOR THE SAME REASON AS {@link #SWEEP}: the test that pins the stopping
+     * frame computes it from these two, so the two cannot drift apart from what it asserts.
      */
-    private static final int PASSES = 8;
+    static final int PASSES = 8;
 
     /**
      * `flow`, or `flow:<fixture>`: the plan as a pannable diagram.
@@ -453,6 +472,68 @@ final class PlannerShot {
                             + " of " + canvas.nodeCount() + " nodes drawn in one frame, by "
                             + "frame " + frame);
                 }
+            }
+        });
+        ShotScreens.preCapture(new ShotScreens.PreCapture() {
+            /**
+             * THE ROOT, AND THE PICTURE IS STILL MOSTLY EMPTY -- WHICH IS THE PLAN AND NOT THE
+             * CAMERA. Measured on `synthetic:4000` after this fix: one node in frame, and the
+             * sweep's own peak over 300 frames is 20 of 4,000. A layered layout caps depth at
+             * 24 columns while the leaf level is thousands of rows, so it is roughly 2,200 by
+             * 69,000 and every column except the last spreads its nodes at a pitch far larger
+             * than a 372px viewport. There is no viewport position at zoom 1.0 from which a
+             * 4,000 node plan looks like a diagram.
+             *
+             * SAID HERE SO THE ARTIFACT IS NOT MISREAD AS THE BUG COMING BACK. A reviewer who
+             * opens `flow293b.png`, sees one node on grey, and concludes the pose failed would
+             * be wrong -- and would very reasonably reach that conclusion, because the picture
+             * this fix produces and the picture the fix replaced differ by one node. The
+             * difference that matters is that the run now SAYS which it is, and can fail.
+             *
+             * For a diagram that reads as a diagram, shoot a real fixture rather than the
+             * synthetic ceiling case: `flow:plan-in-stock` fits five columns on screen.
+             */
+            @Override
+            public void beforeCapture() {
+                canvas.panToBox(canvas.rootBox());
+                ShotHarness.log("flow: composed on the root box for the capture");
+            }
+        });
+        ShotScreens.expectDrawn(new ShotScreens.Drawn() {
+            /**
+             * THE POSITIVE CONTROL, and it is the half of #293 that outlives the pan fix.
+             *
+             * Moving the camera onto the root stops THIS blank screenshot. It does not make a
+             * blank screenshot DETECTABLE, and that is the property that was actually missing:
+             * an empty grey rectangle is what a correct render of an empty viewport looks
+             * like, so for five artifacts across two PRs a broken probe and a true negative
+             * were the same picture and the picture was believed.
+             *
+             * IT ASKS WHETHER THE AIMED-AT BOX IS WHOLLY ON SCREEN, NOT WHETHER THE COUNT IS
+             * ABOVE ZERO, AND THE DIFFERENCE IS NOT PEDANTRY -- `> 0` SHIPPED AND PASSED A
+             * BLANK PICTURE. The first `panToBox` wrapped a negative offset instead of
+             * clamping it, so the run reported `drawn check PASSED -- 1 node(s) drawn`,
+             * exited 0, and wrote a panel holding a two-pixel sliver of one node jammed
+             * against the left edge. A human calling that image blank and a check calling it a
+             * pass were both right about their own question, which means the check was asking
+             * the wrong one.
+             *
+             * "The thing I aimed at is fully in frame" is the question with no such gap. It
+             * cannot be satisfied by a clipped edge, by a neighbour that happens to overlap
+             * the viewport, or by a culler that returns a box it is not drawing.
+             */
+            @Override
+            public boolean drewSomething() {
+                return canvas.drawnLastFrame() > 0 && canvas.fullyShowing(canvas.rootBox());
+            }
+
+            @Override
+            public String describe() {
+                int root = canvas.rootBox();
+                return "flow: " + canvas.drawnLastFrame() + " node(s) drawn on the composed "
+                        + "frame; box " + root + " of " + canvas.nodeCount()
+                        + (canvas.fullyShowing(root) ? " is wholly in frame"
+                                                     : " is NOT wholly in frame");
             }
         });
     }
