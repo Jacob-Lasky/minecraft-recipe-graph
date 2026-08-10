@@ -47,6 +47,28 @@ import io.github.jacoblasky.recipedump.plan.GraphFacts;
  */
 public final class PlannerScreen {
 
+    /**
+     * The graph counter's weight in {@link #stamp}, and the headroom the load term lives under.
+     *
+     * IT IS NOT AN ARBITRARY PRIME ANY MORE. It was one -- three counters that only go up can
+     * be weighted anything and summed -- but #271 added a term that falls back to zero, and the
+     * gap between {@link #LOAD_STEPS} and this is exactly what keeps the sum going up across
+     * that fall. See {@link #stamp}.
+     */
+    static final long GRAPH_WEIGHT = 1021L;
+
+    /** The plan counter's weight in {@link #stamp}. */
+    static final long PLAN_WEIGHT = 31L;
+
+    /**
+     * How finely the graph read is reported to the window: twentieths, so 5% steps.
+     *
+     * THE CEILING ON THE EXTRA REBUILDS ONE LOAD CAN CAUSE, which is why the number is here
+     * rather than inline. See {@link #loadStep}, and see {@code PlannerWindow} for the
+     * prohibition this number is the answer to.
+     */
+    static final long LOAD_STEPS = 20L;
+
     private PlannerScreen() {
     }
 
@@ -85,10 +107,27 @@ public final class PlannerScreen {
      * {@code PlannerWindow.onUpdate} runs it FIRST, so the rebuild this counter triggers draws
      * the plan rather than the absence of one.
      *
-     * WEIGHTED AND SUMMED, which is safe because ALL THREE ONLY EVER GO UP -- each counter
+     * AND A FOURTH TERM THAT IS NOT A COUNTER (#271): twentieths of the graph read, folded in
+     * only while a read is running. The three counters above move on state TRANSITIONS, and
+     * LOADING is one state -- so between entering it and leaving it every one of them is
+     * constant, and the panel built at 0% was the panel still on screen at 99%.
+     * `GraphService.progress()` reported real bytes the whole time and nothing redrew to show
+     * them. See {@link #loadStep} for why twentieths and not per-tick.
+     *
+     * WEIGHTED AND SUMMED, which is safe because THE SUM ONLY EVER GOES UP -- each counter
      * documents that on itself, and `GraphService.reset` bumps forward rather than back to
      * zero for exactly this reason. Any increase in any term moves the sum, and nothing needs
      * to recover which one moved. DO NOT add a term that can decrease.
+     *
+     * THE LOAD TERM DOES FALL BACK TO ZERO, AND {@link #GRAPH_WEIGHT} IS WHAT MAKES THAT SAFE.
+     * It is the one term that is not monotone: it climbs to at most {@link #LOAD_STEPS} during
+     * a read and is zero again the moment the read ends. But a read can only end by bumping the
+     * graph counter -- READY, FAILED and `reset` all do, and MISSING never enters LOADING at
+     * all -- so the fall is always paid for by a jump of {@link #GRAPH_WEIGHT}. The sum
+     * therefore still only goes up, and it does so BECAUSE `LOAD_STEPS < GRAPH_WEIGHT`, which
+     * is an arithmetic fact `PlannerScreenTest.theLoadTermCanNeverOutweighTheGraphCounter`
+     * pins. DO NOT raise `LOAD_STEPS` towards `GRAPH_WEIGHT` without re-reading that test: the
+     * failure it prevents is silent, and it is a window sitting on a stale panel for ever.
      *
      * PACKAGE-VISIBLE RATHER THAN PRIVATE, so `PlannerScreenTest` can read it. It was private
      * when #201 was filed, and that is a large part of why the issue's evidence had to be read
@@ -96,8 +135,78 @@ public final class PlannerScreen {
      * counter is the only piece of the recovery that a headless test can reach at all.
      */
     static long stamp(PlanBook book) {
-        return GraphService.get().generation() * 1021L
-                + PlannerService.get().generation() * 31L + book.revision();
+        GraphService graphs = GraphService.get();
+        // A SEQLOCK, AND NOT TWO PLAIN READS. `generation()` and `progress()` each load
+        // `GraphService.published` SEPARATELY -- one volatile field, read twice -- so a load
+        // finishing between the two reads hands back a pair that never existed: the OLD
+        // generation beside the NEW `progress() == -1`. That sum is numerically BELOW a stamp
+        // this window has already drawn, which is the one thing the note above forbids, and it
+        // costs a tick of staleness at the exact moment the graph lands -- the moment #201 is
+        // about. Re-reading the counter and dropping the progress when it moved pairs the two
+        // or pairs neither.
+        //
+        // TWO READS OF ONE PUBLICATION, NOT TWO FIELDS, AND THE DISTINCTION IS #291'S. Before
+        // #291 those really were separate volatiles and this comment said so; #291 welded state,
+        // detail and the counter into one `Publication` and its note on `GraphService.describe`
+        // names exactly this hazard surviving the weld -- "two reads of a field the loader can
+        // replace between them, which is the same defect this class was carrying before #291,
+        // reintroduced one method down". This is that defect a third time, in a third class.
+        //
+        // #291'S OWN FIX IS NOT AVAILABLE HERE. `describe` reads the publication ONCE into a
+        // local; this cannot, because `Publication` is private with no accessor. DO NOT add one
+        // to `GraphService` to tidy this away -- that is a change to `common/` for a caller's
+        // convenience, and the seqlock is correct without it. If an accessor ever lands, collapse
+        // these three reads into one and delete this note rather than keeping both.
+        long graphGeneration = graphs.generation();
+        float progress = graphs.progress();
+        if (graphs.generation() != graphGeneration) {
+            graphGeneration = graphs.generation();
+            progress = -1.0f;
+        }
+        return stamp(graphGeneration, PlannerService.get().generation(), book.revision(),
+                     progress);
+    }
+
+    /**
+     * The counter as a function of what it is made of, so the arithmetic can be swept.
+     *
+     * A SECOND OVERLOAD RATHER THAN A TEST THAT DRIVES A REAL LOAD, for the reason
+     * {@link #clearSelectionIfPlanChanged} is a method: the policy is what is worth pinning,
+     * and the live route can only be sampled by racing a 5.47 s daemon thread from a test.
+     * `PlannerScreenTest` does both -- it sweeps this, and it samples the real service once to
+     * prove {@link #stamp(PlanBook)} actually reads `progress()` rather than computing a number
+     * that would be right if anyone passed it in.
+     *
+     * @param loadProgress {@code GraphService.progress()}: 0.0 to 1.0 through the file, or
+     *                     negative when no read is running.
+     */
+    static long stamp(long graphGeneration, long planGeneration, long bookRevision,
+                      float loadProgress) {
+        return graphGeneration * GRAPH_WEIGHT + planGeneration * PLAN_WEIGHT + bookRevision
+                + loadStep(loadProgress);
+    }
+
+    /**
+     * Which twentieth of the read we are in, or 0 when nothing is being read.
+     *
+     * TWENTIETHS, WHICH IS THE WHOLE ANSWER TO THE PROHIBITION ON {@code PlannerWindow}. That
+     * note forbids redrawing on anything cheaper than a generation bump, because a rebuild
+     * throws away scroll position -- and it is right to. Twenty is a NUMBER rather than an
+     * assurance: it caps the extra rebuilds a whole graph read can cause at twenty, and at
+     * zero once the read is over, because `GraphService.progress()` returns -1 outside LOADING
+     * and this returns 0 for that. DO NOT swap this for the raw float, for a per-tick value or
+     * for a byte count; those are the shapes the prohibition names, and each of them redraws
+     * on a tick.
+     *
+     * FLOORED, so the value is stable across the many ticks inside one twentieth. Clamped on
+     * its own argument as well as by `progress()`, so a caller sweeping this cannot walk it
+     * past {@link #LOAD_STEPS} and quietly break the inequality {@link #stamp} depends on.
+     */
+    static long loadStep(float loadProgress) {
+        if (loadProgress < 0.0f) {
+            return 0L;
+        }
+        return (long) (Math.min(1.0f, loadProgress) * LOAD_STEPS);
     }
 
     /**
@@ -226,10 +335,29 @@ public final class PlannerScreen {
      * gets blamed on the GUI. The cost is one volatile read per tick.
      *
      * REOPENING THROWS AWAY SCROLL POSITION AND ANY OPEN SUB-PANEL, and that is acceptable
-     * ONLY because it happens when the plan itself has changed -- a scroll offset into a tree
-     * that no longer exists is not worth keeping. DO NOT extend this to redraw on anything
-     * cheaper than a generation bump; a window that reset the player's scroll on a tick would
-     * be worse than one that never refreshed.
+     * ONLY where there is no scroll position to lose. DO NOT extend this to redraw on a tick
+     * counter, on a clock, on `progress()` as a raw float, or on a byte count; a window that
+     * reset the player's scroll on a tick would be worse than one that never refreshed. That
+     * prohibition is unchanged and it is the reason the paragraph below has to argue rather
+     * than assert.
+     *
+     * THE ONE TERM THAT IS NOT A GENERATION BUMP IS THE GRAPH READ (#271), AND IT IS ADMITTED
+     * ON TWO MEASURED FACTS RATHER THAN ON PLAUSIBILITY:
+     *
+     *   1. IT IS BOUNDED, at {@link #LOAD_STEPS} extra rebuilds for a whole 5.47 s read and at
+     *      zero afterwards -- `GraphService.progress()` returns -1 outside LOADING and
+     *      {@link #loadStep} returns 0 for that. A READY graph costs exactly what it cost
+     *      before. That is the prohibition's cost argument answered with a number.
+     *   2. THERE IS NOTHING TO LOSE WHILE IT FIRES. `PlannerEntry.stateFor` returns a non-null
+     *      `PlannerState` for EVERY graph state that is not READY, so while the read is running
+     *      `builderFor` can only build `PlannerWidgets.statePanel` -- an eyebrow and one line of
+     *      text, no `ListWidget`, no scroll, no sub-panel to close.
+     *      `PlannerScreenTest.theLoadingPanelHasNoScrollPositionToThrowAway` pins both halves,
+     *      because "the panel is only two lines" is a claim about OTHER code and would rot
+     *      silently the day a progress bar or a cancel button is added to it.
+     *
+     * DO NOT let the load term survive a change that puts a scrollable widget on the loading
+     * panel. The two facts are what buy the exception, and the second one stops holding first.
      */
     private static final class PlannerWindow extends ModularScreen {
 

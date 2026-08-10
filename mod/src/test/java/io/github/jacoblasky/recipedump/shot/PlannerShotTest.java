@@ -1,7 +1,9 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -16,6 +18,7 @@ import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import org.junit.After;
@@ -168,6 +171,126 @@ public class PlannerShotTest {
                 canvas.getScrollArea().getScrollX().getScroll(),
                 canvas.getScrollArea().getScrollY().getScroll(),
                 canvas.getArea().width, canvas.getArea().height).size();
+    }
+
+    // -- #271: the `planner-recovery:progress` verdict, in all four directions -----------------
+
+    /**
+     * A run that saw the panel redrawn as the read advanced is the only one that passes.
+     *
+     * THE THREE FAILING DIRECTIONS ARE THE POINT OF THIS TEST, not the passing one. A live
+     * `planner-recovery:progress` exercises exactly one branch per run, so the other three are
+     * read-off-the-code until something drives them -- and the last unexecuted guard in this
+     * package, `ShotScreens`' first `reported()`, had been wired to invert its own signal and
+     * would have reported every failure as a pass and every pass as a failure. That is the
+     * defect this file exists to make impossible, so the verdict is driven both ways here.
+     */
+    @Test
+    public void theProgressShotPassesOnlyWhenThePanelWasActuallyRedrawn() {
+        assertNull("still reading, redrawn five times, monotone: this is the artifact",
+                   PlannerRecoveryShot.progressProblem(true, 5, false, 0.02f, 0.61f, 0.5f));
+    }
+
+    @Test
+    public void theProgressShotFailsWhenTheReadFinishedBeforeTheFloor() {
+        // A perfectly good picture of a READY planner. It is not a picture of a load, and the
+        // whole reason `loadingHold` has the same guard is that nothing else would notice.
+        String problem = PlannerRecoveryShot.progressProblem(false, 9, false, 0.02f, 1.0f, 0.5f);
+        assertNotNull("a finished read must not be filed as the loading panel at 50%", problem);
+        assertTrue(problem, problem.contains("finished before"));
+    }
+
+    /**
+     * #271 ITSELF: the read is half done and the window is still the one opened at 0%.
+     *
+     * This is the assertion that goes red against a build without the fix, and it is red for
+     * the right reason -- one window for the whole read -- rather than because a number came
+     * out low.
+     */
+    @Test
+    public void theProgressShotFailsWhenTheWindowWasNeverRebuilt() {
+        String problem = PlannerRecoveryShot.progressProblem(true, 1, false, 0.0f, 0.5f, 0.5f);
+        assertNotNull("one window for a whole read IS the defect", problem);
+        assertTrue(problem, problem.contains("never redrawn"));
+        assertNull("and two is enough, because one is what the defect produces",
+                   PlannerRecoveryShot.progressProblem(true, 2, false, 0.0f, 0.5f, 0.5f));
+    }
+
+    @Test
+    public void theProgressShotFailsWhenProgressWentBackwards() {
+        String problem = PlannerRecoveryShot.progressProblem(true, 6, true, 0.02f, 0.61f, 0.5f);
+        assertNotNull("a bar that goes backwards is not a bar", problem);
+        assertTrue(problem, problem.contains("LESS progress"));
+    }
+
+    // -- #271: the drawn check, driven with REAL `GraphService.describe()` output --------------
+
+    /**
+     * THE CONTROL, AND IT IS A REAL STATE RATHER THAN A FABRICATED ONE.
+     *
+     * `GraphService.describe()` returns "no graph loaded" while the service is IDLE, and
+     * `PlannerEntry.stateFor` still wraps that as a LOADING-KIND state. So this string renders a
+     * fully opaque, entirely non-blank, perfectly legible planner panel that says nothing
+     * whatever about progress -- **a pixel check passes it**, which is the whole argument for
+     * `ShotScreens.Drawn` asking about the sentence instead.
+     *
+     * If the guard cannot say no to this, it is not checking the percentage, and every green
+     * `planner-recovery:progress` run afterwards means nothing. That is the test of the test.
+     */
+    @Test
+    public void theDrawnCheckRejectsTheRealPanelThatCarriesNoPercentage() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("no graph loaded"), 0.5f);
+        assertNotNull("IDLE's own describe() renders a perfectly good panel about nothing",
+                      problem);
+        assertTrue(problem, problem.contains("no percentage at all"));
+    }
+
+    /**
+     * AND IT REJECTS `0%`, WHICH IS THE ONE A LOOSER CHECK WOULD PASS.
+     *
+     * `docs/shots/planner-during-load.png` -- the artifact #271 was filed about -- reads
+     * `reading oracle.json, 0%`. It CONTAINS a percentage. A guard that asked "is a percentage
+     * present" would have gone green on the picture of the bug and agreed with it.
+     */
+    @Test
+    public void theDrawnCheckRejectsTheDefectsOwnZeroPercentPanel() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("reading oracle.json, 0%"), 0.5f);
+        assertNotNull("0% is what the frozen panel reads, and it has a percentage in it",
+                      problem);
+        assertTrue(problem, problem.contains("0%"));
+    }
+
+    @Test
+    public void theDrawnCheckRejectsAPanelBelowTheFloorTheHoldReleasedOn() {
+        String problem = PlannerRecoveryShot.progressNotDrawn(
+                PlannerState.loading("reading oracle.json, 12%"), 0.5f);
+        assertNotNull("the capture and the hold must not disagree about when this is", problem);
+        assertTrue(problem, problem.contains("below the 50%"));
+    }
+
+    /** MISSING's real `describe()`, which `stateFor` wraps as FAILED rather than LOADING. */
+    @Test
+    public void theDrawnCheckRejectsANotYetPanelThatIsNotALoadAtAll() {
+        assertNotNull("a failed panel is not a picture of a read",
+                      PlannerRecoveryShot.progressNotDrawn(
+                              PlannerState.failed("no graph.json. looked in: /x/graph.json"),
+                              0.5f));
+        // READY: `stateFor` returns null because a PLAN should be drawn, so there is no loading
+        // panel on screen and the capture is of something else entirely.
+        assertNotNull("a plan on screen is not a picture of a read",
+                      PlannerRecoveryShot.progressNotDrawn(null, 0.5f));
+    }
+
+    @Test
+    public void theDrawnCheckAcceptsAPanelReportingRealProgressPastTheFloor() {
+        assertNull("this is the artifact: a loading panel reading a moved, non-zero percentage",
+                   PlannerRecoveryShot.progressNotDrawn(
+                           PlannerState.loading("reading oracle.json, 50%"), 0.5f));
+        assertNull("and the file name in front of it is whatever $RECIPEGRAPH_ORACLE points at",
+                   PlannerRecoveryShot.progressNotDrawn(
+                           PlannerState.loading("reading graph-oracle-248.json, 97%"), 0.5f));
     }
 
     /** Nodes in the tree. Iterative, since the trees under test are thousands deep-ish. */
