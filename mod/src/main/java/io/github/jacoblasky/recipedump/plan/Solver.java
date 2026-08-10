@@ -587,8 +587,14 @@ public final class Solver {
         if (leaves.isEmpty()) {
             return 0;
         }
+        // `isMineableOre` AND NOT `isWorldOre`, WHICH IS #270 REACHING THE THIRD READER OF
+        // THIS QUESTION. What this loop asks is "is every dead end something you go and
+        // mine", and for a shadow ore whose `ore*` group the pack deleted the answer is yes --
+        // the graph records where it generates. Reading the finished registry alone scored a
+        // route resting on `sub_block_holder_1:8` as though it rested on junk while the
+        // identical route through its sibling `:2` scored 1. Mirrors `Solver.ore_backed`.
         for (int leaf : leaves) {
-            if (!g.isWorldOre(leaf)) {
+            if (!g.isMineableOre(leaf)) {
                 return 0;
             }
         }
@@ -770,7 +776,14 @@ public final class Solver {
         // the cheapest possible entry, `MACHINE_COST["have"]`, which is 1.0, which is
         // `BASE_RAW_COST`, which is what mining now costs. A comparison here would be a
         // branch that can never take its other side.
-        if (g.isWorldOre(keyId)) {
+        // `isMineableOre` AND NOT `isWorldOre`, WHICH IS #270. The two differ by exactly the
+        // keys the dimension records know and the finished oredict registry does not, and a
+        // key in that gap fell past this branch to the unsourced mark below -- so the plan
+        // asserted "it comes from a mechanic no recipe can describe" while `node.dimension`
+        // four lines down would have named Rhenia. `RecipeGraph.isMineableOre` carries the
+        // argument for why a worldgen record is evidence of mining; `Cost.seed` reads the same
+        // predicate so the price cannot disagree with this stop. Mirrors `solve.expand`.
+        if (g.isMineableOre(keyId)) {
             node.status = PlanStatus.RAW;
             // WHERE, when the graph knows the ore only generates somewhere you have never
             // been (#112). The cost model already charges for the trip, and a route that got

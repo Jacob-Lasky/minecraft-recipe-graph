@@ -714,6 +714,41 @@ public final class RecipeGraph {
     }
 
     /**
+     * True for a key you get by hitting a block with a pick, under any of its ids.
+     *
+     * ONE DEFINITION, BECAUSE {@link io.github.jacoblasky.recipedump.plan.Solver} AND
+     * {@link io.github.jacoblasky.recipedump.plan.Cost} MUST ASK THE SAME QUESTION. The
+     * solver's mining branch stops a plan at "go and mine this" and the cost seed prices that
+     * stop; a key one of them recognises and the other does not is a node badged as one thing
+     * and priced as another, which is #270. Mirrors `Graph.mineable_ores` in python, which
+     * carries the full argument.
+     *
+     * <p>WHY IT IS NOT JUST {@link #isWorldOre}, WHICH IS #270. `worldOres` is membership of
+     * the FINISHED oredict registry, and the dimension ores are not a subset of it:
+     * `index.build` intersects the declared gates with the registry and then unions in
+     * `dimensions.shadow_ores`, whose whole purpose is to reach a SECOND id for a rock that
+     * the registry does not list. `contenttweaker:sub_block_holder_1:8` is the case -- Rhenium
+     * Ore, registered into `oreRhenium` by `scripts/OreDictionary.zs:63` and removed again on
+     * the next line -- and it was falling past the mining branch to the unsourced badge, so
+     * the plan said "it comes from a mechanic no recipe can describe" about an ore the same
+     * graph records as mined on Rhenia.
+     *
+     * <p>{@link #dimensionName} AND NOT {@link #dimensionOf}, WHICH IS THE TRAP THAT METHOD'S
+     * OWN JAVADOC WARNS ABOUT. -1 is also the Nether's real dimension id, so a gated Nether
+     * ore and a non-member return the same number and a membership test written on it would
+     * quietly drop 21 ores. The name is null for a non-member and cannot collide.
+     *
+     * <p>DELIBERATELY NOT {@link #isOffworldOre}. That set says a portal is on the route,
+     * which is a statement about the TRIP rather than about how the block is acquired, and it
+     * is a superset -- unioning it in would widen the mining population on evidence that does
+     * not mean mining. `Cost.rawFloor` reads it as a surcharge on the price this population
+     * earns; the two questions stay apart.
+     */
+    public boolean isMineableOre(int keyId) {
+        return Bits.get(worldOres, keyId) || dimensionName(keyId) != null;
+    }
+
+    /**
      * Is this an ore no pack source ever places in the overworld, so that MINING it means
      * walking through a portal? #248. Says nothing about crafted routes, which compete
      * normally: the toll raises a floor, exactly as the gate does.

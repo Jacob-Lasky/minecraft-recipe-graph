@@ -802,6 +802,12 @@ class Graph:
         self._by_rid = None
         self._ore_index = None
         self._world_ores = None
+        # NOT MEMOISED BEFORE `index.build` HAS FINISHED, and the ordering is real rather
+        # than theoretical: `dimension_ores` is empty on a fresh `Graph` and is filled in two
+        # steps -- the intersected declarations, then `dimensions.shadow_ores` on top -- so a
+        # read taken between them would freeze a population missing exactly the shadow keys
+        # #270 is about. Nothing in `index.build` touches this; the first reader is a solve.
+        self._mineable_ores = None
         self._labels = None
         self._live_keys = None
         self._unsourced_keys = None
@@ -958,6 +964,44 @@ class Graph:
                 for member in members
             }
         return self._world_ores
+
+    @property
+    def mineable_ores(self):
+        """Every key you get by hitting a block with a pick, under any of its ids.
+
+        ONE DEFINITION, BECAUSE `Solver.expand` AND `cost._seed` MUST ASK THE SAME QUESTION
+        AND JAVA MIRRORS BOTH. The solver's world-ore branch stops a plan at "go and mine
+        this" and the seed's world-ore loop prices that stop; a key one of them recognises
+        and the other does not is a node badged as one thing and priced as another, which is
+        #270 exactly. `RecipeGraph.isMineableOre` is the Java spelling.
+
+        WHY IT IS NOT JUST `world_ores`, WHICH IS #270. `world_ores` is membership of the
+        FINISHED oredict registry, and `dimension_ores` is not a subset of it: `index.build`
+        intersects the declared gates with `world_ores`, then unions in
+        `dimensions.shadow_ores`, whose whole purpose is to reach a second id for a rock
+        that is NOT in the registry. `contenttweaker:sub_block_holder_1:8` is the case --
+        Rhenium Ore, registered into `oreRhenium` by `scripts/OreDictionary.zs:63` and
+        removed again on the next line, so it belongs to no `ore*` group at all. It is one
+        of exactly one such key on the reference oracle, measured, and it was reaching the
+        unsourced branch of `expand`: the plan said "it comes from a mechanic no recipe can
+        describe" about an ore the same graph records as mined on Rhenia.
+
+        A DIMENSION RECORD IS POSITIVE EVIDENCE OF MINING, which is what makes the union
+        sound rather than merely convenient. Nothing enters `dimension_ores` without the
+        pack declaring worldgen for it in `planetDefs.xml`, and a shadow enters only on the
+        `shadow_ores` test -- same display name, same mod, and a shared or deliberately
+        deleted `ore*` group. Both arms say "this block generates in the ground"; only the
+        registry lookup can miss it.
+
+        DELIBERATELY NOT `offworld_ores`. That set says a portal is on the route, which is a
+        statement about the TRIP and not about how the block is acquired, and it is a
+        superset of `dimension_ores` -- unioning it in would widen the mining population on
+        evidence that does not mean mining. `raw_floor` reads it as a surcharge on the price
+        this population earns; the two questions stay apart.
+        """
+        if self._mineable_ores is None:
+            self._mineable_ores = frozenset(self.world_ores) | frozenset(self.dimension_ores)
+        return self._mineable_ores
 
     @property
     def reshaped_only(self):
@@ -1152,7 +1196,22 @@ class Graph:
         # graph, and 0 carry a `block*` group at all. It is here because the storage-form
         # widening above is what makes co-registration reachable, and because a rule stated
         # once is cheaper than the same measurement done again.
-        if key in self.world_ores:
+        #
+        # `mineable_ores` SINCE #270, AND THAT IS WHAT KEEPS THE PARAGRAPH ABOVE TRUE RATHER
+        # THAN ACCIDENTALLY TRUE. Both of its clauses name a population that has moved: the
+        # ceiling `cost._seed` applies and the branch `Solver.expand` returns at are now
+        # `mineable_ores`, not `world_ores`. Read the narrower set here and a shadow ore whose
+        # `ore*` group the pack deleted could be badged by this predicate while the seed
+        # priced it as mining and the solver never showed the badge -- which is verbatim the
+        # surface-to-surface divergence the last sentence says it exists to prevent.
+        #
+        # STILL A NO-OP ON TODAY'S DATA, AND MEASURED RATHER THAN ASSUMED: the one key in the
+        # gap already returns None from a later clause, which is why it was in
+        # `pack_authored_unsourced` at all -- that set requires `reachable_form` to be None.
+        # So widening this moved no price and no plan on `graph-oracle-248.json`, verified by
+        # re-running the full cost digest after the change. It is the rule being stated where
+        # it belongs, not a second fix.
+        if key in self.mineable_ores:
             return None
         # A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is not evidence of
         # anything. `Graph.producers` gathers `base:*` for a concrete meta and never the
@@ -1423,6 +1482,41 @@ class Graph:
                 and not self.producers(key)
                 and not self.reachable_form(key)
                 and not self.ores_of(key)
+                # AND THE GRAPH DOES NOT ALREADY KNOW WHERE IT COMES FROM, WHICH IS #270.
+                # A key in `dimension_ores` is one the pack declared worldgen for; the
+                # defining claim of this predicate is that the pack authored the item and
+                # then said nothing about how to obtain it, and a worldgen declaration IS
+                # saying so. Reaching here with one was not a near miss -- it produced the
+                # note "it comes from a mechanic no recipe can describe" for an ore the same
+                # graph records as mined on Rhenia, with the dimension sitting two fields
+                # away on the node.
+                #
+                # `ores_of` ABOVE CANNOT COVER IT, which is the whole reason this is a sixth
+                # clause and not a widening of the fifth. The one key that reaches here is
+                # `contenttweaker:sub_block_holder_1:8`, whose `ore*` group the pack DELETED
+                # (`scripts/OreDictionary.zs:63`); an empty `ores_of` is exactly why it
+                # survived the fifth clause, and it is also why it is absent from
+                # `world_ores`. See `mineable_ores`, which is the same absence read from the
+                # other side, and `dimensions.shadow_ores` for how the key is recovered.
+                #
+                # IN THE SHARED PREDICATE, NOT IN `pack_authored_unsourced` ALONE. The two
+                # properties PARTITION this result on `declared_provenance`, so excluding on
+                # one side only would move the key into the other -- a dimension ore badged
+                # with a puzzle-reward note instead of a false unsourced one, which is a
+                # different wrong answer rather than a fix. `Solver.expand` returns at the
+                # mining branch before it reaches either, and this keeps the price agreeing
+                # with that. Measured on `graph-oracle-248.json`: removes exactly 1 key from
+                # `pack_authored_unsourced`, 284 -> 283.
+                #
+                # THE DECLARED HALF IS UNMEASURED ON THIS ORACLE AND THAT IS RECORDED RATHER
+                # THAN REPORTED AS A ZERO. `declared_provenance` is EMPTY in both
+                # `graph-oracle-248.json` and `graph-oracle.json` -- neither dump carries the
+                # field -- so `pack_authored_declared` is 0 there before this clause and 0
+                # after, and "0 keys moved" on that side is the source being absent rather
+                # than the intersection being empty. `tests/test_dimensions.py` pins the
+                # declared arm on a hand-built graph instead, which is the only place the two
+                # sides can be exercised together today.
+                and key not in self.dimension_ores
                 and self.damage_base(key) == key)
 
     @property

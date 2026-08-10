@@ -566,7 +566,15 @@ class Solver:
                 leaves.append(alt)
         if not leaves:
             return 0
-        world = self.g.world_ores
+        # `mineable_ores` AND NOT `world_ores`, WHICH IS #270 REACHING THE THIRD READER OF
+        # THIS QUESTION. What this line asks is "is every dead end something you go and mine",
+        # and the answer for a shadow ore whose `ore*` group the pack deleted is yes -- the
+        # graph records where it generates. Reading the finished registry alone scored a route
+        # resting on `sub_block_holder_1:8` as though it rested on junk, while the identical
+        # route through its sibling `:2` scored 1: the two ids of one rock ranked differently,
+        # which is the separation #270 asks a test to pin. `Graph.mineable_ores` carries the
+        # argument; `Solver.oreBacked` in java mirrors it.
+        world = self.g.mineable_ores
         return 1 if all(a in world for a in leaves) else 0
 
     def availability_rank(self, recipe):
@@ -712,7 +720,14 @@ class Solver:
         # Consistent with the measurement, too: of 286 world ores on the reference graph, 88
         # price below `BASE_RAW_COST` and every one of those 88 does so because it is IN
         # STOCK, which `take` above has already spent.
-        if key in self.g.world_ores:
+        # `mineable_ores` AND NOT `world_ores`, WHICH IS #270. The two differ by exactly the
+        # keys `dimension_ores` knows and the finished oredict registry does not, and a key in
+        # that gap fell past this branch to the unsourced mark below -- so the plan asserted
+        # "it comes from a mechanic no recipe can describe" while `node["dimension"]` two
+        # lines down would have named Rhenia. `Graph.mineable_ores` carries the argument for
+        # why a worldgen record is evidence of mining; `cost._seed` reads the same property so
+        # the price cannot disagree with this stop.
+        if key in self.g.mineable_ores:
             node["status"] = STATUS_RAW
             # WHERE, when the graph knows the ore only generates somewhere you have never
             # been (#112). The cost model already charges `DIMENSION_COST` for it, and a

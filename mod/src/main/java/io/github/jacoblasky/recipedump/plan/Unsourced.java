@@ -49,7 +49,14 @@ final class Unsourced {
         // the unsourced seed runs later and only raises. {@link Solver} returns "mined, not
         // crafted" before ever consulting this mark, so a badged world ore would show up only
         // in a sweep. Mirrors `Graph.reachable_form` in python, which carries the measurement.
-        if (g.isWorldOre(keyId)) {
+        // `isMineableOre` SINCE #270, AND THAT IS WHAT KEEPS THE SENTENCE ABOVE TRUE RATHER
+        // THAN ACCIDENTALLY TRUE: both populations it names -- the ceiling `Cost.seed`
+        // applies and the branch `Solver` returns at -- have moved to the wider set. Reading
+        // the narrower one here would let a shadow ore whose `ore*` group the pack deleted be
+        // badged by this predicate while the seed priced it as mining, which is the
+        // sweep-only badge the sentence says this guard exists to prevent. Measured a no-op
+        // on today's data: the one key in the gap already returns -1 from a later clause.
+        if (g.isMineableOre(keyId)) {
             return -1;
         }
         // A WILDCARD META HAS NO PRODUCERS BY CONSTRUCTION, so its count is evidence of
@@ -314,6 +321,33 @@ final class Unsourced {
             return false;
         }
         if (g.oresOf().count(keyId) > 0) {
+            return false;
+        }
+        // AND THE GRAPH DOES NOT ALREADY KNOW WHERE IT COMES FROM, WHICH IS #270. A key with
+        // a dimension record is one the pack declared worldgen for; the defining claim of
+        // this predicate is that the pack authored the item and then said nothing about how
+        // to obtain it, and a worldgen declaration IS saying so.
+        //
+        // THE `oresOf` CLAUSE ABOVE CANNOT COVER IT, which is why this is a sixth clause and
+        // not a widening of the fifth. The one key that reaches here is
+        // `contenttweaker:sub_block_holder_1:8`, whose `ore*` group the pack DELETED; an
+        // empty `oresOf` is exactly why it survives the fifth clause, and it is also why it
+        // is absent from `worldOres`. See `RecipeGraph.isMineableOre`, the same absence read
+        // from the other side.
+        //
+        // IN THE SHARED PREDICATE, NOT IN THE UNSOURCED HALF ALONE, for the reason this
+        // method's javadoc gives: the two callers PARTITION this result on
+        // `declaredProvenance`, so excluding on one side only would move the key into the
+        // other -- a dimension ore badged with a puzzle-reward note instead of a false
+        // unsourced one, which is a different wrong answer rather than a fix.
+        //
+        // `dimensionName` AND NOT `dimensionOf`, which is the trap that method's own javadoc
+        // warns about: -1 is the Nether's real id, so a membership test written on the number
+        // would exclude 21 gated Nether ores from this predicate by accident.
+        //
+        // Mirrors the same clause in `Graph._is_pack_authored_unexplained`, which carries the
+        // measurement: 1 key leaves the unsourced set on `graph-oracle-248.json`, 284 -> 283.
+        if (g.dimensionName(keyId) != null) {
             return false;
         }
         if (!key.equals(g.damageBase(key))) {
