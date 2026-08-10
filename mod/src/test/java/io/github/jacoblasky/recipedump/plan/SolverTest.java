@@ -214,6 +214,70 @@ public class SolverTest {
         assertEquals("Nethengeic Waste", ore.dimension);
     }
 
+    /**
+     * The pack's twin: a `contenttweaker:` ore in NO oredict group, with a worldgen record.
+     *
+     * `scripts/OreDictionary.zs:63` registers `contenttweaker:sub_block_holder_1:8` into
+     * `oreRhenium` and removes it again, so the finished registry shows a Rhenium Ore
+     * belonging to nothing. That empty group set is why the key is absent from `worldOres`
+     * AND why it survives the ore clause of `Unsourced`, which is the collision #270 is
+     * about. `declareWorldgen=false` withholds only the dimension record, which is the
+     * control: there the unsourced badge is the correct answer.
+     */
+    private static RecipeGraph grouplessTwin(boolean declareWorldgen) {
+        GraphBuilder b = new GraphBuilder();
+        recipe(b, "r:melt", "crafting_shaped", "fluid:rhenium", 100,
+                slot(GROUPLESS_TWIN, 1));
+        if (declareWorldgen) {
+            b.dimensionOre(b.key(GROUPLESS_TWIN), 163, "Rhenia");
+        }
+        return b.build();
+    }
+
+    private static final String GROUPLESS_TWIN = "contenttweaker:sub_block_holder_1:8";
+
+    @Test
+    public void aRecordedDimensionOreIsNotBadgedAsAnItemNothingCanMake() {
+        // #270. The plan said "the pack defines this item and nothing in the dump makes it;
+        // it comes from a mechanic no recipe can describe" about an ore the same graph
+        // records as mined on Rhenia -- the mechanic was named two fields away on the node.
+        RecipeGraph g = grouplessTwin(true);
+        Map<Integer, String> gates = new LinkedHashMap<Integer, String>();
+        gates.put(g.keyId(GROUPLESS_TWIN), "Rhenia");
+
+        PlanResult plan = solver(g).dimensionGates(gates).build()
+                .solve(g.keyId("fluid:rhenium"), 100);
+        PlanNode ore = plan.tree.children.get(0);
+        assertEquals(PlanStatus.RAW, ore.status);
+        assertEquals("Rhenia", ore.dimension);
+        assertEquals("mined on Rhenia, and you have not been there", ore.note);
+        assertNull("a key the graph places in a dimension is not unsourced", ore.unsourced);
+    }
+
+    @Test
+    public void withoutTheWorldgenRecordTheUnsourcedBadgeStillFires() {
+        // THE CONTROL, AND THE ONE ASSERTION HERE THAT MUST NOT GO GREEN FOR THE WRONG
+        // REASON. Identical graph, dimension record withheld: now nothing knows where the key
+        // comes from and the unsourced badge is true and useful. A change that simply stopped
+        // badging unsourced keys passes the test above and fails this one.
+        RecipeGraph g = grouplessTwin(false);
+
+        PlanResult plan = solver(g).build().solve(g.keyId("fluid:rhenium"), 100);
+        PlanNode ore = plan.tree.children.get(0);
+        assertEquals(Boolean.TRUE, ore.unsourced);
+        assertNull(ore.dimension);
+        assertTrue(ore.note, ore.note.contains("no recipe can describe"));
+    }
+
+    @Test
+    public void aRouteRestingOnAGrouplessDimensionOreIsStillOreBacked() {
+        // The third reader of the mining question. A recipe whose only dead end is this twin
+        // rests on an ore you go and mine, and scored 0 as though it rested on junk.
+        RecipeGraph g = grouplessTwin(true);
+        Solver solver = solver(g).build();
+        assertEquals(1, solver.oreBacked(solver.mergeSlots(0)));
+    }
+
     @Test
     public void aPlaceholderWithNoRecipeIsAnInstructionAndNotAShoppingListRow() {
         // "1 Dungeon Drop" on a list of materials to gather reads as a thing to acquire. It

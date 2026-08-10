@@ -1377,8 +1377,12 @@ class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
 
     def test_the_plan_names_the_dimension_instead_of_denying_one_exists(self):
         node = self._plan(groupless_twin_graph(), HOLDER)
-        self.assertEqual(node["dimension"], "Sedna")
-        self.assertIn("Sedna", node["note"])
+        # `.get`, NOT `[...]`, SO A REGRESSION READS AS A DIFF RATHER THAN A KeyError.
+        # Reverting the fix makes these fields ABSENT, and a traceback saying
+        # `KeyError: 'dimension'` is indistinguishable at a glance from a test that has
+        # itself broken. `None != 'Sedna'` names the regression.
+        self.assertEqual(node.get("dimension"), "Sedna")
+        self.assertIn("Sedna", node.get("note") or "")
         self.assertNotIn("unsourced", node)
 
     def test_the_two_ids_of_one_rock_take_the_same_path(self):
@@ -1397,8 +1401,8 @@ class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
             dimensions.shadow_ores(g, g.dimension_ores, SEDNANITE_REMOVED))
         groupless = self._plan(g, HOLDER)
         keeps_its_group = self._plan(g, registered)
-        self.assertEqual(groupless["dimension"], keeps_its_group["dimension"])
-        self.assertEqual(groupless["note"], keeps_its_group["note"])
+        self.assertEqual(groupless.get("dimension"), keeps_its_group.get("dimension"))
+        self.assertEqual(groupless.get("note"), keeps_its_group.get("note"))
         self.assertEqual(groupless.get("unsourced"), keeps_its_group.get("unsourced"))
 
     def test_it_is_priced_for_the_trip_and_not_as_unsourced(self):
@@ -1410,6 +1414,30 @@ class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
         # AND THE ASSERTION THAT WOULD HAVE CAUGHT IT, stated separately because the equality
         # above would also hold if UNSOURCED_COST were ever tuned down to 801.
         self.assertLess(costs[HOLDER], cost.UNSOURCED_COST)
+
+    def test_a_twin_something_claims_to_produce_still_gets_the_mining_floor(self):
+        """THE CASE `_seed`'s MINING LOOP EXISTS FOR, and the only one that can witness it.
+
+        The loop above it prices a leaf as obtainable only when NO recipe outputs the key --
+        "the only way to get a thing is to make it", which is false for an ore. So on a
+        producerless twin the leaf rule already charges the floor and the mining loop is
+        invisible: revert it and the price test above still passes.
+
+        `contenttweaker:sednanite_ore` is the reported shape of exactly this (#106): two
+        Plasmatic Condenser recipes emit the ore, each wanting 160,000 mB of Dense Plasma, so
+        it counts as produced, every route prices near infinity, and an ore you MINE ends up
+        unreachable. Give the groupless twin the same treatment and the mining loop is the
+        only rule left that can price it -- which is what makes this a witness for reading
+        `mineable_ores` there rather than a second spelling of the test above.
+        """
+        g = groupless_twin_graph()
+        g.add(Recipe("condense-twin", "t", [(HOLDER, 1)],
+                     [Ingredient(["mod:plasma"], 160000)], category="mod.condenser"))
+        self.assertTrue(g.real_producers(HOLDER), "fixture must make the twin PRODUCED")
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        self.assertAlmostEqual(costs[HOLDER],
+                               cost.BASE_RAW_COST + cost.DIMENSION_COST, places=6)
 
     def test_the_price_and_the_badge_agree(self):
         """The property every rule in `cost._seed` claims and this one broke.
@@ -1426,10 +1454,29 @@ class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
         self.assertIsNone(node.get("unsourced"))
         self.assertNotEqual(costs[HOLDER], cost.UNSOURCED_COST)
 
+    def test_the_shopping_row_is_not_marked_unsourced_either(self):
+        """THE THIRD SURFACE, and the one a player actually carries into the world.
+
+        `shopping_row` recomputes the mark off the graph rather than copying it from the tree
+        node, deliberately, so the list and the tree cannot disagree. That means it reads
+        `pack_authored_unsourced` a second time and would have gone on marking this row even
+        after the tree node was fixed -- the divergence #178 spent a PR removing, reappearing
+        one surface over.
+        """
+        g = groupless_twin_graph()
+        gates = dimensions.gates_for(g, {"DIM-1": 42})
+        costs = cost.estimate(g, machine_states=STATES, dimension_gates=gates)
+        plan = Solver(g, machine_states=STATES, costs=costs,
+                      dimension_gates=gates).solve(HOLDER, 1)
+        rows = [r for r in plan["shopping_list"] if r["key"] == HOLDER]
+        self.assertEqual(len(rows), 1, "the twin must reach the shopping list at all")
+        self.assertNotIn("unsourced", rows[0])
+        self.assertNotIn("provenance", rows[0])
+
     def test_visiting_the_dimension_leaves_an_ordinary_mined_ore(self):
         """Not a special case bolted on: it lifts exactly as a registered ore's gate does."""
         node = self._plan(groupless_twin_graph(), HOLDER, visited={"DIM147": 3})
-        self.assertEqual(node["note"], "mined, not crafted")
+        self.assertEqual(node.get("note"), "mined, not crafted")
         self.assertNotIn("dimension", node)
         self.assertNotIn("unsourced", node)
 
@@ -1459,8 +1506,8 @@ class ADimensionOreIsNotAnItemNothingCanMakeTest(unittest.TestCase):
         self.assertNotIn(HOLDER, g.dimension_ores)
         self.assertIn(HOLDER, g.pack_authored_unsourced)
         node = self._plan(g, HOLDER)
-        self.assertTrue(node["unsourced"])
-        self.assertIn("no recipe can describe", node["note"])
+        self.assertTrue(node.get("unsourced"))
+        self.assertIn("no recipe can describe", node.get("note") or "")
         self.assertNotIn("dimension", node)
 
 

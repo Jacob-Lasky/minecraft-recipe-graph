@@ -382,6 +382,30 @@ public class RecipeGraphTest {
         assertEquals(1, graph.worldOreCount());
     }
 
+    @Test
+    public void theMiningPopulationIsTheRegistryPlusWhatTheWorldgenRecordsKnow() {
+        // #270. `worldOres` is membership of the FINISHED registry, and the dimension records
+        // are not a subset of it: `dimensions.shadow_ores` deliberately reaches a SECOND id
+        // for a rock the registry does not list, because the pack removed it from its group
+        // again. A key in that gap is still something you hit with a pick.
+        GraphBuilder b = new GraphBuilder();
+        b.beginOreGroup("oreRhenium");
+        b.oreMember(b.key("contenttweaker:rhenium_ore"));
+        b.endOreGroup();
+        // The twin, in no group at all, with the worldgen record its anchor's gate spread.
+        b.dimensionOre(b.key("contenttweaker:sub_block_holder_1:8"), 163, "Rhenia");
+        b.key("mod:ingot");
+        RecipeGraph g = b.build();
+
+        assertTrue(g.isMineableOre(g.keyId("contenttweaker:rhenium_ore")));
+        assertFalse("the twin is absent from the finished registry",
+                g.isWorldOre(g.keyId("contenttweaker:sub_block_holder_1:8")));
+        assertTrue("and is still an ore you mine",
+                g.isMineableOre(g.keyId("contenttweaker:sub_block_holder_1:8")));
+        // THE SCREEN HAS TO BE ABLE TO SAY NO, or its yes means nothing.
+        assertFalse(g.isMineableOre(g.keyId("mod:ingot")));
+    }
+
     // -- derived key sets --------------------------------------------------------------
 
     @Test
