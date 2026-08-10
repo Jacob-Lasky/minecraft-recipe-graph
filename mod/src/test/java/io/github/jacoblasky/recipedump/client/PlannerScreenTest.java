@@ -171,6 +171,19 @@ public class PlannerScreenTest {
      * before that would otherwise show a progress bar for a read that has stopped -- for the
      * rest of the session. MISSING is decided synchronously and so was never reachable this
      * way; FAILED is not.
+     *
+     * COUNTED RATHER THAN COMPARED ACROSS THE START OF THE LOAD, and that is a fix rather than
+     * a preference. This read `stamp` on the line AFTER `startLoad` and asserted it moved
+     * again later -- which is only true if the loader thread has NOT finished by the time that
+     * line runs. The file is 26 bytes and the parse fails almost immediately, so on a busy host
+     * the read lands after the failure, both bumps are already in the number and nothing moves
+     * afterwards. Observed 2026-08-10: green on two runs of an identical tree and
+     * `Actual: 80911` on the third, which is a test that reports the scheduler rather than the
+     * code. There is no seam to hold the load open at, so the assertion moves to the thing that
+     * is actually deterministic: `startLoad` publishes ONE transition (IDLE to LOADING) and
+     * `Loader.fail` publishes the second, so EXACTLY TWO is the claim, and it is strictly
+     * stronger than the original -- it says the failure published its own bump rather than
+     * merely that the counter differs at two moments.
      */
     @Test
     public void theStampMovesWhenTheLoadFailsRatherThanSucceeding() throws Exception {
@@ -182,9 +195,13 @@ public class PlannerScreenTest {
             out.close();
         }
         System.setProperty(GraphSource.PROPERTY, broken.getPath());
-        GraphService.get().startLoad(null);
         PlanBook book = new PlanBook();
+        // BOTH TAKEN BEFORE THE LOAD STARTS, which is what makes them a fixed point. The
+        // service is IDLE here -- `isolateTheServices` resets it -- so nothing has been
+        // published yet that either number could already contain.
         long drawn = PlannerScreen.stamp(book);
+        long published = GraphService.get().generation();
+        GraphService.get().startLoad(null);
 
         long deadline = System.currentTimeMillis() + 30_000L;
         while (GraphService.get().state() == GraphService.State.LOADING) {
@@ -195,6 +212,8 @@ public class PlannerScreenTest {
         }
 
         assertEquals(GraphService.State.FAILED, GraphService.get().state());
+        assertEquals("a failure must publish its own transition, not ride on LOADING's",
+                     2L, GraphService.get().generation() - published);
         assertNotEquals("a progress bar for a load that has stopped, for ever",
                         drawn, PlannerScreen.stamp(book));
     }
