@@ -149,6 +149,14 @@ cp $SHOTS/after.png docs/shots/plan-after-pin.png
 # partner in frame, which in `plan-fluid-chain` is Ender Pearl at row 159.
 harness/shot.sh planner-collide collide
 cp $SHOTS/collide.png docs/shots/planner-same-name.png
+
+# The flow diagram at the budget ceiling (#293). NO ORACLE: `synthetic:N` builds a balanced
+# tree of exactly N nodes, so the size is the subject and a real plan's size is an accident.
+# The run sweeps 300 frames, then poses on the ROOT box and photographs that -- and refuses
+# the picture unless the box it aimed at is WHOLLY in frame, which is the check `panToBox`
+# exists to satisfy. ~510 s, nearly all of it the sweep.
+harness/shot.sh flow:synthetic:4000 flow4000
+cp $SHOTS/flow4000.png docs/shots/flow-4000-composed.png
 ```
 
 | File | What it shows |
@@ -162,18 +170,126 @@ cp $SHOTS/collide.png docs/shots/planner-same-name.png
 | `planner-during-load.png` / `planner-after-load.png` | The calculator used a second after joining, and the same window a few seconds later, with nothing touched in between (#201). The first is the wait; the second is the plan the window replayed when the graph landed. Before #201 the second picture did not exist -- the window showed the first one until the player closed it and used the item again -- so this pair is the artifact and either half alone is equally consistent with the bug. |
 | `graph-schema-behind.png` / `plan-schema-behind.png` | The same real schema-7 graph read by a schema-8 jar, on the two surfaces that report it (#285). The Graph tab carries `format: OLD GRAPH -- it lacks what this build reads` over `graph is schema 7 and this build reads 8; redump to fix`; the planner carries `graph is schema 7, this build reads 8 -- plans may be wrong` above the tree, because the Graph tab is a screen the player who needs it does not know to open. **The `pack: MISMATCH` line above it is the harness and not a defect** -- `shot.sh` runs a 10-jar dev set against a dump of the full 406, which is what `graph: pack check DIFFERS` in the log says. Taken with `RECIPEGRAPH_ORACLE=$BUILD/graph-s7.json`, a real dump of this pack one schema behind the jar, which is `stage-instance.sh`'s pinned-proceeds case rather than a way around its guard. |
 | `planner-mid-load.png` | The panel above, half-way through the same read instead of at the start of it (#271). Put it beside `planner-during-load.png` and the pair is the number moving: `0%` when the window opens, `50%` a couple of seconds later. Before #271 the second picture could not exist -- every term of the counter the window watches moves on a state TRANSITION, and LOADING is one state, so the panel built at 0% was the panel still on screen at 99%. The run that produced this one also logged the seven windows it replaced on the way, at 23/25/31/35/40/46/50%, because one frame cannot show motion and the picture alone is not the whole artifact. The eyebrow reading `Planner` is the positive control: it is drawn by the same panel and nothing about #271 can change it, so a legible one makes the line under it a reading rather than a hope. **The panel lags the service by at most one twentieth and that is the design, not a defect** -- this capture reads `50%` while the log's `at capture` line reads `51%`, because the panel is the one built at the last step boundary. Before #271 that gap was `0%` against `37%` and unbounded. |
+| `flow-4000-before.png` / `flow-4000-composed.png` | The flow diagram at `DEFAULT_MAX_NODES`, before and after #293. **THEY DIFFER BY ONE NODE AND THAT IS NOT THE ARGUMENT** -- a reviewer opening the second alone could reasonably conclude the fix did nothing. The panel is still mostly empty in both, and that is the plan rather than the camera: the layout is roughly 2,200 x 69,000, depth is capped at 24 columns while the leaf level is thousands of rows, and the sweep's own peak over 300 frames is 20 of 4,000 nodes drawn in any one frame. There is no viewport position at zoom 1.0 from which a 4,000 node plan looks like a diagram. What changed is that the run now STATES what it photographed and exits non-zero when that is nothing, so the pair is evidence about the guard and not about the picture. |
+| `planner-mid-load-refused.png` | THE ONLY COMMITTED PICTURE THAT FAILED ITS OWN RUN, and it is here to be looked at rather than to be argued from. Same screen and same guard as `planner-mid-load.png`, against `graph-tiny-271.json`: the read finished before the hold opened, so what got photographed is a fully drawn, entirely legible panel that is not a picture of a read -- and the guard refused it. Nothing about the image looks like a failure until you read the line in it, which is the whole case against a check that counts pixels or asks whether anything was drawn. Its recipe is under "Making each guard say no"; #303 committed it because the only copy was in the rotating `/coding/.recipegraph-build/shots/` and would have aged out. |
 | `planner-same-name.png` | BOTH BRANCHES OF #232's WIDTH RULE, on adjacent rows, which is the only arrangement that argues anything. `Ender Pearl · Crafting · 5…` is at capacity and declines the fragment, keeping the machine name it draws on master; `Ender Pearl (itemblacklist)` has an empty meta run and takes it. A shot of the taking row alone would be equally consistent with a fix that evicts the machine name to make room, which is the regression the no-eviction rule exists to prevent -- so the row that DOESN'T change is half the evidence. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
 
-`planner-stale` is `planner-live` with one extra claim, and the claim is why it is a separate
-screen: the staged graph must REALLY disagree with the jar, or there is no warning on the panel
-and the run is red rather than a good picture of the wrong case. Verified both ways --
-`graph-s7.json` gives `drawn check PASSED`, and `graph-s8b.json`, which matches the jar, gives
-`DRAWN CHECK FAILED ... so no warning renders` with the reason and the fix in the line. Note
-that a harness exit code arrives through Gradle as 1 whatever the screen said, so
-**`DRAWN CHECK FAILED` in the log is the thing to grep for**, exactly as `shot.sh`'s own note
-says. `planner-live` is deliberately left alone: its header pays for succeeding without a
-graph at all, which is every CI run.
+## Making each guard say no
+
+Three screens register a `Drawn` check (#293): after the capture the screen is asked whether
+what it drew is the thing this shot claims to be about, and the run exits non-zero when it is
+not. **Each of those checks is a first version, and two of the three were WRONG on their first
+attempt.** #293's asked `drawnLastFrame() > 0`, got 1, logged `drawn check PASSED` and wrote a
+panel holding a two-pixel sliver against the left edge. #271's called `stateFor` at capture
+time, which reports what the panel WOULD say if rebuilt -- so on a build carrying #271's own
+defect it reads a healthy percentage while the frozen panel on screen reads `0%`, and it would
+have passed the exact bug it was added for.
+
+So a green guard is not evidence that it can refuse; only a refusal is, and a guard whose
+refusal nobody has seen is the state each of these was built to eliminate, reintroduced one
+level up. Every line quoted below was transcribed from a run that really failed. **Re-run the
+matching recipe after touching any of these checks**, because the edit that breaks one leaves
+the passing case passing.
+
+**GREP FOR `DRAWN CHECK FAILED`. DO NOT WAIT ON AN EXIT CODE.** `runClient` is a Gradle task,
+so the harness's own code never reaches `shot.sh`, which reports Gradle's 1 -- as `shot.sh`'s
+own header says. Someone watching for a 7 concludes the guard did not fire. The codes, from
+`ShotHarness`, because the point of having seven of them is that a reader can tell a broken
+harness from a finding:
+
+| | |
+| --- | --- |
+| 0 | the PNG at the reported path is this run's and the screen was satisfied |
+| 2 | no such screen |
+| 3 | timed out waiting for the screen |
+| 4 | the write itself failed |
+| 5 | the screen registered a verdict and never delivered one |
+| 6 | the screen reported that its own criteria did not hold |
+| 7 | the drawn check refused the picture |
+
+The number does survive as TEXT, one line inside Gradle's failure block, which is where to look
+when 6 and 7 need telling apart:
+
+```
+> Process 'command '.../bin/java'' finished with non-zero exit value 7
+```
+
+7 wins over 6 when both apply: the drawn check runs at capture, so a run can log its screen's
+`!!` verdict line and still exit 7. The first recipe below is exactly that case.
+
+**In every case below the PNG is written and is this run's.** A refusal is a finding about the
+picture, not a failure to take one, so the file is there to look at -- which is the point of
+the committed control image in the first recipe.
+
+### `planner-recovery:progress` -- a read that finished before the guard could photograph it
+
+Point the oracle at a graph small enough that the load completes before the hold opens.
+`graph-tiny-271.json` is two keys and one recipe, written for this.
+
+```bash
+RECIPEGRAPH_ORACLE=/coding/.recipegraph-build/graph-tiny-271.json \
+  harness/shot.sh planner-recovery:progress reject -Dmcrecipedump.shotSettleFrames=2
+```
+
+```
+graph after startLoad: reading oracle.json, 100%
+DRAWN CHECK FAILED -- the panel on screen is a FAILED panel reading "no such item in the
+  graph: nuclearcraft:compound:7", which is not a picture of a read
+!! the screen's verdict was NO: the read finished before 50%, so there was no loading panel
+  left to photograph. Rebuilds seen: 1. Lower -Dmcrecipedump.progressFloor, or point
+  $RECIPEGRAPH_ORACLE at the full graph (graph ready: 2 keys, 1 recipes).
+Java has been asked to exit (code 7)
+```
+
+**`planner-mid-load-refused.png` is that run's picture and it is committed beside the passing
+one on purpose.** It is fully rendered, entirely legible, and correctly refused -- so it is the
+argument, in one image, for why a pixel count or a not-blank test would not have been enough.
+Nothing about it looks like a failure until you read what the panel says.
+
+### `planner-stale` -- a graph that agrees with the jar, so there is no warning to photograph
+
+This screen is `planner-live` with one extra claim, and the claim is why it is a separate
+screen: the staged graph must REALLY disagree with the jar, or no warning renders and the shot
+is a good picture of the wrong case. Verified both ways (#285) -- `graph-s7.json` gives
+`drawn check PASSED`, and `graph-s8b.json`, which matches the jar, gives:
+
+```
+DRAWN CHECK FAILED ... so no warning renders
+```
+
+with the reason and the fix in the same line. `planner-live` itself is deliberately left
+without a `Drawn` check: its header pays for succeeding with no graph at all, which is every
+CI run.
+
+### `flow` -- a composed capture that frames a sliver instead of the box it aimed at
+
+The check is `drawnLastFrame() > 0 && fullyShowing(rootBox())`, and the second half is the half
+that was missing. To see it refuse, put back the defect it was written for: in
+`FlowCanvas.panToBox`, route the computed offsets through `panTo(x, y)` instead of
+`clampToRange`. `panTo` wraps, centring on the root asks for a negative offset, and
+`Math.abs(value % range)` turns that into a pan AWAY from the target.
+
+```bash
+harness/shot.sh flow:synthetic:4000 flowreject
+```
+
+```
+flow: composed on the root box for the capture
+DRAWN CHECK FAILED -- flow: 1 node(s) drawn on the composed frame; box 0 of 4000 is NOT
+  wholly in frame
+Java has been asked to exit (code 7)
+shot.sh: FAILED after 510s (exit 1); the PNG ... IS this run's
+```
+
+**`1 node(s) drawn` IS THE WHOLE POINT OF THIS RECIPE.** The first version of this check asked
+only `drawnLastFrame() > 0`, and on this exact input that is TRUE -- so the first version passes
+the very screenshot it was written to reject, and reports `drawn check PASSED -- 1 node(s)
+drawn` over a two-pixel sliver. Only `fullyShowing(rootBox())` refuses it. Anyone weakening the
+second clause should run this and watch the run go green, which is what going wrong looks like
+here.
+
+Restore `panToBox` afterwards. Do not leave the revert in a tree you then measure from.
 
 `planner-live` is the only shot that SOLVES. `planner`, `planner-menu`, `planner-todo` and
 `flow` read a frozen fixture and nothing else, which is the right subject for a layout
