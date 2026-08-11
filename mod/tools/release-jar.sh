@@ -122,10 +122,31 @@ this jar rather than reusing an older one.
 
 ## Install
 
-Drop the jar in your client's `mods/`, and **move any older `mc-recipe-dump-*.jar` out first**
--- two jars under one mod id is a startup failure rather than a newest-wins.
+**BOTH SIDES, SAME JAR, OR THE CLIENT IS REFUSED AT CONNECT.** Since #19 phase 2 this mod
+registers a real item and opens its own network channels, and it declares no
+`acceptableRemoteVersions` -- so a client holding an item the server's registry does not have
+fails Forge's handshake. Singleplayer needs only the client copy.
 
-Then, in game, `/recipedump`.""" % (schema, version, schema, commit, stamp[:16], srg))
+1. Jar into `mods/` on every client **and** on the server, with the server stopped.
+2. **Move any older `mc-recipe-dump-*.jar` out first** -- two jars under one mod id is a
+   startup failure rather than a newest-wins.
+
+## The planner also needs a graph, and it does not come in the jar
+
+`<instance>/config/mcrecipedump/graph.json`, on **each client**. The planner solves
+client-side; the server never reads it.
+
+Build it once with `/recipedump` in game plus `recipegraph build`, then **share that one file**
+with everyone on the pack -- it is pack data, not player data, so one graph serves the whole
+server. It is around 116 MB and must be plain JSON (no gzip support yet), though it sends at
+about 9 MB compressed.
+
+**Dump it from a CLIENT, never from the server.** A server runs fewer mods than the clients
+connecting to it -- 367 against roughly 406 on MeatballCraft -- so a server-side dump is
+missing everything client-only. The graph carries the mod-set digest it was built from and the
+planner reports `pack: MISMATCH` when it disagrees with what is loaded, so this is a thing
+you get told rather than a thing that quietly plans wrong.""" % (schema, version, schema,
+                                                                commit, stamp[:16], srg))
 
 sys.stderr.write("release-jar: %s  SCHEMA %d  SRG %d  stamp %s\n"
                  % (jar, schema, srg, stamp[:16]))
@@ -172,9 +193,17 @@ echo "release-jar: published $TAG from $COMMIT"
 #      outward-facing and hard to unsay, and cutting one is a decision about what other people
 #      should install rather than a consequence of a commit landing.
 #
-# THE INSTALL IS ALSO A HUMAN STEP and always will be: the jar goes in a client's `mods/`, on
-# the machine that plays, which no automation here can reach. That is the whole point -- the
-# jar becoming DOWNLOADABLE is what this fixes, and it was the blocking half.
+# THE INSTALL IS ALSO A HUMAN STEP and always will be: the jar goes in `mods/` on the machines
+# that play and on the server they play on, which no automation here can reach. That is the
+# whole point -- the jar becoming DOWNLOADABLE is what this fixes, and it was the blocking half.
+#
+# THIS COMMENT AND THE NOTES ABOVE BOTH SAID "a client's `mods/`" UNTIL 0.10.0, AND THAT HAD
+# BEEN WRONG SINCE #19 PHASE 2 MADE THE MOD COMMON-SIDE. It registers `CalculatorItem` and
+# opens `PlanBookNetwork`, and it declares no `acceptableRemoteVersions`, so a client carrying
+# an item the server's registry lacks is refused at connect. Someone following the old notes
+# onto a multiplayer server got a handshake failure with nothing pointing at the cause. Caught
+# on the first release ever cut, which is the run where a stale install instruction stops being
+# a docs problem and becomes the only thing anybody reads.
 #
 # WHAT THIS DOES REMOVE is every way of getting it wrong that a hand-cut release invites:
 # publishing the `-dev` jar, publishing a jar built from other source than the commit being
