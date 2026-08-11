@@ -130,6 +130,8 @@ class Solver:
         # `{key: rid}` shape now fails at the call rather than silently accepting no
         # recipe (a bare string is iterable, so `rid in "hei:x:1"` is a substring test).
         self.pinned = {k: frozenset(v) for k, v in (pinned or {}).items()}
+        # `_routable`'s answer per key, for the lifetime of this solve. See that method.
+        self._routable_cache = {}
         self.max_depth = max_depth
         self.max_nodes = max_nodes
         # `{ore key: dimension name}` for an ore only an unvisited dimension generates.
@@ -919,8 +921,35 @@ class Solver:
         THROUGH `_variant_candidates` RATHER THAN A SECOND SPELLING of its two clauses. It
         returns empty on the first dict miss for all but 501 of the graph's live keys, so this
         costs one lookup on the hot path.
+
+        MEMOISED FOR THIS SOLVE, AND THE CALL COUNT IS THE WHOLE REASON. `_alternative_rank`
+        runs this per alternative per slot, and `estimated_cost` hands `pick_alternative` to
+        `recipe_cost` for every candidate scored -- so on `graph-s8b` planning
+        `nuclearcraft:fuel_californium:7` it was called **5,287,585 times for 536 distinct
+        keys**, a 9,865x redundancy that alone accounted for 22 of that plan's 59 seconds.
+        The clause above about costing "one lookup on the hot path" is true per call and was
+        never the question. #308.
+
+        PER SOLVER, DELIBERATELY, AND NOT ON THE GRAPH. Both clauses read
+        `Recipe.not_production`, which `notproduction.mark` rewrites ACROSS THE GRAPH in place
+        when a server reloads `data/tokens.json` -- no recipe set changes, so `_invalidate`
+        never runs and a graph-level cache would go on serving the previous token map's
+        verdict. `real_producers`' own docstring declines to memoise for exactly that reason
+        and it is right to. A `Solver` is built per plan (`cli.cmd_plan` and
+        `server.State.solver` both construct a fresh one per request and neither stores it),
+        so its lifetime cannot span a re-marking and there is no invalidation contract to get
+        wrong. 536 entries is nothing to hold for that long.
+
+        DO NOT PROMOTE THIS TO THE GRAPH to share it between plans. The measurement says the
+        win is already taken: 536 distinct keys resolve in the first fraction of a solve and
+        every later call is a hit, so a shared cache buys the misses of one short warm-up and
+        takes on the staleness above in exchange.
         """
-        return bool(self.g.real_producers(key)) or bool(self._variant_candidates(key)[0])
+        got = self._routable_cache.get(key)
+        if got is None:
+            got = self._routable_cache[key] = (
+                bool(self.g.real_producers(key)) or bool(self._variant_candidates(key)[0]))
+        return got
 
     def _variant_candidates(self, key):
         """`(recipes, {recipe id: variant})` for a bare demand only a VARIANT of which is made.
