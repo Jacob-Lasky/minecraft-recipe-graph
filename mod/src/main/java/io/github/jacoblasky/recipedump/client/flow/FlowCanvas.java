@@ -179,7 +179,15 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
     }
 
     /**
-     * Move the viewport, clamped to the layout, without a mouse.
+     * Move the viewport, WRAPPED around the layout, without a mouse.
+     *
+     * THIS LINE USED TO SAY "clamped", WHICH IS THE OPPOSITE OF WHAT IT DOES and is the exact
+     * misreading that produced #293's blank flow shot: the first `panToBox` routed through here
+     * on the strength of this summary, and {@link #wrap} turned its negative centring offset
+     * into a positive one that panned AWAY from the target. A summary contradicting the body is
+     * worse than none, because it is the line someone reads INSTEAD of the body. See
+     * {@link #panToBox}, which aims and therefore clamps, and says why it must not come back
+     * here.
      *
      * FOR THE TIMING HARNESS, which drives a pan with no input device. It goes through the
      * same scroll data a drag does rather than a private offset, so the frames it measures
