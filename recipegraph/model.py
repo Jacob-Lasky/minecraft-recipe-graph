@@ -12,6 +12,7 @@ Design notes that are load-bearing:
   extractor's, because the right pick depends on the player's inventory.
 """
 
+import functools
 import json
 import re
 
@@ -379,8 +380,34 @@ def item_stem(key):
     return split_key(base_key(key))[0]
 
 
+@functools.lru_cache(maxsize=None)
 def split_key(key):
-    """Return (base_key_without_meta, meta_or_None) for concrete item keys."""
+    """Return (base_key_without_meta, meta_or_None) for concrete item keys.
+
+    MEMOISED BECAUSE OF THE CALL COUNT, NOT THE COST. The body is a `startswith`, a `split`
+    and an `isdigit` -- microseconds -- and it was still 6.6 seconds of a 59 second plan,
+    because planning `nuclearcraft:fuel_californium:7` against `graph-s8b` calls it
+    **8,905,936 times for 264,113 distinct keys**. Parsing the same string 34 times over is
+    the whole of it. #308.
+
+    SAFE TO CACHE FOREVER AND SAFE TO SHARE ACROSS GRAPHS: this reads nothing but the string
+    it is handed and returns an immutable tuple, so there is no invalidation contract, no
+    aliasing hazard and no per-graph state. That is what makes it a different question from
+    `Graph.real_producers`, which reads `Recipe.not_production` and declines to memoise one
+    layer up for a reason worth reading before assuming the two cases are alike.
+
+    `maxsize=None` RATHER THAN A BOUND. The key space is the graph's, so it converges rather
+    than growing: 264k entries for a full plan against a 168k-live-key pack, holding
+    references to strings the graph already owns rather than copies of them. A bound would
+    add eviction bookkeeping to the hottest function in the solver in exchange for capping
+    something that is already capped by the data.
+
+    IF YOU PATCH THIS IN A MEASUREMENT, PATCH EVERY BINDING. `solve.py` and `explore.py` do
+    `from .model import split_key` and hold their own references, so replacing
+    `model.split_key` alone leaves the hot caller untouched -- and reports 340,398 calls
+    instead of 8,905,936, which is a 1.3x redundancy instead of a 33.7x one and argues
+    against the very cache it failed to install. That happened while this was being measured.
+    """
     if not is_item_key(key):
         return key, None
     parts = key.split(":")
