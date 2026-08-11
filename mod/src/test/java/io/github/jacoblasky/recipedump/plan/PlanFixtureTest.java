@@ -84,8 +84,19 @@ public class PlanFixtureTest {
                 new PlanResult.MachineToBuild("cat", "Machine", "buildable", "why"));
         Set<String> names = new LinkedHashSet<String>();
         collectNames(new JsonParser().parse(PlanJson.toJson(result)), names);
+        // `pins_overruled` IS A MAP KEYED BY ITEM ID, SO ITS KEYS ARE DATA AND NOT FIELDS, and
+        // `collectNames` cannot tell the two apart -- it walks every object key there is. That
+        // put the synthetic `mod:thing` into the emittable set, where it did two things: it
+        // made the gate below permissive by exactly one name a fixture could otherwise be
+        // caught writing, and it read as a field no fixture carries, which is a permanent
+        // false positive for #284's gate. Removed here rather than excused there, because it
+        // is not a field and no reason written next to it would have been true.
+        names.remove(MAXIMAL_ID);
         return names;
     }
+
+    /** The item id the maximal result is built around. A VALUE everywhere but in a map key. */
+    private static final String MAXIMAL_ID = "mod:thing";
 
     private static PlanNode maximalNode() {
         PlanNode node = new PlanNode();
@@ -168,6 +179,95 @@ public class PlanFixtureTest {
         }
         assertTrue("the oracle writes fields this port cannot emit: " + unknown,
                 unknown.isEmpty());
+    }
+
+    /**
+     * Fields no fixture carries, so the gate above has nothing to compare them against.
+     *
+     * ONE ENTRY PER FIELD WITH A REASON, and a field NOT named here fails the test until
+     * somebody decides. Same idiom as `maker.NOT_PINNED` on the Python side, adopted for the
+     * same reason #176 adopted it there: the other direction was missing and a constant that
+     * was never pinned could move without any fixture changing.
+     */
+    private static final Map<String, String> NOT_IN_ANY_FIXTURE = notInAnyFixture();
+
+    private static Map<String, String> notInAnyFixture() {
+        Map<String, String> why = new LinkedHashMap<String, String>();
+        // FOUND BY THIS TEST ON ITS FIRST RUN, and it is `not_consumed` again with a different
+        // name. #171 priced pack-authored keys and #262 ported the reader, so both sides can
+        // write this -- `PlanNode.provenance` here, `api.py`'s `pack_authored_declared` there
+        // -- and not one of the 22 plan fixtures carries one. The gate above therefore has
+        // nothing to compare, and a port that stopped writing `provenance` tomorrow would be
+        // caught by nothing in this file. That is the hole #280 climbed out of from the other
+        // side, still open, one field along.
+        //
+        // NOT FIXABLE BY EXEMPTING IT FOREVER. It needs a fixture whose chosen route reaches a
+        // key the pack declares -- `graph-s8b` carries 896 declarations with 52 surviving the
+        // price, so the data exists and no target in `maker.TARGETS` lands on one. Retiring
+        // this line means adding that target, which is a fixture-set change and a
+        // regeneration rather than an edit here.
+        why.put("provenance",
+                "#171/#262. Both sides can emit it and no fixture's route reaches a "
+                + "pack-declared key, so the gate beside this one has nothing to compare. "
+                + "Retire by adding a target that lands on one of graph-s8b's 52 surviving "
+                + "declarations, not by widening this table.");
+        return why;
+    }
+
+    /**
+     * #284, and the other direction of the gate above.
+     *
+     * THE GATE ABOVE IS ONE-DIRECTIONAL AND THAT IS HOW `not_consumed` HID FOR THREE ISSUES.
+     * It reads every field the fixtures carry and refuses one the port cannot emit. It says
+     * nothing whatever about a field the port CAN emit that no fixture carries -- and for such
+     * a field the gate has nothing to compare, so a port that silently stopped writing it
+     * would be caught by nothing here. `not_consumed` was exactly that: it needs a schema-8
+     * dump's `p`, every oracle before `graph-s8b` produced fixtures without one, and the gate
+     * passed over the hole for as long as the hole existed. #280 found it from the other side,
+     * by the accusation that the port could not emit a field it emits fine.
+     *
+     * A FIELD IS NOT COVERAGE UNTIL SOME FIXTURE CARRIES IT. That is the whole claim. The
+     * emittable set is derived by serialising a maximal result rather than typed out -- see
+     * {@link #emittableNames()} -- so this cannot drift from the writer, and a new key on
+     * `PlanJson` arrives here as a decision to make rather than as silence.
+     *
+     * WHY AN EXEMPTION MAP AND NOT A SOFTER ASSERTION. Some of these fields are legitimately
+     * absent: `truncated` at the root is a boolean the fixtures set false, a chance yield needs
+     * a chance recipe in the chosen route. Naming each one with its reason costs a line and
+     * makes the difference between "no fixture exercises this yet, here is why" and "nothing
+     * noticed". Both are cheap; only one is silent.
+     */
+    @Test
+    public void everyFieldThisPortCanEmitOccursInSomeFixture() throws IOException {
+        List<File> fixtures = planFixtures();
+        Assume.assumeFalse("no tests/fixtures/plan/plan-*.json yet; this gate is waiting on "
+                + "the fixture set", fixtures.isEmpty());
+
+        Set<String> inFixtures = new LinkedHashSet<String>();
+        for (File fixture : fixtures) {
+            collectNames(read(fixture).get("result"), inFixtures);
+        }
+        // A ZERO FROM THIS SWEEP WOULD BE A CLAIM ABOUT THE SWEEP. An empty `inFixtures` makes
+        // every emittable field look uncovered, which reads as a catastrophic coverage gap and
+        // is a broken reader -- the failure this whole test exists to refuse, one level up.
+        assertFalse("no field names were read out of " + fixtures.size() + " fixtures, so this "
+                + "test is measuring nothing", inFixtures.isEmpty());
+
+        Set<String> uncovered = new TreeSet<String>(emittableNames());
+        uncovered.removeAll(inFixtures);
+        uncovered.removeAll(NOT_IN_ANY_FIXTURE.keySet());
+        assertTrue("this port can emit these and no fixture carries one, so the gate beside "
+                + "this one has nothing to compare them against: " + uncovered
+                + ". Either a fixture should exercise the field, or name it in "
+                + "NOT_IN_ANY_FIXTURE with the reason.", uncovered.isEmpty());
+
+        // And the table must not outlive what it excuses. An entry for a field the fixtures
+        // now carry is an excuse nobody withdrew, which is how an exemption list becomes the
+        // thing that hides the next hole.
+        Set<String> stale = new TreeSet<String>(NOT_IN_ANY_FIXTURE.keySet());
+        stale.retainAll(inFixtures);
+        assertTrue("NOT_IN_ANY_FIXTURE excuses fields the fixtures now carry: " + stale,
+                stale.isEmpty());
     }
 
     @Test
