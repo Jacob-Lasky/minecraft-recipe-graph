@@ -3,9 +3,9 @@
 Offline crafting-tree planner for heavy Minecraft **1.12.2** modpacks, pruned against
 what your **AE2 network already holds**.
 
-Developed and verified against **MeatballCraft (Dimensional Ascension)** — 366 mods — but
-nothing in it is pack-specific: the recipe data comes from your own instance and the
-inventory from your own world save.
+Developed and verified against **MeatballCraft (Dimensional Ascension)** — several hundred
+mods — but nothing in it is pack-specific: the recipe data comes from your own instance and
+the inventory from your own world save.
 
 You ask for an item. It walks the entire recipe chain, stops wherever your **AE2
 network already has the ingredient**, and hands you the actual shopping list — instead
@@ -182,9 +182,12 @@ The solver handles the three things that make this harder than it looks:
   the only one there is. Same for "go and kill a boss", priced lower than a lock and higher
   than picking something up.
 
-  Only gates the pack states **as an item** are priced. A dimension you have to travel to
-  is not one: travelling is not a recipe, so the graph cannot see it, and a plan will
-  still route you to another planet without mentioning the trip.
+  **Dimension gates are priced too, and by a different mechanism.** Travelling is not a
+  recipe, so no placeholder item states it — the evidence is instead the pack's own worldgen
+  declarations read against the dimensions your save has terrain for. So an ore that only
+  generates somewhere you have never been is charged for the trip, and a plan names the
+  dimension rather than routing you to another planet in silence. The two sources, and what
+  each one is allowed to do, are in [Dimensions](#dimensions) below.
 
 ### Explore — search before you plan
 
@@ -260,9 +263,11 @@ memory, which is why this is a long-running server rather than a per-request scr
 
 ## Asking the graph questions
 
-Loading the graph costs about **4.4 seconds** and 115 MB off disk. The running server already
-has it and answers in **0.048**, so anything more curious than a plan should be a `curl` at
-the server rather than a script that loads the file again. Everything here is read-only.
+Loading the graph in-process costs about **4.4 seconds** warm — the container's first-start
+figure is larger, see the deploy section — and reads well over 100 MB off disk. The
+running server already has it and answers in **0.048**, so anything more curious than a plan
+should be a `curl` at the server rather than a script that loads the file again. Everything
+here is read-only.
 
 ```bash
 curl -s localhost:8765/api | jq                       # the endpoints, fields and functions
@@ -306,7 +311,7 @@ wrong, so it is worth reading once.
 | Piece | What it is | Where it goes | Version |
 | --- | --- | --- | --- |
 | **The tool** | `recipegraph/` — the CLI, the renderers and the web server, one Python package | anywhere with Python 3.8+; on a server, the Docker image below | git commit, printed in the page footer |
-| **The dump mod** | `mod/` — a client-side Forge jar adding `/recipedump` | the **client's** `mods/`, on the machine that plays | built with `mod/tools/build-jar.sh` |
+| **The dump mod** | `mod/` — a Forge jar adding `/recipedump` and the in-game planner | the **client's** `mods/`, on the machine that plays; **also the Minecraft server's**, for live ME stock — see below | built with `mod/tools/build-jar.sh` |
 | **The data** | `mc-recipe-dump/` from the mod, then `graph.json` and `ae2_have.json` built from it | the `/data` mount the tool reads | a `schema` number, recorded in every file and checked on read |
 
 **The web UI is not a separate piece.** Pages are server-rendered by the same renderers the
@@ -330,8 +335,21 @@ computes, which makes AE2 stock read as zero rather than as an error. Both sever
 reported on the page footer and by `have`; the current upgrade order is in
 [the dump mod](#the-dump-mod).
 
+**On a dedicated server, the jar goes in BOTH `mods/` directories — and the failure when it
+does not is silent.** The client alone gives you the whole planner UI: the tree, the shopping
+list, the machines table, the pins, the `=` keybind. What it cannot do alone is read your ME
+network, because the network exists only on the server, so the read is a request the client
+sends and the server answers. That request rides the mod's own Forge channel, and **Forge
+drops a packet whose channel the other end has not registered** — no kick, no error, nothing
+in either log. The planner is left waiting on a reply that will never come, showing "nothing
+planned yet" forever, and re-opening it does not re-ask.
+
+So: singleplayer needs nothing extra, and a dedicated server needs the same jar installed
+server-side. Do NOT expect Forge to refuse the connection at handshake over this — it does
+not, which is exactly why the symptom is a hang rather than a message.
+
 **Only the machine that plays can produce the data.** A server has no game to run
-`/recipedump` in and no reason to hold the pack's 367 mod jars, which is what
+`/recipedump` in and no reason to hold the pack's several hundred mod jars, which is what
 [Feeding it from the machine that plays](#feeding-it-from-the-machine-that-plays) is about.
 A jar built here is therefore *available*, not *installed* — building it does nothing until
 someone copies it into a client.
@@ -367,9 +385,12 @@ authentication and the graph still exposes a live base's contents, so publish it
 or to `127.0.0.1`, never to a public interface.
 
 `--user 99:100` is for UnRAID hosts, whose array shares expect `nobody:users`; drop or
-change it elsewhere. The health check allows a 180 second start period because loading a
-115 MB graph takes 40 to 90 seconds, and a shorter one restarts the container forever
-while it is doing exactly what it should.
+change it elsewhere. The health check allows a 180 second start period because a fresh
+container takes 40 to 90 seconds before it first answers — cold caches and startup work on
+top of the warm in-process load measured at ~4.4s above — and a shorter one restarts the container forever
+while it is doing exactly what it should. **The graph grows with every dump** — ~120 MB on
+the reference pack as of 2026-08-22, up from 115 — so the start period is deliberately
+generous rather than fitted to a measurement that moves.
 
 ### Feeding it from the machine that plays
 
@@ -384,9 +405,9 @@ rsync -avz --partial data/graph.json data/ae2_have.json \
       server:/srv/minecraft-recipe-graph/data/
 ```
 
-`build` reads the 367 mod jars and a ~165 MB `recipes.ndjson`, so it belongs where those
-already are. Shipping the built graph moves ~115 MB instead of several gigabytes of jars,
-and the server needs no copy of the pack.
+`build` reads every jar in the pack's `mods/` — 367 of them, counted 2026-08-03 — and a
+~165 MB `recipes.ndjson`, so it belongs where those already are. Shipping the built graph
+moves ~120 MB instead of several gigabytes of jars, and the server needs no copy of the pack.
 
 The server notices the file changed and says so; the **Reload** button picks it up without
 a restart. That button re-reads the graph and the stock file, it does not re-import Python,
@@ -478,7 +499,7 @@ unless `--allow-mod-set-change` says so.
 **`/recipedump` refuses to overwrite a dump written by a different set of mods.** The output
 directory is `<gamedir>/mc-recipe-dump` and cannot be redirected, so a run from a dev client
 or a server-side instance would land on top of the pack's real dump — the one artifact here
-that costs a launch of the full 367-jar pack to reproduce. `/recipedump force` overwrites it
+that costs a launch of the whole pack to reproduce. `/recipedump force` overwrites it
 anyway. A dump directory that predates schema 6 records no digest and is overwritten without
 a fight, which is what makes the first dump after upgrading work.
 
@@ -566,10 +587,13 @@ maven a runner can reach -- re-probed 2026-08-09, with `modularui` returning 25 
 the same nexus that returns 0 for HadEnoughItems as the control. Mirroring them is a
 supply-chain decision rather than a code change.
 
-It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts it agrees with the
-source in `mod/` on the dump schema, the version, and a SHA-256 over the whole Java tree, so
-it cannot quietly fall behind the Python side that reads its output. If that test fails,
-rebuild and re-commit the jar rather than editing the expected numbers.
+It is the reobfuscated release build, and `tests/test_dist_jar.py` asserts that the jar in
+`mod/build/libs/` agrees with the source in `mod/` on the dump schema, the version, and a
+SHA-256 over the whole Java tree, so it cannot quietly fall behind the Python side that reads
+its output. **The jar is not tracked in git**, so that test SKIPS when nothing has been built
+— a repository with no jar in it cannot ship a stale one. When it fails, rebuild with
+`mod/tools/build-jar.sh` rather than editing the expected numbers; there is nothing to edit,
+because every expected value is recomputed from the source tree.
 
 **Only one jar may be installed at a time.** Every version declares modid `mcrecipedump`, so
 two in `mods/` is a startup failure rather than a newest-wins. Move the old one out.
@@ -635,8 +659,10 @@ harness/shot.sh <screen> [name] # any screen registered in ShotScreens
 ```
 
 About a minute and a half per screenshot on a warm cache, against a manual pack launch.
-Adding a screen to it is one line. It renders GUIs and not the world, and seven mods is not
-367, so it replaces the launch-per-iteration loop rather than the live acceptance run.
+Adding a screen to it is one line. It renders GUIs and not the world, and its dev set is five
+staged jars — ten loaded mods, because Forge alone answers to four mod ids — against a pack of
+several hundred, so it replaces the launch-per-iteration loop rather than the live acceptance
+run.
 [harness/README.md](harness/README.md) has the knobs, the costs and the limits.
 
 ### Machines — route through what you actually have
@@ -703,20 +729,41 @@ different calculation from the ranking above and not a matter of adding the numb
 
 ### In game — the calculator item
 
-The same two questions, without leaving Minecraft. Craft the **Recipe Calculator** (a JEC
-calculator, an AE2 calculation processor, a 1k ME storage component and a wireless receiver —
-each component does the job it is named for) and:
+The same two questions, without leaving Minecraft. Craft the **Recipe Calculator** — a Book
+above a row of Comparator, Crafting Table, Ender Pearl — and:
 
 | gesture | window |
 | --- | --- |
-| right-click | the **planner**: the crafting tree, the shopping list, the TODO panel, the flow diagram, and a recipe picker that writes a pin the solver honours |
+| right-click | the **planner**: the crafting tree, the shopping list, a node menu with "Add to TODO", and a recipe picker that writes a pin the solver honours |
 | **shift**-right-click | the **browse** screens, behind a tab strip |
+| `=` pointing at a JEI ingredient | plans **that item**, straight from the JEI overlay |
+
+**The recipe is deliberately all-vanilla.** It once held an AE2 Wireless Receiver, for the
+stated reason that the item reads your network at range — but requiring an AE2 part made the
+calculator uncraftable in any pack without AE2, so the at-range component is an Ender Pearl
+now and the claim is honoured by carrying a link rather than by proximity. See the class note
+on `Ae2Stock` for why that swap changes nothing about how stock is read.
+
+**Two panels exist in code but have no way in yet.** The flow diagram renders — it is
+photographed by the screenshot harness every run — but nothing a player can click opens it
+([#323](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/323)). The TODO *panel*,
+which would list what you put on the TODO, is the same shape — its only openers are the harness
+and the tests — and #323 covers both panels. The TODO itself does work — "Add to TODO" in the node menu writes to the plan
+book, and the planner footer counts it — so what is missing is the screen that reads the list
+back, not the feature.
+
+**`=` is the headline interaction.** Point at anything in JEI's item list or in an open recipe
+and press it: no window to open first, no item to type. It is bound to `=` by default because
+Just Enough Calculation — the thing this is a better version of — uses that key for exactly
+the "send it to the calculator" gesture, so a player who has used JEC will try it first. JEI's
+own `R` and `U` are left alone. Rebind it under **Controls**, where it appears in this mod's
+own category.
 
 The browse group is three tabs, and shift-right-click lands on the first:
 
 | tab | what it answers |
 | --- | --- |
-| **Machines** | what can I build with? All 504 categories with their verdicts, filtered by state and by mod, and a per-category detail view listing every candidate block |
+| **Machines** | what can I build with? Every category in the graph with its verdict, filtered by state and by mod, and a per-category detail view listing every candidate block |
 | **Free** | why is *that* costing me nothing? Everything the planner will not charge for, with the evidence for each — a placed water source, a cobblestone generator, a curated default |
 | **Graph** | am I planning against the right graph? States a verdict — `pack: OK`, `pack: MISMATCH` or `pack: UNCHECKED` — then the evidence: the file being read, the instance the dump came from, the build that wrote it, and the totals |
 
@@ -766,6 +813,30 @@ The verdicts are only as good as what the mod could read, and the panel says so 
 implying otherwise: `verdicts computed without: have, placed` means no ME network reader and no
 world scan, so **every machine reads as buildable rather than owned**. That line names only the
 inputs a machine verdict actually uses, which is a shorter list than the planner's.
+
+**Live ME stock is read through a WIRELESS TERMINAL, on AE2's own terms — with one exception.**
+In game there is no `have` file: the planner asks the server to read your network, and the
+server answers only when you have a linked wireless terminal in your inventory, are inside the
+range of an *active* wireless access point on that network **in the dimension you are standing
+in**, have at least one AE unit of power in the terminal, and hold extract permission on the
+network's security grid. Six of those seven checks are the tests AE2's own wireless terminal
+makes, so a terminal you can open is almost always a network the planner can read. The
+exception is the power floor: the one-AE-per-read threshold is this mod's own judgement
+(`POWER_PER_READ`, whose comment says outright that nobody has measured the magnitude), so a
+terminal holding under one AE opens in AE2 and is still refused here.
+
+When any of them fails the plan is still produced — costed as though you own nothing — and it
+says so on the `planned without:` caveat line. **Click that line for the specific reason**:
+no terminal, not linked, the network is gone, out of range, no power, no permission, or no
+storage grid. That distinction is the point of the line, because the fix differs: "out of
+range" means walk toward your base, where "not linked" means go and re-link the terminal.
+
+**Placed machines are NOT scanned, so a machine you built reads as `buildable` rather than
+owned** unless its item also happens to be in the network. The offline tool gets this from a
+region-file scan during `have`; there is no equivalent on a render thread, so the in-game
+verdicts declare the gap instead of guessing. Same for AE2 autocrafting patterns, visited
+dimensions and ProjectE knowledge — each one names itself on the caveat line, with what its
+absence costs.
 
 Both windows need [ModularUI](https://github.com/CleanroomMC/ModularUI) 3.1.5. The shipped jar
 declares no dependency on it, so a pack without it still loads the mod and still dumps; the
@@ -863,9 +934,12 @@ its ores twice — once as the block `planetDefs.xml` names, once as a ContentTw
 MaterialSystem part packed into a shared holder block — and the recipes overwhelmingly
 consume the holder. Gating only the declared key produced a plan that said "mined on Sedna,
 and you have not been there" above a price that had not moved. A key is treated as the same
-ore when it shares **both** the display name and an `ore*` group with a gated one; needing
-both is what declines `tardis:power_cell`, a Trionic Power Cell that is in `oreUranium`
-without being an ore. The two keys stay separate nodes and are only priced alike.
+ore when it shares **all three** of the display name, the registering mod, and an `ore*` group
+with a gated one — a group the pack *deleted* the key from counts, since the deletion is still
+the pack saying the two belong together. Needing the name declines `tardis:power_cell`, a
+Trionic Power Cell that is in `oreUranium` without being an ore; needing the mod declines one
+mod's Uranium Ore being gated behind the dimension declared for another's, which no pack
+source states. The two keys stay separate nodes and are only priced alike.
 
 Nothing is gated when the stock file has no dimension record, which is every file written
 before this feature and any written by `tools/ae2_dump.lua`. Rescanning after a trip lifts
@@ -884,7 +958,7 @@ same code runs inside a server container where `pip` is unavailable.
 That extends to the tests, which is worth knowing before reaching for the usual runner:
 
 ```bash
-python3 -m unittest discover -s tests -q      # the python half of CI; about 4 seconds
+python3 -m unittest discover -s tests -q      # the python half of CI; about a minute
 ```
 
 CI runs two jobs: that suite on 3.8 and 3.14, and `tools/ci-java.sh`, which compiles and runs

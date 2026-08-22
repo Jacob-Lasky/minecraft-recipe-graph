@@ -100,8 +100,9 @@ exists for.
 ## Why it exists
 
 This machine cannot run the game and the desktop can only run it by hand. Issue #19 is mostly
-GUI work, so without this every layout tweak costs a manual launch of a 410-mod pack and the
-whole plan is paced by how often someone will sit through one. That is the constraint this
+GUI work, so without this every layout tweak costs a manual launch of the whole pack -- 367
+jars in `mods/`, counted 2026-08-03 -- and the whole plan is paced by how often someone will
+sit through one. That is the constraint this
 removes: a screenshot is now a command, not an errand.
 
 It is also where #19 Phase 3b's 60 fps panning gate gets measured, and where the visual
@@ -149,8 +150,9 @@ data chooses (no filter; the busiest category) rather than to a hardcoded uid th
 existing when the pack changes.
 
 Unlike `planner`, these have **no fixture fallback and do not fake one.** A plan tree is a small
-document that can be frozen in `tests/fixtures/plan/`; a machines table is a verdict on all 503
-categories resolved from placed blocks and stock against a 121 MB graph, and a six-category
+document that can be frozen in `tests/fixtures/plan/`; a machines table is a verdict on every
+category in the graph, resolved from placed blocks and stock against a graph over 100 MB, and a
+six-category
 stand-in would photograph a screen no player will ever see -- the columns are sized from the
 data, so it would not even have the right geometry. Without `RECIPEGRAPH_ORACLE` these shoot the
 "no graph.json, looked in ..." panel and SUCCEED, which is the picture a new player sees and is
@@ -242,6 +244,14 @@ nodes and the default twenty RENDER frames is shorter than that -- a screen that
 says so in code rather than in an incantation the next person has to know to type. See the AE2
 bullet under Limits for what its verdict does and does not establish.
 
+**That settle window is UNSOUND and #319 is open on it.** A frame count does not bound server
+tick progress -- the two are separate clocks, and `requestSettleFrames(150)` is a bet on their
+ratio that has already lost once, on 2026-08-03. `ShotScreens.holdCapture` is the replacement
+and is what every shot that needs to WAIT on a condition already uses (`Ae2ProbeShot` is the
+only `requestSettleFrames` caller left; several shots need no wait at all): it holds until the
+condition it actually cares about is true, so there is no ratio to be wrong about. The description above is accurate about what the
+code does today; do not read it as an endorsement, and do not copy the pattern into a new shot.
+
 `dump` is the only entry that runs a COMMAND rather than opening a GUI, and the only one that
 opens no `GuiScreen` at all: `harness/shot.sh dump dump -Dmcrecipedump.shotWorld=dump`. It
 drives `/recipedump` through `ClientCommandHandler` -- the identical path a keyboard drives,
@@ -265,7 +275,7 @@ All are `-D` system properties on the client, forwarded from the gradle command 
 | `mcrecipedump.shotOut` | `<gamedir>/shots/<screen>.png` | Exact output path. |
 | `mcrecipedump.shotWidth` / `Height` | 1280 / 800 | Window size, and therefore image size. |
 | `mcrecipedump.shotSettleFrames` | 20 | Frames between opening the screen and capturing. |
-| `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the menu, **and for a screen that is holding the capture**. Raise it for a big pack: 600 sits inside the estimated 410-jar boot range, so a healthy run would time out. Not raised by default, because for the five-jar dev set 600 is generous and a larger default only makes a genuinely hung run take longer to fail. |
+| `mcrecipedump.shotTimeoutSeconds` | 600 | Give up waiting for the menu, **and for a screen that is holding the capture**. Raise it for a big pack: 600 sits inside the estimated boot range of the full 367-jar pack, so a healthy run would time out. Not raised by default, because for the five-jar dev set 600 is generous and a larger default only makes a genuinely hung run take longer to fail. |
 | `mcrecipedump.shotDebugOverlay` | `false` | Keep ModularUI's widget-outline overlay in the shot. |
 | `mcrecipedump.shotTimedFrames` | 0 | Time this many frames after settling, then report. See below. |
 | `mcrecipedump.shotWorld` | unset | Load a superflat single-player world before opening the screen. Adds ~40 s. See the world bullet under Limits. |
@@ -384,7 +394,8 @@ running the check at all. So each bullet says whether it was measured.
   of those four steps is exercised here.** What is established is that the environment can HOST
   the test, which is the thing that was in doubt. #191 is where the probe that drives the real
   path belongs.
-* **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Seven mods is not 410. A
+* **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Five staged jars -- ten
+  loaded mods, because Forge alone answers to four mod ids -- is not the pack's 367. A
   screen that renders here can still collide with something in MeatballCraft -- a conflicting
   keybind, another mod's GUI overlay, a theme override. #19's verification plan keeps one live
   acceptance run per phase for exactly this.

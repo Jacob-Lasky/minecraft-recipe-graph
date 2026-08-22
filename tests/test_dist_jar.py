@@ -220,15 +220,15 @@ class DistJarMatchesSourceTest(unittest.TestCase):
 
         `mod/build.gradle`'s `stampSourceHash` writes a SHA-256 over the main Java sources
         into the jar, so the comparison needs no JDK and no rebuild. If this fails: rebuild
-        and re-commit the jar. Do NOT edit the expected value -- there isn't one to edit, it
-        is recomputed from the tree.
+        the jar with `mod/tools/build-jar.sh`. Do NOT edit the expected value -- there isn't
+        one to edit, it is recomputed from the tree.
         """
         want = _source_hash()
         with zipfile.ZipFile(os.path.join(_dist_dir(), _jars()[0])) as z:
             names = [n for n in z.namelist() if n.endswith("mcrecipedump-source.sha256")]
             self.assertEqual(len(names), 1,
                              "no source stamp in the jar: it predates stampSourceHash, so "
-                             "it is certainly stale. Rebuild and re-commit.")
+                             "it is certainly stale. Rebuild it.")
             got = z.read(names[0]).decode("utf-8").strip()
         self.assertEqual(got, want,
                          "the built jar is from different source than mod/ holds now; "

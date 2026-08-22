@@ -31,7 +31,7 @@ harness/shot.sh planner-recipes:plan-in-stock picker-nograph
 cp $SHOTS/picker-nograph.png docs/shots/recipe-picker-no-graph.png
 
 # The machines table (#254). ALL THREE NEED THE ORACLE and there is no fixture fallback:
-# a machines table is a verdict on all 503 categories, not a document that can be frozen.
+# a machines table is a verdict on every category in the graph, not a document that can be frozen.
 RECIPEGRAPH_ORACLE=$ORACLE harness/shot.sh machines machines
 cp $SHOTS/machines.png docs/shots/machines-table.png
 

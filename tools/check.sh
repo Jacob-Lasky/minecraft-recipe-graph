@@ -3,7 +3,7 @@
 # Run everything, including the two gates that skip themselves into invisibility.
 #
 #   tools/check.sh                  # python + java + the oracle gate, ~14 min
-#   tools/check.sh --python         # ~11 min with an oracle present, ~17s without
+#   tools/check.sh --python         # ~11 min with an oracle present, ~1 min without
 #   tools/check.sh --java           # ~3 min
 #   GRADLE_CACHE=<dir> tools/check.sh
 #   GATE_LOCK= tools/check.sh       # opt out of the one-container-at-a-time gate
@@ -25,8 +25,8 @@
 # the lock across it would starve everyone else for nothing. The wait is announced and names
 # the holder, because a script blocking silently is indistinguishable from a script that hung.
 #
-# ELEVEN MINUTES FOR THE PYTHON SUITE IS CORRECT, NOT A HANG. Without an oracle it is 17
-# seconds; with one, `tests/test_plan_fixtures.py` regenerates every fixture and `cost.estimate`
+# ELEVEN MINUTES FOR THE PYTHON SUITE IS CORRECT, NOT A HANG. Without an oracle it is about a
+# minute; with one, `tests/test_plan_fixtures.py` regenerates every fixture and `cost.estimate`
 # is about two minutes per distinct priced scenario on this pack. That is the price of the
 # assertion actually running, and it is why it is opt-in rather than always-on. Use `--java`
 # during a Java change; run the whole thing before you merge.

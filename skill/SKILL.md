@@ -29,7 +29,7 @@ describe it -- that is a wrong-answer bug, not a compatibility concern.
 ## ASK THE RUNNING SERVER, DO NOT COLD-LOAD THE GRAPH
 
 **`Graph.load` costs 4.4 seconds and the container already has the graph in memory. Twenty
-throwaway `python3` probes in one session is ninety seconds of reloading a 115 MB file off a
+throwaway `python3` probes in one session is ninety seconds of reloading a ~120 MB file off a
 FUSE mount, and Jake watched it happen and called it out twice.** The reflex to reach for is
 `curl`, not a heredoc.
 
@@ -390,7 +390,7 @@ The bind-mount source is a HOST path (`/mnt/user/misc/coding/...`), not this con
 `/coding` view. Give it the wrong one and the `-v` still succeeds, mounting an empty
 directory, and the server exits "no graph at /data/graph.json".
 
-Give it 40 to 90 seconds before concluding it failed: it loads a 115 MB graph before
+Give it 40 to 90 seconds before concluding it failed: it loads a ~120 MB graph before
 answering anything, which is why the health check has a 180 second start period.
 
 ### Building the dump mod from pocket-dev
@@ -509,9 +509,29 @@ directory written by a different jar set without `force`. That last one is the i
 one: the output path is hardcoded to `<gamedir>/mc-recipe-dump`, so a dev-client or harness
 dump run in a pack directory would otherwise destroy the pack's real dump in place.
 
-**Schema 5 and 6 changed SHAPES, not the digest**, so a schema-4 graph's keys are still the
-keys the reader computes and AE2 stock still matches. Upgrading 4 -> 6 is `/recipedump` then
-`build`, with **no re-run of `have`** -- the opposite of 3 -> 4, and why
+**SCHEMA 7 AND 8 EXIST AND BOTH ARE WORTH THE REDUMP, 8 MORE THAN 7.** Both are the same idea
+on the two sides of a recipe, and neither breaks anything if you skip it -- which is what makes
+them easy to under-rate.
+
+* **Schema 7 adds `p` on an INPUT stack**: how much of that input a run actually spends. Tinkers
+  casts, Modular Machinery's `setChance(0.0)` catalysts and anything else that sits in the
+  machine rather than being consumed by it are recorded as permanent, so a plan asks you to own
+  one instead of buying one per craft. A schema-6 dump parses perfectly and prices them into
+  every run -- 8,796 recipes carrying a catalyst input (8,823 catalyst SLOTS, which is what
+  `summary.json`'s `catalyst_slots` census counts) on the schema-8 reference graph, measured
+  2026-08-22. (The 14,354 sometimes quoted is `TinkersCastingBridge`'s own two-category count,
+  not the population.)
+* **Schema 8 adds `q` on an OUTPUT stack**: how often a run actually yields it. Where the input
+  side is overwhelmingly the binary `setChance(0.0)`, the output side is almost entirely
+  fractional -- 834 of the pack's 835 `addItemOutput` chances, spanning 0.99 down to 0.001. A
+  schema-7 dump reads every one as guaranteed, so the solver divides the work by a yield up to
+  a thousand times too high and **understates both the run count and every input those runs
+  consume**. `summary.json`'s `chance_outputs` is the census, and a zero on a pack shipping
+  Modular Machinery means the bridge stopped resolving rather than that the pack has none.
+
+**Schemas 5 through 8 changed SHAPES, not the digest**, so a schema-4 graph's keys are still
+the keys the reader computes and AE2 stock still matches. Upgrading 4 -> 8 is `/recipedump`
+then `build`, with **no re-run of `have`** -- the opposite of 3 -> 4, and why
 `nbt_digest.DIGEST_FORMAT_SCHEMA` deliberately stayed at 4. Moving it for a bump that did not
 touch the digest would make the loud "your stock reads as zero" warning fire on a graph that
 is fine, and a warning that cries wolf gets trained away before the one time it matters.
@@ -533,9 +553,20 @@ launch, check that the installed jar emits something the last one did not. Re-ru
 for no new data, which re-strands AE2 stock and forces a `have` re-run: strictly negative.
 `mod_version` is stamped into `summary.json` and shown in the UI footer, so it is the thing
 to compare. v0.6.0 is the first jar that can write `nbt_trace.json`; v0.7.0 writes it by
-default; v0.8.0 changes the digest itself. v0.9.0 adds four
-files and the icon atlas without touching the digest, so it is the jar whose redump is worth a
-launch right now -- and unlike v0.8.0's, that redump does not re-strand AE2 stock.
+default; v0.8.0 changes the digest itself. v0.9.0 adds four files and the icon atlas without
+touching the digest.
+
+**CURRENT AS OF 2026-08-22: mod 0.10.1, dump schema 8, released on GitHub as `mod-v0.10.1`
+(2026-08-12).** `DumpCommand.SCHEMA` is the authority; `mod/gradle.properties` carries
+`mod_version`. **`mod-v0.10.0` is marked SUPERSEDED on the release page and must not be
+installed** -- 0.10.0 shipped with #19's MVP unreachable, because the plan keybind could not
+fire while a `GuiScreen` was open, which is every frame on which JEI has an overlay to point
+at (#313, #314). 0.10.1 exists for that one fix. So the jar whose redump is worth a launch is
+0.10.1's, for schema 8's `q` field, and that redump does not re-strand AE2 stock.
+
+**The release is the only sync channel between the machine that builds and the machine that
+plays**, cut by `mod/tools/release-jar.sh`. Do not reason about "the installed jar" from this
+repo's source alone: check the footer or `summary.json`.
 
 ### Installing a built jar
 
@@ -593,7 +624,8 @@ rsync -avz --partial data/graph.json data/ae2_have.json \
       tower:/mnt/user/misc/coding/minecraft-recipe-graph/data/
 ```
 
-That moves ~115 MB rather than several gigabytes of jars. Tower notices the file changed
+That moves ~120 MB (as of 2026-08-22, and it grows with every dump) rather than several
+gigabytes of jars. Tower notices the file changed
 and the **Reload** button picks it up with no restart.
 
 **The Reload button re-reads DATA, never code.** That distinction cost an hour once: four
@@ -787,6 +819,88 @@ machine states are rendered by four different components; each used to keep its 
 bare string literals, so adding a status would have drawn silently wrong. Add the case there,
 never a local dict in a renderer -- `tests/test_present.py` asserts completeness both ways.
 
+## The in-game GUI has SHIPPED, and this file used to not mention it at all
+
+Mod 0.10.1 is released. Anything written on the assumption that #19 is a proposal, or that the
+web UI is the only front end, is out of date -- there are two front ends over one planner now,
+and the Java side is the one a player uses.
+
+**The entry points, all four:**
+
+| gesture | what opens |
+| --- | --- |
+| right-click the **Recipe Calculator** item | the planner: crafting tree, shopping list, a node menu carrying "Add to TODO", and a recipe picker that writes a pin |
+| sneak-right-click it | the browse group, behind a tab strip -- tabs labelled **Machines / Free / Graph** (`client/browse/BrowseTabs.java`) |
+| **`=`** while pointing at a JEI ingredient | plans that item (`client/jei/PlanTargetKeybind.java`, `Keyboard.KEY_EQUALS`, rebindable under Controls) |
+| `/recipedump` | the dump command, unchanged |
+
+**A PANEL EXISTING IN `PlannerWidgets` DOES NOT MEAN A PLAYER CAN OPEN IT, AND THIS FILE GOT IT
+WRONG ONCE.** `PlannerScreen.openPanel(ModularPanel)` is documented as "one of the planner's
+secondary windows, **for the screenshot harness to photograph**" -- so a panel whose only
+callers are `shot/` and `src/test/` renders perfectly, passes its layout tests, appears in
+screenshots, and is unreachable in game. Two are in that state right now:
+
+* **The flow diagram** -- `PlannerWidgets.flowPanel` and `new FlowCanvas` have no caller
+  outside `shot/PlannerShot.java` and the tests.
+* **The TODO panel** -- `PlannerWidgets.todoPanel`, same shape, only `PlannerShot.java:715` and
+  `PlannerLayoutTest`. Both panels are filed together as **#323**. Note the asymmetry: the TODO *feature* is live, because
+  `LivePlannerActions.addToTodo` / `addRowToTodo` send `PlanBookEdit.SET_TODO` from the node
+  menu and the footer counts "N on TODO". What has no opener is the screen that reads the list
+  back.
+
+**So the reachability test is `grep` for the opener, not for the widget.** Before writing that
+the planner "offers" something, check that a caller outside `shot/` and `src/test/` reaches it:
+`/bin/grep -rn "<panelName>(" mod/src/main/java`. Reachable by that test today: `planPanel`
+(the planner proper), `nodeMenu` and `recipePicker` (both from `LivePlannerActions`), and the
+three browse panels.
+
+**The item's recipe is all-vanilla and that was deliberate**: a Book over Comparator, Crafting
+Table, Ender Pearl. It once held an AE2 Wireless Receiver, which made the calculator
+uncraftable in any pack without AE2. `Ae2Stock`'s class note carries the swap and, importantly,
+carries **"DO NOT read the swap as permission to widen candidate 2"** -- the rejected
+proximity-radius design was never resting on the recipe.
+
+**WHAT THE PLANNER READS LIVE, AND WHAT IT DOES NOT.** `common/ScenarioSource.java` is the
+single list, and it is a contract with `tests/fixtures/plan/*.json` rather than a to-do list.
+Live: pins, hand-set overrides, and **ME stock**. Not live: `craftables`, `placed`,
+`visited_dimensions`, `emc_knowledge` -- each with its reason in its own javadoc, each named on
+the player-visible `planned without:` line by `ScenarioSource.summary()`, each explained by
+`missingNotes()`.
+
+**The design rule behind that list is the thing to carry into any new input.** An unread
+scenario field is not neutral: an empty `have` is the CLAIM "you own nothing", and a plan built
+on it tells a player to fetch 377 iron ingots that are sitting in their ME system. That is a
+wrong answer delivered with the same confidence as a right one. So a reader ANSWERS -- and says
+which refusal -- rather than leaving a field empty. Never add a scenario field without a reader
+or a declared reason.
+
+**`placed` being unread has a specific player-visible consequence worth stating outright: a
+machine you built reads as `buildable` rather than owned**, because nothing scans tile
+entities on a render thread. The panel admits it (`verdicts computed without: have, placed`)
+instead of implying the verdicts are complete.
+
+**Live ME stock is a round trip, and its failure mode is a hang.** `Ae2StockReader` runs on the
+SERVER and refuses with a named reason -- `NO_TERMINAL`, `NOT_LINKED`, `NETWORK_GONE`,
+`OUT_OF_RANGE`, `NO_POWER`, `NO_PERMISSION`, `NO_STORAGE` -- six of which are AE2's own tests.
+The seventh is not: `NO_POWER`'s threshold is this mod's own `POWER_PER_READ = 1.0`, whose
+javadoc says the magnitude is a judgement nobody has measured, so a terminal holding under one
+AE opens in AE2 and is refused here. `PlannerStock` waits for the reply rather than planning
+twice, and its javadoc says "WAITING IS SAFE BECAUSE A REPLY IS GUARANTEED", which holds only
+while the far end has the channel: `canAsk()` checks that a connection exists, not that the
+server has the mod. **On a dedicated server without the jar installed, Forge drops the request
+silently and the planner waits forever**, and `hold()` will not re-ask because a question is
+already outstanding. See the README's "What ships where" for the install consequence.
+
+**ModularUI 3.1.5 is required for the SCREENS and for nothing else.** The jar declares no
+dependency on it, so a pack without it still loads the mod and still dumps; the item says what
+is missing rather than opening an empty window. Do not add a hard dependency to "fix" this.
+
+**The Graph tab makes a check the CLI cannot.** In game one side of the comparison is reality:
+the dump records the jar set it saw, and the mod can ask Forge what is actually loaded, so the
+verdict is `pack: OK` / `MISMATCH` / `UNCHECKED` (#285). `UNCHECKED` is a third state and not a
+soft pass -- a pre-schema-6 dump carries no jar-set stamp, and this project's own reference
+oracle is a schema-5 graph, so it triggers exactly that case.
+
 ## Machine availability drives recipe choice
 
 ```bash
@@ -876,10 +990,11 @@ measured in chromium, `Sodium Fluoride Sol...` overlapped `85,248 mB` by 6.8px w
 per-character advances in it were measured off the rendered SVG; re-measure with
 `getBBox()` if the fonts change.
 
-## The cost model prices ITEM gates, and still cannot see a PLACE
+## The cost model prices ITEM gates, and prices PLACES separately
 
-Half of this is fixed and half is not, and the halves are easy to conflate. Know which is which
-before answering "do I need to unlock X for this plan".
+Both halves are fixed, by two different mechanisms with two different kinds of evidence, and
+conflating them is how "do I need to unlock X for this plan" gets answered wrongly. Know which
+one a question is about.
 
 **PRICED (#105): a gate the pack states AS AN ITEM.** `cost.TOKEN_COST` maps each
 `tokens.py` kind to a price, and `estimate`, `estimate_cached`, `_seed` and `fingerprint` all
@@ -896,21 +1011,27 @@ when it is the only route; and LOOT != GATE, per #95's lesson that one shared nu
 the ordering among both claims. HINT and METHOD stay at a raw leaf on purpose -- neither is a
 thing to obtain, and METHOD would double-count the machine `category_entry_cost` already charged.
 
-**NOT PRICED: a dimension.** Travelling is not a recipe, so the graph cannot see it, and a plan
-will still route you to another planet without mentioning the trip. Do not claim otherwise.
+**ALSO PRICED (#112): a dimension you have not been to.** `cost.DIMENSION_COST` is 800.0 and
+`cost.OVERWORLD_TOLL` is 5.0, and the gate expires when your save has terrain for the
+dimension. Travelling is still not a recipe, so this is NOT read off the graph's edges -- see
+"Dimensions have a price now (#112)" below for the two pack sources, the asymmetry between
+them, and why one may only ever remove a gate.
 
-**AND THERE IS NO STRUCTURAL SIGNAL FOR ONE, WHICH IS THE THING TO KNOW BEFORE TRYING.** The
+**AND THERE WAS NO STRUCTURAL SIGNAL FOR ONE, WHICH IS WHY IT IS NOT DONE THAT WAY.** The
 obvious sweep -- a world ore with no producers and many consumers -- returns **122 keys on the
 reference graph**, and the overwhelming majority are ordinary overworld variants:
 `forestry:resources:1 Copper Ore` and `railcraft:ore_metal_poor:3 Poor Tin Ore` sit in exactly
 the same bucket as Sednanite. Nothing in the graph distinguishes "on another planet" from
 "a second mod's copper". The pack's own planet ores DO share a `contenttweaker:sub_block_holder_*`
 prefix (23 keys, 22 of them ores), but whether all 23 are off-world is not answerable from the
-graph either. So this needs a CURATED map, the same shape as `tokens.DEFAULT_TOKENS`, and that
-is data authoring rather than code. Tracked in #112.
+graph either. So #112 landed on the pack's own declarations instead of a graph heuristic, which
+is the shape to reuse for the next question of this kind: **when the graph cannot distinguish
+two cases, find the file where the pack already did.**
 
-The reporting half has always worked: read the `tokens_needed` / "locked behind progress" rollup
-for what a plan is gated on, and remember it covers items, never places.
+The reporting half has always worked, and the two halves report in two different places: read
+the `tokens_needed` / "locked behind progress" rollup for the ITEM gates, and the per-node
+"mined on &lt;dimension&gt;" note for the PLACES. A plan gated on a trip says so on the node,
+not in the rollup, so a rollup read as the whole answer misses every dimension gate.
 
 ## The cost model is load-bearing, and it fails silently
 
@@ -1472,8 +1593,13 @@ RECIPEGRAPH_ORACLE=<oracle graph> python3 tools/make-java-fixtures.py --check   
 **Build a dedicated oracle outside `data/`. Do NOT point it at `data/graph.json`, even when
 that file is current.** It is the file the container serves, so it is replaced every time
 somebody redumps and rebuilds -- pinning fixtures to it makes the port's contract a function
-of the last game launch. (The jar count is NOT a reason -- both machines read the same 364
-recipe-bearing jars; see the parity section above.)
+of the last game launch. (The jar count is NOT a reason: the parity section above measured
+the recipe-bearing set identical on both machines, 364 jars each on 2026-08-03, with a
+difference of zero produced keys in both directions. The AMP instance's live `mods/` has since
+grown to 366 — counted 2026-08-22 via a root container against the instance itself; note the
+staged copy in `.recipegraph-build/packserver377` still holds the old 364 and is stale. The
+ARGUMENT is that the sets are recipe-identical, not that the count is frozen, so re-measure
+the sets rather than reading a drifted count as a divergence.)
 
 **Use current CODE, though.** #110, #112 and #117 all work in `index.build`, so a graph built
 before them has an empty `dimension_ores` and three fixtures would assert the pre-fix
@@ -1760,13 +1886,36 @@ with no producer kept 1.0: the gate computed, the plan's note appeared, and no p
 is the strongest gate case silently doing nothing. Pinned by
 `test_an_ore_nothing_produces_is_still_gated`.
 
-**THE GATE DOES NOT REACH THE SEDNANITE PLAN, AND THAT IS A DIFFERENT BUG.** There are two keys
-named Sednanite Ore -- `contenttweaker:sednanite_ore` (which planetDefs names, now 801.0) and
-`contenttweaker:sub_block_holder_1:2` (which it does not, still 1.0) -- and BOTH are registered
-`oreSednanite`, so both are world ores. A plan for a Sednanite Ingot takes the cheap duplicate.
-Spreading the gate across the oredict group fixes 4 cases and breaks one: `oreUranium` also holds
-`tardis:power_cell`, which is not an ore you mine on Oi. So the duplicate registration is filed
-separately rather than papered over with a rule that is wrong 1 time in 5.
+**THE GATE REACHES THE DUPLICATE KEY NOW (#117, widened by #168), AND THE RULE IS THREE
+CLAUSES.** There are two keys named Sednanite Ore -- `contenttweaker:sednanite_ore`, which
+planetDefs names, and `contenttweaker:sub_block_holder_1:2`, which it does not -- because
+MeatballCraft builds its custom ores twice, and 26 recipes consume the holder key literally.
+Gating only the declared key produced the worst shape available: the plan node said "mined on
+Sedna, and you have not been there" above a price that had not moved.
+
+`dimensions.shadow_ores` closes it, and `index.build` unions its result into both
+`dimension_ores` and `offworld_ores` (`recipegraph/index.py:264-267`). A key is a shadow of a
+gated one when it shares **the display name, the registering mod, AND an `ore*` group** --
+where a group the pack *removed* the key from counts as much as one it left it in, read back
+from the CraftTweaker log by `oredict.removals_from_crafttweaker_log`.
+
+**All three clauses are load-bearing and each was measured, so do not drop one to simplify.**
+Group alone gates `tardis:power_cell`, a Trionic Power Cell in `oreUranium` that is not an ore
+you mine on Oi. Name alone gates the `chisel:lapis:0..8` family, nine distinct blocks all
+called "Lapis Lazuli Block". Dropping the mod clause gates `immersiveengineering:ore:5` behind
+the dimension declared for ContentTweaker's ore, a provenance no pack source states. And do
+NOT replace the group clause with "has no `ore*` group at all", which is the cheaper spelling
+and flags 6 keys for 4 correct. Measured with all three: **4 flagged, 4 correct, nothing else
+in the 266,728 keys of the graph it was measured on** (the key population moves with every
+dump; the 2026-08-22 reference graph holds 261,113 named keys) -- and read that as recall over
+this pack's four same-mod twins, not as
+"finds every decoy", because a twin registered by a different mod from its anchor is invisible
+to it by construction.
+
+`graph.json`'s `shadow_ores` records which id is the twin: 4 entries on the reference graph,
+`contenttweaker:sub_block_holder_1:2` among them. **The two keys stay separate nodes and are
+only priced alike** -- pricing the twin correctly makes it TIE with its anchor, and which id a
+plan should name is a design decision deliberately left open rather than an oversight.
 
 **DIMENSION_COST = 800, between LOOT (200) and GATE (1000).** A trip is a construction project
 you can decide to do this afternoon; a locked chapter is not. Distinct from both by #95's rule
