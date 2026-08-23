@@ -122,10 +122,13 @@ this jar rather than reusing an older one.
 
 ## Install
 
-**BOTH SIDES, SAME JAR, OR THE CLIENT IS REFUSED AT CONNECT.** Since #19 phase 2 this mod
-registers a real item and opens its own network channels, and it declares no
-`acceptableRemoteVersions` -- so a client holding an item the server's registry does not have
-fails Forge's handshake. Singleplayer needs only the client copy.
+**BOTH SIDES, SAME JAR -- and the failure for skipping the server copy is SILENT, which is
+worse than a refusal.** Forge accepts a client whose extra mod the server lacks (measured in
+the decompiled 1.12.2 source: the mod-list check explicitly tolerates it) and then silently
+drops the mod's packets -- so the planner's live ME stock and owned-machine reads never get an
+answer. The planner notices after five seconds and says so on the plan's caveat line
+(`the server did not answer`), but nothing else errors, kicks or logs. Singleplayer needs only
+the client copy.
 
 1. Jar into `mods/` on every client **and** on the server, with the server stopped.
 2. **Move any older `mc-recipe-dump-*.jar` out first** -- two jars under one mod id is a
@@ -138,12 +141,13 @@ client-side; the server never reads it.
 
 Build it once with `/recipedump` in game plus `recipegraph build`, then **share that one file**
 with everyone on the pack -- it is pack data, not player data, so one graph serves the whole
-server. It is around 116 MB and must be plain JSON (no gzip support yet), though it sends at
+server. It is well over 100 MB (and grows with every dump) and must be plain JSON (no gzip
+support yet), though it sends at
 about 9 MB compressed.
 
-**Dump it from a CLIENT, never from the server.** A server runs fewer mods than the clients
-connecting to it -- 367 against roughly 406 on MeatballCraft -- so a server-side dump is
-missing everything client-only. The graph carries the mod-set digest it was built from and the
+**Dump it from a CLIENT, never from the server.** A client carries jars the server does not
+(a handful of client-only mods -- measured at 3 on MeatballCraft, and it drifts with pack
+updates), so a server-side dump can miss client-only content. The graph carries the mod-set digest it was built from and the
 planner reports `pack: MISMATCH` when it disagrees with what is loaded, so this is a thing
 you get told rather than a thing that quietly plans wrong.""" % (schema, version, schema,
                                                                 commit, stamp[:16], srg))
