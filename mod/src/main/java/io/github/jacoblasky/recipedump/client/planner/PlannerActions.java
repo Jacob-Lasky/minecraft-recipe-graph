@@ -1,5 +1,6 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 /**
@@ -43,6 +44,45 @@ public interface PlannerActions {
 
     /** "Choose another recipe". */
     void openRecipePicker(PlanNode node);
+
+    /**
+     * Open the FLOW DIAGRAM on this plan: the visual half of #19's MVP. #323.
+     *
+     * THE ENTRY THIS INTERFACE WAS MISSING FOR THREE RELEASES. `PlannerWidgets.flowPanel` and
+     * `FlowCanvas` were written, tested, culled, zoomed, hit-tested and photographed, and the
+     * only three callers of the panel were in `shot/PlannerShot` -- so the diagram a player was
+     * told about in the release notes could not be opened by one. Nothing was broken; there was
+     * simply no method here for a button to call.
+     *
+     * IT TAKES THE PLAN, unlike {@link #openCaveats}, and the difference is what each thing is
+     * ABOUT. A caveat is a statement about the SCENARIO -- `ScenarioSource` is a global the panel
+     * does not carry -- and a diagram is a picture of the plan the panel was built from, which
+     * the panel has in hand. `PlannerWidgets` may not reach for either.
+     *
+     * THE IMPLEMENTATION CANNOT BUILD THE CANVAS IN THIS PACKAGE, AND THAT IS A CONSTRAINT
+     * RATHER THAN AN OVERSIGHT. Doing so means naming `client.flow.FlowCanvas`, and `flow`
+     * depends on `planner` and never the reverse -- said on `PlannerWidgets.flowPanel`, said
+     * again on `PlannerWidgets.NodeContent`, and obeyed even by `PlannerLayoutTest`, which
+     * spells `FlowLayout`'s node width out as a literal rather than importing it. So the widget
+     * is handed to {@link LivePlannerActions} from above; see {@link FlowSource}.
+     */
+    void openFlow(PlanView plan);
+
+    /**
+     * Open the TODO panel: the plan book's list, and what this plan still needs of it. #323.
+     *
+     * THE READ HALF OF A WRITE PATH THAT SHIPPED WITHOUT IT. {@link #addToTodo} has sent
+     * `PlanBookEdit.SET_TODO` to the server since #140 and the node menu has offered it in every
+     * release since, so a player could put items on a list they had no way to open --
+     * `PlannerWidgets.todoPanel`'s only caller was the screenshot harness. Half-wiring is worse
+     * than no wiring: the click appeared to work, and the evidence that it had was in a window
+     * that did not exist.
+     *
+     * IT TAKES THE BOOK AS WELL AS THE PLAN because the panel is made of both, and `todoPanel`
+     * says why the difference is recomputed rather than stored: the book holds what the player
+     * ASKED for and the plan holds what is left after stock.
+     */
+    void openTodo(PlanView plan, PlanBook book);
 
     /**
      * Clicking the "planned without" caveat: show what each missing input costs the player.
@@ -142,6 +182,14 @@ public interface PlannerActions {
 
         @Override
         public void openRecipePicker(PlanNode node) {
+        }
+
+        @Override
+        public void openFlow(PlanView plan) {
+        }
+
+        @Override
+        public void openTodo(PlanView plan, PlanBook book) {
         }
 
         @Override

@@ -178,6 +178,11 @@ public class ShotScreensTest {
      */
     @Test
     public void everyRegisteredScreenIsAccountedForByName() {
+        // THREE NAMES ARRIVED HERE FROM TWO ISSUES AND BOTH ARE DELIBERATE. `ae2-placed` is
+        // #320's, probing a real ME grid for machines it reads as owned; `planner-view-flow` and
+        // `planner-view-todo` are #323's, below. They landed on separate branches and met in this
+        // list, which is the merge this test's own note predicts -- "these registrations are
+        // append-only blocks in one file, and three branches are adding to them at once".
         List<String> expected = Arrays.asList(
                 "ae2-placed", "ae2-probe", "dump", "fixture", "flow", "flow-hit",
                 "flow-selected",
@@ -185,6 +190,14 @@ public class ShotScreensTest {
                 "planner", "planner-caveats", "planner-collide", "planner-live", "planner-menu",
                 "planner-recipes",
                 "planner-recovery", "planner-selected", "planner-stale", "planner-todo",
+                // #323 ADDED THESE TWO, and they are the only screens here that reach a panel
+                // by CLICKING rather than by calling its builder. `flow` and `planner-todo`
+                // photograph the same two windows directly, which is how a diagram with no
+                // player-reachable opener came to have three green screenshots; these drive the
+                // button, so they would go red if the wiring were removed and the others would
+                // not. Both are kept: the direct ones are the layout subject, these are the
+                // reachability evidence.
+                "planner-view-flow", "planner-view-todo",
                 "planner-yield", "row-menu", "sources", "world-probe");
 
         List<String> actual = new ArrayList<String>(ShotScreens.names());

@@ -143,9 +143,10 @@ public class PlannerShotTest {
     @Test
     public void theFrameTheFlowSweepStopsOnShowsNothingAndTheRootBoxDoes() {
         PlanNode tree = PlannerShot.synthetic(4000);
-        FlowCanvas canvas = new FlowCanvas(tree);
-        // THE SIZE `openFlow` USES. A different viewport is a different question.
-        canvas.pos(4, 4).size(612, 372);
+        // THE SIZE `openFlow` USES, and since #323 it is the same CALL `openFlow` makes rather
+        // than a copy of its two numbers. A different viewport is a different question, and while
+        // this was hand-sized it was a claim about `openFlow` that could quietly stop being true.
+        FlowCanvas canvas = FlowCanvas.forPanel(tree);
         HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
         FlowLayout.Laid laid = FlowLayout.of(tree);
 

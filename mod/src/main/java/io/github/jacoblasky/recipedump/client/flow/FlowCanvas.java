@@ -96,6 +96,40 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
     /** Screen pixels per layout pixel. See {@link FlowZoom} for what depends on it. */
     private float zoom = FlowZoom.DEFAULT;
 
+    /**
+     * A canvas sized to the panel `PlannerWidgets.flowPanel` is about to put it in. #323.
+     *
+     * THE SIZE IS NOT OPTIONAL AND NOTHING IN PRODUCTION STATED IT UNTIL NOW. A widget added to
+     * a ModularUI panel with no size is not stretched to fit -- it comes back at nothing, and
+     * `WidgetTree.resizeInternal` catches Throwable around the whole resize and logs it through
+     * `ModularUI.LOGGER.catching` rather than rethrowing -- verified against the 3.1.5 bytecode,
+     * one exception-table entry spanning the resize and all three position passes -- so what a
+     * caller who forgot gets is a panel that opens, lays out, hit-tests and draws an empty grey
+     * rectangle, with the only complaint in the game log.
+     * That is indistinguishable by eye from a broken renderer, an unarmed seam or a bad zoom,
+     * which is exactly the confusion `ShotScreens`' verdict machinery was written for after five
+     * blank flow screenshots survived two PRs.
+     *
+     * SO IT WAS THE SECOND HALF OF #323 AND NOT A TIDY-UP. That issue is that no player could
+     * open the diagram; the three callers that could were all in `shot/`, and each carried its
+     * own `pos(4, 4).size(612, 372)`. A first production opener would have had to know two
+     * numbers nothing had ever told it, and getting them wrong fails silently.
+     *
+     * A FACTORY IN THIS PACKAGE RATHER THAN INSIDE `flowPanel`, AND THE DIRECTION DECIDES IT.
+     * This package may name `PlannerWidgets` and that one may not name this, so the constants can
+     * be read here and cannot be applied there. It is also the honest split: `flowPanel` takes
+     * whatever widget it is handed BECAUSE `FlowCanvasTest` hands it deliberately small
+     * viewports -- 300x180 -- to give `FlowCulling` something to drop. Sizing inside the panel
+     * would overwrite every one of those and turn assertions about culling into assertions about
+     * a viewport nothing is outside, without failing.
+     */
+    public static FlowCanvas forPanel(PlanNode tree) {
+        FlowCanvas canvas = new FlowCanvas(tree);
+        canvas.pos(PlannerWidgets.FLOW_PAD, PlannerWidgets.FLOW_PAD);
+        canvas.size(PlannerWidgets.FLOW_CANVAS_WIDTH, PlannerWidgets.FLOW_CANVAS_HEIGHT);
+        return canvas;
+    }
+
     public FlowCanvas(PlanNode tree) {
         super(new HorizontalScrollData(), new VerticalScrollData());
         this.laid = FlowLayout.of(tree);

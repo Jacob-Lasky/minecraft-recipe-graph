@@ -526,6 +526,21 @@ public final class ShotScreens {
                 PlannerShot.openTodo(arg);
             }
         });
+        // THE TWO THAT GO THROUGH A BUTTON (#323). `flow` and `planner-todo` above call the
+        // panel builders directly, which is how a diagram no player could open came to have
+        // three green screenshots. These two click the real thing; see `PlannerShot.openView`.
+        register("planner-view-flow", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openViewFlow(arg);
+            }
+        });
+        register("planner-view-todo", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openViewTodo(arg);
+            }
+        });
         register("planner-caveats", new Opener() {
             @Override
             public void open(String arg) {

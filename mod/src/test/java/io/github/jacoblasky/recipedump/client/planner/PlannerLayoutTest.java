@@ -1830,6 +1830,20 @@ public class PlannerLayoutTest {
             calls.add("caveats");
         }
 
+        // THE PLAN'S TARGET IS RECORDED AND NOT MERELY THE FACT OF THE CALL, so the witness
+        // below can fail against an implementation that opens a view of the WRONG plan -- which
+        // is the shape a click that reached for `PlannerService` instead of the panel's own plan
+        // would have. A recorder that logged only "flow" would agree with that bug.
+        @Override
+        public void openFlow(PlanView plan) {
+            calls.add("flow:" + plan.target());
+        }
+
+        @Override
+        public void openTodo(PlanView plan, PlanBook book) {
+            calls.add("todo:" + plan.target() + ":" + book.todoKeys().size());
+        }
+
         @Override
         public void pinRecipe(PlanNode node, RecipeChoice choice) {
             calls.add("pin:" + node.key() + ":" + choice.rid());
@@ -1884,6 +1898,31 @@ public class PlannerLayoutTest {
     }
 
     /**
+     * The panel's click targets with the view bar's buttons taken out. #323.
+     *
+     * BY TYPE AND NOT BY DROPPING THE FIRST TWO. The view bar is drawn above the tree, so an
+     * index-based skip is correct only while there are exactly two views -- and the assertion it
+     * feeds counts what is left against `plan.flatten().size()`, so a third button would make it
+     * off by one against a number the test also computes, which reads as a tree defect. Asking
+     * `ViewBar` for its own children cannot go wrong that way, which is what that type is for.
+     */
+    private static List<PlannerWidgets.ClickableGroup> treeClickables(IWidget root) {
+        List<PlannerWidgets.ClickableGroup> found = clickables(root);
+        found.removeAll(viewButtons(root));
+        return found;
+    }
+
+    /** The view bar's buttons, in the order they are drawn. Empty when there is no bar. */
+    private static List<PlannerWidgets.ClickableGroup> viewButtons(IWidget root) {
+        for (IWidget widget : HeadlessLayout.flatten(root)) {
+            if (widget instanceof PlannerWidgets.ViewBar) {
+                return clickables(widget);
+            }
+        }
+        return new java.util.ArrayList<PlannerWidgets.ClickableGroup>();
+    }
+
+    /**
      * Clicking a tree row asks for that row's menu.
      *
      * THE TEST THE REVIEW ADDED. Everything else here asserts geometry, and geometry is
@@ -1897,7 +1936,12 @@ public class PlannerLayoutTest {
         ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(), recorder);
         HeadlessLayout.layOut(panel);
 
-        List<PlannerWidgets.ClickableGroup> rows = clickables(panel);
+        // THE VIEW BAR'S BUTTONS ARE EXCLUDED BY TYPE AND COUNTED SEPARATELY (#323). They are
+        // click targets on this panel and they are not tree rows, so folding them into the
+        // number below would weaken the assertion that follows into one that cannot tell a
+        // button from a row.
+        assertEquals("the two view buttons", 2, viewButtons(panel).size());
+        List<PlannerWidgets.ClickableGroup> rows = treeClickables(panel);
         // ONE PER NODE PLUS THE CAVEAT BLOCK, which #190 made clickable. Counted rather than
         // filtered out, so that a second unexplained click target added later fails here: this
         // assertion is the only thing standing between "every row opens its own menu" and "a
@@ -1914,6 +1958,132 @@ public class PlannerLayoutTest {
         rows.get(1).onMousePressed(0);
         assertEquals(java.util.Arrays.asList("menu:" + plan.tree().children().get(0).key()),
                      recorder.calls);
+    }
+
+    /**
+     * THE WITNESS FOR #323: the planner panel offers a way into the other two windows.
+     *
+     * RED ON MASTER, AND RED AS AN ASSERTION RATHER THAN AS A COMPILE ERROR ONLY BECAUSE THE
+     * INTERFACE HAD TO GROW. What master had was a panel whose click targets were one per tree
+     * row plus the caveat and nothing else, so `viewButtons` came back empty -- there was no
+     * `ViewBar` to find, because nothing built one. `PanelReachabilityTest` is the half of this
+     * witness that runs against the compiled mod and names the two unreachable builders; this is
+     * the half that says what a player can now click and what it does.
+     *
+     * BOTH BUTTONS, AND EACH ASSERTED TO DO ITS OWN THING. One button tested is consistent with a
+     * bar whose two entries share a handler -- which is a real bug rather than a hypothetical:
+     * `clickingATreeRowOpensThatNodesMenu` says so about tree rows and gives the reason ("one
+     * shared handler that always reports the root"), and a two-entry bar is where that is easiest
+     * to write.
+     *
+     * THE PLAN IS IN THE RECORDED CALL, so this also fails against a button that opens a view of
+     * some other plan -- see the recorder.
+     */
+    @Test
+    public void theViewButtonsOpenTheDiagramAndTheTodoList() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        PlanBook book = emptyBook();
+        book.setTodo("minecraft:iron_ingot", 4L);
+        Recorder recorder = new Recorder();
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, matching(), recorder);
+        HeadlessLayout.layOut(panel);
+
+        List<PlannerWidgets.ClickableGroup> buttons = viewButtons(panel);
+        assertEquals("one button per view", 2, buttons.size());
+
+        buttons.get(0).onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("flow:" + plan.target()), recorder.calls);
+
+        recorder.calls.clear();
+        buttons.get(1).onMousePressed(0);
+        // THE BOOK IS PASSED THROUGH AS WELL AS THE PLAN, and the recorded size is what says so:
+        // the TODO panel is made of both, and a button that handed over an empty book would draw
+        // "nothing on the list" over a list with something on it.
+        assertEquals(java.util.Arrays.asList("todo:" + plan.target() + ":1"), recorder.calls);
+    }
+
+    /**
+     * The buttons are where a mouse can reach them, and inside the panel.
+     *
+     * THE FAILURE THIS CATCHES IS INVISIBLE ABOVE: `onMousePressed` called directly does not care
+     * where the box is, or whether there is one. That is `theCaveatsClickTargetCoversItsLines`'
+     * argument, and it applies harder here -- a control whose whole purpose is to be FOUND is
+     * useless at zero height, and ModularUI reports nothing for it because every row in the panel
+     * is still exactly the height it was built with.
+     *
+     * AND THEY DO NOT OVERLAP, which no size assertion on its own would catch. Two buttons laid
+     * out at the same x are both clickable, both drawn, and the one underneath can never be hit;
+     * #125 measured that ModularUI neither clamps nor clips, so nothing complains.
+     *
+     * THE SHOT IS THE OTHER HALF OF THIS AND NOT A DUPLICATE OF IT. `planner-view-flow` parks the
+     * real cursor on the box these coordinates describe and asks ModularUI's own hit-testing
+     * whether it agrees; this asserts the geometry across every fixture in seconds. Neither
+     * subsumes the other.
+     */
+    @Test
+    public void theViewButtonsAreClickableBoxesInsideThePanel() {
+        ModularPanel panel = laidOut("plan-in-stock");
+        List<PlannerWidgets.ClickableGroup> buttons = viewButtons(panel);
+        assertEquals(2, buttons.size());
+
+        Area box = panel.getArea();
+        for (int i = 0; i < buttons.size(); i++) {
+            Area button = buttons.get(i).getArea();
+            assertEquals("button " + i + " is not a full row tall",
+                         PlannerWidgets.ROW_HEIGHT, button.h());
+            assertEquals("button " + i + " is not the measured width",
+                         PlannerWidgets.VIEW_BUTTON_WIDTH, button.w());
+            // ABSOLUTE COORDINATES AFTER LAYOUT: the panel is centred on the screen, so its own
+            // box is the thing to compare against rather than PANEL_WIDTH.
+            assertTrue("button " + i + " runs off the right of the panel",
+                       button.x() + button.w() <= box.x() + box.w());
+            assertTrue("button " + i + " is drawn past the bottom of the panel",
+                       button.y() + button.h() <= box.y() + box.h());
+        }
+        Area first = buttons.get(0).getArea();
+        Area second = buttons.get(1).getArea();
+        assertTrue("the two buttons overlap, so one of them cannot be clicked at all",
+                   first.x() + first.w() <= second.x());
+    }
+
+    /**
+     * Every label the view bar can draw survives `fit` UNCUT, and is one the width was measured
+     * against.
+     *
+     * A TRUNCATED BUTTON IS ALWAYS A BUG, because the vocabulary is fixed -- {@link
+     * PlannerWidgets#BADGE}'s rule, and the badge column is what happens when it is broken:
+     * sized from a second copy of the vocabulary it came out at 66 pixels and the screenshot read
+     * "no known...". `theBadgeColumnFitsEveryWordTheVocabularyCanProduce` is this assertion one
+     * column over.
+     *
+     * THE SECOND HALF IS THE ONE THAT WILL EARN ITS KEEP. `VIEW_BUTTON_WIDTH` measures
+     * `VIEW_LABELS`, and the buttons are built from whatever `views` returns -- two lists that
+     * agree today. A third view added to `views` alone would be measured against the old widest
+     * label and cut, and the cut is silent.
+     */
+    @Test
+    public void everyViewLabelIsInTheMeasuredVocabularyAndFitsItsButton() {
+        List<PlannerWidgets.Entry> views =
+                PlannerWidgets.views(PlanView.empty(), emptyBook(), PlannerActions.NONE);
+        assertEquals("the view bar draws one button per entry", 2, views.size());
+        for (PlannerWidgets.Entry view : views) {
+            assertTrue("`" + view.text + "` is drawn on a button whose width was never measured"
+                       + " against it; VIEW_LABELS holds " + PlannerWidgets.VIEW_LABELS,
+                       PlannerWidgets.VIEW_LABELS.contains(view.text));
+        }
+        // AGAINST A LITERAL, AND THAT IS THE ONLY FORM OF THIS ASSERTION THAT CAN FAIL. The
+        // obvious version -- `fit(label, VIEW_BUTTON_WIDTH)` equals `label` -- is VACUOUS, and it
+        // sat here until a reviewer pointed at it: the width is DERIVED from the longest entry of
+        // `VIEW_LABELS`, so for any label drawn from that same list the budget is its own length
+        // plus slack and `fit` cannot cut. It agreed with every bug it could have had. So the
+        // number is spelt out instead: 14 characters of "Show TODO list" at `CHAR_WIDTH` 6, plus
+        // `GAP` twice. A test that spells its expectation with the thing it is testing is the
+        // shape `SeamInstallationTest.aDescriptorIsSpeltTheWayTheConstantPoolSpellsIt` refuses for
+        // the same reason, and the membership assertion above is what keeps the two lists welded.
+        assertEquals("VIEW_BUTTON_WIDTH is no longer the widest label plus two gaps, so either a"
+                     + " label changed length or the slack did; recount rather than adjusting"
+                     + " this number",
+                     90, PlannerWidgets.VIEW_BUTTON_WIDTH);
     }
 
     /**

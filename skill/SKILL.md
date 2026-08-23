@@ -838,21 +838,49 @@ and the Java side is the one a player uses.
 WRONG ONCE.** `PlannerScreen.openPanel(ModularPanel)` is documented as "one of the planner's
 secondary windows, **for the screenshot harness to photograph**" -- so a panel whose only
 callers are `shot/` and `src/test/` renders perfectly, passes its layout tests, appears in
-screenshots, and is unreachable in game. Two are in that state right now:
+screenshots, and is unreachable in game. Two were in that state through 0.10.0 and 0.10.1:
 
-* **The flow diagram** -- `PlannerWidgets.flowPanel` and `new FlowCanvas` have no caller
-  outside `shot/PlannerShot.java` and the tests.
-* **The TODO panel** -- `PlannerWidgets.todoPanel`, same shape, only `PlannerShot.java:715` and
-  `PlannerLayoutTest`. Both panels are filed together as **#323**. Note the asymmetry: the TODO *feature* is live, because
-  `LivePlannerActions.addToTodo` / `addRowToTodo` send `PlanBookEdit.SET_TODO` from the node
-  menu and the footer counts "N on TODO". What has no opener is the screen that reads the list
-  back.
+* **The flow diagram** -- `PlannerWidgets.flowPanel` and `new FlowCanvas` had no caller outside
+  `shot/PlannerShot.java` and the tests.
+* **The TODO panel** -- `PlannerWidgets.todoPanel`, same shape. Note the asymmetry that made it
+  worse: the TODO *feature* was live, because `LivePlannerActions.addToTodo` / `addRowToTodo`
+  send `PlanBookEdit.SET_TODO` from the node menu and the footer counts "N on TODO". What had no
+  opener was the screen that reads the list back, so the write path shipped without the read.
 
-**So the reachability test is `grep` for the opener, not for the widget.** Before writing that
-the planner "offers" something, check that a caller outside `shot/` and `src/test/` reaches it:
-`/bin/grep -rn "<panelName>(" mod/src/main/java`. Reachable by that test today: `planPanel`
-(the planner proper), `nodeMenu` and `recipePicker` (both from `LivePlannerActions`), and the
-three browse panels.
+**#323 FIXED BOTH AND REPLACED THE GREP WITH A TEST.** The planner panel now carries a view bar
+under its heading -- `PlannerWidgets.viewBar`, two `ClickableGroup` buttons reading **Show
+diagram** and **Show TODO list** -- routed through `PlannerActions.openFlow` / `openTodo` to
+panel handlers on `LivePlannerActions`, the same shape the node menu and the picker already
+used. Buttons rather than a keybind because #313 is the cautionary case at the other end: the
+plan key could not fire while JEI was on screen, so the MVP's only entry point was a chord that
+silently did nothing.
+
+**DO NOT go back to grepping for the opener; run the gate.**
+`PanelReachabilityTest.everyPanelBuilderIsOpenedBySomethingOutsideTheHarness` enumerates every
+static method in the compiled mod that returns a `ModularPanel` or a subclass of one -- public,
+protected or package-private -- and asserts each has a caller outside `shot/`. **The gate prints
+its own inventory on every run, and that printout is the authority on how many there are**; do
+not quote a number here, because the last one in this file went stale within a day of being
+written. Measured against the pre-fix tree it reported exactly `flowPanel` and `todoPanel`, and
+nothing else, which is the discrimination a grep cannot claim:
+it keys on the JVM descriptor, so an overload cannot pass as its sibling, and it finds callers
+inside anonymous classes, where every one of these openers actually lives
+(`LivePlannerActions$5`, `$6`). It also caught a real mistake made while fixing #323 -- widening
+`PlannerScreen.planPanel` to `public` so the harness could hold the panel put a builder on the
+list whose only caller outside `shot/` was its own class, and the fix was to revert the widening
+and have the harness find the live panel off `ModularScreen.getCurrent()` instead.
+`Minecraft.currentScreen` is the route that looks right and does not compile here: it holds the
+`GuiScreenWrapper`, and casting to `IMuiScreen` needs `neverenoughanimations.api.IAnimatedScreen`,
+which is not on the classpath.
+
+Two things the gate cannot see, both stated on it: that the opener is REACHED rather than merely
+compiled (a button behind a false condition satisfies it), and that the panel is usable once
+open. The second is not hypothetical -- `flowPanel` took a canvas that only the harness ever
+sized, so the first production opener would have opened a correctly wired window around a
+zero-size diagram. `FlowCanvas.forPanel` is the answer and `PlannerWidgets.FLOW_CANVAS_WIDTH`
+the one statement of the numbers. What covers "reached" is a picture: the `planner-view-flow` and
+`planner-view-todo` shot screens park the real cursor on a button, click only what ModularUI
+agrees is under it, and assert the panel that opened is the one the button claims.
 
 **The item's recipe is all-vanilla and that was deliberate**: a Book over Comparator, Crafting
 Table, Ender Pearl. It once held an AE2 Wireless Receiver, which made the calculator

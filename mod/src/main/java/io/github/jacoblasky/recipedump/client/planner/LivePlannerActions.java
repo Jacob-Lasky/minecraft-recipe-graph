@@ -10,6 +10,7 @@ import com.cleanroommc.modularui.screen.SecondaryPanel;
 import io.github.jacoblasky.recipedump.client.PlannerStock;
 import io.github.jacoblasky.recipedump.common.GraphService;
 import io.github.jacoblasky.recipedump.common.PinStore;
+import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.net.PlanBookEdit;
 import io.github.jacoblasky.recipedump.common.net.PlanBookEditMessage;
@@ -29,14 +30,46 @@ import io.github.jacoblasky.recipedump.common.net.PlanBookNetwork;
  */
 public final class LivePlannerActions implements PlannerActions {
 
+    /**
+     * Where the diagram comes from. Never null; see {@link FlowSource} for why it is handed in
+     * rather than built here, and why it is a constructor argument rather than a settable seam.
+     */
+    private final FlowSource flowSource;
+
     private ModularPanel parent;
     private IPanelHandler menu;
     private IPanelHandler picker;
     private IPanelHandler caveats;
     private IPanelHandler rowMenu;
+    private IPanelHandler flow;
+    private IPanelHandler todo;
 
     /** The node the next sub-panel describes. Client thread only, like every field here. */
     private PlanNode current;
+
+    /**
+     * The plan the next VIEW panel is of, and the book beside it. Client thread only.
+     *
+     * ONE PLAN FIELD SHARED BY BOTH VIEWS, UNLIKE {@link #current} AND {@link #currentRow}.
+     * Those two are split because they are different QUESTIONS -- one occurrence against the
+     * aggregate over every occurrence -- and one field would let a row menu open on a node,
+     * which is the confusion #251 exists to make unrepresentable. These two ask the same
+     * question of the same object: both views are of the plan this panel was built from, so
+     * there is no wrong pairing available to make.
+     */
+    private PlanView currentPlan;
+
+    /** The book the next TODO panel reads. See {@link #currentPlan}. */
+    private PlanBook currentBook;
+
+    /**
+     * @param flowSource where the diagram widget comes from. Required, not settable: see
+     *                   {@link FlowSource} for the dependency direction that puts it here and
+     *                   for why a no-op default would be the #191 shape all over again.
+     */
+    public LivePlannerActions(FlowSource flowSource) {
+        this.flowSource = flowSource;
+    }
 
     /**
      * The shopping row the next row menu describes. Client thread only, like every field here.
@@ -89,6 +122,19 @@ public final class LivePlannerActions implements PlannerActions {
     public void openRecipePicker(PlanNode node) {
         current = node;
         open(picker());
+    }
+
+    @Override
+    public void openFlow(PlanView plan) {
+        currentPlan = plan;
+        open(flow());
+    }
+
+    @Override
+    public void openTodo(PlanView plan, PlanBook book) {
+        currentPlan = plan;
+        currentBook = book;
+        open(todo());
     }
 
     @Override
@@ -277,6 +323,58 @@ public final class LivePlannerActions implements PlannerActions {
             }, true);
         }
         return caveats;
+    }
+
+    /**
+     * The diagram's panel handler, built at open time like the others. #323.
+     *
+     * THE CANVAS IS BUILT PER OPEN AND MUST BE. `FlowLayout.of` walks the tree the canvas was
+     * made from and lays out every box once in the constructor, so a canvas kept across a
+     * re-solve would draw the PREVIOUS plan -- and a pin exists to change the plan, so that is
+     * the case a player reaches on purpose. `open` deletes the cached panel before every open,
+     * which is what makes this re-ask; it is `caveats()`'s reason with a different subject.
+     *
+     * IT COSTS A LAYOUT OF THE WHOLE TREE PER OPEN, which is stated rather than assumed:
+     * `FlowLayout` is the pass #293 capped at `DEFAULT_MAX_NODES`, and paying it on a click is
+     * the same order as paying it on the harness's own three call sites. What it buys is that a
+     * diagram is never of a plan that is no longer on screen.
+     */
+    private IPanelHandler flow() {
+        if (flow == null && parent != null) {
+            flow = IPanelHandler.simple(parent, new SecondaryPanel.IPanelBuilder() {
+                @Override
+                public ModularPanel build(ModularPanel opener,
+                                          net.minecraft.entity.player.EntityPlayer player) {
+                    // THE WIDGET COMES FROM THE SOURCE AND IS NOT BUILT HERE. `client.flow` may
+                    // not be named from this package; see `FlowSource`.
+                    return PlannerWidgets.flowPanel(flowSource.diagramFor(currentPlan));
+                }
+            }, true);
+        }
+        return flow;
+    }
+
+    /**
+     * The TODO panel's handler, built at open time like the others. #323.
+     *
+     * REBUILT PER OPEN FOR A REASON THE OTHERS DO NOT HAVE: this panel is the one that shows the
+     * BOOK, and the book is written by the server. "Add to TODO" sends an edit and the server
+     * answers with a whole-book sync, so a panel cached at first open would show the list as it
+     * was before the player added anything -- which is the same click-appears-to-do-nothing
+     * failure `PlannerScreen.stamp` folds the book revision in to avoid.
+     */
+    private IPanelHandler todo() {
+        if (todo == null && parent != null) {
+            todo = IPanelHandler.simple(parent, new SecondaryPanel.IPanelBuilder() {
+                @Override
+                public ModularPanel build(ModularPanel opener,
+                                          net.minecraft.entity.player.EntityPlayer player) {
+                    return PlannerWidgets.todoPanel(currentPlan, currentBook,
+                                                    LivePlannerActions.this);
+                }
+            }, true);
+        }
+        return todo;
     }
 
     private IPanelHandler picker() {

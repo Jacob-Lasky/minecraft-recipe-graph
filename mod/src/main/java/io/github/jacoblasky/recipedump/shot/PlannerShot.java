@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.shot;
 
 import io.github.jacoblasky.recipedump.client.PlannerScreen;
+import io.github.jacoblasky.recipedump.client.ScreenCursor;
 import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
 import io.github.jacoblasky.recipedump.client.flow.FlowZoom;
 import io.github.jacoblasky.recipedump.client.jei.JeiBridge;
@@ -13,7 +14,12 @@ import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
+import java.util.List;
+
+import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.screen.ModularPanel;
+import com.cleanroommc.modularui.screen.ModularScreen;
+import com.cleanroommc.modularui.widget.sizer.Area;
 import com.cleanroommc.modularui.widgets.ListWidget;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.client.planner.RecipeChoices;
@@ -321,9 +327,11 @@ final class PlannerShot {
         PlanView plan = fixture(arg == null || arg.trim().isEmpty() ? SELECTION_FIXTURE : arg);
         armNodeActions(plan.tree());
         PlanSelection.select(mostRepeated(plan));
-        FlowCanvas canvas = new FlowCanvas(plan.tree());
-        canvas.pos(4, 4).size(612, 372);
-        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+        // `forPanel` RATHER THAN A HAND-SIZED CANVAS (#323). These three screens each carried
+        // their own `pos(4, 4).size(612, 372)`, which is how the first production opener came to
+        // have no source for the two numbers at all; the factory is now the only statement of
+        // them and the panel's own constants are what it reads.
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(FlowCanvas.forPanel(plan.tree())));
     }
 
     /**
@@ -513,8 +521,7 @@ final class PlannerShot {
         // drawn in it. The picture looked like a diagram with no icons, which is also what a
         // diagram with a broken icon lookup looks like.
         armNodeActions(tree);
-        final FlowCanvas canvas = new FlowCanvas(tree);
-        canvas.pos(4, 4).size(612, 372);
+        final FlowCanvas canvas = FlowCanvas.forPanel(tree);
         canvas.setZoom(zoom);
         PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
         ShotScreens.animate(new ShotScreens.Animated() {
@@ -656,8 +663,7 @@ final class PlannerShot {
             spec = arg.substring(0, at);
             zoom = Float.parseFloat(arg.substring(at + 1));
         }
-        final FlowCanvas canvas = new FlowCanvas(flowTree(spec));
-        canvas.pos(4, 4).size(612, 372);
+        final FlowCanvas canvas = FlowCanvas.forPanel(flowTree(spec));
         canvas.setZoom(zoom);
         PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
         ShotScreens.animate(new ShotScreens.Animated() {
@@ -704,6 +710,320 @@ final class PlannerShot {
                 + ", the layout says " + fromLayout
                 + (hovered == fromLayout ? "  AGREE" : "  DISAGREE")
                 + "   [" + canvas.cursorDiagnostic() + "]");
+    }
+
+    /** `planner-view-flow`: the diagram, opened by clicking the button that offers it. */
+    static void openViewFlow(String arg) {
+        openView(arg, 0, "mcrecipedump_flow");
+    }
+
+    /** `planner-view-todo`: the TODO panel, likewise. */
+    static void openViewTodo(String arg) {
+        openView(arg, 1, "mcrecipedump_todo");
+    }
+
+    /**
+     * Open the planner a player gets, click one view button with the real mouse, and check what
+     * came up. #323.
+     *
+     * WHAT THESE TWO PROVE THAT NO OTHER SHOT DOES. `flow` and `planner-todo` photograph those
+     * panels by calling their builders directly -- which is precisely how #323 shipped: three
+     * green screenshots of a diagram no player could reach, every one produced by the only
+     * caller. So these do not build a panel at all. They open the panel `PlannerScreen` builds,
+     * park the real cursor over a button, and click it.
+     *
+     * THE PANEL IS OPENED THROUGH `PlannerScreen.openPlan` AND THEN FOUND AGAIN, rather than
+     * built here and kept. A panel built here would carry a `FlowSource` and a `PlannerActions`
+     * chosen by the harness, and the question being asked is whether the ones PRODUCTION chooses
+     * work. `openPlan` is also the player's own path, so nothing about the subject is arranged.
+     *
+     * FINDING IT BACK COSTS THE `GuiScreenWrapper` UNWRAP THAT `openYield` AVOIDS, and here that
+     * is the cheaper side of the trade rather than a regression. The alternative was making
+     * `planPanel` public to hold a reference, and `PanelReachabilityTest` -- this issue's own
+     * gate -- reported it as a panel builder with no opener outside `shot/` the moment it became
+     * visible. Widening production API to photograph it is precisely the move that gate exists
+     * to refuse, so the indirection lives in the harness instead. See {@link #livePanel}.
+     *
+     * A HOLD RATHER THAN `animate`, for `planner-yield`'s stated reason: `animate` is gated on
+     * `-Dmcrecipedump.shotTimedFrames`, which a caller who did not know that would omit -- and
+     * the capture would then happen before the click, producing a perfectly good picture of an
+     * unclicked planner and no sign in the log that anything was skipped.
+     *
+     * AND IT OWES A VERDICT. A screenshot of an open window is equally consistent with the WRONG
+     * window, so the screen asserts the panel by name and `ShotScreens.expectReport` makes
+     * silence a failed run rather than a clean one -- `jei-keybind`'s discipline.
+     */
+    private static void openView(String arg, int index, String expected) {
+        PlanView plan = fixture(arg);
+        // ARMED, like `openTree` and for its reason: the tree and the TODO panel both draw an
+        // icon per row, and a shot taken against `NodeActions.NONE` is a picture of the icon
+        // column being charged and never filled.
+        armNodeActions(plan.tree());
+        PlannerScreen.openPlan(plan, book(plan));
+        ShotScreens.expectReport(expected);
+        ShotScreens.holdCapture(new ClickViewButton(index, expected));
+    }
+
+    /**
+     * The planner panel that is on screen right now, or null if there is not one yet.
+     *
+     * `ModularScreen.getCurrent()` AND NOT `Minecraft.currentScreen`, WHICH DOES NOT COMPILE HERE.
+     * `ClientGUI.open` displays a `GuiScreenWrapper` around the `ModularScreen`, so the vanilla
+     * field holds the wrapper and the obvious route is to cast it to `IMuiScreen` and ask. That
+     * interface extends `com.cleanroommc.neverenoughanimations.api.IAnimatedScreen`, which is not
+     * on this project's compile classpath -- NEA is not one of the five staged dev jars -- and
+     * javac refuses the cast with "cannot access IAnimatedScreen" rather than anything that names
+     * the real problem. Measured while writing this screen. ModularUI's own static accessor needs
+     * no unwrap and no dependency.
+     *
+     * NULL IS A NORMAL ANSWER AND NOT AN ERROR. `openPlan` hands `ClientGUI` a BUILDER, so the
+     * panel does not exist until the screen builds its UI, and a `Hold` polling on the first
+     * render tick can legitimately arrive first. The caller treats null as "come back next poll",
+     * which is `ScrollToRow`'s shape.
+     *
+     * `getMainPanel` AND NOT `getTopMostPanel`, deliberately. The whole point of these two screens
+     * is that a sub-panel comes UP over the planner, so the top-most panel is the thing being
+     * measured -- reading the buttons off it after the click would find them on whatever opened.
+     */
+    private static ModularPanel livePanel() {
+        ModularScreen screen = ModularScreen.getCurrent();
+        return screen == null ? null : screen.getPanelManager().getMainPanel();
+    }
+
+    /**
+     * Park the real cursor on one view button, click what is under it, and check what opened.
+     *
+     * THE CLICK IS ONLY DELIVERED IF THE FRAMEWORK AGREES SOMETHING IS THERE, and that is the
+     * whole difference between this and a layout test. `PlannerLayoutTest` calls `onMousePressed`
+     * on a button it found by walking the widget tree, which passes whether or not the button is
+     * anywhere a mouse can reach -- that is stated on `theCaveatsClickTargetCoversItsLines`, and
+     * it is why that test exists at all. Here the cursor is sent to where the LAYOUT says the
+     * button is, and the click happens only if `IWidget.isHovering()` -- ModularUI's own verdict,
+     * from `getWidgetsAt` rather than from these coordinates -- says the cursor landed on it. Two
+     * answers from two different pieces of code, which is what `flow-hit` established the mouse
+     * can do on an Xvfb display.
+     *
+     * READ AFTER A WAIT AND NEVER ON THE POLL THAT MOVED, which is `flow-hit`'s measured lesson
+     * and not caution: the hover pass runs from the cursor position sampled at the start of a
+     * tick, so `isHovering` lags a move by at least one frame. At one frame's gap that probe
+     * reported ModularUI answering for the PREVIOUS node on every line -- six tidy DISAGREE lines
+     * that were really six agreements, one row out of step.
+     *
+     * THE OTHER BUTTONS ARE CHECKED TOO, and that is the assertion that makes this discriminate.
+     * "The cursor is over a button" is satisfied by being over the WRONG button, and a shot of
+     * the TODO panel is a fine picture of a successful run of the flow screen. So the cursor must
+     * be over the button asked for and over no other.
+     */
+    private static final class ClickViewButton implements ShotScreens.Hold {
+
+        /**
+         * The earliest poll on which `isHovering` is worth reading. `flow-hit` measured 5.
+         *
+         * READ-THEN-MOVE, AND THE ANSWER ON ANY POLL BELONGS TO THE PREVIOUS POSITION. The hover
+         * pass runs from the cursor position sampled at the start of a tick, so a read taken on
+         * the poll that moved the mouse describes where it used to be -- `flow-hit` published six
+         * tidy DISAGREE lines that were really six agreements, one row out of step, before that
+         * was understood. Re-parking to the SAME point every poll is what makes the rule harmless
+         * here: the previous position and the current one are the same position.
+         */
+        private static final int SETTLE_POLLS = 5;
+
+        /**
+         * Polls between the click and asking what opened.
+         *
+         * THE PANEL IS ADDED IMMEDIATELY AND DRAWN LATER, so this is about the PICTURE rather
+         * than about the answer: `isPanelOpen` would be true on the next poll, and a capture
+         * taken then can still be of a panel that has not had a layout pass. `ScrollToRow` holds
+         * eight polls for the same kind of reason, and both are cheap against a boot.
+         */
+        private static final int OPEN_POLLS = 4;
+
+        private final int index;
+        private final String expected;
+
+        /** The panel the buttons were read off, kept only so the verdict can reach its screen. */
+        private ModularPanel panel;
+
+        private int poll;
+
+        /** Set once the click has been delivered; {@link #poll} then counts the open wait. */
+        private boolean clicked;
+
+        ClickViewButton(int index, String expected) {
+            this.index = index;
+            this.expected = expected;
+        }
+
+        @Override
+        public boolean busy() {
+            ModularPanel current = livePanel();
+            if (current != null) {
+                this.panel = current;
+            }
+            List<PlannerWidgets.ClickableGroup> buttons =
+                    panel == null ? new java.util.ArrayList<PlannerWidgets.ClickableGroup>()
+                                  : viewButtons(panel);
+            if (buttons.size() <= index || buttons.get(index).getArea().height <= 0) {
+                // NOT LAID OUT YET, or the bar is not there at all. Both are "come back next
+                // poll" and the run's own timeout is the backstop -- `ScrollToRow`'s shape,
+                // rather than a frame count nobody can justify. A bar that never appears fails
+                // as a timeout with the verdict still owed, which is the honest outcome.
+                return true;
+            }
+            PlannerWidgets.ClickableGroup button = buttons.get(index);
+            String label = PlannerWidgets.VIEW_LABELS.get(index);
+            if (clicked) {
+                if (poll < OPEN_POLLS) {
+                    poll++;
+                    return true;
+                }
+                return verdict(label);
+            }
+
+            // RE-PARKED EVERY POLL, WHICH IS `ScrollToRow`'S FIX ONE AXIS OVER. That screen
+            // scrolled once, logged sane numbers, and photographed an unscrolled list; holding
+            // and re-applying is what makes the last poll before the read a parked one whatever
+            // swallowed the first attempt. It is idempotent -- the same point every time -- so
+            // the read-then-move rule above stays satisfied.
+            Area box = button.getArea();
+            int targetX = box.x + box.width / 2;
+            int targetY = box.y + box.height / 2;
+            ScreenCursor.park(targetX, targetY);
+            if (poll == 0) {
+                ShotHarness.log("planner-view: parking the cursor on '" + label + "' at "
+                                + targetX + "," + targetY + " (button box " + box.x + ","
+                                + box.y + " " + box.width + "x" + box.height + "); clicking"
+                                + " through the screen on poll " + SETTLE_POLLS);
+            }
+            poll++;
+            if (poll < SETTLE_POLLS) {
+                return true;
+            }
+            // DISPATCHED THROUGH THE SCREEN, WHICH IS THE CLICK PATH THE GAME USES.
+            // `GuiScreenWrapper.mouseClicked` calls exactly this, and `ModularScreen` does its own
+            // hit-testing from the live cursor to decide which widget receives it -- so the button
+            // is reached BY POSITION and nothing here names the widget that gets the click.
+            //
+            // AND NOT GATED ON `IWidget.isHovering()`, WHICH THIS PROBE MEASURED UNRELIABLE HERE.
+            // The first two runs parked the cursor dead centre of the button and polled that flag
+            // forty times, about a second, and it never set: `asked=171,112 mouseRaw=342,576
+            // scale=2 gui=171,112` against a laid-out box of `126,107 90x11`. The conversion round
+            // trips and the point is inside the box, so the flag is not reporting the cursor.
+            // `flow-hit` gets a true answer from the same flag, but its widgets sit inside a
+            // `FlowCanvas`, which is an `IViewport` and walks its own children -- a plain
+            // `ParentWidget` is not. Waiting longer for it was tried and does not help.
+            //
+            // THE VERDICT IS WHAT DISCRIMINATES, so nothing is lost by not gating: a click that
+            // landed on the wrong button opens the wrong panel and {@link #verdict} fails on the
+            // panel's NAME, and a click that landed on nothing opens nothing and fails too.
+            // The hit-test answers are logged rather than asserted, because they are evidence
+            // about the harness rather than about the mod.
+            ModularScreen screen = panel.getScreen();
+            ShotHarness.log("planner-view: dispatching a click at the cursor after " + poll
+                            + " poll(s); ModularUI's own hit tests say belowMouse="
+                            + screen.getPanelManager().isBelowMouseInTopPanel(button)
+                            + " isHovering=" + button.isHovering()
+                            + " anyHovered=" + panel.isAnyHovered()
+                            + " otherButtons=" + othersHovered(buttons, button)
+                            + " panelOpen=" + panel.isOpen() + " ["
+                            + cursorDiagnostic(targetX, targetY) + "]");
+            boolean taken = screen.onMousePressed(0);
+            ShotHarness.log("planner-view: the screen " + (taken ? "took" : "did NOT take")
+                            + " the click aimed at '" + label + "'");
+            clicked = true;
+            poll = 0;
+            return true;
+        }
+
+        /** How many OTHER view buttons claim the cursor. Non-zero means it is on the wrong one. */
+        private static int othersHovered(List<PlannerWidgets.ClickableGroup> buttons,
+                                        PlannerWidgets.ClickableGroup button) {
+            int count = 0;
+            for (PlannerWidgets.ClickableGroup other : buttons) {
+                if (other != button && other.isHovering()) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        /**
+         * Where the probe thinks everything is, for when the probe itself is the thing wrong.
+         *
+         * THE RAW LWJGL PAIR IS PART OF THE LINE, not a redundant echo of the gui one. This is
+         * `FlowCanvas.cursorDiagnostic`'s argument and it earned its place here on the first run:
+         * "the raw y is what I set and the gui y is the mirror of it" is the reading that names
+         * the conversion rather than the panel, and without it a false negative is unattributable.
+         */
+        private static String cursorDiagnostic(int targetX, int targetY) {
+            int scale = ScreenCursor.scale();
+            return "asked=" + targetX + "," + targetY
+                    + " mouseRaw=" + org.lwjgl.input.Mouse.getX() + ","
+                    + org.lwjgl.input.Mouse.getY()
+                    + " scale=" + scale
+                    + " gui=" + ScreenCursor.guiX() + "," + ScreenCursor.guiY()
+                    + " screen=" + ScreenCursor.guiWidth() + "x" + ScreenCursor.guiHeight()
+                    + " display=" + ScreenCursor.displayHeight();
+        }
+
+        private boolean verdict(String label) {
+            ModularScreen screen = panel.getScreen();
+            boolean open = screen.isPanelOpen(expected);
+            ModularPanel top = screen.getPanelManager().getTopMostPanel();
+            String name = top == null ? "none" : top.getName();
+            ShotHarness.log("planner-view: after clicking '" + label + "' there are "
+                            + screen.getPanelManager().getOpenPanelCount() + " panel(s) open,"
+                            + " the top one is '" + name + "', and '" + expected + "' is "
+                            + (open ? "open" : "NOT open"));
+            if (open && expected.equals(name)) {
+                ShotScreens.reportPass();
+            } else {
+                // THE NAME IS THE ASSERTION. A panel being open somewhere is not the claim the
+                // button makes, and the picture cannot tell the two apart -- `flow` and
+                // `planner-todo` are both perfectly good photographs of a panel that opened for
+                // a different reason.
+                ShotScreens.reportFail("clicking '" + label + "' left '" + name + "' on top and"
+                                       + " '" + expected + "' " + (open ? "merely open behind it"
+                                       : "not open at all"));
+            }
+            return false;
+        }
+    }
+
+    /**
+     * The view bar's buttons, in the order they are drawn, or empty until the panel is laid out.
+     *
+     * FOUND BY TYPE RATHER THAN BY POSITION, for the reason `PlannerWidgets.ViewBar` exists: an
+     * index into the panel's click targets is right until a third view is added, and then it
+     * starts parking the cursor on a tree row while still reporting a button.
+     */
+    private static List<PlannerWidgets.ClickableGroup> viewButtons(IWidget parent) {
+        List<PlannerWidgets.ClickableGroup> found =
+                new java.util.ArrayList<PlannerWidgets.ClickableGroup>();
+        PlannerWidgets.ViewBar bar = firstViewBar(parent);
+        if (bar == null) {
+            return found;
+        }
+        for (IWidget child : bar.getChildren()) {
+            if (child instanceof PlannerWidgets.ClickableGroup) {
+                found.add((PlannerWidgets.ClickableGroup) child);
+            }
+        }
+        return found;
+    }
+
+    /** The panel's view bar, depth first. Null before layout or on a panel that has none. */
+    private static PlannerWidgets.ViewBar firstViewBar(IWidget parent) {
+        if (parent instanceof PlannerWidgets.ViewBar) {
+            return (PlannerWidgets.ViewBar) parent;
+        }
+        for (IWidget child : parent.getChildren()) {
+            PlannerWidgets.ViewBar found = firstViewBar(child);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     static void openTodo(String arg) {
@@ -928,6 +1248,22 @@ final class PlannerShot {
 
         @Override
         public void openCaveats() {
+        }
+
+        // INERT LIKE THE REST, AND THE SCREENS THAT EXERCISE THESE TWO DO NOT USE THIS OBJECT
+        // (#323). `planner-view-flow` and `planner-view-todo` open the panel `PlannerScreen`
+        // builds, so their buttons are wired to a real `LivePlannerActions` with a real panel to
+        // hang a sub-panel off. Making these live instead would have been the tempting shortcut
+        // and it would photograph the harness's own wiring -- which is the defect #323 is, since
+        // the three flow screenshots that existed were all produced by the only caller.
+        @Override
+        public void openFlow(
+                io.github.jacoblasky.recipedump.client.planner.PlanView plan) {
+        }
+
+        @Override
+        public void openTodo(io.github.jacoblasky.recipedump.client.planner.PlanView plan,
+                             PlanBook book) {
         }
 
         @Override

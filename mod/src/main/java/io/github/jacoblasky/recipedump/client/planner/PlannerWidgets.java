@@ -323,6 +323,72 @@ public final class PlannerWidgets {
      */
     private static final int SELECTION_EDGE = 0xCC2F5F96;
 
+    /**
+     * What the view bar's buttons say. #323.
+     *
+     * VERBS, AND NOT `Diagram` AND `TODO`. Colour does not say "clickable" on this panel:
+     * {@link #heading} is `line(text, width, INK_CRAFT)`, so the panel's own title is drawn in
+     * the same ink as a menu entry, and a bare noun one row under it reads as a second heading.
+     * "Show" is the word the node menu already uses for its two entries that open something --
+     * "Show recipes", "Show uses" -- so a player who has opened that menu has been taught what
+     * it means here, and nothing new has to be learned.
+     *
+     * NO BRACKETS, WHICH IS A DELIBERATE DEPARTURE FROM `BrowseTabs.strip` AND THE STATE CHIPS.
+     * Both of those bracket the SELECTED entry, and the argument for it -- a second, redundant
+     * channel that costs two characters and survives greyscale and a red-green deficiency -- is
+     * about telling ON from OFF. These two have no on state to tell: they open secondary windows
+     * OVER the tree rather than tabs that replace it, and the tree is still there underneath.
+     * Borrowing the bracket would spend an established signal on something it does not mean.
+     * `MachinesWidgets.modButton` is the precedent that actually fits -- a control on a main
+     * panel that opens a sub-panel, drawn as plain text.
+     */
+    static final String SHOW_DIAGRAM = "Show diagram";
+
+    /** See {@link #SHOW_DIAGRAM}. */
+    static final String SHOW_TODO = "Show TODO list";
+
+    /**
+     * Every label a view button can carry, for {@link #VIEW_BUTTON_WIDTH} to measure.
+     *
+     * PUBLIC BECAUSE `shot.PlannerShot` NAMES THE BUTTON IT PARKED ON in its log, and a shot
+     * whose log says "button 0" rather than what the button said is a shot whose log has to be
+     * cross-referenced with this file to be read at all.
+     *
+     * `PlannerLayoutTest.everyViewLabelIsInTheMeasuredVocabulary` asserts that this holds every
+     * label {@link #views} actually produces. Without it a third button added to `views` and not
+     * to here would be measured against the old widest label and cut -- and a truncated button is
+     * always a bug, because the vocabulary is fixed. That is {@link #BADGE}'s rule, and the badge
+     * column is what happens when it is broken: sized from a second copy of the vocabulary it
+     * came out at 66 pixels and the screenshot read "no known...".
+     */
+    public static final List<String> VIEW_LABELS =
+            java.util.Collections.unmodifiableList(
+                    java.util.Arrays.asList(SHOW_DIAGRAM, SHOW_TODO));
+
+    /**
+     * Width of one view button: the widest label plus one character of slack.
+     *
+     * THE SLACK IS TRAILING AND IS NOT PADDING EITHER SIDE, which this comment used to imply.
+     * `line` draws its text at x=0 across the whole width it is given, so the cell has no left
+     * inset at all; the two `GAP`s buy six pixels of room past the longest label so `fit` has
+     * something to spare and can never cut. What separates the buttons from each other is the
+     * `GAP` that `viewBar` adds between cells, which is a different six pixels.
+     *
+     * EQUAL CELLS, sized to the longest, which is `BrowseTabs.TAB_WIDTH`'s shape. Sizing each
+     * button to its own label gives a ragged row, and `choiceList` and `tableList` both make the
+     * same choice for the same reason: a column of things that do not line up is unscannable.
+     */
+    public static final int VIEW_BUTTON_WIDTH = widestViewLabel() + GAP * 2;
+
+    /** The widest entry in {@link #VIEW_LABELS}, in pixels. Derived, like {@link #BADGE}. */
+    private static int widestViewLabel() {
+        int widest = 0;
+        for (String label : VIEW_LABELS) {
+            widest = Math.max(widest, label.length());
+        }
+        return widest * NodeRowText.CHAR_WIDTH;
+    }
+
     /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
     private static int widestBadge() {
         int widest = NodeStatus.UNSOURCED_BADGE.length();
@@ -336,22 +402,70 @@ public final class PlannerWidgets {
     }
 
     /**
+     * The flow panel's outer box: NEARLY THE WHOLE SCREEN, unlike the tree panel.
+     *
+     * A diagram is only useful at the width it can show a couple of columns in, and
+     * `FlowLayout.NODE_WIDTH` is 209 -- a 360px panel shows one column and half of the next,
+     * which is a list with extra steps. 620x380 fits a 1280x800 client at the default 2x GUI
+     * scale.
+     *
+     * 214 UNTIL #303, IN A COMMENT ONLY: the node has been 209 since `FlowLayout`'s own pin
+     * caught the hand-added figure, and that sentence kept quoting the wrong one while reading
+     * as the reason for the panel size.
+     *
+     * CONSTANTS SINCE #323, because the canvas has to be sized to them and the two numbers were
+     * written out at four places -- here and once per harness call site. See
+     * {@link #FLOW_CANVAS_WIDTH}.
+     */
+    public static final int FLOW_WIDTH = 620;
+
+    /** The flow panel's height. See {@link #FLOW_WIDTH}. */
+    public static final int FLOW_HEIGHT = 380;
+
+    /**
+     * The inset between the flow panel's frame and its canvas, on all four sides.
+     *
+     * NOT {@link #PADDING}, which is the tree panel's 6. This was 4 at all three harness call
+     * sites from the day the diagram was written, and changing it here would silently re-crop
+     * every committed flow screenshot -- so it is recorded as what it is rather than folded into
+     * the other constant because the two numbers look similar.
+     */
+    public static final int FLOW_PAD = 4;
+
+    /**
+     * The canvas inside the flow panel: the panel less its inset on both sides.
+     *
+     * DERIVED, AND THE DERIVATION IS THE POINT (#323). Every caller used to state 612x372 by
+     * hand: three of them on the production side, all in `shot/PlannerShot`, plus a fourth copy
+     * in `PlannerShotTest` asserting what one of those three does. So the first PRODUCTION opener
+     * would have had to know a number nothing had ever told it, and a canvas added to a panel
+     * with no size comes back at nothing rather than filling its parent. `FlowCanvas.forPanel`
+     * is the one
+     * place that applies these; see it for why the sizing cannot live in {@link #flowPanel}.
+     */
+    public static final int FLOW_CANVAS_WIDTH = FLOW_WIDTH - FLOW_PAD * 2;
+
+    /** The canvas's height. See {@link #FLOW_CANVAS_WIDTH}. */
+    public static final int FLOW_CANVAS_HEIGHT = FLOW_HEIGHT - FLOW_PAD * 2;
+
+    /**
      * A panel wrapping the flow diagram, sized to the screen.
      *
      * Here rather than in `client.flow` so the diagram keeps its one dependency on this
      * package pointing the same way as everything else: `flow` calls `planner`, never the
      * reverse. A panel is chrome, and chrome lives with the rest of the chrome.
+     *
+     * IT TAKES A CANVAS THAT IS ALREADY SIZED AND MUST NOT SIZE ONE ITSELF. That looks like the
+     * obvious tidy-up now that {@link #FLOW_CANVAS_WIDTH} exists, and it would break the culling
+     * tests without failing them: `FlowCanvasTest` hands this deliberately small viewports --
+     * 300x180 -- precisely so `FlowCulling` has something to drop, and a size applied here would
+     * quietly overwrite every one of them and turn five assertions about culling into five
+     * assertions about a viewport nothing is outside. DO NOT move the sizing in; production and
+     * the harness both get it from `FlowCanvas.forPanel`.
      */
     public static ModularPanel flowPanel(IWidget canvas) {
-        // NEARLY THE WHOLE SCREEN, unlike the tree panel. A diagram is only useful at the
-        // width it can show a couple of columns in, and `FlowLayout.NODE_WIDTH` is 209 -- a
-        // 360px panel shows one column and half of the next, which is a list with extra steps.
-        // 620x380 fits a 1280x800 client at the default 2x GUI scale.
-        //
-        // 214 UNTIL NOW, IN THIS COMMENT ONLY: the node has been 209 since `FlowLayout`'s own
-        // pin caught the hand-added figure, and this sentence kept quoting the wrong one while
-        // reading as the reason for the panel size.
-        ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow", 620, 380);
+        ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow",
+                                                       FLOW_WIDTH, FLOW_HEIGHT);
         panel.child(canvas);
         return panel;
     }
@@ -359,6 +473,24 @@ public final class PlannerWidgets {
     /** A parent that positions its children absolutely. Concrete because `ParentWidget` is
      *  F-bounded and cannot be instantiated. Adds nothing. */
     public static final class Group extends ParentWidget<Group> {
+    }
+
+    /**
+     * The row of view buttons on the planner panel, as a TYPE rather than a {@link Group}.
+     *
+     * SO SOMETHING ELSE CAN FIND IT WITHOUT COUNTING WIDGETS. `NodeContent` is a type for the
+     * same reason one surface over -- the diagram has to reach its nodes to dim their labels --
+     * and here two readers need it. `PlannerLayoutTest` partitions this panel's click targets
+     * into tree rows and buttons, and it must: its row count is `plan.flatten().size()` plus the
+     * caveat, asserted exactly so that "a stray widget swallows a click somewhere in the panel"
+     * fails. `shot.PlannerShot` needs it to park a real cursor on one button.
+     *
+     * BOTH ALTERNATIVES ARE WRONG IN THE SAME WAY. An index into the panel's clickables is
+     * correct until a third view is added, and then it silently starts calling a tree row a
+     * button; a marker string is a name that can go stale with nothing to notice. A type cannot
+     * do either, and the compiler maintains it.
+     */
+    public static final class ViewBar extends ParentWidget<ViewBar> {
     }
 
     /**
@@ -537,6 +669,78 @@ public final class PlannerWidgets {
     }
 
     /**
+     * The other two ways to read this plan, as clickable entries. #323.
+     *
+     * `Entry` REUSED FROM THE MENUS rather than a second record invented here, because a view
+     * button IS what that one already is -- a label and what clicking it does -- and a second
+     * "text plus Runnable" would be one more thing to keep in step for nothing.
+     *
+     * THE PLAN AND THE BOOK ARE HANDED TO THE ACTION rather than read from a global by whoever
+     * implements it, which is this class's whole contract: no screen and no client state reaches
+     * any method here, and that is what lets `PlannerLayoutTest` run ModularUI's real sizer over
+     * the panel with no window. {@link PlannerActions#openCaveats} takes no argument precisely
+     * BECAUSE its subject is the runtime and the panel does not carry it; these two are made of
+     * what the panel was built from, so the panel passes them.
+     *
+     * AND THAT IS ALSO WHAT KEEPS THE VIEWS HONEST ACROSS A RE-SOLVE. The plan captured here is
+     * the plan drawn on this panel, and `PlannerScreen.PlannerWindow` rebuilds the whole panel
+     * when the plan generation moves -- so a button can only ever open a view of the tree the
+     * player is looking at. Reaching `PlannerService.get().plan()` at click time would look
+     * fresher and would be able to draw a diagram of a plan that is not on screen.
+     */
+    static List<Entry> views(final PlanView plan, final PlanBook book,
+                             final PlannerActions actions) {
+        List<Entry> views = new java.util.ArrayList<Entry>();
+        views.add(new Entry(SHOW_DIAGRAM, new Runnable() {
+            @Override
+            public void run() {
+                actions.openFlow(plan);
+            }
+        }));
+        views.add(new Entry(SHOW_TODO, new Runnable() {
+            @Override
+            public void run() {
+                actions.openTodo(plan, book);
+            }
+        }));
+        return views;
+    }
+
+    /**
+     * The view bar: one button per window this plan can also be read in.
+     *
+     * WHY IT COSTS THE TREE A ROW AND IS WORTH IT (#323). Until this row existed neither the
+     * flow diagram nor the TODO panel had an opener at all outside the screenshot harness: both
+     * rendered, both were photographed, both were covered by layout tests, and mod 0.10.0
+     * shipped with neither reachable by a player. `MachinesWidgets` makes the same trade one
+     * screen over and states it in one line -- "a screen a player cannot find is a screen that
+     * did not ship" -- and it is the same row of table for the same way in.
+     *
+     * BUTTONS AND NOT A KEYBIND, which is the reported requirement rather than a preference:
+     * "keybindings are very challenging to remember and a UI is invaluable". #313 is the
+     * cautionary tale at the other end of that -- the plan key could not fire while JEI was on
+     * screen, so for the whole of 0.10.0 the MVP's only entry point was a chord that silently
+     * did nothing, and nothing on any screen said so.
+     *
+     * A ROW OF `ClickableGroup`, NOT `ButtonWidget`, for the reason that class already gives: a
+     * button brings its own themed background and hover fill, and this panel's inks are chosen
+     * against vanilla's light grey. `BrowseTabs.strip` builds its cells exactly this way.
+     */
+    static ViewBar viewBar(int width, List<Entry> views) {
+        ViewBar bar = new ViewBar();
+        bar.size(width, ROW_HEIGHT);
+        int x = 0;
+        for (Entry view : views) {
+            ClickableGroup button = new ClickableGroup(view.action);
+            button.size(VIEW_BUTTON_WIDTH, ROW_HEIGHT);
+            button.child(line(view.text, VIEW_BUTTON_WIDTH, NodeStatus.INK_CRAFT).pos(0, 0));
+            bar.child(button.pos(x, 0));
+            x += VIEW_BUTTON_WIDTH + GAP;
+        }
+        return bar;
+    }
+
+    /**
      * The whole planner window for a solved plan.
      *
      * @param book   the player's plan book, for the "still needed" column; may be empty.
@@ -554,6 +758,22 @@ public final class PlannerWidgets {
         int y = 0;
         body.child(heading(NodeRowText.heading(plan), CONTENT_WIDTH).pos(0, y));
         y += LINE + 1;
+
+        // THE WAY IN TO THE OTHER TWO WINDOWS, AND IT COSTS THE TREE ONE ROW (#323). See
+        // `viewBar` for why that is the right trade; before it, both of those windows could only
+        // be opened by the screenshot harness.
+        //
+        // DIRECTLY UNDER THE HEADING, where `MachinesWidgets` puts its own strip and chips, so
+        // it is on screen before anything is scrolled -- the reader who needs to know there is a
+        // diagram is the one who does not yet suspect there is one, which is `staleGraphWarning`'s
+        // argument for repeating a verdict where the wrong answer is actually read.
+        //
+        // AND RESERVED BEFORE THE TREE IS SIZED, not appended after. The tree takes whatever is
+        // left, so a row added below it without taking its height out first is drawn past the
+        // bottom of the panel -- ModularUI neither clamps nor clips a child (#125). `y` is what
+        // does the reserving, so this line has to come before `treeHeight` is computed.
+        body.child(viewBar(CONTENT_WIDTH, views(plan, book, actions)).pos(0, y));
+        y += ROW_HEIGHT + 1;
 
         // ABOVE THE OTHER WARNINGS, AND NOT INSIDE THEM (#285). `warnings` is capped at
         // MAX_WARNINGS and rolls the overflow up as "+N more recipe choice(s)", so a stale-graph
@@ -1128,8 +1348,16 @@ public final class PlannerWidgets {
         return menuPanel("mcrecipedump_row_menu", row.need() + "x " + row.label(), entries);
     }
 
-    /** One menu line and what it does. */
-    private static final class Entry {
+    /**
+     * One menu line and what it does -- and, since #323, one view button.
+     *
+     * PACKAGE-VISIBLE RATHER THAN PRIVATE so `PlannerLayoutTest` can read the labels {@link
+     * #views} produces and check them against {@link #VIEW_LABELS}, which is what stops a third
+     * button being measured against the old widest label and cut. A test that could only reach
+     * the WIDGETS would find a `TextWidget` holding an `IKey` whose rendered string cannot be
+     * read back headlessly -- the same wall {@link #todoLines} exists to get around.
+     */
+    static final class Entry {
         final String text;
         final Runnable action;
 

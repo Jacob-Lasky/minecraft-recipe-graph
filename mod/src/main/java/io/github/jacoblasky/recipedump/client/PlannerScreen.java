@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client;
 
 import java.util.function.Function;
 
+import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.factory.ClientGUI;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.ModularScreen;
@@ -9,6 +10,8 @@ import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 
 import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
+import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
+import io.github.jacoblasky.recipedump.client.planner.FlowSource;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
@@ -255,12 +258,56 @@ public final class PlannerScreen {
         ClientGUI.open(new ModularScreen(RecipeDumpMod.MODID, builder));
     }
 
+    /**
+     * The planner panel a player gets, actions attached.
+     *
+     * DELIBERATELY STILL PRIVATE, AND #323 IS WHY THE NOTE IS HERE. Its two harness screens have
+     * to drive the panel PRODUCTION builds -- a hand-built one would carry a {@link FlowSource}
+     * and a `PlannerActions` chosen by the harness, and would photograph the harness's own wiring,
+     * which is the exact failure #323 is. Making this public looked like the way to hand it over
+     * and `PanelReachabilityTest` immediately reported it as a panel builder with no opener
+     * outside `shot/`: true, by that gate's own rule, since {@link #openPlan} is its own class.
+     * The gate was right and the change was wrong. `PlannerShot` calls `openPlan` -- the player's
+     * path -- and finds the panel back off `ModularScreen.getCurrent()`, which is where a harness
+     * indirection belongs. NOT off `Minecraft.currentScreen`, which is the obvious route and does
+     * not compile: that field holds the `GuiScreenWrapper`, and casting it to `IMuiScreen` to ask
+     * for the panel drags in `neverenoughanimations.api.IAnimatedScreen`, which is not on this
+     * project's classpath. See `PlannerShot.livePanel`, which carries the measurement.
+     *
+     * DO NOT let a caller pass its own actions or its own schema check in. Both are decided here
+     * and decided ONCE, for the reason {@link #schemaCheck} carries the same instruction.
+     */
     private static ModularPanel planPanel(PlanView plan, PlanBook book) {
-        LivePlannerActions actions = new LivePlannerActions();
+        LivePlannerActions actions = new LivePlannerActions(DIAGRAMS);
         ModularPanel panel = PlannerWidgets.plannerPanel(plan, book, schemaCheck(), actions);
         actions.attachTo(panel);
         return avoidedByJei(panel);
     }
+
+    /**
+     * Where the flow diagram comes from, installed at the one layer allowed to name both
+     * packages. #323.
+     *
+     * `client.flow` depends on `client.planner` and never the reverse -- see `FlowSource` for the
+     * full argument -- so the class that owns the button's panel handler cannot build a canvas.
+     * This one can: it is above both, it already imports `client.planner` to build the panel at
+     * all, and `FlowCanvas` is loaded by the panel it opens a moment later anyway.
+     *
+     * `FlowCanvas.forPanel` AND NOT `new FlowCanvas(...)`. The canvas has to be sized to the
+     * panel it goes in, and until #323 the only three callers were harness call sites each
+     * carrying their own copy of the two numbers. A production opener that forgot would open a
+     * correctly wired window around a zero-sized diagram -- a blank grey rectangle, which is what
+     * every other reason a canvas draws nothing also looks like.
+     *
+     * A CONSTANT AND NOT A FRESH INSTANCE PER PANEL, because it holds nothing: it is a function
+     * from a plan to a widget, and the plan arrives as an argument at click time.
+     */
+    private static final FlowSource DIAGRAMS = new FlowSource() {
+        @Override
+        public IWidget diagramFor(PlanView plan) {
+            return FlowCanvas.forPanel(plan.tree());
+        }
+    };
 
     /**
      * How the loaded graph's dump format compares with this build's, or null when no graph is

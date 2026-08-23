@@ -105,9 +105,6 @@ import io.github.jacoblasky.recipedump.common.ScenarioSource;
  */
 public class SeamInstallationTest {
 
-    /** Anything under here is the screenshot harness, not production. See the class note. */
-    private static final String HARNESS = ClassFiles.ROOT_PACKAGE + "/shot/";
-
     /**
      * Seams that must still be found by the scan, so a broken predicate cannot pass by
      * matching nothing. NOT the list under test -- see the class note.
@@ -178,8 +175,8 @@ public class SeamInstallationTest {
     public void everySettableSeamIsInstalledSomewhereInProduction() throws Exception {
         Scan scan = findSeams();
         assertTheScanFoundTheSeamsItIsKnownToHave(scan);
-        Map<String, Set<String>> callers = emptyCallerMap(scan.seams.keySet());
-        recordProductionCallers(callers);
+        Map<String, Set<String>> callers = ProductionCallers.emptyMap(scan.seams.keySet());
+        ProductionCallers.record(callers);
 
         List<String> unwired = new ArrayList<String>();
         for (Seam seam : scan.seams.values()) {
@@ -328,15 +325,15 @@ public class SeamInstallationTest {
      * Every public static method on these classes EXCEPT the no-argument void ones, mapped to
      * the production classes that call it.
      *
-     * KEYED BY DESCRIPTOR, so an overload cannot be counted as its sibling: `accept(NBTTagCompound)`
-     * and a future `accept(StockSnapshot)` are different joins and one being called says nothing
-     * about the other.
+     * KEYED BY DESCRIPTOR, so an overload cannot be counted as its sibling:
+     * `accept(NBTTagCompound)` and a future `accept(StockSnapshot)` are different joins and one
+     * being called says nothing about the other.
      */
     private static Map<String, Set<String>> productionCallersOfPublicStatics(Set<String> owners)
             throws IOException {
         Map<String, Set<String>> found = new LinkedHashMap<String, Set<String>>();
         for (String owner : owners) {
-            Class<?> loaded = load(owner);
+            Class<?> loaded = ProductionCallers.load(owner);
             if (loaded == null) {
                 continue;
             }
@@ -350,52 +347,13 @@ public class SeamInstallationTest {
                         && method.getReturnType() == void.class) {
                     continue;  // the `install()` shape, owned by the gate above
                 }
-                found.put(owner + "." + method.getName() + descriptorOf(method),
+                found.put(owner + "." + method.getName()
+                          + ProductionCallers.descriptorOf(method),
                           new LinkedHashSet<String>());
             }
         }
-        recordProductionCallers(found);
+        ProductionCallers.record(found);
         return found;
-    }
-
-    /** A method's JVM descriptor, which is how a `Methodref` spells it. */
-    private static String descriptorOf(Method method) {
-        StringBuilder descriptor = new StringBuilder("(");
-        for (Class<?> parameter : method.getParameterTypes()) {
-            descriptor.append(typeDescriptor(parameter));
-        }
-        return descriptor.append(')').append(typeDescriptor(method.getReturnType())).toString();
-    }
-
-    private static String typeDescriptor(Class<?> type) {
-        if (type.isArray()) {
-            return "[" + typeDescriptor(type.getComponentType());
-        }
-        if (!type.isPrimitive()) {
-            return "L" + internalNameOf(type) + ";";
-        }
-        if (type == void.class) {
-            return "V";
-        }
-        if (type == boolean.class) {
-            return "Z";
-        }
-        if (type == byte.class) {
-            return "B";
-        }
-        if (type == char.class) {
-            return "C";
-        }
-        if (type == short.class) {
-            return "S";
-        }
-        if (type == int.class) {
-            return "I";
-        }
-        if (type == long.class) {
-            return "J";
-        }
-        return type == float.class ? "F" : "D";
     }
 
     /**
@@ -410,14 +368,14 @@ public class SeamInstallationTest {
         Map<String, Set<String>> found = new LinkedHashMap<String, Set<String>>();
         for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
             String internal = ClassFiles.internalName(file);
-            if (isHarness(internal) || declaresASeam(scan, internal)) {
+            if (ProductionCallers.isHarness(internal) || declaresASeam(scan, internal)) {
                 continue;
             }
             if (Collections.disjoint(ClassFiles.methodReferences(ClassFiles.read(file)),
                                      seamReferences)) {
                 continue;
             }
-            Class<?> owner = load(internal);
+            Class<?> owner = ProductionCallers.load(internal);
             if (owner == null) {
                 continue;
             }
@@ -435,13 +393,13 @@ public class SeamInstallationTest {
                 continue;
             }
         }
-        recordProductionCallers(found);
+        ProductionCallers.record(found);
         return found;
     }
 
     private static boolean declaresASeam(Scan scan, String internal) {
         for (Seam seam : scan.seams.values()) {
-            if (isSelf(seam.owner, internal)) {
+            if (ProductionCallers.isSelf(seam.owner, internal)) {
                 return true;
             }
         }
@@ -618,7 +576,7 @@ public class SeamInstallationTest {
         Set<String> outer = Collections.emptySet();
         for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE + "/client")) {
             String internal = ClassFiles.internalName(file);
-            if (!isSelf(proxy, internal)) {
+            if (!ProductionCallers.isSelf(proxy, internal)) {
                 continue;
             }
             Set<String> references = ClassFiles.methodReferences(ClassFiles.read(file));
@@ -635,7 +593,7 @@ public class SeamInstallationTest {
         assertEquals("exactly one nested class of ClientProxy hands the reply on, and the"
                      + " gate's whole-production scan is what sees it", 1, nestedHolders.size());
         assertTrue("a caller inside a nested class is still a caller from another class",
-                   !isSelf(ClassFiles.ROOT_PACKAGE + "/client/PlannerStock",
+                   !ProductionCallers.isSelf(ClassFiles.ROOT_PACKAGE + "/client/PlannerStock",
                            nestedHolders.get(0)));
     }
 
@@ -662,10 +620,10 @@ public class SeamInstallationTest {
     public void aDescriptorIsSpeltTheWayTheConstantPoolSpellsIt() throws Exception {
         Method sample = SeamInstallationTest.class.getMethod(
                 "sampleSignature", int.class, String[].class, long[][].class);
-        assertEquals("(I[Ljava/lang/String;[[J)Z", descriptorOf(sample));
-        assertEquals("V", typeDescriptor(void.class));
-        assertEquals("D", typeDescriptor(double.class));
-        assertEquals("[B", typeDescriptor(byte[].class));
+        assertEquals("(I[Ljava/lang/String;[[J)Z", ProductionCallers.descriptorOf(sample));
+        assertEquals("V", ProductionCallers.typeDescriptor(void.class));
+        assertEquals("D", ProductionCallers.typeDescriptor(double.class));
+        assertEquals("[B", ProductionCallers.typeDescriptor(byte[].class));
     }
 
     /**
@@ -683,10 +641,10 @@ public class SeamInstallationTest {
                    + " exclusion is silently excluding nothing", harnessClasses.size() >= 5);
         for (File file : harnessClasses) {
             assertTrue(ClassFiles.internalName(file) + " should be excluded as harness code",
-                       isHarness(ClassFiles.internalName(file)));
+                       ProductionCallers.isHarness(ClassFiles.internalName(file)));
         }
         assertFalse("production code must not be mistaken for the harness",
-                    isHarness(ClassFiles.ROOT_PACKAGE + "/client/ClientProxy"));
+                    ProductionCallers.isHarness(ClassFiles.ROOT_PACKAGE + "/client/ClientProxy"));
     }
 
     /**
@@ -699,10 +657,11 @@ public class SeamInstallationTest {
     @Test
     public void aClassInstallingItsOwnSeamDoesNotCount() {
         String hooks = ClassFiles.ROOT_PACKAGE + "/client/jei/PlannerHooks";
-        assertTrue(isSelf(hooks, hooks));
+        assertTrue(ProductionCallers.isSelf(hooks, hooks));
         assertTrue("a nested class is still the same class for this purpose",
-                   isSelf(hooks, hooks + "$1"));
-        assertFalse(isSelf(hooks, ClassFiles.ROOT_PACKAGE + "/client/PlanTarget"));
+                   ProductionCallers.isSelf(hooks, hooks + "$1"));
+        assertFalse(ProductionCallers.isSelf(
+                hooks, ClassFiles.ROOT_PACKAGE + "/client/PlanTarget"));
     }
 
     // -- finding the seams ---------------------------------------------------------------------
@@ -730,10 +689,10 @@ public class SeamInstallationTest {
         Scan scan = new Scan();
         for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
             String internal = ClassFiles.internalName(file);
-            if (isHarness(internal)) {
+            if (ProductionCallers.isHarness(internal)) {
                 continue;
             }
-            Class<?> owner = load(internal);
+            Class<?> owner = ProductionCallers.load(internal);
             if (owner == null) {
                 scan.skipped.add(internal);
                 continue;
@@ -743,8 +702,8 @@ public class SeamInstallationTest {
                     if (!isSeamInstaller(owner, method)) {
                         continue;
                     }
-                    String descriptor =
-                            "(L" + internalNameOf(method.getParameterTypes()[0]) + ";)V";
+                    String descriptor = "(L" + ProductionCallers.internalNameOf(
+                            method.getParameterTypes()[0]) + ";)V";
                     Seam seam = new Seam(internal, method.getName(), descriptor);
                     scan.seams.put(seam.reference(), seam);
                 }
@@ -794,57 +753,6 @@ public class SeamInstallationTest {
         return false;
     }
 
-    /**
-     * Fill in, for every `owner.nameDescriptor` key already present, the production classes
-     * whose constant pool names it. A key with no caller keeps the empty set it arrived with,
-     * which is what every gate here reads as "nothing in the shipped mod calls this".
-     *
-     * ONE WALK FOR ALL THREE GATES. Each carried its own copy of this loop, identical down to
-     * the self-check, which is the dangerous kind of duplication rather than the harmless kind:
-     * three implementations that agree today drift one at a time, and a gate that drifts stops
-     * DISCRIMINATING rather than failing, so nothing reports it. #205 added the third copy and
-     * this removes all three.
-     *
-     * A CLASS DOES NOT COUNT AS ITS OWN CALLER, nested classes included. A default reinstalling
-     * its own default is the exact no-op this whole file exists to notice.
-     */
-    private static void recordProductionCallers(Map<String, Set<String>> into)
-            throws IOException {
-        for (File file : ClassFiles.under(ClassFiles.ROOT_PACKAGE)) {
-            String caller = ClassFiles.internalName(file);
-            if (isHarness(caller)) {
-                continue;
-            }
-            for (String reference : ClassFiles.methodReferences(ClassFiles.read(file))) {
-                Set<String> callers = into.get(reference);
-                if (callers != null && !isSelf(ownerOf(reference), caller)) {
-                    callers.add(caller);
-                }
-            }
-        }
-    }
-
-    /** A caller map with every key present and no callers found yet. */
-    private static Map<String, Set<String>> emptyCallerMap(Set<String> references) {
-        Map<String, Set<String>> map = new LinkedHashMap<String, Set<String>>();
-        for (String reference : references) {
-            map.put(reference, new LinkedHashSet<String>());
-        }
-        return map;
-    }
-
-    /**
-     * The declaring class of an `owner.nameDescriptor` reference.
-     *
-     * THE FIRST `.` IS THE SEPARATOR AND THAT IS NOT AN ACCIDENT: an owner is an INTERNAL name,
-     * so it is `a/b/C` and cannot contain a dot, while everything after the first one is the
-     * method name and its descriptor. Spelled once because it was open-coded at three call
-     * sites, and the assumption is worth saying rather than leaving to be re-derived.
-     */
-    private static String ownerOf(String reference) {
-        return reference.substring(0, reference.indexOf('.'));
-    }
-
     private static void assertTheScanFoundTheSeamsItIsKnownToHave(Scan scan) {
         // ASSERT THE POPULATION BEFORE THE PROPERTY, as `CommonSideSafetyTest` does. A scan
         // that introspected nothing finds no unwired seams and reports success.
@@ -862,21 +770,8 @@ public class SeamInstallationTest {
 
     // -- small helpers -------------------------------------------------------------------------
 
-    private static boolean isHarness(String internalName) {
-        return internalName.startsWith(HARNESS);
-    }
-
-    /** True when `caller` is the seam's own class, counting its nested classes as the same. */
-    private static boolean isSelf(String owner, String caller) {
-        return caller.equals(owner) || caller.startsWith(owner + "$");
-    }
-
     private static boolean isOurs(Class<?> type) {
         return type.getName().startsWith(ClassFiles.ROOT_PACKAGE.replace('/', '.') + ".");
-    }
-
-    private static String internalNameOf(Class<?> type) {
-        return type.getName().replace('.', '/');
     }
 
     private static File classFile(String relative) {
@@ -886,21 +781,4 @@ public class SeamInstallationTest {
         return file;
     }
 
-    /**
-     * Load without INITIALISING, which matters: several of these classes register a keybind or
-     * touch Forge state in a static initialiser, and running that here would either throw or
-     * quietly change global state for every test after this one.
-     *
-     * A class that cannot be loaded at all -- one naming a mod that is `compileOnly`, say --
-     * is skipped rather than failed. It cannot be scanned for seams, and failing on it would
-     * make this gate depend on which pack jars happen to be on the classpath.
-     */
-    private static Class<?> load(String internalName) {
-        try {
-            return Class.forName(internalName.replace('/', '.'), false,
-                                 SeamInstallationTest.class.getClassLoader());
-        } catch (Throwable absent) {
-            return null;
-        }
-    }
 }

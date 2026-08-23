@@ -744,13 +744,20 @@ calculator uncraftable in any pack without AE2, so the at-range component is an 
 now and the claim is honoured by carrying a link rather than by proximity. See the class note
 on `Ae2Stock` for why that swap changes nothing about how stock is read.
 
-**Two panels exist in code but have no way in yet.** The flow diagram renders — it is
-photographed by the screenshot harness every run — but nothing a player can click opens it
-([#323](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/323)). The TODO *panel*,
-which would list what you put on the TODO, is the same shape — its only openers are the harness
-and the tests — and #323 covers both panels. The TODO itself does work — "Add to TODO" in the node menu writes to the plan
-book, and the planner footer counts it — so what is missing is the screen that reads the list
-back, not the feature.
+**Two buttons on the planner open the other two windows.** Under the heading are **Show
+diagram** and **Show TODO list**: the first opens the flow diagram of the plan you are looking
+at, the second opens the TODO panel — the list "Add to TODO" writes to, beside what this plan
+still needs of it. The tree stays where it was underneath; both are windows over it rather than
+tabs that replace it. The row costs the tree one visible line, which is the same trade the
+browse screens make for their tab strip: a window you cannot find is a window that did not ship.
+
+Until 0.10.1 neither had an opener at all. Both panels rendered, both were photographed by the
+screenshot harness every run, and the only callers of either were the harness and the tests
+([#323](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/323)) — so the diagram the
+release notes described could not be reached, and a player could add to a TODO list they had no
+way to see. The buttons are the fix, and `PanelReachabilityTest` is the part that keeps it
+fixed: it fails when any panel builder in the mod has no opener outside the harness, which is
+what neither the layout tests nor the screenshots could notice.
 
 **`=` is the headline interaction.** Point at anything in JEI's item list or in an open recipe
 and press it: no window to open first, no item to type. It is bound to `=` by default because

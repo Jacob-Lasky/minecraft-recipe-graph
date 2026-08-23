@@ -157,6 +157,25 @@ cp $SHOTS/collide.png docs/shots/planner-same-name.png
 # exists to satisfy. ~510 s, nearly all of it the sweep.
 harness/shot.sh flow:synthetic:4000 flow4000
 cp $SHOTS/flow4000.png docs/shots/flow-4000-composed.png
+
+# The two view buttons, and each panel opened BY CLICKING one (#323). NO ORACLE, and the
+# fixture is deliberately the SAME for the first two: `plan-in-stock` is four nodes, so the
+# tree shot and the diagram shot are the same plan drawn two ways and can be read as a pair.
+#
+# `planner-view-flow` AND `planner-view-todo` ARE NOT `flow` AND `planner-todo`. Those two call
+# the panel builders directly, which is how a diagram no player could open came to have three
+# green screenshots; these park the real cursor on a button, click through
+# `ModularScreen.onMousePressed`, and refuse the run unless the panel that came up is the one
+# the button claims. Both are 80-90 s (measured 88 s and 79 s) and neither needs a world.
+harness/shot.sh planner:plan-in-stock view-bar
+cp $SHOTS/view-bar.png docs/shots/planner-view-bar.png
+harness/shot.sh planner-view-flow:plan-in-stock view-flow
+cp $SHOTS/view-flow.png docs/shots/planner-view-flow.png
+# The TODO one keeps the DEFAULT fixture on purpose: `plan-truncated` fills the book with
+# fluids, a 934,400 mB water draw and the discriminated `vis_pod` key, so the panel is shown
+# carrying the rows that are hard rather than the three a hopper produces.
+harness/shot.sh planner-view-todo view-todo
+cp $SHOTS/view-todo.png docs/shots/planner-view-todo.png
 ```
 
 | File | What it shows |
@@ -174,6 +193,9 @@ cp $SHOTS/flow4000.png docs/shots/flow-4000-composed.png
 | `planner-mid-load-refused.png` | THE ONLY COMMITTED PICTURE THAT FAILED ITS OWN RUN, and it is here to be looked at rather than to be argued from. Same screen and same guard as `planner-mid-load.png`, against `graph-tiny-271.json`: the read finished before the hold opened, so what got photographed is a fully drawn, entirely legible panel that is not a picture of a read -- and the guard refused it. Nothing about the image looks like a failure until you read the line in it, which is the whole case against a check that counts pixels or asks whether anything was drawn. Its recipe is under "Making each guard say no"; #303 committed it because the only copy was in the rotating `/coding/.recipegraph-build/shots/` and would have aged out. |
 | `planner-same-name.png` | BOTH BRANCHES OF #232's WIDTH RULE, on adjacent rows, which is the only arrangement that argues anything. `Ender Pearl · Crafting · 5…` is at capacity and declines the fragment, keeping the machine name it draws on master; `Ender Pearl (itemblacklist)` has an empty meta run and takes it. A shot of the taking row alone would be equally consistent with a fix that evicts the machine name to make room, which is the regression the no-eviction rule exists to prevent -- so the row that DOESN'T change is half the evidence. |
 | `plan-pin-overruled.png` | A pin the cycle guard could not honour (`9 nuggets -> 1 ingot`, and the nuggets come from an ingot). The plan says so in red. Until this PR it said nothing, and the picture was byte-identical to `plan-before-pin.png` -- which is how the gap was found, by two screenshots that should have differed and did not. |
+| `planner-view-bar.png` | THE ROW THAT MAKES THE OTHER TWO WINDOWS EXIST FOR A PLAYER (#323). `Show diagram` and `Show TODO list` under the `2x Hopper` heading, above the tree. Both panels rendered, were photographed and were covered by layout tests through 0.10.0 and 0.10.1 while the only callers of either builder were `shot/` and the tests -- so the diagram the release notes described could not be opened, and a player could add to a TODO list with no way to see it. This is the picture that says a player can find them; `PanelReachabilityTest` is what keeps it true. |
+| `planner-view-flow.png` | The same four-node plan as `planner-view-bar.png`, as a GRAPH, reached by clicking `Show diagram` on that panel. **READ IT AS A PAIR WITH THAT SHOT, WHICH IS WHY BOTH USE `plan-in-stock`**: the list and the diagram are one plan drawn two ways, and the pair is what shows the button changes the view rather than opening some other plan. What no picture can show is that the click travelled: the run parks the real cursor on the button box, clicks through `ModularScreen.onMousePressed`, and asserts the panel that opened is named `mcrecipedump_flow` -- see the log line in the recipe above, because a screenshot of an open diagram is equally consistent with a harness that opened it directly. |
+| `planner-view-todo.png` | The TODO panel over the planner, reached by clicking `Show TODO list`. **THE WRITE PATH SHIPPED WITHOUT THIS READ PATH**, which is the half of #323 that was worse: `LivePlannerActions.addToTodo` has sent `PlanBookEdit.SET_TODO` since #140 and the node menu has offered it in every release since, so the list was real and unopenable. The planner's own edges are visible above and below, because this is a secondary window over the tree rather than a tab that replaces it. `plan-truncated` rather than the hopper, so the rows on show are the awkward ones -- fluids, a 934,400 mB water draw, and the discriminated `vis_pod` key that exercises the fallback to a raw key. |
 
 ## Making each guard say no
 

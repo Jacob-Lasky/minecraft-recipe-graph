@@ -124,6 +124,40 @@ public class FlowCanvasTest {
         assertEquals(180, canvas.getArea().height);
     }
 
+    /**
+     * THE SECOND HALF OF #323: a canvas the production opener can hand over already sized.
+     *
+     * WHAT A ZERO HERE MEANS, which is why this asserts a number rather than "not zero". A widget
+     * added to a ModularUI panel with no size is not stretched to fit it -- it arrives at nothing,
+     * and `WidgetTree.resizeInternal` catches Throwable and only logs it, so the panel opens,
+     * lays out and draws an empty grey rectangle. Every one of the three callers that existed
+     * before #323 was
+     * in `shot/` and carried its own copy of the two numbers, so the FIRST player-reachable
+     * opener would have had nothing to read them off -- and getting it wrong produces exactly the
+     * blank picture that five flow screenshots turned out to be across two PRs.
+     *
+     * ASSERTED AFTER A REAL LAYOUT PASS AND NOT ON THE CONSTRUCTED VALUES, because that is the
+     * question: `HeadlessLayout.layOut` runs ModularUI's own sizer over the panel, so a canvas
+     * that asked for 612x372 and was then given something else by the sizer fails here.
+     *
+     * AND AGAINST THE PANEL'S OWN CONSTANTS, not against 612 and 372 written out again. A literal
+     * here would pass while disagreeing with the panel, which is the drift the constants were
+     * introduced to end.
+     */
+    @Test
+    public void forPanelSizesTheCanvasToThePanelItGoesIn() {
+        FlowCanvas canvas = FlowCanvas.forPanel(PlanTrees.fan(20));
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
+        assertEquals(PlannerWidgets.FLOW_CANVAS_WIDTH, canvas.getArea().width);
+        assertEquals(PlannerWidgets.FLOW_CANVAS_HEIGHT, canvas.getArea().height);
+        // THE INSET IS ON BOTH SIDES, which is what makes the canvas clear the nine-slice's
+        // frame. A canvas at 0,0 the full inner width would be the same size and drawn over the
+        // border -- the failure `PlannerWidgets.NODE_PAD` records one level down.
+        assertTrue("the canvas must clear the panel's own frame",
+                   canvas.getArea().width + PlannerWidgets.FLOW_PAD * 2
+                           == PlannerWidgets.FLOW_WIDTH);
+    }
+
     @Test
     public void theScrollExtentIsTheWholeLayoutSoEveryNodeCanBeReached() {
         // A scroll size left at the viewport's own size is the shape that makes a diagram
