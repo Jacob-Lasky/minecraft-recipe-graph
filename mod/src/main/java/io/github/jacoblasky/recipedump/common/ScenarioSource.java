@@ -75,12 +75,58 @@ public enum ScenarioSource {
     RAW("raw", true, ""),
 
     /**
-     * Placed tile entities, which decide machine availability and infinite sources. A world
-     * scan, and the offline tool does it by reading region files -- neither is a thing to do
-     * on a render thread, so it needs its own design rather than a quick call.
+     * Placed machines, which decide machine availability and infinite sources. LIVE SINCE #320,
+     * and live WITH A STATED SCOPE rather than in full.
+     *
+     * <h2>What counts as placed in game, exactly</h2>
+     *
+     * A machine CONNECTED TO THE ME NETWORK YOUR WIRELESS TERMINAL IS LINKED TO. `Ae2StockReader`
+     * enumerates the grid's nodes in the same pass and behind the same gates as the stock read,
+     * so no link, no range, no power or no permission refuses the machines exactly as it refuses
+     * the items -- nothing is granted without an ME connection. Jake's decision on #320: simple
+     * over complete, and not overpowered.
+     *
+     * <h2>THE THREE THINGS IT STILL DOES NOT SEE -- phase 1's scope, not the end state</h2>
+     *
+     * #320 stays OPEN for phase 2: a server-side scan of each loaded world's
+     * `loadedTileEntityList` in the same request/reply -- formed Modular Machinery controllers
+     * (by reflection, formed-state checked) and placed generators -- merged into this same
+     * `placed` map. The design is on the issue. The list below is what phase 1 leaves out:
+     *
+     * <ul>
+     * <li>A machine sitting OFF the grid. It reads `buildable`, not `have` -- the honest answer
+     *     under this scope, and a lower bound rather than a wrong one.</li>
+     * <li>A standalone generator: a placed `nuclearcraft:water_source` is not a grid node, so
+     *     `resolveFreeSources` still finds nothing placed and falls through to stock.</li>
+     * <li>Anything reached only through a storage bus. The bus is the node; the machine behind
+     *     it is not on the grid at all. Measured against the pack in `Ae2StockReader.placedOf`.
+     *     </li>
+     * </ul>
+     *
+     * WHY THIS IS STILL DECLARED `live`. The alternative is reporting it unavailable, and
+     * {@link Status#unavailable} carries NO CONTENTS by design -- so a partial-credit status
+     * would throw the machines away and go back to pricing every one as buildable, which is the
+     * bug #320 fixed. A narrower read that says what it read beats a wider one that says
+     * nothing. The scope is stated to the player by `client.planner.PlanCaveats.PLACED_SCOPE`,
+     * rendered through `PlanCaveats.scopeLines`.
+     *
+     * <h2>What the offline tool does instead, kept here because the two must not be confused</h2>
+     *
+     * `recipegraph have` reads region files and sees EVERY tile entity in the save, grid or no
+     * grid. That read is not available here: neither a region read nor a world scan belongs on a
+     * render thread, which is why the grid was the affordable scope. The two produce the same
+     * `placed` FIELD with different coverage, and `ScenarioInputs` cannot tell them apart -- so
+     * a plan made in game and the same plan made offline can legitimately disagree about a
+     * machine. DO NOT "fix" that by widening this WITHOUT the phase-2 design on #320 -- the
+     * loaded-tile-entity scan is the sanctioned widening; a region read or a render-thread
+     * world scan is not.
+     *
+     * THE DECLARED CONSTANT BELOW IS NOW A FAULT REPORT, like {@link #HAVE}'s. It is reached only
+     * when NOTHING installed a reader, which since #320 means the client wiring did not run.
      */
-    PLACED("placed", false, "placed machines and generators are not scanned yet, so every "
-            + "machine reads as buildable rather than owned"),
+    PLACED("placed", false, "no ME network reader is installed, so no machine counts as owned "
+            + "and every one reads as buildable -- the planner should have installed one when "
+            + "the client started"),
 
     /**
      * Which dimensions have terrain. Read from the save's region directories, so the server

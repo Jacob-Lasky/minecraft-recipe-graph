@@ -23,6 +23,8 @@ import java.util.Set;
 
 import org.junit.Test;
 
+import io.github.jacoblasky.recipedump.common.ScenarioSource;
+
 /**
  * EVERY SETTABLE SEAM MUST BE INSTALLED BY PRODUCTION, not only by the test that covers it.
  *
@@ -444,6 +446,79 @@ public class SeamInstallationTest {
             }
         }
         return false;
+    }
+
+    /**
+     * A FIFTH SHAPE, AND THE ONLY PART OF IT A CONSTANT POOL CAN ANSWER: which `ScenarioSource`
+     * constants the installer names at all. #320
+     *
+     * <h2>What this can and cannot see, because the difference is the whole reason it is worded
+     * this way</h2>
+     *
+     * The class note above is emphatic that PER-CONSTANT GRANULARITY IS NOT RECOVERABLE for
+     * `readBy`: `HAVE.readBy(...)` and `PLACED.readBy(...)` compile to the SAME `Methodref`
+     * behind different `getstatic`s, so no gate here can say WHICH constant got a reader. That
+     * limit stands and this does not pretend to beat it.
+     *
+     * What IS exact is one level narrower: a `getstatic` of an enum constant emits a `Fieldref`,
+     * and its name lands in the pool as plain text. So "does the class that installs the readers
+     * mention `PLACED` anywhere" is a yes-or-no question about bytes. That catches the #191 shape
+     * -- one end quietly stopping -- for the placed join, which is the shape that actually
+     * happened twice on the stock one. It does NOT catch a reader installed on the wrong
+     * constant, and only `PlannerStockTest.installWiresPlacedAsWellAsHave` says that.
+     *
+     * DERIVED FROM THE ENUM RATHER THAN LISTED, so a source that goes live tomorrow is covered
+     * the day its reader is written rather than the day somebody remembers this file. The
+     * population is the sources a reader has to be installed for -- the ones whose declared
+     * constant is a fault report -- which is asked of the enum by whether the note names a
+     * missing READER.
+     *
+     * THE NEGATIVE CONTROL IS DOING THE WORK. A raw substring search over a class file matches
+     * a lot of things, so `PinStore` -- which installs a reader on `PINS` and no other -- must
+     * NOT read as mentioning `PLACED`. Without that, a search that matched everything would pass
+     * this forever.
+     */
+    @Test
+    public void theClassThatInstallsTheReadersNamesEverySourceThatNeedsOne() throws Exception {
+        // THE DECLARED CONSTANTS ARE WHAT THIS READS, and a reader left installed by another
+        // test class in the same JVM would answer instead of them -- so the population would
+        // shrink silently and the gate would pass having checked less.
+        ScenarioSource.resetReaders();
+        byte[] stock = ClassFiles.read(classFile("client/PlannerStock"));
+        byte[] pins = ClassFiles.read(classFile("common/PinStore"));
+
+        List<String> needAReader = new ArrayList<String>();
+        for (ScenarioSource source : ScenarioSource.values()) {
+            // The fault-report wording is the marker: a source whose declared constant blames a
+            // missing READER is one production is expected to install one for. A source that is
+            // genuinely empty (`pins`, `no_machine`) or genuinely unread (`emc_knowledge`) says
+            // something else, and demanding a reader for those would be asserting a feature
+            // nobody has built.
+            if (source.note().contains("no ME network reader is installed")) {
+                needAReader.add(source.name());
+            }
+        }
+        assertEquals("the fault-report wording moved, so this gate is asserting nothing; the"
+                     + " sources needing a reader are HAVE and PLACED since #320",
+                     Arrays.asList("HAVE", "PLACED"), needAReader);
+
+        List<String> unnamed = new ArrayList<String>();
+        for (String constant : needAReader) {
+            if (!ClassFiles.contains(stock, constant)) {
+                unnamed.add(constant);
+            }
+        }
+        assertEquals("PlannerStock is the one class that installs a ScenarioSource reader on the"
+                     + " client, and it does not mention these constants at all -- so whatever"
+                     + " they read from, it is not the stock reply, and every one of them is"
+                     + " reporting its declared fault forever",
+                     Collections.emptyList(), unnamed);
+
+        assertFalse("the search matched a constant PinStore does not use, so it would match"
+                    + " anything and this gate asserts nothing",
+                    ClassFiles.contains(pins, "PLACED"));
+        assertTrue("control: PinStore really does name the constant it installs",
+                   ClassFiles.contains(pins, "PINS"));
     }
 
     /**

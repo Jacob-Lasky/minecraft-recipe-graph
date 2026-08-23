@@ -7,7 +7,9 @@ import net.minecraft.nbt.NBTTagCompound;
 
 /**
  * The join between {@link LiveStock} and the planner: ask when a plan is wanted, plan when the
- * reply lands, and answer for {@link ScenarioSource#HAVE} in between.
+ * reply lands, and answer for {@link ScenarioSource#HAVE} and {@link ScenarioSource#PLACED} in
+ * between -- two inputs off one reply, because #320's grid-connected machines come back in the
+ * same read as the items.
  *
  * <h2>Why this exists as its own class</h2>
  *
@@ -74,6 +76,16 @@ public final class PlannerStock {
                 return statusOf(LiveStock.latest());
             }
         });
+        // BOTH READERS OFF THE ONE SNAPSHOT, AND INSTALLED TOGETHER. #320's placed machines
+        // come back in the same reply as the items, so a second install site would be a second
+        // thing to remember and the failure would be #191's exactly: the machines arriving,
+        // being stored, and every machine still pricing as buildable.
+        ScenarioSource.PLACED.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return placedStatusOf(LiveStock.latest());
+            }
+        });
     }
 
     /**
@@ -100,6 +112,35 @@ public final class PlannerStock {
             return ScenarioSource.Status.unavailable(snapshot.reason().message());
         }
         return ScenarioSource.Status.available(snapshot.document());
+    }
+
+    /**
+     * The same, for {@link ScenarioSource#PLACED}: what the grid's machines mean for a plan.
+     *
+     * A REFUSAL REPORTS THE REASON AND NEVER AN EMPTY GRID, which is the whole hazard this
+     * method exists to avoid. The two are indistinguishable in the data -- both carry no
+     * machines -- and they are opposite claims: "your terminal is out of power" is a lower
+     * bound the player can act on, while "you own no machines" is a confident falsehood that
+     * prices a Pulverizer you are standing next to as something to go and build. Same argument
+     * as {@link #statusOf} one field over, and the same reason `StockSnapshot` refuses to have
+     * an empty state that means both.
+     *
+     * THE SENTENCES ARE NOT `statusOf`'s, DELIBERATELY. `ScenarioSource.missingNotes` renders
+     * one line per unread source, so two readers answering off one refused snapshot with the
+     * same string would print the same sentence twice with nothing to tell the two inputs
+     * apart. Each names the consequence for its own field -- own nothing, own no machines --
+     * and keeps the action verbatim from the reason.
+     */
+    static ScenarioSource.Status placedStatusOf(StockSnapshot snapshot) {
+        if (snapshot == null) {
+            return ScenarioSource.Status.unavailable("your ME network has not been read yet, so"
+                    + " no machine counts as owned -- open the planner again to ask");
+        }
+        if (!snapshot.isAvailable()) {
+            return ScenarioSource.Status.unavailable(snapshot.reason().message()
+                    + ", so no machine on it counts as owned");
+        }
+        return ScenarioSource.Status.available(snapshot.placedDocument());
     }
 
     /**

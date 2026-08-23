@@ -3,6 +3,7 @@ package io.github.jacoblasky.recipedump.client;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -12,7 +13,12 @@ import com.google.gson.JsonObject;
 
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
+import io.github.jacoblasky.recipedump.common.ae2.Snapshots;
 import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
+import io.github.jacoblasky.recipedump.graph.GraphBuilder;
+import io.github.jacoblasky.recipedump.graph.RecipeGraph;
+import io.github.jacoblasky.recipedump.plan.MachineInfo;
+import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -72,7 +78,7 @@ public class PlannerStockTest {
     public void aReadNetworkBecomesTheHaveFieldAndTheCaveatGoes() {
         Map<String, Long> counts = new LinkedHashMap<String, Long>();
         counts.put("minecraft:iron_ingot", Long.valueOf(377L));
-        LiveStock.accept(StockSnapshot.of(counts));
+        LiveStock.accept(StockSnapshot.of(counts, NO_MACHINES));
         PlannerStock.install();
 
         assertTrue(ScenarioSource.HAVE.live());
@@ -92,7 +98,7 @@ public class PlannerStockTest {
     @Test
     public void anEmptyHaveIsNotWhatAReadNetworkProduces() {
         LiveStock.accept(StockSnapshot.of(
-                Collections.singletonMap("minecraft:iron_ingot", Long.valueOf(377L))));
+                Collections.singletonMap("minecraft:iron_ingot", Long.valueOf(377L)), NO_MACHINES));
         PlannerStock.install();
         assertFalse("the read landed and the scenario still claims the player owns nothing",
                     PlannerService.liveScenario().getAsJsonObject("have").entrySet().isEmpty());
@@ -102,7 +108,7 @@ public class PlannerStockTest {
     public void anEmptyNetworkIsStillARead() {
         // An available snapshot may legitimately be empty, and that is a different statement
         // from every refusal: the plan is correct and carries no caveat.
-        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap()));
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
         PlannerStock.install();
         assertTrue(ScenarioSource.HAVE.live());
         assertTrue(PlannerService.liveScenario().getAsJsonObject("have").entrySet().isEmpty());
@@ -125,7 +131,7 @@ public class PlannerStockTest {
         PlannerStock.install();
         assertFalse(ScenarioSource.HAVE.live());
         LiveStock.accept(StockSnapshot.of(
-                Collections.singletonMap("minecraft:stone", Long.valueOf(64L))));
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
         assertTrue(ScenarioSource.HAVE.live());
         LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
         assertFalse(ScenarioSource.HAVE.live());
@@ -160,7 +166,7 @@ public class PlannerStockTest {
                     + " already coming, and a read is a megabyte on the wire",
                     PlannerStock.hold(current, true));
         PlannerStock.accept(
-                StockSnapshot.of(Collections.<String, Long>emptyMap()).serializeNBT());
+                StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES).serializeNBT());
         assertFalse(abandoned.ran);
         assertTrue(current.ran);
     }
@@ -184,7 +190,7 @@ public class PlannerStockTest {
         assertFalse(plan.ran);
 
         StockSnapshot snapshot = StockSnapshot.of(
-                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)));
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES);
         PlannerStock.accept(snapshot.serializeNBT());
 
         assertTrue("the reply landed and the question it was asked for went unanswered",
@@ -210,12 +216,12 @@ public class PlannerStockTest {
         Ran first = new Ran();
         PlannerStock.hold(first, true);
         PlannerStock.accept(StockSnapshot.of(
-                Collections.singletonMap("a", Long.valueOf(1L))).serializeNBT());
+                Collections.singletonMap("a", Long.valueOf(1L)), NO_MACHINES).serializeNBT());
         assertTrue(first.ran);
         first.ran = false;
 
         PlannerStock.accept(StockSnapshot.of(
-                Collections.singletonMap("b", Long.valueOf(2L))).serializeNBT());
+                Collections.singletonMap("b", Long.valueOf(2L)), NO_MACHINES).serializeNBT());
         assertFalse("a solve nobody asked for would replace what the player is looking at",
                     first.ran);
         assertEquals(2L, LiveStock.latest().count("b"));
@@ -225,7 +231,7 @@ public class PlannerStockTest {
     public void aFreshReadIsNotAskedForTwice() {
         // Opening the planner twice in a row must not put a megabyte of item list on the wire
         // twice -- which is the whole reason `isFresh` exists.
-        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap()));
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
         assertTrue(LiveStock.isFresh());
         Ran plan = new Ran();
         assertFalse("a fresh read must not be asked for again",
@@ -240,11 +246,199 @@ public class PlannerStockTest {
         // the path wraps negative and reads as owning none.
         Map<String, Long> counts = new LinkedHashMap<String, Long>();
         counts.put("minecraft:cobblestone", Long.valueOf(3_000_000_000L));
-        PlannerStock.accept(StockSnapshot.of(counts).serializeNBT());
+        PlannerStock.accept(StockSnapshot.of(counts, NO_MACHINES).serializeNBT());
         PlannerStock.install();
         assertEquals(3_000_000_000L,
                      PlannerService.liveScenario().getAsJsonObject("have")
                                    .get("minecraft:cobblestone").getAsLong());
+    }
+
+    // -- the placed half of the same reply (#320) -----------------------------------------------
+
+    /**
+     * A graph with one category whose machine is CRAFTABLE, so its verdict turns on `placed`.
+     *
+     * CRAFTABLE AND NOT UNAVAILABLE, because the point is to distinguish the two answers that
+     * differ. With no placed evidence `mod:press` has producers, so `candidateVerdict` returns
+     * BUILDABLE -- the state a machine you are standing next to used to read as, which is #320's
+     * whole complaint. With placed evidence it is HAVE. An unbuildable machine would go from
+     * UNAVAILABLE to HAVE and the test would pass on a weaker distinction.
+     */
+    private static RecipeGraph pressGraph() {
+        GraphBuilder b = new GraphBuilder();
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("mod:leaf"));
+        b.endSlot();
+        b.output(b.key("mod:a"), 1);
+        b.endRecipe("r", "mod.press", "Press", "test", false, false);
+        // The machine itself is craftable by hand, which is what makes it BUILDABLE unplaced.
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("mod:leaf"));
+        b.endSlot();
+        b.output(b.key("mod:press"), 1);
+        b.endRecipe("r_press", "minecraft.crafting", "Crafting Table", "test", false, false);
+        b.beginCatalyst("mod.press");
+        b.catalystKey(b.key("mod:press"));
+        b.endCatalyst();
+        return b.build();
+    }
+
+    private static MachineInfo verdictFor(RecipeGraph graph) {
+        return ScenarioInputs.resolve(graph, PlannerService.liveScenario())
+                             .machineStates()
+                             .info(graph.categoryId("mod.press"));
+    }
+
+    @Test
+    public void nobodyHasAskedIsAReasonThatSaysWhatToDoAboutMachinesToo() {
+        // The sentences must DIFFER from `statusOf`'s, or the caveat panel prints the same line
+        // twice with nothing to tell `have` and `placed` apart.
+        ScenarioSource.Status status = PlannerStock.placedStatusOf(null);
+        assertFalse(status.live());
+        assertTrue(status.note(), status.note().contains("no machine counts as owned"));
+        assertTrue("a caveat has to name an action", status.note().contains("open the"));
+        assertEquals("nothing was read, so nothing may be priced against it",
+                     null, status.contents());
+        assertFalse("the two readers must not answer with the same sentence",
+                    status.note().equals(PlannerStock.statusOf(null).note()));
+    }
+
+    @Test
+    public void aRefusedReadReportsTheREASONForMachinesRatherThanAnEmptyGrid() {
+        // The failure this whole path exists to avoid: "out of power" and "your grid carries no
+        // machines" are opposite claims and carry the same data.
+        ScenarioSource.Status status = PlannerStock.placedStatusOf(
+                StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
+        assertFalse(status.live());
+        assertTrue(status.note(),
+                   status.note().startsWith(StockSnapshot.Reason.NO_POWER.message()));
+        assertTrue(status.note(), status.note().contains("counts as owned"));
+        assertEquals(null, status.contents());
+    }
+
+    @Test
+    public void installWiresPlacedAsWellAsHave() {
+        // ONE REPLY, TWO INPUTS. A second install site would be the #191 shape again: the
+        // machines arriving, being stored, and every one still pricing as buildable.
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(),
+                                          Snapshots.machines("mod:press", 1)));
+        PlannerStock.install();
+        assertTrue(ScenarioSource.PLACED.live());
+        assertEquals("", ScenarioSource.PLACED.note());
+        assertEquals(1, PlannerService.liveScenario().getAsJsonObject("placed")
+                                      .get("mod:press").getAsInt());
+    }
+
+    /**
+     * THE BUG #320 IS ABOUT, asserted as the difference between two verdicts.
+     *
+     * On master this test fails at the second assertion with BUILDABLE, because `placed` was
+     * read by nothing: a Press you are standing next to priced as a Press you have to build.
+     * The evidence string is asserted too, because "HAVE" alone would also be produced by the
+     * machine ITEM sitting in stock -- a route that already worked -- and this has to prove the
+     * verdict came from the grid walk rather than from the item list.
+     */
+    @Test
+    public void aMachineOnTheGridReadsAsOwnedRatherThanBuildable() {
+        RecipeGraph graph = pressGraph();
+
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
+        PlannerStock.install();
+        assertEquals("nothing on the grid, so the machine is something to build",
+                     MachineInfo.BUILDABLE, verdictFor(graph).state());
+
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(),
+                                          Snapshots.machines("mod:press", 1)));
+        MachineInfo owned = verdictFor(graph);
+        assertEquals("the machine is on the grid and the plan still says build one",
+                     MachineInfo.HAVE, owned.state());
+        assertEquals("placed: mod:press", owned.why());
+    }
+
+    @Test
+    public void aRefusedReadDoesNotSilentlyPriceEveryMachineAsBuildable() {
+        // The direction that matters. A refusal reaching `placed` as an empty object would look
+        // exactly like a grid with no machines on it -- so the assertion is on the CAVEAT, not
+        // on the verdict: the verdict is the same either way and only one of them is honest.
+        RecipeGraph graph = pressGraph();
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        PlannerStock.install();
+
+        assertFalse(ScenarioSource.PLACED.live());
+        assertTrue(ScenarioSource.summary(),
+                   ScenarioSource.summary().contains(ScenarioSource.PLACED.field()));
+        assertTrue(PlannerService.liveScenario().getAsJsonObject("placed")
+                                 .entrySet().isEmpty());
+        assertEquals(MachineInfo.BUILDABLE, verdictFor(graph).state());
+    }
+
+    @Test
+    public void aReadGridWithNoMachinesDropsTheCaveatWithoutClaimingAnything() {
+        // An available snapshot may legitimately carry no machines, and that is a different
+        // statement from every refusal: the caveat goes and the verdict stays BUILDABLE.
+        RecipeGraph graph = pressGraph();
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
+        PlannerStock.install();
+
+        assertTrue(ScenarioSource.PLACED.live());
+        assertFalse(ScenarioSource.summary(),
+                    ScenarioSource.summary().contains(ScenarioSource.PLACED.field()));
+        assertEquals(MachineInfo.BUILDABLE, verdictFor(graph).state());
+    }
+
+    /**
+     * THE PLACED EVIDENCE REACHES THE COST CACHE KEY, so two grids do not share one price table.
+     *
+     * `PlannerService.costsFor` memoises on `Resolved.costSignature`, which carries
+     * `machineStates.summarise()` and `describedCategories()` -- and machine states are exactly
+     * what placed evidence changes. Without this, a plan made with the Press on the grid and one
+     * made after dismantling it would be served the same prices, which is
+     * `costSignature`'s own stated failure ("one inventory's prices served to another").
+     */
+    @Test
+    public void thePlacedReadChangesTheCostSignature() {
+        RecipeGraph graph = pressGraph();
+        PlannerStock.install();
+
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
+        String bare = ScenarioInputs.resolve(graph, PlannerService.liveScenario())
+                                    .costSignature();
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(),
+                                          Snapshots.machines("mod:press", 1)));
+        String owned = ScenarioInputs.resolve(graph, PlannerService.liveScenario())
+                                     .costSignature();
+        assertFalse("two grids sharing one cost table means one base's prices served to"
+                    + " another: " + bare, bare.equals(owned));
+    }
+
+    @Test
+    public void thePlacedReaderFollowsTheHeldSnapshotRatherThanTheOneItWasInstalledWith() {
+        // A grid can go out of range between two plans, so the reader has to look each time --
+        // the same rule the `have` reader obeys, asserted separately because it is a second
+        // reader and a second chance to cache.
+        PlannerStock.install();
+        assertFalse(ScenarioSource.PLACED.live());
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(),
+                                          Snapshots.machines("mod:press", 1)));
+        assertTrue(ScenarioSource.PLACED.live());
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        assertFalse(ScenarioSource.PLACED.live());
+    }
+
+    @Test
+    public void placedMachinesSurviveTheWireAndReachTheScenario() {
+        // End to end through the packet, which is the half `placedStatusOf` on its own cannot
+        // prove: the reply is deserialised by `accept` and only then read by the source.
+        PlannerStock.accept(StockSnapshot.of(
+                Collections.<String, Long>emptyMap(),
+                Snapshots.machines("appliedenergistics2:drive", 8,
+                                   "thermalexpansion:machine:1", 1)).serializeNBT());
+        PlannerStock.install();
+        JsonObject placed = PlannerService.liveScenario().getAsJsonObject("placed");
+        assertEquals(8, placed.get("appliedenergistics2:drive").getAsInt());
+        assertEquals(1, placed.get("thermalexpansion:machine:1").getAsInt());
     }
 
     /** A plan that records whether it was run. */

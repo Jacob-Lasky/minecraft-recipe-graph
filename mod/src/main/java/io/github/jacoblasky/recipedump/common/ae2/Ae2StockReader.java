@@ -6,6 +6,7 @@ import appeng.api.features.ILocatable;
 import appeng.api.features.IWirelessTermHandler;
 import appeng.api.implementations.tiles.IWirelessAccessPoint;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.IGridBlock;
 import appeng.api.networking.IGridHost;
 import appeng.api.networking.IGridNode;
 import appeng.api.networking.security.ISecurityGrid;
@@ -104,7 +105,10 @@ final class Ae2StockReader {
             return StockSnapshot.unavailable(StockSnapshot.Reason.NO_STORAGE);
         }
         handler.usePower(player, POWER_PER_READ, terminal);
-        return StockSnapshot.of(countsOf(items));
+        // ONE CHARGE FOR BOTH HALVES. The machines come off the grid this call already
+        // resolved, behind gates this call already passed, so charging again would be charging
+        // twice for one question -- see POWER_PER_READ on why a plan is one question.
+        return StockSnapshot.of(countsOf(items), placedOf(grid));
     }
 
     /**
@@ -222,5 +226,83 @@ final class Ae2StockReader {
                     (already == null ? 0L : already.longValue()) + entry.getStackSize()));
         }
         return counts;
+    }
+
+    /**
+     * The machines connected to this grid, keyed as item keys, to how many were seen. #320
+     *
+     * <h2>THE SCOPE IS THE GRID AND THAT IS THE WHOLE DESIGN DECISION</h2>
+     *
+     * A machine counts as owned when it is CONNECTED TO THE ME SYSTEM. Jake's call on #320,
+     * and it is what makes this affordable: it needs no world scan, no region read and no
+     * proximity radius -- the three things `Ae2Stock`'s header rejects -- because the grid is
+     * already resolved and already gated. No link, no range, no power or no permission refuses
+     * the machines exactly as it refuses the stock.
+     *
+     * <h2>WHAT AE2'S ENUMERATION ACTUALLY RETURNS, measured 2026-08-22 against the pack</h2>
+     *
+     * A node exists only for something that IMPLEMENTS `IGridHost` and registers one. Measured
+     * over MeatballCraft's 366 jars: 21 reference `IGridHost` in a constant pool and 11 declare
+     * it as a direct superinterface -- AE2 itself, ExtraCells, ae2stuff, ThaumicEnergistics,
+     * OpenComputers, EnderIO's ME conduit, capabilityadapter, and the PackagedAuto family
+     * (PackagedAuto, PackagedExCrafting, PackagedAvaritia, PackagingProvider), whose crafters
+     * are real machines. The other 345 never touch it.
+     *
+     * SO A MACHINE ATTACHED THROUGH A STORAGE BUS IS INVISIBLE HERE, and that is not a bug to
+     * fix: the bus is the node, and the chest or furnace behind it is not on the grid at all.
+     * Modular Machinery CE only REFERENCES `IGridHost` and declares none, so a multiblock
+     * controller is not a grid node either -- which is the limit #320 states on purpose.
+     *
+     * <h2>Why the machine representation and not the block at the node's position</h2>
+     *
+     * `IGridBlock.getMachineRepresentation()` is AE2'S OWN answer to "what item is this
+     * machine", so nothing here invents a block-to-item mapping. `Machines.candidateItems`
+     * already records why that lands in the right namespace -- "a machine block's item and
+     * block registry names are the same in 1.12.2, so a candidate can be checked against both
+     * placed tile entities and inventory with no extra mapping" -- and AE2 populates it from
+     * the tile's own item, as does every third-party implementation measured above
+     * (PackagedAuto builds `new ItemStack(block, 1, meta)`).
+     *
+     * `baseStackKey` RATHER THAN `stackKey`, for the catalyst walk's reason: a machine verdict
+     * is a claim about an ITEM and not about one NBT state of it, so a digest here would strand
+     * the match against the graph's bare machine key.
+     *
+     * <h2>Two filters that look right and are NOT applied</h2>
+     *
+     * DO NOT FILTER ON `isWorldAccessible()`. It reads like "is this a real placed block" and
+     * it is not: measured on this jar, `AEBasePart`'s CONSTRUCTOR passes
+     * `this instanceof PartCable` into `AENetworkProxy` (whose `isWorldAccessible()` returns
+     * that flag), while `AENetworkTile.createProxy` passes true for every tile -- so every AE2
+     * part that is not a cable -- an ME Interface, a
+     * storage bus, a pattern provider -- reports false while being a block the player placed.
+     * The flag distinguishes the node that OWNS the world tile from the parts sharing it. Using
+     * it would drop real machines and keep cables, which is backwards.
+     *
+     * DO NOT FILTER ON `isActive()`. A machine with no channel or no power is still one the
+     * player BUILT, which is what `Evidence.placed` means -- "you built it, it is there" -- and
+     * the offline region reader makes no power check either. Availability of a machine is not
+     * the same question as whether it is running right now.
+     */
+    private static Map<String, Integer> placedOf(IGrid grid) {
+        Map<String, Integer> placed = new LinkedHashMap<String, Integer>();
+        for (IGridNode node : grid.getNodes()) {
+            IGridBlock block = node.getGridBlock();
+            if (block == null) {
+                continue;
+            }
+            // Null-safe on the ItemStack too: the API says non-null and a third-party
+            // implementation is not the API. `baseStackKey` answers null for an empty stack,
+            // for an item with no registry name, and now for a null one.
+            String key = DumpCommand.baseStackKey(block.getMachineRepresentation());
+            if (key == null) {
+                continue;
+            }
+            Integer already = placed.get(key);
+            // Summed rather than put, for `countsOf`'s reason one field over: eight drives on
+            // one grid are eight sightings of the same key, and the eighth must not replace
+            // the first.
+            placed.put(key, Integer.valueOf((already == null ? 0 : already.intValue()) + 1));
+        }
+        return placed;
     }
 }

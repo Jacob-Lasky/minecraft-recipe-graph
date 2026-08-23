@@ -17,11 +17,20 @@ import java.util.List;
  * skip the two entries that are real.
  *
  * AND THE OMISSION IS THE MORE DANGEROUS HALF. `ScenarioSource.PLACED`'s own note is already a
- * sentence about this screen -- "placed machines and generators are not scanned yet, so every
- * machine reads as buildable rather than owned" -- so a machines table drawn with `placed`
- * unread is a table whose `have` column is empty for a reason that has nothing to do with what
- * the player owns. Saying nothing would make the tool's biggest blind spot invisible on the
- * one screen it is about.
+ * sentence about this screen -- with no reader installed it says "no machine counts as owned
+ * and every one reads as buildable" -- so a machines table drawn with `placed` unread is a
+ * table whose `have` column is empty for a reason that has nothing to do with what the player
+ * owns. Saying nothing would make the tool's biggest blind spot invisible on the one screen it
+ * is about.
+ *
+ * WHAT THIS LINE STOPS SAYING ONCE #320'S READ SUCCEEDS, and why that is right rather than a
+ * gap. `placed` is live in game now -- the machines on the ME network the player's wireless
+ * terminal is linked to -- so with a terminal in hand this line is empty and the table reserves
+ * no row for it, which is what {@link #summaryLine} promises and what `MachineCaveatsTest`
+ * pins. The SCOPE of that read is narrower than the field name and is stated on the planner's
+ * caveat panel by `client.planner.PlanCaveats.PLACED_SCOPE`, not here: this line's contract is
+ * "which inputs were not read", and a scope sentence that were never empty would steal a row
+ * of the table on every draw forever.
  */
 public final class MachineCaveats {
 

@@ -388,6 +388,16 @@ public final class ShotScreens {
                 Ae2ProbeShot.open(arg);
             }
         });
+        // BESIDE `ae2-probe` AND NOT INSTEAD OF IT. That one proves the harness can host an AE2
+        // grid at all; this one drives the production read across it and asserts a machine on
+        // the network reads as owned (#320). The first is the environment, the second is the
+        // feature, and a failure in either says something different.
+        register("ae2-placed", new Opener() {
+            @Override
+            public void open(String arg) {
+                Ae2PlacedProbeShot.open(arg);
+            }
+        });
         // The only screen that runs a COMMAND. See DumpShot for why it goes through
         // `ClientCommandHandler` rather than calling `DumpCommand.execute`.
         register("dump", new Opener() {

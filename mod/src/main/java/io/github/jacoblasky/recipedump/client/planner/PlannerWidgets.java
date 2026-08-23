@@ -1551,7 +1551,8 @@ public final class PlannerWidgets {
      * SIZED TO ITS CONTENT AND NOT CAPPED, unlike every other list in this class. The caps
      * elsewhere exist because a tree or a viewport pays for the height; nothing is underneath
      * this, and a cut-off list of what the planner could not see is a shorter, wrong list.
-     * Five notes wrap to about eleven lines, which is 110 pixels of a 240-pixel screen.
+     * Since #320 at most four sources can be declared missing in game, wrapping to under ten
+     * lines -- comfortably inside a 240-pixel screen.
      */
     public static ModularPanel caveatsPanel() {
         // `CONTENT_WIDTH` IS ALREADY `PANEL_WIDTH - PADDING * 2`; do not recompute it here.

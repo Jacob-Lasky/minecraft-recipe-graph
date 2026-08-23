@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES;
 
 
 import java.util.Collections;
@@ -346,7 +347,7 @@ public class PlannerEntryTest {
                      PlannerService.State.IDLE, PlannerService.get().state());
 
         PlannerStock.accept(StockSnapshot.of(
-                Collections.singletonMap("mod:ingot", Long.valueOf(64L))).serializeNBT());
+                Collections.singletonMap("mod:ingot", Long.valueOf(64L)), NO_MACHINES).serializeNBT());
         awaitPlan();
         assertEquals("and the reply is what sets it going",
                      PlannerService.State.DONE, PlannerService.get().state());

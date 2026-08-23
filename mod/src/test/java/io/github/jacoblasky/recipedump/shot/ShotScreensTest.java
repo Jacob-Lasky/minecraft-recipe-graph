@@ -179,7 +179,8 @@ public class ShotScreensTest {
     @Test
     public void everyRegisteredScreenIsAccountedForByName() {
         List<String> expected = Arrays.asList(
-                "ae2-probe", "dump", "fixture", "flow", "flow-hit", "flow-selected",
+                "ae2-placed", "ae2-probe", "dump", "fixture", "flow", "flow-hit",
+                "flow-selected",
                 "graph", "jei", "jei-keybind", "machines", "machines-detail", "machines-mods",
                 "planner", "planner-caveats", "planner-collide", "planner-live", "planner-menu",
                 "planner-recipes",
@@ -312,6 +313,17 @@ public class ShotScreensTest {
         // so that looking one up does not load AE2, and a test that loaded the class here would
         // need AE2 on the test runtime classpath, where it deliberately is not.
         assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("ae2-probe"));
+    }
+
+    @Test
+    public void theAe2PlacedProbeIsReachableByName() {
+        // #320's live proof, and the same argument one screen over: `Ae2PlacedProbeShot` names
+        // AE2 types and is reachable only through `-Dmcrecipedump.shot=ae2-placed`, so the NAME
+        // is asserted and never the class. It is a SEPARATE entry from `ae2-probe` because the
+        // two answer different questions -- that one asks whether a grid can form here at all,
+        // this one drives `Ae2Stock.read` across a real grid and asserts a machine on the
+        // network reads as owned while one off it does not.
+        assertTrue(ShotScreens.names().toString(), ShotScreens.names().contains("ae2-placed"));
     }
 
     /**

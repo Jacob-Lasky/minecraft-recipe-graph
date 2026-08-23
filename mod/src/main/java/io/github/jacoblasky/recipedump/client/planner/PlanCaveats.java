@@ -54,6 +54,26 @@ public final class PlanCaveats {
     /** The heading of the detail panel. */
     static final String TITLE = "What this plan could not see";
 
+    /**
+     * What `placed` means in game, said in full, because it is narrower than the field name.
+     *
+     * A SOURCE THAT READ SOMETHING NARROW STILL OWES THE PLAYER THE SHAPE OF IT. #320 made
+     * {@link ScenarioSource#PLACED} live by enumerating the machines on the ME network the
+     * player's wireless terminal is linked to -- not by scanning the world, which is what the
+     * offline tool does and what the field name suggests. So a machine standing off the network
+     * reads `buildable` while the plan carries no caveat at all, and a player who read
+     * `planned without: placed` yesterday and reads nothing today would reasonably conclude
+     * every machine they own is now accounted for.
+     *
+     * ON THE DETAIL PANEL AND NOT THE SUMMARY LINE, which is a constraint rather than a
+     * preference: {@link #summaryLine} is empty when nothing is missing and the planner reserves
+     * its row from exactly that emptiness, so a sentence there would steal a line of the tree on
+     * every plan forever. The panel sizes to its content and can afford one more line.
+     */
+    static final String PLACED_SCOPE =
+            "\"placed\" means machines connected to the ME network your wireless terminal is"
+            + " linked to; one sitting off the network still reads as buildable";
+
     private PlanCaveats() {
     }
 
@@ -95,6 +115,11 @@ public final class PlanCaveats {
     public static List<String> detailLines(int widthPx) {
         List<String> notes = ScenarioSource.missingNotes();
         List<String> out = new ArrayList<String>();
+        // THE SCOPE LINE IS APPENDED AT THE END rather than woven into the numbering, and the
+        // numbering is why: a player counts the entries against `planned without: a, b, c`, so
+        // an unnumbered sentence after them cannot be mistaken for a fourth missing input.
+        // It is added AFTER the branch below, so the every-input-was-read case gets it too --
+        // that case is where the scope is least obvious and most likely to be over-read.
         if (notes.isEmpty()) {
             // NOT AN EMPTY PANEL. Every input live is a real and reachable state -- it is what
             // `ScenarioSourceTest` asserts with every reader installed -- and a blank window
@@ -106,6 +131,7 @@ public final class PlanCaveats {
             // be cut.
             out.addAll(NodeRowText.wrapRow("every input was read; this plan assumes nothing",
                                            widthPx));
+            out.addAll(scopeLines(widthPx));
             return out;
         }
         for (int i = 0; i < notes.size(); i++) {
@@ -117,6 +143,25 @@ public final class PlanCaveats {
             // declared constants and around 105 once a reader answers, so most take two lines.
             out.addAll(NodeRowText.wrapRow((i + 1) + ". " + notes.get(i), widthPx));
         }
+        out.addAll(scopeLines(widthPx));
         return out;
+    }
+
+    /**
+     * {@link #PLACED_SCOPE}, wrapped, when `placed` was read -- and nothing when it was not.
+     *
+     * ONLY WHEN THE READ SUCCEEDED, because otherwise the panel says two things about the same
+     * field: `PLACED`'s own note already explains that no machine counts as owned, and adding
+     * the scope of a read that did not happen beside it describes a state the player is not in.
+     *
+     * PUBLIC FOR ITS TEST AND FOR NOTHING ELSE would be the wrong reason, so it is package
+     * private: {@link #detailLines} is the only caller and the only surface, which is what keeps
+     * the sentence from being rendered twice by a second panel that forgets the condition.
+     */
+    static List<String> scopeLines(int widthPx) {
+        if (!ScenarioSource.PLACED.live()) {
+            return new ArrayList<String>();
+        }
+        return new ArrayList<String>(NodeRowText.wrapRow(PLACED_SCOPE, widthPx));
     }
 }

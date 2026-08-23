@@ -219,9 +219,21 @@ public final class ScenarioInputs {
             }
         }
 
+        // A COUNT OF ZERO IS NOT A SIGHTING, and it is dropped here rather than downstream.
+        // `Evidence.placed` already refuses one, so machine verdicts were safe -- but
+        // `resolveFreeSources` indexes `placed.keySet()` with no regard for the count, so a
+        // zero-count entry would have reported "placed: nuclearcraft:water_source" and made
+        // water free off a block the scan counted none of. Python filters at both sites
+        // (`machines.describe` and `generators.sightings`, each with a comment saying why) and
+        // this restores the pair. Latent until #320: no fixture carries a zero, and the field
+        // was only ever written by a region walk that omits what it did not see. It is written
+        // by a live grid read now.
         Map<String, Integer> placed = new LinkedHashMap<String, Integer>();
         for (Map.Entry<String, JsonElement> e : object(scenario, "placed").entrySet()) {
-            placed.put(e.getKey(), e.getValue().getAsInt());
+            int seen = e.getValue().getAsInt();
+            if (seen > 0) {
+                placed.put(e.getKey(), Integer.valueOf(seen));
+            }
         }
 
         // machines.describe -> Machines.resolve. Placed tile entities and stock are the

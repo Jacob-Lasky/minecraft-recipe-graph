@@ -137,8 +137,111 @@ public class PlanCaveatsTest {
         assertTrue("the plan panel must reserve no caveat lines",
                    PlanCaveats.summaryLine().isEmpty());
         List<String> lines = PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH);
-        assertEquals("one line, saying every input was read", 1, lines.size());
+        assertFalse("a blank panel reads as a rendering fault", lines.isEmpty());
         assertFalse(lines.get(0).isEmpty());
+        assertTrue("the first line still says every input was read: " + lines.get(0),
+                   lines.get(0).contains("every input was read"));
+        // AND THE SCOPE LINE IS STILL THERE. Every input live is the state in which `placed`
+        // being narrower than its name is LEAST obvious, so this is the one case the scope
+        // sentence must not be dropped from. See `thePlacedScopeIsStatedOnceTheReadSucceeded`.
+        assertTrue("the scope of `placed` vanished in the every-input-live case: " + lines,
+                   rejoin(lines).contains(PlanCaveats.PLACED_SCOPE));
+    }
+
+    // -- what `placed` means once it is live (#320) ---------------------------------------------
+
+    /**
+     * A NARROW READ STILL OWES THE PLAYER ITS SHAPE.
+     *
+     * #320 made `placed` live by enumerating the machines on the ME network the wireless
+     * terminal is linked to -- not by scanning the world, which is what the field name suggests
+     * and what the offline tool actually does. So the caveat for `placed` DISAPPEARS while a
+     * machine standing off the network still reads as buildable, and a player who read
+     * `planned without: placed` yesterday and reads nothing today would reasonably conclude
+     * every machine they own is accounted for. This is the sentence that stops that.
+     */
+    @Test
+    public void thePlacedScopeIsStatedOnceTheReadSucceeded() {
+        ScenarioSource.PLACED.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(new com.google.gson.JsonObject());
+            }
+        });
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertTrue("the scope of what `placed` read never reaches a screen: " + rejoined,
+                   rejoined.contains(PlanCaveats.PLACED_SCOPE));
+        assertTrue("the sentence has to name the ME network, or it says nothing useful",
+                   PlanCaveats.PLACED_SCOPE.contains("ME network"));
+        assertTrue("and it has to name what is NOT counted",
+                   PlanCaveats.PLACED_SCOPE.contains("buildable"));
+    }
+
+    /**
+     * And NOT stated when the read refused, because then the refusal already explains it.
+     *
+     * Two sentences about the same field where one describes a state the player is not in is
+     * worse than either alone: it makes the caveat panel look like boilerplate, which is
+     * `MachineCaveats`' own argument against over-claiming, one level down.
+     */
+    @Test
+    public void thePlacedScopeIsSilentWhenTheReadDidNotHappen() {
+        // No reader installed at all, which is the declared-constant state.
+        assertFalse(ScenarioSource.PLACED.live());
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertFalse("the scope of a read that did not happen: " + rejoined,
+                    rejoined.contains(PlanCaveats.PLACED_SCOPE));
+        // The declared note IS shown, so this is not silence about `placed` -- it is the other
+        // sentence about it.
+        assertTrue(rejoined, rejoined.contains(ScenarioSource.PLACED.note()));
+    }
+
+    @Test
+    public void theScopeLineIsNotNumberedAndDoesNotInflateTheNoteCount() {
+        // A player counts the numbered entries against `planned without: a, b, c`. An
+        // unnumbered sentence after them cannot be mistaken for a further missing input, and
+        // a numbered one would make the panel claim one more gap than the plan named.
+        ScenarioSource.PLACED.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(new com.google.gson.JsonObject());
+            }
+        });
+        int count = ScenarioSource.missingNotes().size();
+        assertTrue("`placed` going live must leave other sources missing, or this asserts"
+                   + " nothing about numbering", count > 0);
+        List<String> lines = PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH);
+        assertFalse("the scope line was numbered as a missing input",
+                    opensWith(lines, (count + 1) + ". "));
+        for (String line : lines) {
+            if (line.contains("means machines connected")) {
+                assertFalse("the scope sentence opens with a note number: " + line,
+                            line.matches("^\\d+\\. .*"));
+            }
+        }
+    }
+
+    @Test
+    public void theScopeLineIsWrappedRatherThanCut() {
+        // This panel caps nothing -- a truncated statement of what `placed` covers is a
+        // shorter, WRONG statement, which is the same argument `detailLines` makes about the
+        // notes it never caps.
+        ScenarioSource.PLACED.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(new com.google.gson.JsonObject());
+            }
+        });
+        List<String> lines = PlanCaveats.scopeLines(PlannerWidgets.PANEL_WIDTH
+                                                    - PlannerWidgets.PADDING * 2);
+        assertTrue("the sentence is long enough to need wrapping; one line means the width"
+                   + " assumption moved: " + lines, lines.size() > 1);
+        assertEquals("the wrap lost part of the sentence",
+                     PlanCaveats.PLACED_SCOPE, rejoin(lines).trim());
+        for (String line : lines) {
+            assertFalse("a line of this panel must never be cut: " + line,
+                        line.endsWith(NodeRowText.ELLIPSIS));
+        }
     }
 
     /**

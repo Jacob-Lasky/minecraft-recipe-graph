@@ -157,6 +157,24 @@ public class SchemaSixTest {
         return Arrays.asList(ids);
     }
 
+    /**
+     * A unique, digit-free spelling of a number, for a temp directory name.
+     *
+     * BECAUSE `refuseToClobber` PUTS `dir.getName()` IN ITS MESSAGE, and one case here asserts
+     * that message does NOT contain a particular digit sequence. A name carrying the raw
+     * `System.nanoTime()` therefore decides that assertion by accident -- see
+     * `aDigestWithNoCountBesideItDoesNotPrintMinusOneMods` for the measurement and the flake it
+     * caused. Digit `d` becomes `'a' + d`, which is a bijection: the name stays unique per call
+     * and per run, and it can never be empty, which a regex-scrub of a base-26 rendering could.
+     */
+    private static String lettersOnly(long value) {
+        StringBuilder out = new StringBuilder();
+        for (char digit : Long.toString(Math.abs(value)).toCharArray()) {
+            out.append((char) ('a' + (digit - '0')));
+        }
+        return out.toString();
+    }
+
     @Test
     public void theSummaryRecordsWhichJarsTheDumpSaw() throws Exception {
         File file = File.createTempFile("summary-mods", ".json");
@@ -354,8 +372,18 @@ public class SchemaSixTest {
         // `writeSummary` emits the pair or neither, so this shape cannot come from our own
         // writer. It can come from a hand edit, and hand-edited artifacts are the entire
         // subject of #194 -- the refusal must stay readable on one.
+        //
+        // THE FIXTURE DIRECTORY NAME CARRIES NO DIGITS, AND THAT IS THE FIX FOR A REAL FLAKE.
+        // `refuseToClobber` opens its message with `dir.getName()`, and this fixture used to be
+        // named `"halfrecorded-" + System.nanoTime()` -- so on any host whose nanoTime clock
+        // reads in a `1...` decade the directory is `halfrecorded-1354...`, which CONTAINS the
+        // very substring the last assertion forbids. MEASURED on pocket-dev 2026-08-22:
+        // nanoTime 135424656432072, and the assertion below failed over the fixture's own name
+        // while the message it was checking said "an unrecorded number of mods there" perfectly
+        // correctly. A test whose fixture can satisfy its own negative assertion fails in the
+        // direction that looks like a real finding, and it fails intermittently, which is worse.
         File dir = new File(System.getProperty("java.io.tmpdir"),
-                            "halfrecorded-" + System.nanoTime());
+                            "halfrecorded-" + lettersOnly(System.nanoTime()));
         assertTrue(dir.mkdirs());
         dir.deleteOnExit();
         File summary = new File(dir, DumpCommand.SUMMARY_FILE);
@@ -369,7 +397,15 @@ public class SchemaSixTest {
 
         assertNotNull(refusal);
         assertTrue(refusal, refusal.contains("an unrecorded number of mods there"));
-        assertFalse(refusal, refusal.contains("-1"));
+        // THE RENDERING, NOT THE BYTE PAIR. `String.valueOf(existing.count)` is the only thing
+        // in `refuseToClobber` that can print a negative count, and it is always followed by
+        // " mods there" -- so this is the exact wrong output the test is named for, and it
+        // cannot be satisfied by a path, a digest or a temp directory that happens to contain a
+        // hyphen and a one. The name-scrubbing above makes the fixture safe; this makes the
+        // ASSERTION safe, and both are wanted: the next person to reach for `nanoTime()` here
+        // should not be able to reintroduce the flake.
+        assertFalse(refusal, refusal.contains("-1 mods there"));
+        assertFalse(refusal, refusal.contains("an unrecorded number of mods there, -1"));
     }
 
     @Test

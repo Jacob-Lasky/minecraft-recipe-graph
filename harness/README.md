@@ -172,7 +172,7 @@ an invented instance path -- which is not a weaker artifact than the real one, i
 misleading one, because the invented thing is exactly what a reviewer checks. `graph` needs only
 the graph loaded; `sources` also waits for the scenario resolve, so it is the slower of the two.
 
-`flow-hit`, `jei-keybind`, `ae2-probe` and `dump` ASSERT rather than photograph, and a screen
+`flow-hit`, `jei-keybind`, `ae2-probe`, `ae2-placed` and `dump` ASSERT rather than photograph, and a screen
 in that shape owes the harness a verdict. It declares one with `ShotScreens.expectReport(...)`
 and then answers with `reportPass()` or `reportFail(<the criterion that did not hold>)`; the
 harness fails the run if the verdict never arrives OR if it is a NO. There is deliberately no
@@ -251,6 +251,66 @@ and is what every shot that needs to WAIT on a condition already uses (`Ae2Probe
 only `requestSettleFrames` caller left; several shots need no wait at all): it holds until the
 condition it actually cares about is true, so there is no ratio to be wrong about. The description above is accurate about what the
 code does today; do not read it as an endorsement, and do not copy the pattern into a new shot.
+
+`ae2-placed` is the probe `ae2-probe` said was owed, and it needs a world the same way:
+`harness/shot.sh ae2-placed ae2placed -Dmcrecipedump.shotWorld=ae2`. It calls
+`Ae2Stock.read(player)` — the exact entry point `StockRequestMessage.Handler` calls in game — so
+every gate is the real gate, and it reaches them by building the setup a player would have: a
+creative energy cell, an ME Security Terminal whose node it takes ownership of, a Wireless
+Access Point, a Molecular Assembler on the grid, and a Wireless Terminal in the player's
+inventory linked to the station's serial and charged to full. A vanilla furnace goes down three
+blocks clear of the AE2 line.
+
+**Four criteria, and two of them are NEGATIVE**, because the thing under test is a map that can
+legitimately be empty and "no error" would therefore be worthless: the read succeeds; the
+assembler IS in `placed()`; the furnace is NOT; and through `ScenarioInputs.resolve` the
+assembler's category reads `have` with evidence starting `placed:` while the furnace's reads
+`buildable`. The third criterion is what stops the probe passing on an enumeration that returned
+every tile entity nearby, and the evidence-string check in the fourth is what stops it passing on
+a `have` that came from the machine's ITEM being in stock, which is a route that already worked.
+
+It uses `ShotScreens.holdCapture` and NOT `requestSettleFrames` — see #319, which is about
+`ae2-probe`'s settle-frame budget being a stopping rule that is sound only by arithmetic nobody
+re-checks. This one holds until its own driver has reached a verdict, so a slower host waits
+instead of turning a pass into "the screen never reported". A hold is still not a verdict, so it
+declares one too.
+
+**THE INTEGRATED SERVER DOES NOT TICK IN THIS HARNESS UNLESS YOU TURN OFF `pauseOnLostFocus`.
+MEASURED 2026-08-22 over four runs, and it is the single most expensive thing to not know.**
+
+Minecraft opens `GuiIngameMenu` by itself, every tick, whenever `gameSettings.pauseOnLostFocus`
+is set and `Display.isActive()` is false — and under Xvfb with no window manager the display is
+never active. A single-player client with a screen open sets `Minecraft.isGamePaused`, and a
+paused `IntegratedServer.tick()` skips `super.tick()` entirely: it drains only its
+`futureTaskQueue`. So **no tile entity ticks, no `TickEvent.ServerTickEvent` fires, and AE2 can
+never build a grid.** The four runs, in order, are worth reading as a set:
+
+| run | what it did | result |
+| --- | --- | --- |
+| 1 | opened `HarnessFixtureScreen`, waited on server ticks | froze at tick 0, spun 676 s to a timeout |
+| 2 | `expectNoScreen()` | still paused; logged "opened no screen" and hung anyway |
+| 3 | client-tick driver, closed the screen it found | named `GuiIngameMenu`, saw **1** server tick in 200 client ticks, failed in 81 s |
+| 4 | `pauseOnLostFocus = false` | **102 server ticks in 160 client ticks; grid formed, 4 nodes, powered; PASS in 82 s** |
+
+Three lessons, and the third is the one that generalises:
+
+* **`expectNoScreen()` is not enough.** It stops the harness failing the run for an unchanged
+  screen; it does not stop the game opening one on its own.
+* **Closing the screen is treating the symptom.** It reopens on the next tick, and a probe that
+  logs the close once cannot tell "opened once" from "reopens forever" — which is why
+  `ae2-placed` counts them.
+* **Clock a probe off the CLIENT tick and count SERVER ticks as evidence.** The client tick always
+  runs, so a probe driven by it can report "the server ticked 1 time in 200" instead of hanging.
+  A probe clocked off the thing that can stop cannot tell "still settling" from "stopped", and
+  the failure it produces is a timeout, which reads as a broken probe rather than a paused world.
+
+**This casts doubt on `ae2-probe`'s documented pass, and #319 understates the problem.** That
+probe opens `HarnessFixtureScreen` and then waits twenty SERVER ticks, which is run 1 exactly —
+its ticks cannot arrive under a paused client, so its settle-frame budget is not merely an
+unsound stopping rule, it is a budget for an event that never comes. Its recorded pass is from
+2026-08-03 and nothing has re-run it since; whatever was true then, the shape is broken now. It
+has NOT been re-run as part of #320 and should be, with `pauseOnLostFocus = false` moved into the
+harness itself rather than set per-probe.
 
 `dump` is the only entry that runs a COMMAND rather than opening a GUI, and the only one that
 opens no `GuiScreen` at all: `harness/shot.sh dump dump -Dmcrecipedump.shotWorld=dump`. It
@@ -392,8 +452,16 @@ running the check at all. So each bullet says whether it was measured.
   terminal in the player's inventory, reading its encryption key, resolving that through AE2's
   locatable registry, and checking the player against an `IWirelessAccessPoint`'s range. **None
   of those four steps is exercised here.** What is established is that the environment can HOST
-  the test, which is the thing that was in doubt. #191 is where the probe that drives the real
-  path belongs.
+  the test, which is the thing that was in doubt.
+
+  **THAT PROBE NOW EXISTS, for the machine half: `ae2-placed`.** #320. It builds the security
+  station, the access point and the linked, charged wireless terminal, then calls
+  `Ae2Stock.read(player)` itself — so all four steps above are exercised, and a refusal names
+  which gate stopped. What it still does not cover is the PACKET: `StockRequestMessage` and
+  `StockReplyMessage` are asserted by `StockSnapshotTest` and `PlannerStockTest` over a real NBT
+  round trip, not by a client-server hop. The stock half of the read has no probe of its own
+  either; `ae2-placed` reads it as a side effect and logs the item count, which is evidence but
+  not an assertion.
 * **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Five staged jars -- ten
   loaded mods, because Forge alone answers to four mod ids -- is not the pack's 367. A
   screen that renders here can still collide with something in MeatballCraft -- a conflicting

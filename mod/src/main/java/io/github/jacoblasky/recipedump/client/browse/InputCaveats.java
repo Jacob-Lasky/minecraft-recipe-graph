@@ -16,8 +16,16 @@ import java.util.List;
  *     two. A reader who checks a named input, finds it irrelevant to the screen they are on,
  *     and concludes the warning is boilerplate will skip the entries that are real.
  *   - NAMING TOO FEW hides the tool's blind spot on the one screen it is about.
- *     `ScenarioSource.PLACED`'s own note is already a sentence about both callers: "placed
- *     machines and generators are not scanned yet".
+ *     `ScenarioSource.PLACED`'s own note is already a sentence about both callers: with no
+ *     reader installed, "no machine counts as owned and every one reads as buildable".
+ *
+ * WHAT THIS DELIBERATELY DOES NOT SAY, since #320 made `placed` live. A source that WAS read
+ * contributes nothing here, and `placed` is now read from the player's linked ME network -- a
+ * narrower thing than the field name suggests. The SCOPE of a successful read is not a caveat
+ * about an unread input and does not belong in this count: a line that were never empty would
+ * steal a row from every screen forever, which is the opposite of the reserve-no-line contract
+ * every caller depends on. `client.planner.PlanCaveats.PLACED_SCOPE` states it on the one panel
+ * that sizes to its content.
  *
  * SO EACH SCREEN DECLARES ITS OWN INPUTS AND THIS COUNTS THEM. The declaration is the part that
  * has to be right and the part a test can pin; the counting is four lines that were about to

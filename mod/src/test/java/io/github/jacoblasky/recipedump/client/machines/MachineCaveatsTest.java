@@ -25,8 +25,14 @@ import io.github.jacoblasky.recipedump.common.ScenarioSource;
  *     `emc_knowledge`, finds it has nothing to do with whether they own a Pulverizer, and
  *     concludes the warning is boilerplate will skip the two entries that matter.
  *   - NAMING TOO FEW hides the tool's biggest blind spot on the one screen it is about.
- *     `ScenarioSource.PLACED`'s own note is already a sentence about this screen: "every
- *     machine reads as buildable rather than owned".
+ *     `ScenarioSource.PLACED`'s own note is already a sentence about this screen: with no
+ *     reader installed, "every one reads as buildable".
+ *
+ * THE DEFAULT STATE HERE IS NO READERS INSTALLED, which is what makes `placed` still show up as
+ * missing below even though #320 made it live in game. `resetReaders` puts every source back on
+ * its declared constant, so these cases are about the SHAPE of the line rather than about what
+ * a running client reports -- and `theLineIsEmptyWhenEveryInputAVerdictUsesWasRead` is the one
+ * that exercises the read having succeeded.
  */
 public class MachineCaveatsTest {
 

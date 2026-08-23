@@ -862,10 +862,10 @@ proximity-radius design was never resting on the recipe.
 
 **WHAT THE PLANNER READS LIVE, AND WHAT IT DOES NOT.** `common/ScenarioSource.java` is the
 single list, and it is a contract with `tests/fixtures/plan/*.json` rather than a to-do list.
-Live: pins, hand-set overrides, and **ME stock**. Not live: `craftables`, `placed`,
-`visited_dimensions`, `emc_knowledge` -- each with its reason in its own javadoc, each named on
-the player-visible `planned without:` line by `ScenarioSource.summary()`, each explained by
-`missingNotes()`.
+Live: pins, hand-set overrides, **ME stock**, and since #320 **`placed`**. Not live:
+`craftables`, `visited_dimensions`, `emc_knowledge` -- each with its reason in its own javadoc,
+each named on the player-visible `planned without:` line by `ScenarioSource.summary()`, each
+explained by `missingNotes()`.
 
 **The design rule behind that list is the thing to carry into any new input.** An unread
 scenario field is not neutral: an empty `have` is the CLAIM "you own nothing", and a plan built
@@ -874,10 +874,45 @@ wrong answer delivered with the same confidence as a right one. So a reader ANSW
 which refusal -- rather than leaving a field empty. Never add a scenario field without a reader
 or a declared reason.
 
-**`placed` being unread has a specific player-visible consequence worth stating outright: a
-machine you built reads as `buildable` rather than owned**, because nothing scans tile
-entities on a render thread. The panel admits it (`verdicts computed without: have, placed`)
-instead of implying the verdicts are complete.
+**`placed` IS read since #320, and its SCOPE is the thing to carry: a machine counts as owned
+when it is CONNECTED TO THE ME NETWORK your wireless terminal is linked to.** The stock read
+already resolves that grid behind five gates, so `Ae2StockReader.placedOf` enumerates its nodes
+in the same pass and ships an item-key-to-count map back in the same reply -- no world scan, no
+region read, no proximity radius, and nothing granted without an ME connection.
+
+What that scope does NOT cover — **phase 1's scope, not the end state: #320 stays open for
+phase 2**, a server-side scan of loaded tile entities in the same request/reply (formed Modular
+Machinery controllers by reflection, placed generators), designed on the issue:
+
+* **A machine sitting off the network reads `buildable`.** The honest answer under this scope; a
+  lower bound rather than a wrong one.
+* **A machine reached only through a storage bus is invisible.** The bus is the grid node; the
+  chest or furnace behind it is not on the grid at all.
+* **Standalone generators are invisible.** A placed `nuclearcraft:water_source` is not a node, so
+  `resolveFreeSources` still falls through to the in-stock path.
+* **MEASURED against the pack, 2026-08-22:** of MeatballCraft's 366 jars, 21 reference
+  `appeng.api.networking.IGridHost` and 11 declare it -- AE2 itself plus ExtraCells, ae2stuff,
+  ThaumicEnergistics, OpenComputers, EnderIO's ME conduit and the PackagedAuto family, whose
+  crafters are real machines. **ModularMachinery-CE only references it and declares none, so an
+  MM multiblock controller is not a grid node.** The other 345 jars never touch it, so most of
+  the pack's machines -- NuclearCraft, Thermal, Tinkers -- do not appear here.
+
+The mapping is `IGridBlock.getMachineRepresentation()` handed to `DumpCommand.baseStackKey`:
+AE2's own answer to "what item is this machine", so no second block-to-item mapping exists.
+**Two filters that look right and are deliberately NOT applied**, both measured and both
+commented at the call site: `isWorldAccessible()` is a which-node-owns-the-tile flag rather than
+an existence flag (`AEBasePart`'s CONSTRUCTOR passes `this instanceof PartCable` into
+`AENetworkProxy`, whose `isWorldAccessible()` returns that flag, while `AENetworkTile.createProxy`
+passes true for every tile — so every non-cable
+part reports false while being a placed block), and `isActive()` would stop an unpowered machine
+counting as built, which is not what `Evidence.placed` means.
+
+Because the field is live, `summary()` stops naming it and the caveat disappears -- so the scope
+is stated instead by `client.planner.PlanCaveats.PLACED_SCOPE` on the detail panel. **Do not
+"fix" a discrepancy between an in-game plan and an offline one by widening this outside #320's
+phase-2 design** (the loaded-tile-entity scan is the sanctioned widening; a region read or a
+render-thread world scan is not): the
+offline `recipegraph have` reads every tile entity in the save and legitimately sees more.
 
 **Live ME stock is a round trip, and its failure mode is a hang.** `Ae2StockReader` runs on the
 SERVER and refuses with a named reason -- `NO_TERMINAL`, `NOT_LINKED`, `NETWORK_GONE`,

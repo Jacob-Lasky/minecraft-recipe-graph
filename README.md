@@ -810,9 +810,17 @@ candidate block there plans one of it. A row marked `(manual)` is a verdict you 
 which outranks every automatic one.
 
 The verdicts are only as good as what the mod could read, and the panel says so rather than
-implying otherwise: `verdicts computed without: have, placed` means no ME network reader and no
-world scan, so **every machine reads as buildable rather than owned**. That line names only the
-inputs a machine verdict actually uses, which is a shorter list than the planner's.
+implying otherwise: `verdicts computed without: have, placed` means the ME network could not be
+read at all — no wireless terminal, out of range, out of power — so **every machine reads as
+buildable rather than owned**. That line names only the inputs a machine verdict actually uses,
+which is a shorter list than the planner's.
+
+With a linked terminal in range, both inputs are live and the line disappears. **A machine
+counts as owned when it is connected to your ME network**: the read that fetches your stock also
+enumerates the grid's own machines, so a Packager or a Drive on the network reads `have` while
+the same machine sitting off the network still reads `buildable`. That scope is narrower than
+the offline tool's, which reads every tile entity in the save, and the planner's caveat panel
+says so in as many words.
 
 **Live ME stock is read through a WIRELESS TERMINAL, on AE2's own terms — with one exception.**
 In game there is no `have` file: the planner asks the server to read your network, and the
@@ -831,12 +839,28 @@ no terminal, not linked, the network is gone, out of range, no power, no permiss
 storage grid. That distinction is the point of the line, because the fix differs: "out of
 range" means walk toward your base, where "not linked" means go and re-link the terminal.
 
-**Placed machines are NOT scanned, so a machine you built reads as `buildable` rather than
-owned** unless its item also happens to be in the network. The offline tool gets this from a
-region-file scan during `have`; there is no equivalent on a render thread, so the in-game
-verdicts declare the gap instead of guessing. Same for AE2 autocrafting patterns, visited
-dimensions and ProjectE knowledge — each one names itself on the caveat line, with what its
-absence costs.
+**A machine counts as owned when it is CONNECTED TO YOUR ME NETWORK.** The same read that
+fetches your stock also enumerates the machines on the grid your terminal is linked to, behind
+the same five gates, so nothing is granted without an ME connection. What that leaves out is
+phase 1's scope — [#320](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/320)
+stays open for phase 2, a server-side scan of loaded tile entities that will see formed
+Modular Machinery multiblocks and placed generators — and worth knowing, because the plan
+carries no caveat about it:
+
+- a machine sitting **off** the network still reads `buildable` — the honest answer under this
+  scope, and a lower bound rather than a wrong one;
+- a machine reached only through a **storage bus** is invisible: the bus is the network node, the
+  chest or furnace behind it is not on the network at all;
+- a **standalone generator** — a placed water source block — is not a node either, so it only
+  makes water free when its item is in stock.
+
+The offline tool is wider here and always was: `recipegraph have` reads every tile entity in the
+save from the region files, grid or no grid, so an in-game plan and an offline plan can
+legitimately disagree about one machine. The planner's caveat panel states the in-game scope in
+as many words rather than letting the shorter field name imply the wider read.
+
+AE2 autocrafting patterns, visited dimensions and ProjectE knowledge are still unread, and each
+one names itself on the caveat line with what its absence costs.
 
 Both windows need [ModularUI](https://github.com/CleanroomMC/ModularUI) 3.1.5. The shipped jar
 declares no dependency on it, so a pack without it still loads the mod and still dumps; the

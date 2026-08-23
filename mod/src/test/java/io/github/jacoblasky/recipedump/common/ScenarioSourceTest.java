@@ -196,6 +196,40 @@ public class ScenarioSourceTest {
         assertTrue(ScenarioSource.missingNotes().contains(ScenarioSource.HAVE.note()));
     }
 
+    @Test
+    public void placedIsNotSilentlyAssumedEmptyEither() {
+        // The machine-shaped version of the same wrong answer: an unread `placed` is the claim
+        // "you own no machines", which prices a Pulverizer the player is standing next to as
+        // something to go and build. Since #320 the declared constant is a FAULT REPORT rather
+        // than a roadmap entry -- it is reached only when nothing installed a reader -- so it
+        // has to read as wrong, exactly as `HAVE`'s does.
+        assertFalse(ScenarioSource.PLACED.live());
+        assertTrue(ScenarioSource.PLACED.note(),
+                   ScenarioSource.PLACED.note().contains("no machine counts as owned"));
+        assertTrue("the declared constant must say a READER is missing, not that the feature"
+                   + " is unbuilt; #320 built it: " + ScenarioSource.PLACED.note(),
+                   ScenarioSource.PLACED.note().contains("reader is installed"));
+        assertFalse("the pre-#320 wording claimed placed machines are never scanned, which is"
+                    + " no longer true: " + ScenarioSource.PLACED.note(),
+                    ScenarioSource.PLACED.note().contains("not scanned yet"));
+        assertTrue(ScenarioSource.missingNotes().contains(ScenarioSource.PLACED.note()));
+    }
+
+    @Test
+    public void theTwoRefusalsAboutOneReadDoNotPrintTheSameSentenceTwice() {
+        // `have` and `placed` are answered by two readers off ONE snapshot (#320), so a shared
+        // refusal string would render as the same line twice on the caveat panel with nothing
+        // to say which input it was about. Asserted on the declared constants because that is
+        // the pair a reader-less client shows, and `PlannerStockTest` asserts it for the
+        // runtime refusals.
+        assertFalse(ScenarioSource.HAVE.note() + " == " + ScenarioSource.PLACED.note(),
+                    ScenarioSource.HAVE.note().equals(ScenarioSource.PLACED.note()));
+        assertEquals("two distinct notes for two distinct inputs",
+                     2, new LinkedHashSet<String>(java.util.Arrays.asList(
+                             ScenarioSource.HAVE.note(),
+                             ScenarioSource.PLACED.note())).size());
+    }
+
     // -- the runtime reader, which is how a source goes live (#191) ----------------------
 
     @org.junit.After

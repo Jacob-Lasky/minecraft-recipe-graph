@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES;
 
 import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
 import java.util.Collections;
@@ -44,7 +45,7 @@ public class LiveStockTest {
     @Test
     public void aFreshReadIsPlannableAndIsHeldWhole() {
         StockSnapshot snapshot = StockSnapshot.of(
-                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)));
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES);
         LiveStock.accept(snapshot);
         assertSame(snapshot, LiveStock.latest());
         assertTrue(LiveStock.isFresh());
@@ -56,9 +57,9 @@ public class LiveStockTest {
         // A snapshot is what the network held at an instant. Merging would invent a state it
         // was never in, and the item that quietly persisted is the one already spent.
         LiveStock.accept(StockSnapshot.of(
-                Collections.singletonMap("minecraft:stone", Long.valueOf(64L))));
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
         LiveStock.accept(StockSnapshot.of(
-                Collections.singletonMap("minecraft:dirt", Long.valueOf(1L))));
+                Collections.singletonMap("minecraft:dirt", Long.valueOf(1L)), NO_MACHINES));
 
         assertEquals(0L, LiveStock.latest().count("minecraft:stone"));
         assertEquals(1L, LiveStock.latest().count("minecraft:dirt"));
@@ -71,7 +72,7 @@ public class LiveStockTest {
         // planning against what it used to hold -- keeping the last good read is exactly the
         // stale-file behaviour this whole phase exists to retire.
         LiveStock.accept(StockSnapshot.of(
-                Collections.singletonMap("minecraft:stone", Long.valueOf(64L))));
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
         LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
 
         assertFalse(LiveStock.latest().isAvailable());
