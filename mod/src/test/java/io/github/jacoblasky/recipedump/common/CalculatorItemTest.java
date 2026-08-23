@@ -1,6 +1,7 @@
 package io.github.jacoblasky.recipedump.common;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -19,6 +20,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import net.minecraft.init.Bootstrap;
+import net.minecraft.item.ItemStack;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -234,6 +236,84 @@ public class CalculatorItemTest {
             }
         }
     }
+
+    // -- the item's name on every surface (#316) -------------------------------------------------
+
+    /**
+     * WITNESS. The item names itself rather than showing its own lang key.
+     *
+     * WHAT MASTER DOES IS RETURN THE KEY, on three surfaces at once: the inventory, JEI and
+     * `config/AppliedEnergistics2/items.csv` all read `item.mcrecipedump.calculator.name`. #316
+     * ruled out every ordinary cause by measurement against the jar in `mods/` -- the lang entry is
+     * present and correctly keyed, 51 bytes of ASCII with no BOM (hexdumped), the client is on
+     * `lang:en_us`, and the computed key matches the file's key exactly. The game returned the raw
+     * key anyway.
+     *
+     * THIS TEST RUNS IN THE FAILING CONDITION BY DEFAULT, which is what makes it worth having
+     * rather than a restatement of the fix. There is no resource pack and no loaded language map on
+     * a JUnit classpath, so `I18n.translateToLocal` answers with the key it was given -- the exact
+     * behaviour the player was seeing. If `getItemStackDisplayName` were left alone, this reads
+     * `item.mcrecipedump.calculator.name` and fails.
+     *
+     * GOES THROUGH THE PRODUCTION OVERRIDE and not through `displayName`: the branch is trivial and
+     * the thing worth doubting is whether the override is reached and whether the string it compares
+     * against is the key the game actually builds. Only calling the real method answers that.
+     */
+    @Test
+    public void theCalculatorHasANameAndNotItsOwnLangKey() {
+        CalculatorItem item = new CalculatorItem();
+        ItemStack stack = new ItemStack(item);
+        String shown = item.getItemStackDisplayName(stack);
+        assertEquals("the flagship item shows its lang key rather than a name (#316)",
+                     "Crafting Planner", shown);
+        assertFalse("a display name must never be a translation key: " + shown,
+                    shown.startsWith("item."));
+    }
+
+    /**
+     * The fallback name is the lang file's, VERBATIM, so the item has one name and not two.
+     *
+     * TWO SPELLINGS OF THE ITEM'S NAME IS A WORSE BUG THAN ONE WRONG ONE: a player would see
+     * "Crafting Planner" in their hand and something else in the graph after a redump, with nothing
+     * saying which is the item. Read out of the shipped resource rather than compared against a
+     * remembered string, so editing the lang file and forgetting the constant fails here.
+     */
+    @Test
+    public void theFallbackNameIsExactlyWhatTheLangFileSays() throws Exception {
+        InputStream in = CalculatorItemTest.class.getResourceAsStream(LANG);
+        assertNotNull("the lang file must be on the classpath at " + LANG, in);
+        String contents;
+        try {
+            contents = readAll(in);
+        } finally {
+            in.close();
+        }
+        String expectedLine = "item." + io.github.jacoblasky.recipedump.RecipeDumpMod.MODID + "."
+                + CalculatorItem.NAME + ".name=" + CalculatorItem.DISPLAY_NAME;
+        assertTrue("the fallback name and the lang file disagree; the file says:\n" + contents
+                   + "and the constant would render: " + expectedLine,
+                   contents.contains(expectedLine));
+    }
+
+    /**
+     * A REAL translation still wins, which is the half that makes this a fallback.
+     *
+     * DO NOT LET THIS BECOME AN UNCONDITIONAL RETURN. A hard-coded English name that ignored the
+     * language map would silently discard every translation -- including ours, the moment the lang
+     * lookup starts working -- and nothing in game would report it. `translateToLocal` returns the
+     * KEY when it has no entry, so the comparison is exact: a resolved name never equals its own
+     * key.
+     */
+    @Test
+    public void aResolvedTranslationIsPreferredOverTheFallback() {
+        String key = "item.mcrecipedump.calculator.name";
+        assertEquals("Planificateur",
+                     CalculatorItem.displayName("Planificateur", key));
+        assertEquals("the fallback must fire only on the exact key",
+                     CalculatorItem.DISPLAY_NAME, CalculatorItem.displayName(key, key));
+    }
+
+    private static final String LANG = "/assets/mcrecipedump/lang/en_us.lang";
 
     private static String readAll(InputStream in) throws Exception {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();

@@ -30,11 +30,29 @@ import net.minecraft.nbt.NBTTagCompound;
  * the first answer would be the confidently-wrong "you own none of this" plan that
  * {@link ScenarioSource} exists to prevent, shown for as long as the solve takes.
  *
- * WAITING IS SAFE BECAUSE A REPLY IS GUARANTEED. `StockRequestMessage.Handler` answers every
- * path, including every refusal -- "a refusal is a reply, not a dropped packet" -- over the
- * ordinary reliable channel. The one case with no server to answer is a client that is not
- * connected to one, which {@link #canAsk} checks for rather than hanging on: the screenshot
- * harness is exactly that case, and it plans immediately with the caveat, as it did before.
+ * <h2>A REPLY IS NOT GUARANTEED, AND WAITING IS ONLY SAFE BECAUSE IT IS BOUNDED. #321</h2>
+ *
+ * WHAT THIS JAVADOC USED TO SAY WAS WRONG, and it was wrong in the direction that defended a
+ * hang: "waiting is safe because a reply is guaranteed ... the one case with no server to answer
+ * is a client that is not connected to one, which `canAsk` checks for". `canAsk` checks only that
+ * a CONNECTION EXISTS. A client connected to a dedicated server that does not have this mod
+ * installed never gets an answer, and 1.12.2 does not refuse that connection -- measured in the
+ * decompiled source on #321: `Loader.checkRemoteModList` always returns true,
+ * `NetworkModHolder.DefaultNetworkChecker.checkCompatible` explicitly accepts a client-side-extra
+ * mod, and `NetworkDispatcher` then hands the unknown channel's payload to vanilla handling, which
+ * drops it. No kick, no log, no error. DO NOT re-derive this; it is measured and it is on the
+ * issue. (Commit 4dee2ea's release note asserts the handshake would refuse such a server. It does
+ * not.)
+ *
+ * The consequence of believing the old sentence was that a parked plan stayed parked for the whole
+ * session and the planner showed IDLE -- "nothing planned yet" -- with nothing anywhere saying why.
+ * So the wait is now BOUNDED: {@link #releaseIfUnanswered} gives up after
+ * {@link #REPLY_TIMEOUT_MILLIS} and plans anyway, with `NO_REPLY` in the caveat line naming the
+ * server's mod list as the thing to go and check. What is still true is the narrower claim:
+ * `StockRequestMessage.Handler` answers every path a SERVER RUNNING THIS MOD takes, refusals
+ * included -- a refusal is a reply, not a dropped packet -- so on a server that has the mod the
+ * timeout never fires. A client with no server at all is still `canAsk`'s case and still plans
+ * immediately with the caveat; the screenshot harness is exactly that.
  *
  * <h2>Single-threaded, like {@code NodeActionsHolder}</h2>
  *
@@ -57,6 +75,32 @@ public final class PlannerStock {
      * would win by arriving first.
      */
     private static Runnable waiting;
+
+    /**
+     * When the ask that {@link #waiting} is waiting on went out, in millis.
+     *
+     * SET ONCE PER ASK AND NOT ONCE PER QUESTION. A second question replaces the waiting plan
+     * without sending a second ask -- see {@link #hold} -- so resetting this there would let a
+     * player who reopens the planner every few seconds push the deadline back forever and never
+     * see the timeout that exists for them.
+     */
+    private static long askedAt;
+
+    /**
+     * How long a plan waits for a reply before planning without one. #321
+     *
+     * FIVE SECONDS IS A JUDGEMENT AND IT IS DELIBERATELY GENEROUS AGAINST A ROUND TRIP, which is
+     * milliseconds on a local server and well under a second on a remote one even with the
+     * server-side tile-entity scan in the read (#320 phase 2). What it is really sized against is
+     * the other error: a player staring at "nothing planned yet" learns nothing, so waiting longer
+     * buys a marginally better chance of a slow answer at the cost of the thing this exists to
+     * prevent.
+     *
+     * A LATE REPLY IS NOT LOST, which is what makes a short timeout safe. `accept` stores whatever
+     * arrives whenever it arrives, so a reply landing after the give-up still feeds the NEXT plan;
+     * the timeout costs one plan priced without stock, and `NO_REPLY` says so on that plan.
+     */
+    static final long REPLY_TIMEOUT_MILLIS = 5_000L;
 
     private PlannerStock() {
     }
@@ -109,7 +153,11 @@ public final class PlannerStock {
                     + " this plan assumes you own nothing -- open the planner again to ask");
         }
         if (!snapshot.isAvailable()) {
-            return ScenarioSource.Status.unavailable(snapshot.reason().message());
+            // `explanation` AND NOT `message`: this note lands on the detail panel, which sizes to
+            // its content, so the reason's advice belongs here. The always-visible line takes the
+            // short form through {@link #refusalSentence} -- see `Reason`'s header on why the two
+            // strings exist and which surface each is budgeted for.
+            return ScenarioSource.Status.unavailable(snapshot.reason().explanation());
         }
         return ScenarioSource.Status.available(snapshot.document());
     }
@@ -137,8 +185,8 @@ public final class PlannerStock {
                     + " no machine counts as owned -- open the planner again to ask");
         }
         if (!snapshot.isAvailable()) {
-            return ScenarioSource.Status.unavailable(snapshot.reason().message()
-                    + ", so no machine on it counts as owned");
+            return ScenarioSource.Status.unavailable(snapshot.reason().explanation()
+                    + ", so no machine counts as owned");
         }
         return ScenarioSource.Status.available(snapshot.placedDocument());
     }
@@ -190,6 +238,18 @@ public final class PlannerStock {
      * Safe to skip because a reply is guaranteed; see the class note.
      */
     static boolean hold(Runnable plan, boolean canAsk) {
+        return hold(plan, canAsk, System.currentTimeMillis());
+    }
+
+    /**
+     * The same, told what time it is, so the deadline can be asserted without sleeping.
+     *
+     * A TEST THAT PROVED THE TIMEOUT BY SLEEPING FIVE SECONDS would be a five-second test that
+     * still could not prove the deadline is five seconds rather than four. The clock is an
+     * argument for the same reason `canAsk` is one: everything worth getting wrong is on this side
+     * of the thing that cannot be reached from a test.
+     */
+    static boolean hold(Runnable plan, boolean canAsk, long now) {
         if (!canAsk || LiveStock.isFresh()) {
             waiting = null;
             plan.run();
@@ -197,7 +257,43 @@ public final class PlannerStock {
         }
         boolean alreadyAsked = waiting != null;
         waiting = plan;
+        if (!alreadyAsked) {
+            askedAt = now;
+        }
         return !alreadyAsked;
+    }
+
+    /**
+     * Give up on a reply that is not coming, and plan without it. #321 §2
+     *
+     * Called from the client tick by {@link StockTimeout}. Does nothing at all until a plan has
+     * been parked for longer than {@link #REPLY_TIMEOUT_MILLIS}, which on any server running this
+     * mod never happens -- see the class note on why "a reply is guaranteed" was false.
+     *
+     * IT MINTS A REFUSAL RATHER THAN JUST RUNNING THE PLAN, and that ordering is the whole point:
+     * `LiveStock.accept` goes FIRST, so by the time the plan runs, `ScenarioSource.HAVE` and
+     * `PLACED` both answer `NO_REPLY` and the caveat line carries "the server did not answer --
+     * this mod may not be installed on it". Running the plan first would produce the very screen
+     * this replaces: a plan priced as though the player owns nothing, with the caveat saying
+     * nobody has asked yet, when in fact we asked and were ignored.
+     *
+     * AND THE REFUSAL IS NOT FRESH, so the next plan asks again. A server that is merely slow
+     * therefore recovers on the following plan with no further intervention.
+     */
+    static boolean releaseIfUnanswered(long now) {
+        Runnable plan = waiting;
+        if (plan == null || now - askedAt < REPLY_TIMEOUT_MILLIS) {
+            return false;
+        }
+        waiting = null;
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_REPLY));
+        plan.run();
+        return true;
+    }
+
+    /** The tick's entry point. Its own clock, because a tick has no argument to carry one. */
+    public static void releaseIfUnanswered() {
+        releaseIfUnanswered(System.currentTimeMillis());
     }
 
     /**
@@ -223,6 +319,42 @@ public final class PlannerStock {
     /** Test seam: drop the outstanding question, so one test cannot leak into the next. */
     static void forgetWaiting() {
         waiting = null;
+        askedAt = 0L;
+    }
+
+    /**
+     * The one short sentence a refused read owes the player, or null. #321 §1
+     *
+     * <h2>WHY THIS EXISTS SEPARATELY FROM `statusOf`</h2>
+     *
+     * `statusOf` answers `ScenarioSource.HAVE` and its sentence goes into `missingNotes`, which
+     * `PlanCaveats.detailLines` renders on a panel the player has to CLICK to reach. #321's first
+     * defect is that the refusal REASON -- the only sentence that says what to go and do -- was
+     * behind that click, while the always-visible line said `planned without: have` and nothing
+     * else. A player standing at a wired ME Terminal with no wireless terminal on them read
+     * "planned without: have" and had no way to know the answer was "pick up your wireless
+     * terminal".
+     *
+     * SO THIS IS THE SHORT FORM, AND SHORT IS A HARD CONSTRAINT RATHER THAN A STYLE. The summary
+     * line is wrapped to `PlannerWidgets.MAX_CAVEAT_LINES` and TRUNCATED past it, and the pointer
+     * at the detail panel is the half that must never be the casualty (`PlanCaveats.POINTER` says
+     * so). WHAT COUNTS AS SHORT IS NOT A CHARACTER COUNT: this sentence is one of four parts of the
+     * composed line, the field list among them changes at runtime, and the wrap breaks on spaces so
+     * three lines are worth less than three times the column budget. `Reason`'s own header carries
+     * the measured proof of that. The only authority is
+     * `PlanCaveatsTest.everyRefusalReasonFitsTheCaveatCapWithThePointerIntact`, which composes and
+     * wraps the real line for every `Reason`.
+     *
+     * NULL WHEN THERE IS NOTHING SHORT AND ACTIONABLE TO SAY: nobody has asked yet (whose sentence
+     * is long and already the note), the read succeeded, or no reader is installed at all. Only a
+     * REFUSAL has a one-line cause, which is why only a refusal gets a line.
+     */
+    public static String refusalSentence() {
+        StockSnapshot held = LiveStock.latest();
+        if (held == null || held.isAvailable()) {
+            return null;
+        }
+        return held.reason().message();
     }
 
     /**

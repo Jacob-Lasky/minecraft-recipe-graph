@@ -124,6 +124,41 @@ public final class ScenarioInputs {
     private ScenarioInputs() {
     }
 
+    /**
+     * How much of a `have` map the graph could not understand. #322
+     *
+     * WHY A PAIR AND NOT A COUNT, and why it is a type rather than two ints on `Resolved`: the two
+     * numbers only mean anything together -- see the comment at the counting site -- and a caller
+     * holding one without the other would report either a scare or a shrug. The type makes
+     * "nothing was stranded" a single check that cannot be half-answered.
+     */
+    public static final class Stranded {
+
+        static final Stranded NONE = new Stranded(0, 0L);
+
+        private final int keys;
+        private final long volume;
+
+        Stranded(int keys, long volume) {
+            this.keys = keys;
+            this.volume = volume;
+        }
+
+        /** Stock keys in the scenario that this graph has never heard of. */
+        public int keys() {
+            return keys;
+        }
+
+        /** How many ITEMS those keys carried. The number that decides whether it matters. */
+        public long volume() {
+            return volume;
+        }
+
+        public boolean any() {
+            return keys > 0;
+        }
+    }
+
     /** Everything a scenario resolves to, so a cost table can be shared between fixtures. */
     public static final class Resolved {
         final Map<Integer, Long> have = new LinkedHashMap<Integer, Long>();
@@ -135,6 +170,8 @@ public final class ScenarioInputs {
         final Set<Integer> emcAvailable = new LinkedHashSet<Integer>();
         final Map<Integer, Set<String>> pinned = new LinkedHashMap<Integer, Set<String>>();
         MachineStates machineStates;
+        /** Defaults to none, so a `Resolved` built by hand in a test reports honestly. */
+        Stranded strandedStock = Stranded.NONE;
 
         /**
          * The machine verdicts this scenario resolved to.
@@ -172,6 +209,18 @@ public final class ScenarioInputs {
         }
 
         /**
+         * What the graph could not understand about the `have` map. #322
+         *
+         * NOT PART OF {@link #costSignature}, deliberately, and the rule that decides it is the
+         * signature's own: it is keyed on what `Cost.estimate` is actually handed. A stranded key
+         * reached no cost table by definition -- that is what stranded means -- so including it
+         * would split the cache on a number that cannot change a price.
+         */
+        public Stranded strandedStock() {
+            return strandedStock;
+        }
+
+        /**
          * What two scenarios must agree on to share one cost table.
          *
          * KEYED ON WHAT `Cost.estimate` IS ACTUALLY HANDED, not on a hand-maintained list of
@@ -199,13 +248,31 @@ public final class ScenarioInputs {
         Resolved out = new Resolved();
 
         Map<String, Long> haveByKey = new LinkedHashMap<String, Long>();
+        int strandedKeys = 0;
+        long strandedVolume = 0L;
         for (Map.Entry<String, JsonElement> e : object(scenario, "have").entrySet()) {
             haveByKey.put(e.getKey(), e.getValue().getAsLong());
             int keyId = g.keyId(e.getKey());
             if (keyId >= 0) {
                 out.have.put(keyId, e.getValue().getAsLong());
+            } else {
+                // COUNTED RATHER THAN SILENTLY DROPPED. #322. A stock key the graph does not know
+                // cannot be priced against, and until now it went nowhere -- no count, no log, no
+                // caveat -- while `PlanCaveats` went on reporting `have` as live. So the plan
+                // claimed it had consulted the player's stock while discarding part of it, which
+                // is the confidently-wrong shape `ScenarioSource`'s header is about, one level in.
+                //
+                // VOLUME AS WELL AS COUNT, because the offline `have` path already learned that
+                // key count is the misleading number: closed #80 measured 11,353 NBT-digest keys
+                // churning across redumps, and almost all of the ITEMS live in plain keys that
+                // cannot miss. Ninety stranded keys carrying eleven items is a curiosity; three
+                // carrying forty thousand ingots is a wrong plan. `gaps.stock_coverage` (#92) is
+                // the offline precedent for reporting the pair.
+                strandedKeys++;
+                strandedVolume += e.getValue().getAsLong();
             }
         }
+        out.strandedStock = new Stranded(strandedKeys, strandedVolume);
         for (JsonElement e : array(scenario, "craftables")) {
             int keyId = g.keyId(e.getAsString());
             if (keyId >= 0) {

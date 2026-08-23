@@ -6,10 +6,23 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 
-import org.junit.After;
-import org.junit.Test;
+import com.google.gson.JsonObject;
 
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import io.github.jacoblasky.recipedump.client.LiveStock;
+import io.github.jacoblasky.recipedump.client.PlannerStock;
+import io.github.jacoblasky.recipedump.common.GraphDocuments;
+import io.github.jacoblasky.recipedump.common.GraphService;
+import io.github.jacoblasky.recipedump.common.GraphSource;
+import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
+import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
+import io.github.jacoblasky.recipedump.plan.Solver;
 
 /**
  * The disclosure, which is the whole of #190's first work item.
@@ -23,10 +36,37 @@ import io.github.jacoblasky.recipedump.common.ScenarioSource;
  */
 public class PlanCaveatsTest {
 
+    @Rule
+    public TemporaryFolder folder = new TemporaryFolder();
+
+    private String savedGraphProperty;
+
+    @Before
     @After
-    public void dropReaders() {
-        // The readers are static and a leaked one answers for the next test's `have`.
+    public void isolate() {
+        // ALL FOUR ARE STATIC. A leaked reader answers for the next test's `have`, a leaked
+        // snapshot decides whether the summary line carries a refusal (#321), and a leaked plan
+        // decides whether the panel reports stranded stock (#322) -- so a case that forgot any of
+        // them would set the next one's answer. `@Before` as well as `@After` because a case in
+        // ANOTHER class can leave the same state behind.
         ScenarioSource.resetReaders();
+        LiveStock.forget();
+        PlannerService.get().reset();
+        GraphService.get().reset();
+    }
+
+    @Before
+    public void rememberGraphProperty() {
+        savedGraphProperty = System.getProperty(GraphSource.PROPERTY);
+    }
+
+    @After
+    public void restoreGraphProperty() {
+        if (savedGraphProperty == null) {
+            System.clearProperty(GraphSource.PROPERTY);
+        } else {
+            System.setProperty(GraphSource.PROPERTY, savedGraphProperty);
+        }
     }
 
     /**
@@ -105,8 +145,10 @@ public class PlanCaveatsTest {
                     line.isEmpty());
         List<String> lines = NodeRowText.wrap(line, PlannerWidgets.CONTENT_WIDTH,
                                               PlannerWidgets.MAX_CAVEAT_LINES);
-        assertTrue("the caveat needs more than " + PlannerWidgets.MAX_CAVEAT_LINES
-                   + " lines: " + lines, lines.size() <= PlannerWidgets.MAX_CAVEAT_LINES);
+        // A `lines.size() <= MAX_CAVEAT_LINES` assertion used to sit here and was DELETED as
+        // tautological: `wrap` loops on `lines.size() < maxLines`, so it asserted the wrapper's own
+        // loop condition and would have held with the caveat cut to a single ellipsis. The
+        // round-trip below is what actually says nothing was lost.
         assertEquals("the wrap lost part of the caveat", line, rejoin(lines).trim());
         for (String wrapped : lines) {
             assertFalse("a wrapped line must not also be cut: " + wrapped,
@@ -213,12 +255,48 @@ public class PlanCaveatsTest {
         List<String> lines = PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH);
         assertFalse("the scope line was numbered as a missing input",
                     opensWith(lines, (count + 1) + ". "));
+        // MATCHED ON THE CONSTANT'S OWN OPENING WORDS rather than on a remembered phrase. This
+        // used to search for the literal "means machines connected", and #320 phase 2 reworded the
+        // sentence -- at which point the loop below stopped examining any line at all and the
+        // assertion inside it became unreachable while the test went on passing. A slice of the
+        // constant cannot go stale that way.
+        String opening = PlanCaveats.PLACED_SCOPE.substring(0, 24);
+        boolean sawTheScopeSentence = false;
         for (String line : lines) {
-            if (line.contains("means machines connected")) {
+            if (line.contains(opening)) {
+                sawTheScopeSentence = true;
                 assertFalse("the scope sentence opens with a note number: " + line,
                             line.matches("^\\d+\\. .*"));
             }
         }
+        assertTrue("the scope sentence was not on the panel at all, so the numbering assertion"
+                   + " above examined nothing", sawTheScopeSentence);
+    }
+
+    /**
+     * The scope sentence covers BOTH sources of `placed`, which is #320 phase 2.
+     *
+     * WITNESS. On master this sentence said only "machines connected to the ME network your
+     * wireless terminal is linked to; one sitting off the network still reads as buildable" -- and
+     * after phase 2 that is false in the direction that matters: a machine sitting off the network
+     * DOES count now if its chunk is loaded, and what does not count is a machine in an unloaded
+     * chunk. A player who read the old sentence and built a machine off-grid would conclude the
+     * planner could not see it, which is the reverse of the truth.
+     */
+    @Test
+    public void thePlacedScopeNamesTheLoadedChunkScanAndNotOnlyTheGrid() {
+        assertTrue("the sentence must still name the ME network half: "
+                   + PlanCaveats.PLACED_SCOPE,
+                   PlanCaveats.PLACED_SCOPE.contains("ME network"));
+        assertTrue("the sentence never mentions the loaded-chunk half, so a player cannot know"
+                   + " an off-grid machine now counts: " + PlanCaveats.PLACED_SCOPE,
+                   PlanCaveats.PLACED_SCOPE.contains("loaded"));
+        assertTrue("and it must say what is still NOT counted, which is now the unloaded chunk"
+                   + " rather than the off-grid machine: " + PlanCaveats.PLACED_SCOPE,
+                   PlanCaveats.PLACED_SCOPE.contains("unloaded"));
+        assertFalse("the old sentence's claim that an off-grid machine reads buildable is now"
+                    + " wrong: " + PlanCaveats.PLACED_SCOPE,
+                    PlanCaveats.PLACED_SCOPE.contains("off the network"));
     }
 
     @Test
@@ -273,6 +351,220 @@ public class PlanCaveatsTest {
                    rejoined.contains(refusal));
         assertFalse("the declared constant was shown instead of the refusal that happened",
                     rejoined.contains(declared));
+    }
+
+    // -- the refusal reason on the line nobody has to click for (#321 §1) -----------------------
+
+    /**
+     * WITNESS. The always-visible line carries the refusal's own sentence.
+     *
+     * ON MASTER THIS FAILS, and it is the whole of #321 §1: `summaryLine` was
+     * `ScenarioSource.summary() + " " + POINTER`, so a player standing at a wired ME Terminal with
+     * no wireless terminal on them read `planned without: have, placed, ...` and had no way to
+     * learn that the answer was "pick up your wireless terminal". The reason string was computed,
+     * stored and rendered -- on a panel behind a click they had no reason to make.
+     *
+     * GOES THROUGH `LiveStock` RATHER THAN A STUBBED READER, because the claim under test is that
+     * the sentence travels from the held snapshot to the line. A test that installed a
+     * `ScenarioSource.HAVE` reader returning the string would assert that a string I supplied comes
+     * back, which is what #190's own header calls the shape of a test that passes for as long as
+     * the defect exists.
+     */
+    @Test
+    public void theSummaryLineLeadsWithTheRefusalsOwnReason() {
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_TERMINAL));
+        PlannerStock.install();
+        String line = PlanCaveats.summaryLine();
+        String reason = StockSnapshot.Reason.NO_TERMINAL.message();
+        assertTrue("the refusal reason is still only reachable by clicking: " + line,
+                   line.contains(reason));
+        assertTrue("the reason has to be the first thing read, not an afterthought: " + line,
+                   line.startsWith(reason));
+        assertTrue("the field list must survive beside it: " + line,
+                   line.contains(ScenarioSource.HAVE.field()));
+        assertTrue("and so must the way in: " + line, line.contains(PlanCaveats.POINTER));
+    }
+
+    /**
+     * A SUCCESSFUL read adds no reason, because there is none to give.
+     *
+     * THE CONTROL. Without it, a `summaryLine` that appended some fixed sentence unconditionally
+     * would pass the witness above, and the line would grow a permanent extra clause that says
+     * nothing -- which is the "tidy sentence that looks like ordinary UI and nobody reports"
+     * failure `ScenarioSource.HAVE`'s own javadoc names.
+     */
+    @Test
+    public void aSuccessfulReadAddsNoReasonToTheLine() {
+        LiveStock.accept(StockSnapshot.of(
+                java.util.Collections.singletonMap("minecraft:stone", Long.valueOf(1L)),
+                io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES));
+        PlannerStock.install();
+        String line = PlanCaveats.summaryLine();
+        assertTrue("some inputs are still unread, so there is a line to examine: " + line,
+                   line.contains(PlanCaveats.POINTER));
+        assertTrue("a successful read must not prepend anything: " + line,
+                   line.startsWith(ScenarioSource.summary()));
+    }
+
+    /**
+     * GUARD. Every refusal reason fits the plan panel's three-line cap with the pointer intact.
+     *
+     * THE CAP TRUNCATES, and `POINTER`'s own javadoc says it is the half that must never be the
+     * casualty -- "drop a field name from the list first, since the fields are recoverable from the
+     * panel and the way in is not". Leading the line with a reason spends 34-46 characters of a
+     * budget that had roughly one line of headroom, so "it fits" is a measurement rather than an
+     * argument, and it has to hold for the LONGEST reason rather than for the one I happened to
+     * try. This is the test to run before lengthening any `Reason.message()`.
+     */
+    @Test
+    public void everyRefusalReasonFitsTheCaveatCapWithThePointerIntact() {
+        int checked = 0;
+        for (StockSnapshot.Reason reason : StockSnapshot.Reason.values()) {
+            if (reason == StockSnapshot.Reason.OK) {
+                continue;
+            }
+            ScenarioSource.resetReaders();
+            LiveStock.forget();
+            LiveStock.accept(StockSnapshot.unavailable(reason));
+            PlannerStock.install();
+            String line = PlanCaveats.summaryLine();
+            List<String> lines = NodeRowText.wrap(line, PlannerWidgets.CONTENT_WIDTH,
+                                                  PlannerWidgets.MAX_CAVEAT_LINES);
+            // THERE IS DELIBERATELY NO `lines.size() <= MAX_CAVEAT_LINES` ASSERTION. `wrap` loops
+            // on `lines.size() < maxLines`, so that can never be false -- it is an assertion about
+            // the wrapper's for-loop dressed up as one about the caveat, and it would pass with the
+            // line truncated to nothing. The pointer and ellipsis checks below are the real test.
+            assertTrue(reason + " pushed the way-in pointer off the line: " + lines,
+                       rejoin(lines).contains(PlanCaveats.POINTER));
+            assertTrue(reason + " lost its own reason to the wrap: " + lines,
+                       rejoin(lines).contains(reason.message()));
+            for (String wrapped : lines) {
+                assertFalse(reason + " produced a cut line: " + wrapped,
+                            wrapped.endsWith(NodeRowText.ELLIPSIS));
+            }
+            checked++;
+        }
+        assertTrue("no reason was checked, so this asserted nothing", checked > 0);
+    }
+
+    // -- stock the graph could not understand (#322) --------------------------------------------
+
+    /**
+     * WITNESS. A stock key the graph never heard of is admitted to, with its volume.
+     *
+     * ON MASTER NOTHING SAYS THIS AT ALL. `ScenarioInputs.resolve` drops any `have` key with no
+     * key id -- no count, no log, no caveat -- while `have` goes on reporting live, so the plan
+     * claims it consulted your stock while discarding part of it. After a redump the in-game
+     * planner is exactly where a player notices "it told me to make something I have", and nothing
+     * distinguished that from #321's refusals.
+     *
+     * THE VOLUME IS ASSERTED SEPARATELY FROM THE COUNT, because key count alone is the misleading
+     * number: closed #80 measured 11,353 digest keys churning across redumps while almost all the
+     * ITEMS live in plain keys that cannot miss. Three keys carrying 40,000 ingots and three
+     * carrying twelve are the same count and opposite situations.
+     */
+    @Test
+    public void strandedStockIsAdmittedToWithBothItsNumbers() throws Exception {
+        planWithStock("mod:ingot", 5L, "mod:unknown_a", 40_000L, "mod:unknown_b", 2L);
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertTrue("nothing on the panel admits the graph dropped part of the stock: " + rejoined,
+                   rejoined.contains("did not match this graph"));
+        assertTrue("the KEY count is missing: " + rejoined,
+                   rejoined.contains("2 stock entries"));
+        assertTrue("the VOLUME is missing, which is the number that decides whether it matters: "
+                   + rejoined, rejoined.contains("40,002 items"));
+        // GROUPED, and asserted as such: an ungrouped `40002` is a number the reader has to count
+        // digits on, which is `NodeRowText.grouped`'s own argument. Asserting the grouped form is
+        // also what stops someone "simplifying" this back to string concatenation.
+        assertFalse("the volume must go through the grouping formatter: " + rejoined,
+                    rejoined.contains("40002"));
+    }
+
+    /**
+     * And silence when every key landed, because good news nobody needs told is noise.
+     *
+     * THE CONTROL, and the offline reader's rule rather than a new one: `gaps.stock_coverage` (#92)
+     * speaks only when the schemas could actually disagree.
+     */
+    @Test
+    public void nothingIsSaidWhenEveryStockKeyLanded() throws Exception {
+        planWithStock("mod:ingot", 5L);
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertFalse("a plan that stranded nothing still complained: " + rejoined,
+                    rejoined.contains("did not match this graph"));
+    }
+
+    /**
+     * And silence before any plan has been resolved, which is a DIFFERENT state.
+     *
+     * `PlannerService.strandedStock()` answers null until a resolve has happened, and null must not
+     * be read as "nothing was stranded": one has nothing to say and the other is a claim. A caveat
+     * panel opened before the first plan that announced clean stock coverage would be reporting on
+     * a read that never took place.
+     */
+    @Test
+    public void nothingIsSaidBeforeAnyPlanHasBeenResolved() {
+        PlannerService.get().reset();
+        assertTrue("reset must clear it, or this test cannot distinguish the two states",
+                   PlannerService.get().strandedStock() == null);
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertFalse(rejoined, rejoined.contains("did not match this graph"));
+    }
+
+    /** One stranded key reads as "1 stock entry", because "1 stock entries" reads as a bug. */
+    @Test
+    public void theSentenceAgreesWithItselfAboutNumber() throws Exception {
+        planWithStock("mod:unknown_a", 1L);
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertTrue(rejoined, rejoined.contains("1 stock entry (1 item) did not match"));
+        // AND THE PRONOUN AGREES. "1 stock entry ... so they were not counted" is the shape review
+        // caught: the noun is singular and the verb was not, which reads as a string built by
+        // concatenation rather than written for a player.
+        assertTrue("singular entry needs a singular verb: " + rejoined,
+                   rejoined.contains("so it was not counted as owned"));
+        assertFalse(rejoined, rejoined.contains("they were"));
+    }
+
+    /**
+     * Run a REAL plan whose `have` holds the given key/count pairs, and settle it.
+     *
+     * <h2>THE PRODUCTION PATH END TO END, AND THAT IS THE POINT OF THE SETUP COST</h2>
+     *
+     * The thread under test is long -- a stock reader answers `ScenarioSource.HAVE`,
+     * `PlannerService.liveScenario` builds the document, `ScenarioInputs.resolve` strands what the
+     * graph does not know, `PlannerService` keeps the pair, `PlanCaveats` reads it -- and every
+     * shorter version of this test would stub out the half that has historically been broken. #191
+     * and #320 were both "the value arrives, is stored, and nothing reads it"; a test that handed
+     * `PlanCaveats` a number directly would pass with that seam severed.
+     *
+     * The graph is `GraphDocuments.TINY`, which knows `mod:plate` and `mod:ingot` and nothing else,
+     * so any other key in `have` is genuinely stranded rather than declared to be.
+     */
+    private void planWithStock(Object... pairs) throws Exception {
+        GraphDocuments.loadTinyGraphFrom(folder.getRoot());
+        final JsonObject have = new JsonObject();
+        for (int i = 0; i < pairs.length; i += 2) {
+            have.addProperty((String) pairs[i], (Long) pairs[i + 1]);
+        }
+        ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
+            @Override
+            public ScenarioSource.Status status() {
+                return ScenarioSource.Status.available(have);
+            }
+        });
+        assertTrue("the plan was refused before it started",
+                   PlannerService.get().plan("mod:plate", 1L, Solver.DEFAULT_MAX_NODES));
+        long deadline = System.currentTimeMillis() + 60_000L;
+        while (PlannerService.get().state() == PlannerService.State.PLANNING) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("the planner never finished: "
+                                         + PlannerService.get().describe());
+            }
+            Thread.sleep(5L);
+        }
+        assertEquals("the plan did not succeed, so the caveat under test has no scenario behind"
+                     + " it: " + PlannerService.get().describe(),
+                     PlannerService.State.DONE, PlannerService.get().state());
     }
 
     private static boolean opensWith(List<String> lines, String prefix) {

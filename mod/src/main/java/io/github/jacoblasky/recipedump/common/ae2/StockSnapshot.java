@@ -37,22 +37,69 @@ import net.minecraft.nbt.NBTTagList;
  *
  * <h2>TWO MAPS, ONE READ, ONE REASON. #320</h2>
  *
- * A snapshot carries what the network HOLDS and what is CONNECTED to it, and the two share a
- * single {@link Reason} because they are the same walk of the same grid behind the same gate:
- * no terminal, no range, no power or no permission refuses both at once. Splitting the
- * availability would be inventing a state the read cannot produce -- there is no way to
- * succeed at the items and fail at the machines -- and it would let a caller price a plan
- * against machines from a read whose stock half had refused.
+ * A snapshot carries what the network HOLDS and what the read SAW PLACED, and the two share a
+ * single {@link Reason} because they come out of one call behind one gate: no terminal, no range,
+ * no power or no permission refuses both at once. Splitting the availability would be inventing a
+ * state the read cannot produce -- there is no way to succeed at the items and fail at the
+ * machines -- and it would let a caller price a plan against machines from a read whose stock half
+ * had refused.
  *
- * The placed half is DELIBERATELY NARROWER THAN THE OFFLINE TOOL'S. `recipegraph have` scans
- * region files and sees every tile entity in the save; this sees only what is on the grid the
- * player's wireless terminal is linked to. That is the MVP scope decided in #320 -- a machine
- * counts as owned when it is connected to the ME system -- and {@link ScenarioSource#PLACED}
- * is where it is written down for the player.
+ * THE PLACED HALF NOW HAS TWO SOURCES AND STILL ONE REASON, which is why nothing above changes.
+ * `Ae2StockReader.placedOf` walks the grid's nodes (#320 phase 1) and
+ * {@link io.github.jacoblasky.recipedump.common.PlacedTileEntities} scans each loaded world's tile
+ * entities (#320 phase 2) -- including formed Modular Machinery controllers -- and both merge into
+ * the one map. A count is a count: `Machines.candidateVerdict` tests membership and quotes the key,
+ * never the source, so there is nothing a per-source field on the wire could tell a reader.
+ *
+ * STILL NARROWER THAN THE OFFLINE TOOL'S, ON ONE AXIS. `recipegraph have` scans region files and
+ * sees every tile entity in the save, LOADED OR NOT; this sees the grid plus whatever chunks the
+ * server currently has in memory. {@link ScenarioSource#PLACED} is where that scope is argued and
+ * `client.planner.PlanCaveats.PLACED_SCOPE` is where it is written down for the player.
  */
 public final class StockSnapshot {
 
-    /** Why a network could not be read. Every one is a different thing to go and do. */
+    /**
+     * Why a network could not be read. Every one is a different thing to go and do.
+     *
+     * <h2>TWO STRINGS PER REASON, AND THE SPLIT IS A PIXEL BUDGET RATHER THAN A STYLE</h2>
+     *
+     * {@link #message} is the SHORT cause and it goes on the always-visible caveat line (#321 §1),
+     * which `PlannerWidgets` wraps to three lines and TRUNCATES past -- and the pointer at the
+     * detail panel is the half that must never be the casualty.
+     *
+     * <h3>NO CHARACTER COUNT IS THE BUDGET, AND ARITHMETIC ON ONE WILL LIE TO YOU</h3>
+     *
+     * The wrap is `NodeRowText.wrap`, which takes `CONTENT_WIDTH / CHAR_WIDTH` = 64 characters a
+     * line and breaks on SPACES. So three lines are not 192 usable characters: every line throws
+     * away whatever sits between its last space and the 64th column, and how much that is depends
+     * on where the spaces fall in the whole composed line. The line is not just this string either
+     * -- it is `message` + " -- " + the field list + " " + the pointer, and THE FIELD LIST CHANGES
+     * AT RUNTIME as sources go live.
+     *
+     * The measured proof that arithmetic lies here: the rejected `NO_REPLY` composed to 176
+     * characters against a nominal 3x64 = 192 and STILL did not fit, because its middle line broke
+     * after "placed," at column 45 and threw away 19. A per-message count cannot see that.
+     *
+     * SO THE ONLY AUTHORITY IS
+     * `PlanCaveatsTest.everyRefusalReasonFitsTheCaveatCapWithThePointerIntact`, which composes and
+     * wraps the REAL line for every value below. RUN IT before lengthening a message. For scale
+     * only, the ten messages span 25 characters (`NO_REPLY`) to 49 (`NOT_LINKED`, which predates
+     * this branch) -- measured 2026-08-23, after review caught an earlier version of this paragraph
+     * claiming "34-46", which was wrong at both ends.
+     *
+     * THE TEST HAS ALREADY CAUGHT ONE: `NO_REPLY` was first written as "the server did not answer
+     * -- this mod may not be installed on it", 64 characters, and it pushed the way-in pointer off
+     * the line. That is what {@link #advice} exists for.
+     *
+     * {@link #advice} is the extra sentence for the DETAIL PANEL, where there is room, and it is
+     * empty for every reason whose cause is already the whole story. "No wireless terminal in your
+     * inventory" needs no elaboration; "the server did not answer" does, because the thing to go and
+     * check is not in the sentence.
+     *
+     * DO NOT lengthen a `message` to say what an `advice` is for. The cap test will fail, and the
+     * fix it is pointing at is moving the words rather than raising `MAX_CAVEAT_LINES` -- see that
+     * constant's own javadoc, which forbids raising it for anything but a longer FIELD LIST.
+     */
     public enum Reason {
         /** Read succeeded. The only value for which counts are meaningful. */
         OK("read"),
@@ -63,17 +110,74 @@ public final class StockSnapshot {
         OUT_OF_RANGE("no wireless access point in range"),
         NO_POWER("your wireless terminal is out of power"),
         NO_PERMISSION("you do not have extract access to that network"),
-        NO_STORAGE("that network has no storage attached");
+        NO_STORAGE("that network has no storage attached"),
+        /**
+         * The server never answered. #321
+         *
+         * <h2>NOT SENT BY THE SERVER, and it is the only reason that is not</h2>
+         *
+         * Every other value here is a verdict `Ae2StockReader` reached and put on the wire. This
+         * one is minted BY THE CLIENT, by `PlannerStock.releaseIfUnanswered`, when a plan has
+         * waited past its deadline for a reply that is not coming. It is a reason rather than a
+         * new kind of state for exactly one purpose: everything downstream of a refusal already
+         * works. The status readers name it, the caveat line quotes it, `LiveStock.isFresh`
+         * declines to treat it as fresh so the next plan re-asks, and no branch anywhere needs to
+         * learn about a fourth possibility.
+         *
+         * THE LIKELIEST CAUSE IS A MISSING SERVER-SIDE INSTALL, measured in the decompiled 1.12.2
+         * source on #321: a client mod missing from a dedicated server's `mods/` is NOT refused
+         * at handshake -- `Loader.checkRemoteModList` returns true and
+         * `NetworkModHolder.DefaultNetworkChecker.checkCompatible` explicitly accepts a
+         * client-side-extra mod -- and `NetworkDispatcher` then routes the unknown channel's
+         * payload to vanilla handling, which ignores it. No kick, no log, no error.
+         *
+         * SO THE ADVICE HEDGES, AND THE HEDGE IS NOT TIMIDITY. The give-up fires on a five-second
+         * deadline, which a merely BUSY server can miss -- and on an integrated server the mod is
+         * installed by definition, so "this mod is not installed" would be flatly false to the
+         * single-player who is by far the likeliest reader. Naming both possibilities keeps the
+         * sentence true in every case it can appear in, and the recovery is the same either way:
+         * the refusal is not fresh, so the next plan asks again. Review caught the unhedged version.
+         */
+        NO_REPLY("the server did not answer",
+                 "it may be busy, or this mod may not be installed on it");
 
         private final String message;
+        private final String advice;
 
         Reason(String message) {
-            this.message = message;
+            this(message, "");
         }
 
-        /** A sentence for the player, with no punctuation or prefix of its own. */
+        Reason(String message, String advice) {
+            this.message = message;
+            this.advice = advice;
+        }
+
+        /**
+         * The short cause, for the always-visible caveat line. No punctuation or prefix of its own.
+         *
+         * KEEP IT SHORT, AND LET THE CAP TEST DECIDE WHAT SHORT IS. See the enum's own header: this
+         * string is only one of four parts of a word-wrapped, truncated line, so no character count
+         * predicts whether it fits and none is written here to be trusted.
+         */
         public String message() {
             return message;
+        }
+
+        /** The extra sentence for the detail panel, or "" when the cause says it all. */
+        public String advice() {
+            return advice;
+        }
+
+        /**
+         * Both, for a surface with room. `""` advice yields the message unchanged.
+         *
+         * COMPOSED HERE RATHER THAN AT THE CALL SITE, so there is one spelling of the join and no
+         * caller has to remember that `advice` might be empty. `PlannerStock.statusOf` is the
+         * caller; `PlannerStock.refusalSentence` deliberately uses {@link #message} alone.
+         */
+        public String explanation() {
+            return advice.isEmpty() ? message : message + " -- " + advice;
         }
     }
 
@@ -104,15 +208,16 @@ public final class StockSnapshot {
 
     /**
      * An available snapshot. Either map may be empty -- a new network really does hold nothing.
-     * (The placed map is NODE-keyed, so cables and drives appear under their own item keys too:
-     * an available snapshot with an EMPTY placed map is essentially unreachable off a real grid
-     * walk, and only catalyst keys are ever read back by `Machines.resolve`. The empty case
-     * exists for deserialization of a pre-placed payload and for tests.)
+     * (The placed map keys every grid NODE and every loaded TILE ENTITY, so cables, drives and
+     * chests appear under their own item keys too: an available snapshot with an EMPTY placed map
+     * is essentially unreachable off a real read, since the security station the terminal is linked
+     * to is itself a node. The empty case exists for deserialization of a pre-placed payload and
+     * for tests.)
      *
      * BOTH HALVES ARE REQUIRED AND THERE IS NO ONE-ARGUMENT FORM, deliberately. A caller that
      * could name only the items would be handing on a snapshot whose placed half silently reads
      * as "you own no machines" -- the same confidently-wrong claim this class exists to prevent,
-     * one field over. Every caller has both, because both come out of the one grid walk.
+     * one field over. Every caller has both, because both come out of the one read.
      */
     public static StockSnapshot of(Map<String, Long> counts, Map<String, Integer> placed) {
         return new StockSnapshot(Reason.OK,
@@ -144,9 +249,15 @@ public final class StockSnapshot {
     }
 
     /**
-     * Every node on the grid, keyed as item keys, to how many were seen -- cables and drives
-     * included, not only machines in the catalyst sense; `Machines.resolve` only ever looks up
-     * catalyst keys, so the extra rows are inert there.
+     * Everything the read saw placed, to how many were seen: every node on the grid PLUS every
+     * tile entity in a loaded chunk, keyed as item keys (and, where a tile entity's registry id
+     * differs from its block's item id, under that too -- see `PlacedTileEntities`).
+     *
+     * FULL OF THINGS THAT ARE NOT MACHINES, and that is not waste. Cables, drives, chests and
+     * signs all key here; `Machines.resolve` only ever looks up CATALYST keys and
+     * `resolveFreeSources` only generator keys, so the extra rows are inert at both readers.
+     * Filtering to "machines" would mean inventing a definition of machine that the graph already
+     * owns, in the one place that cannot see the graph.
      *
      * Empty for a refusal. {@link #isAvailable} is what tells a refusal from a real read -- the
      * same rule {@link #counts} obeys and for the same reason.
@@ -192,10 +303,11 @@ public final class StockSnapshot {
      * The `placed` field of a scenario document, in the shape `ScenarioInputs.resolve` reads.
      *
      * SAME SHAPE AS THE OFFLINE TOOL'S, WITH A NARROWER MEANING. `recipegraph have` writes
-     * `placed` from a region-file walk of every tile entity in the save; this writes it from
-     * the grid the player is linked to. `ScenarioInputs.resolve` cannot tell them apart and
-     * must not need to -- it reads a block id to a count either way -- so the difference is
-     * declared to the PLAYER on {@link ScenarioSource#PLACED} rather than encoded here.
+     * `placed` from a region-file walk of every tile entity in the save, loaded or not; this writes
+     * it from the player's grid plus the chunks the server currently holds. `ScenarioInputs.resolve`
+     * cannot tell them apart and must not need to -- it reads a block id to a count either way --
+     * so the difference is declared to the PLAYER on {@link ScenarioSource#PLACED} rather than
+     * encoded here.
      *
      * A REFUSAL PRODUCES AN EMPTY OBJECT, safe for exactly the reason {@link #document} is:
      * the refusal travels beside it on {@link ScenarioSource}, so the empty object arrives with

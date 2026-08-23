@@ -12,6 +12,8 @@ import appeng.api.networking.energy.IEnergyGrid;
 import appeng.api.util.AEPartLocation;
 import io.github.jacoblasky.recipedump.client.LiveStock;
 import io.github.jacoblasky.recipedump.client.PlannerStock;
+import io.github.jacoblasky.recipedump.common.ModularMachineryControllers;
+import io.github.jacoblasky.recipedump.common.PlacedTileEntities;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
 import io.github.jacoblasky.recipedump.common.ae2.Ae2Stock;
@@ -21,6 +23,7 @@ import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import io.github.jacoblasky.recipedump.plan.MachineInfo;
 import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
@@ -57,7 +60,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
  * enumeration against my own expectation of it -- mocked tests confirm parser shape, not wire
  * shape, and the shape in question is AE2's.
  *
- * <h2>Five criteria, fixed in advance, and TWO OF THEM ARE NEGATIVE</h2>
+ * <h2>Nine criteria, fixed in advance, and TWO OF THEM ARE NEGATIVE</h2>
  *
  * `Ae2ProbeShot`'s header makes the case: a grid that never forms and a grid that forms empty
  * are indistinguishable from a working read of an empty network, so "no error" is not evidence.
@@ -69,19 +72,41 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
  *     failure here says which gate stopped rather than "AE2 broke".</li>
  * <li>The machine ON the grid is in `placed()`, under the item key the graph would name it by.
  *     Nothing short of a walked grid produces that key.</li>
- * <li>The machine OFF the grid is NOT in `placed()`. This is the criterion that makes the probe
- *     able to fail in the other direction: an enumeration that returned every tile entity in the
- *     chunk, or a `placed` map somebody filled from the world, would satisfy criterion 2 and
- *     break here. A vanilla furnace is placed three blocks away and is not an `IGridHost`.</li>
+ * <li>The machine OFF the grid IS in `placed()` too. #320 PHASE 2 INVERTED THIS CRITERION: a
+ *     vanilla furnace three blocks clear of the AE2 line is a tile entity in a loaded chunk, so
+ *     `PlacedTileEntities` must see it. Master asserts the opposite, which is what makes the flip a
+ *     measurement -- there is no way for both versions to pass.</li>
+ * <li>A block with NO TILE ENTITY is not in `placed()`, however much of it is loaded. This is the
+ *     control criterion 3 used to be, and a stronger one: it fails for a scan that had become a
+ *     block scan, a chunk-palette read, or anything-near-the-player, and it depends on nothing
+ *     about where the AE2 blocks went.</li>
  * <li>The verdicts follow, through `ScenarioInputs.resolve` -- the ONE resolver the golden
- *     fixtures use. The on-grid category reads `have` with evidence starting `placed:`, and the
- *     off-grid category reads `buildable`. Asserting the state alone would not do: `have` is
- *     also what the machine ITEM sitting in stock produces, which is a route that already
- *     worked, so the evidence string is what proves the verdict came from the grid walk.</li>
+ *     fixtures use. Both placed categories read `have` with evidence starting `placed:`. Asserting
+ *     the state alone would not do: `have` is also what the machine ITEM sitting in stock produces,
+ *     which is a route that already worked, so the evidence string is what proves the verdict came
+ *     from a sighting.</li>
+ * <li>A category whose machine was NEVER placed still reads `buildable`. With the furnace flipping
+ *     to `have`, this is what keeps the distinction #320 is actually about alive; without it a
+ *     resolver answering `have` for everything would pass.</li>
+ * <li>A PLACED GENERATOR makes its output free, with `placed:` evidence -- `resolveFreeSources`'
+ *     placed-first branch, which phase 1 could never light up because a generator block joins no
+ *     grid. See {@link #placedGeneratorIsFree}.</li>
  * <li>The CAVEAT IS GONE: `ScenarioSource.PLACED` reports live and `summary()` no longer names
  *     `placed`. Only a real read can put the source in that state, so no unit test can assert
  *     it -- and it is the half a player actually sees.</li>
+ * <li>A tile entity WITH NO PICK-BLOCK does not take the read down, and reaches the map under its
+ *     tile-entity id. A `minecraft:mob_spawner` is placed for this: it was a real
+ *     NullPointerException caught in review, and it arrived at the player as `NETWORK_GONE` -- so
+ *     the whole stock read, item list included, died on the first such block in a loaded chunk.
+ *     Criterion 1 carries the survival half; this carries the fallback half. See
+ *     {@link #NO_ITEM_FORM}, whose note records how an earlier cut picked the wrong block and how
+ *     the mutation run caught it.</li>
  * </ol>
+ *
+ * WHAT THIS PROBE DOES NOT COVER, logged on every run rather than left to be inferred: Modular
+ * Machinery controllers. MM is not among the dev harness's five staged jars, so the formed-controller
+ * path is unit-tested against fakes derived from `ModularMachinery-CE-2.2.2`'s own `javap` output
+ * and its LIVE proof is pending a full-pack prodshot. A green run here is not coverage of it.
  *
  * CRITERION 4 GOES THROUGH THE PRODUCTION INSTALLER, which an earlier cut of this did not. It
  * called `ScenarioSource.PLACED.readBy(...)` with a reader built here, and that proves a document
@@ -141,20 +166,85 @@ final class Ae2PlacedProbeShot {
      */
     private static final String ON_GRID = "appliedenergistics2:molecular_assembler";
     /**
-     * The machine that must NOT read as owned, and criterion 3 is the whole reason it is here.
+     * The machine that is placed but NOT on the grid. #320 phase 2 changed what it proves.
      *
      * A VANILLA FURNACE: placed, in the world, in a loaded chunk, three blocks from the grid, and
-     * not an `IGridHost`. Under #320's scope it is exactly the case that still reads `buildable`
-     * -- and it is the control that stops this probe passing on an enumeration that simply
-     * returned everything nearby.
+     * not an `IGridHost`. Under phase 1's scope it was the control that stopped this probe passing
+     * on an enumeration that returned everything nearby, and it had to read `buildable`.
+     *
+     * UNDER PHASE 2 IT IS THE WITNESS, and the assertion is INVERTED: it is a tile entity in a
+     * loaded chunk, so `PlacedTileEntities` must see it and its category must read `have` with
+     * `placed:` evidence. On master this probe asserts the opposite, which is what makes the flip
+     * the measurement rather than a restatement -- there is no way for both to pass.
+     *
+     * A furnace rather than a Modular Machinery controller because MM IS NOT IN THE DEV MOD SET
+     * (five staged jars: MixinBooter, ModularUI, HEI, JEC, AE2-UEL). The MM half of phase 2 is
+     * unit-tested against fakes derived from the real jar's `javap` output and its live proof is
+     * PENDING A FULL-PACK PRODSHOT. Do not read a pass here as covering it.
      */
     private static final String OFF_GRID = "minecraft:furnace";
+    /**
+     * The control that replaces the one criterion 3 used to be, and it is a stronger one.
+     *
+     * STONE HAS NO TILE ENTITY AND THE WORLD IS FULL OF IT. That combination is what makes it
+     * unbeatable as a control: a scan that had become a BLOCK scan, or that read a chunk's
+     * palette, or that reported everything near the player, would put `minecraft:stone` in the
+     * placed map instantly -- while a scan correctly scoped to `loadedTileEntityList` cannot,
+     * however much stone is loaded. The old control (a furnace that must be absent) depended on
+     * the furnace being off the grid; this one depends on nothing about the world's contents,
+     * which is why it survives phase 2 and the furnace did not.
+     */
+    private static final String NO_TILE_ENTITY = "minecraft:stone";
+    /**
+     * A TILE ENTITY WHOSE BLOCK HAS NO ITEM FORM. The blocker's live regression guard.
+     *
+     * A mob spawner is a tile entity with no pick-block: vanilla overrides `Block.getItem` to return
+     * `ItemStack.EMPTY` so a player cannot middle-click one, and the item-key derivation therefore
+     * has nothing to return. That combination crashed the scan before review caught it -- the
+     * absence was normalised into the per-blockstate cache but not into the local, so the FIRST such
+     * tile entity dereferenced null, the NPE escaped `Ae2StockReader.read`, and `Ae2Stock.read`'s
+     * catch-all reported `NETWORK_GONE`, killing the ENTIRE stock read (the item list and phase 1's
+     * grid machines with it) after the terminal had been charged.
+     *
+     * THE REVIEW NAMED THIS BLOCK AND WAS RIGHT; AN EARLIER CUT OF THIS PROBE SECOND-GUESSED IT AND
+     * WAS WRONG. It swapped in a brewing stand on the strength of
+     * `Item.getItemFromBlock(MOB_SPAWNER)` returning an `ItemBlock` -- true, and about a function
+     * THE SCAN DOES NOT CALL. `Block.getItem` is the one it calls, and vanilla overrides that in
+     * both directions. THE MUTATION RUN IS WHAT EXPOSED THE SWAP: with the blocker restored, the
+     * probe PASSED, because a brewing stand's `getItem` answers a real item and the branch was never
+     * taken. A criterion that cannot fail is worse than no criterion. With the spawner it fails
+     * correctly -- `available=false, reason=NETWORK_GONE, items=0, placed=0`.
+     *
+     * SO THE CRITERION IS THAT THE READ SURVIVES, and it is worth more than the unit tests beside
+     * it: only a real world proves the whole gated path still answers with one of these standing in
+     * it, and only the mutation proves the criterion can fail.
+     *
+     * AND IT IS EXPECTED IN `placed()`, UNDER ITS TILE-ENTITY ID rather than an item key. That is
+     * the two-keys design doing exactly what it exists for -- the class note calls the tile entity
+     * id "the ONLY answer for a block whose item form does not exist" -- and it matches what the
+     * offline region walk records for the same block. Asserting its ABSENCE would have been wrong,
+     * and asserting only survival would miss that the fallback fired.
+     */
+    private static final String NO_ITEM_FORM = "minecraft:mob_spawner";
     /** The terminal itself. An item, not a block. */
     private static final String TERMINAL = "appliedenergistics2:wireless_terminal";
 
     /** Category uids for the synthetic graph. Only this class ever reads them. */
     private static final String ON_GRID_CATEGORY = "probe.on_grid";
     private static final String OFF_GRID_CATEGORY = "probe.off_grid";
+    /**
+     * A category whose machine is not a real block at all, so it can never be placed.
+     *
+     * THE `buildable` HALF OF THE DISTINCTION HAS TO SURVIVE PHASE 2. With the furnace flipping to
+     * `have`, a probe asserting only `have`s would pass on a resolver that answered `have` for
+     * everything -- and #320 is about `buildable` versus `have`, so losing the negative verdict
+     * would gut the criterion. A synthetic key cannot be in the world by accident, which is what
+     * a real registry name could always be.
+     */
+    private static final String ABSENT_CATEGORY = "probe.absent";
+    private static final String ABSENT_MACHINE = "probe:absent_machine";
+    /** What a placed generator should make free. Synthetic, so nothing else can grant it. */
+    private static final String FREE_OUTPUT = "probe:free_fluid";
 
     private Ae2PlacedProbeShot() {
     }
@@ -402,7 +492,7 @@ final class Ae2PlacedProbeShot {
         }
         EntityPlayerMP player = players.get(0);
 
-        String[] ids = {ENERGY, SECURITY, ACCESS, ON_GRID, OFF_GRID};
+        String[] ids = {ENERGY, SECURITY, ACCESS, ON_GRID, OFF_GRID, NO_TILE_ENTITY, NO_ITEM_FORM};
         for (String id : ids) {
             if (block(id) == Blocks.AIR) {
                 // Ids verified against the jar's en_us.lang rather than guessed, so this firing
@@ -423,10 +513,21 @@ final class Ae2PlacedProbeShot {
         world.setBlockState(assemblerAt, block(ON_GRID).getDefaultState());
         world.setBlockState(accessAt, block(ACCESS).getDefaultState());
         world.setBlockState(furnaceAt, block(OFF_GRID).getDefaultState());
+        // PUT THE CONTROL BLOCK DOWN RATHER THAN TRUSTING THE WORLD TO CONTAIN ONE. Criterion 4
+        // asserts that a block with no tile entity is ABSENT from the placed map, and an assertion
+        // about absence passes trivially if the thing was never there -- which is the shape of a
+        // control that cannot fail. Placing it is what makes the criterion load-bearing.
+        BlockPos stoneAt = furnaceAt.east();
+        world.setBlockState(stoneAt, block(NO_TILE_ENTITY).getDefaultState());
+        // THE BLOCKER'S GUARD, and it goes down BEFORE the read like everything else here: a
+        // spawner placed after the read would prove nothing about the read. See NO_ITEM_FORM.
+        BlockPos spawnerAt = stoneAt.east();
+        world.setBlockState(spawnerAt, block(NO_ITEM_FORM).getDefaultState());
 
         ShotHarness.log("ae2-placed: placed energy=" + energyAt + " security=" + securityAt
                 + " assembler=" + assemblerAt + " access=" + accessAt
-                + " (off-grid furnace=" + furnaceAt + ")");
+                + " (off-grid furnace=" + furnaceAt + ", no-tile-entity control=" + stoneAt
+                + ", no-item-form tile entity=" + spawnerAt + ")");
         return true;
     }
 
@@ -498,15 +599,27 @@ final class Ae2PlacedProbeShot {
     /**
      * Two categories, each catalysed by one of the two machines, both machines craftable.
      *
-     * BOTH CRAFTABLE IS THE LOAD-BEARING PART. `Machines.candidateVerdict` answers `buildable`
-     * for a candidate with producers and `unavailable` for one without, so without the crafting
-     * recipes the off-grid category would read `unavailable` and criterion 4 would be proving
-     * that an unowned machine is unowned. #320 is about `buildable` versus `have`.
+     * EVERY MACHINE CRAFTABLE IS THE LOAD-BEARING PART. `Machines.candidateVerdict` answers
+     * `buildable` for a candidate with producers and `unavailable` for one without, so without the
+     * crafting recipes the never-placed category would read `unavailable` and criterion 6 would be
+     * proving that an unreachable machine is unreachable. #320 is about `buildable` versus `have`.
      */
     private static RecipeGraph probeGraph() {
         GraphBuilder b = new GraphBuilder();
         machineCategory(b, ON_GRID_CATEGORY, "On Grid", ON_GRID);
         machineCategory(b, OFF_GRID_CATEGORY, "Off Grid", OFF_GRID);
+        // The machine that is nowhere, so `buildable` stays reachable. See ABSENT_CATEGORY.
+        machineCategory(b, ABSENT_CATEGORY, "Absent", ABSENT_MACHINE);
+        // AND A KEY FOR A PLACED GENERATOR TO MAKE FREE. `resolveFreeSources` refuses to seed a
+        // key the graph has never heard of (`addFree` checks `keyId >= 0`), so a free-source
+        // criterion against a graph without this key would pass by finding nothing and would look
+        // exactly like the placed-first branch being dead.
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key(FREE_OUTPUT));
+        b.endSlot();
+        b.output(b.key("probe:free_out"), 1);
+        b.endRecipe("probe.free.r", "minecraft.crafting", "Crafting Table", "probe", false, false);
         return b.build();
     }
 
@@ -579,15 +692,39 @@ final class Ae2PlacedProbeShot {
                     + " -- \"" + snapshot.reason().message() + "\"");
             return;
         }
-        ShotHarness.log("ae2-placed: placed keys " + new ArrayList<String>(
-                snapshot.placed().keySet()));
+        // KEYS AND COUNTS, not just keys. The merged map double-counts anything that is BOTH a grid
+        // node and a loaded tile entity -- an ME Drive lands as 2 -- which `PlacedTileEntities`'
+        // class note now states outright as a limitation rather than promising it cannot happen.
+        // Logging the counts is what keeps that observable instead of folklore: read the assembler's
+        // number here and you can see the doubling for yourself.
+        ShotHarness.log("ae2-placed: placed keys and counts " + snapshot.placed());
 
-        // CRITERIA 2 AND 3.
+        // CRITERIA 2, 3 AND 4.
         boolean sawOnGrid = snapshot.placedCount(ON_GRID) > 0;
         boolean sawOffGrid = snapshot.placedCount(OFF_GRID) > 0;
+        boolean sawStone = snapshot.placedCount(NO_TILE_ENTITY) > 0;
+        // CRITERION 9: the read SURVIVED a tile entity whose block has no item form, and the
+        // spawner reached the map under its TILE-ENTITY id. Criterion 1 above already proves the
+        // survival half -- an NPE here used to arrive as `NETWORK_GONE` -- so this is the half that
+        // proves the two-keys fallback fired rather than the block being silently dropped.
+        boolean sawSpawner = snapshot.placedCount(NO_ITEM_FORM) > 0;
         ShotHarness.log("ae2-placed: " + ON_GRID + " on the grid -> " + sawOnGrid
-                + " (criterion: true), " + OFF_GRID + " off the grid -> " + sawOffGrid
-                + " (criterion: false)");
+                + " (criterion: true), " + OFF_GRID + " off the grid but placed -> " + sawOffGrid
+                + " (criterion: true -- INVERTED by #320 phase 2), " + NO_TILE_ENTITY
+                + " (no tile entity, world full of it) -> " + sawStone + " (criterion: false), "
+                + NO_ITEM_FORM + " (tile entity, NO item form -- the read surviving this at all is"
+                + " the blocker's guard) -> " + sawSpawner + " (criterion: true, under its"
+                + " tile-entity id)");
+
+        // WHAT THE SCAN COST, measured rather than argued. A SECOND, INSTRUMENTED CALL: the
+        // production read above discards the `Result` because nothing in game needs it, so the
+        // only way to get numbers is to run the scan again for the numbers. It reads the same
+        // worlds a moment later, so the counts are the production scan's counts; what it is not
+        // is the production PATH, which criteria 1-3 already cover.
+        PlacedTileEntities.Result cost =
+                PlacedTileEntities.scan(server, new LinkedHashMap<String, Integer>());
+        ShotHarness.log("ae2-placed: scan cost, as placed -- " + cost);
+        measureAtScale(server, world);
 
         // CRITERION 4, and IT GOES THROUGH THE PRODUCTION INSTALLER RATHER THAN AN AD-HOC
         // READER. An earlier cut of this called `ScenarioSource.PLACED.readBy(...)` here with a
@@ -605,6 +742,7 @@ final class Ae2PlacedProbeShot {
                 .liveScenario());
         MachineInfo owned = resolved.machineStates().info(graph.categoryId(ON_GRID_CATEGORY));
         MachineInfo unowned = resolved.machineStates().info(graph.categoryId(OFF_GRID_CATEGORY));
+        MachineInfo absent = resolved.machineStates().info(graph.categoryId(ABSENT_CATEGORY));
         // CRITERION 4b: the caveat must be GONE, because a live `placed` is what makes the
         // planner stop saying "planned without: placed". Asserted here rather than in a unit
         // test because only a real read can put the source in this state for real.
@@ -616,21 +754,41 @@ final class Ae2PlacedProbeShot {
 
         boolean ownedOk = owned.state() == MachineInfo.HAVE
                 && owned.why() != null && owned.why().startsWith("placed:");
-        boolean unownedOk = unowned.state() == MachineInfo.BUILDABLE;
+        // INVERTED BY #320 PHASE 2. The furnace is a tile entity in a loaded chunk, so it is now
+        // owned -- and the evidence string is what proves the verdict came from the SCAN rather
+        // than from the furnace item sitting in the network, which is a route that already worked.
+        boolean unownedOk = unowned.state() == MachineInfo.HAVE
+                && unowned.why() != null && unowned.why().startsWith("placed:");
+        boolean absentOk = absent.state() == MachineInfo.BUILDABLE;
         ShotHarness.log("ae2-placed: on-grid verdict state=" + owned.state() + " why=\""
                 + owned.why() + "\" (criterion: HAVE=" + MachineInfo.HAVE + " and why starts"
-                + " \"placed:\"), off-grid verdict state=" + unowned.state() + " why=\""
-                + unowned.why() + "\" (criterion: BUILDABLE=" + MachineInfo.BUILDABLE + ")");
+                + " \"placed:\"), off-grid-but-placed verdict state=" + unowned.state() + " why=\""
+                + unowned.why() + "\" (criterion: HAVE and why starts \"placed:\" -- INVERTED by"
+                + " #320 phase 2), never-placed verdict state=" + absent.state() + " why=\""
+                + absent.why() + "\" (criterion: BUILDABLE=" + MachineInfo.BUILDABLE + ")");
+
+        boolean freeOk = placedGeneratorIsFree(graph);
 
         String verdict = "read available true, on-grid placed " + sawOnGrid
-                + ", off-grid placed " + sawOffGrid + " (want false), on-grid HAVE+placed "
-                + ownedOk + ", off-grid BUILDABLE " + unownedOk + ", caveat gone " + caveatGone;
+                + ", off-grid TE placed " + sawOffGrid + " (want true), no-tile-entity block placed "
+                + sawStone + " (want false), no-item-form TE placed " + sawSpawner + " (want true,"
+                + " and the read surviving it is the blocker's guard), on-grid HAVE+placed " + ownedOk
+                + ", off-grid TE HAVE+placed " + unownedOk + ", never-placed BUILDABLE " + absentOk
+                + ", placed generator free " + freeOk + ", caveat gone " + caveatGone;
         ShotHarness.log("ae2-placed: VERDICT " + verdict);
+        // SAID EVERY RUN, so a green line is never mistaken for coverage it does not have.
+        ShotHarness.log("ae2-placed: NOT COVERED HERE -- Modular Machinery controllers. MM is not"
+                + " in the dev mod set, so the formed-controller path is unit-tested against fakes"
+                + " derived from ModularMachinery-CE-2.2.2's javap output and its live proof is"
+                + " pending a full-pack prodshot. MM readable in this client: "
+                + ModularMachineryControllers.available() + " ("
+                + ModularMachineryControllers.unavailableBecause() + ")");
 
         // THE ONLY PASS IN THIS CLASS, and it needs every criterion. Every other exit calls
         // `reportFail`, so a run whose criteria did not hold cannot come back green.
         // DO NOT report a pass outside this branch.
-        if (sawOnGrid && !sawOffGrid && ownedOk && unownedOk && caveatGone) {
+        if (sawOnGrid && sawOffGrid && !sawStone && sawSpawner && ownedOk && unownedOk && absentOk
+                && freeOk && caveatGone) {
             ShotScreens.reportPass();
         } else {
             ShotScreens.reportFail(verdict);
@@ -639,6 +797,112 @@ final class Ae2PlacedProbeShot {
         // thread, and opening a client screen from a server tick is wrong twice over. The reason
         // there is none at all is in `open` -- a paused single-player client stops ticking its
         // integrated server, which freezes this very ticker.
+    }
+
+    /**
+     * How the scan behaves with a thousand tile entities in it, rather than five. #320 phase 2
+     *
+     * <h2>WHY THE PROBE HAS TO BUILD THE SCALE ITSELF</h2>
+     *
+     * The dev harness's `ae2` world holds five tile entities -- the four AE2 blocks this probe
+     * placed and the furnace -- so the scan reads `5 tile entities, 5 key derivations, 0 ms`, and
+     * every one of those blocks is a different type. THAT IS A CORRECT RESULT AND USELESS AS
+     * EVIDENCE: `keyDerivations == tileEntities` is exactly right when every entry is a distinct
+     * block state, so the number says nothing about whether the cache works. The claim under test
+     * is about a base with hundreds of the same machine and tens of thousands of entries, and a
+     * five-entry world cannot speak to it. Reasoning from it either way would be reading a
+     * measurement of nothing.
+     *
+     * So a thousand of ONE block go down and the scan runs again. The cache's whole claim is that
+     * asking a block for its item form happens once per distinct `IBlockState` rather than once per
+     * tile entity, which makes this the exact experiment: a thousand more entries must add ZERO
+     * derivations, and the milliseconds are then a real per-entry cost rather than a guess.
+     *
+     * <h2>A CUBE AND NOT A LINE, so the chunks stay loaded</h2>
+     *
+     * Ten by ten by ten beside the player is inside one or two chunks, which are loaded because the
+     * player is standing there. A thousand-block line would run 1,000 blocks out and most of it
+     * would be in chunks the server has never loaded -- `isBlockLoaded` would skip them, the count
+     * would come back low, and the run would read as a broken cache rather than as a bad fixture.
+     *
+     * <h2>AFTER EVERY CRITERION HAS BEEN EVALUATED. DO NOT MOVE THIS EARLIER.</h2>
+     *
+     * It changes the world, and criterion 3 counts `minecraft:furnace`. Running it before the
+     * verdicts would leave the criteria asserting against a world this method built, which is a
+     * probe measuring its own setup.
+     */
+    private static void measureAtScale(MinecraftServer server, World world) {
+        final int side = 10;
+        Block furnace = block(OFF_GRID);
+        BlockPos origin = furnaceAt.up().north(side + 2);
+        int placedBlocks = 0;
+        for (int dx = 0; dx < side; dx++) {
+            for (int dy = 0; dy < side; dy++) {
+                for (int dz = 0; dz < side; dz++) {
+                    world.setBlockState(origin.add(dx, dy, dz), furnace.getDefaultState());
+                    placedBlocks++;
+                }
+            }
+        }
+        PlacedTileEntities.Result scaled =
+                PlacedTileEntities.scan(server, new LinkedHashMap<String, Integer>());
+        ShotHarness.log("ae2-placed: scan cost, after placing " + placedBlocks + " more "
+                + OFF_GRID + " in a " + side + "^3 cube at " + origin + " -- " + scaled);
+        // NOT A CRITERION, deliberately: a timing on a shared host is not a pass/fail, and a
+        // threshold here would fail on a busy Tower and tell nobody anything. What it IS is a
+        // number in the log that a reader can compare against the line above, and the comparison
+        // is the point -- 1,000 more entries adding no key derivations is the cache working, and
+        // adding 1,000 is the cache gone.
+        ShotHarness.log("ae2-placed: read those two cost lines together -- the second should show"
+                + " ~" + placedBlocks + " more tile entities and the SAME key derivations. A"
+                + " matching rise in derivations means the per-blockstate cache is not working.");
+    }
+
+    /**
+     * Does a PLACED generator make its output free, through `resolveFreeSources`? #320 phase 2
+     *
+     * <h2>WHY THIS CRITERION IS SEPARATE FROM THE MACHINE VERDICTS</h2>
+     *
+     * `resolveFreeSources` is a different consumer of the same `placed` map, and it was the second
+     * thing #320 phase 2 was for: "a placed `nuclearcraft:water_source` is not a grid node, so
+     * `resolveFreeSources` still finds nothing placed and falls through to stock". It checks placed
+     * blocks BEFORE stock on purpose, and phase 1 could never light that branch up. A probe that
+     * only asserted machine verdicts would leave the generator half proven by a unit test against a
+     * hand-written document.
+     *
+     * <h2>THE GENERATOR IS AN OVERRIDE, AND THAT IS THE ONLY HONEST OPTION HERE</h2>
+     *
+     * The built-in generator table names NuclearCraft and Thermal Expansion blocks, and NEITHER MOD
+     * IS IN THE DEV MOD SET -- so no default generator can be placed in this world. A
+     * `source_overrides.generators` entry naming the furnace is a knob a player can set, applied to
+     * the PRODUCTION scenario document this read produced, resolved by the production resolver. What
+     * is under test is the branch, and the branch does not care which block named it.
+     *
+     * DO NOT "improve" this by adding a dev-set block to `DEFAULT_GENERATORS`. That table is pack
+     * data about which blocks really are input-free, and a furnace is not one.
+     *
+     * <h2>THE EVIDENCE STRING IS THE ASSERTION, not the free-ness</h2>
+     *
+     * `addFree` is `setdefault` -- the FIRST reason wins -- and stock is checked second, so a key
+     * that came out free could have done so for the wrong reason. `placed:` is what says the
+     * sighting did it.
+     */
+    private static boolean placedGeneratorIsFree(RecipeGraph graph) {
+        com.google.gson.JsonObject scenario = PlannerService.liveScenario();
+        com.google.gson.JsonObject generators = new com.google.gson.JsonObject();
+        com.google.gson.JsonArray outputs = new com.google.gson.JsonArray();
+        outputs.add(FREE_OUTPUT);
+        generators.add(OFF_GRID, outputs);
+        com.google.gson.JsonObject overrides = new com.google.gson.JsonObject();
+        overrides.add("generators", generators);
+        scenario.add("source_overrides", overrides);
+
+        ScenarioInputs.Resolved resolved = ScenarioInputs.resolve(graph, scenario);
+        int keyId = graph.keyId(FREE_OUTPUT);
+        String why = keyId < 0 ? null : resolved.freeSources().get(Integer.valueOf(keyId));
+        ShotHarness.log("ae2-placed: placed generator " + OFF_GRID + " -> " + FREE_OUTPUT
+                + " free because \"" + why + "\" (criterion: starts \"placed:\")");
+        return why != null && why.startsWith("placed:");
     }
 
     /** Nodes in the grid. `getNodes()` returns AE2's `IReadOnlyCollection`, which has size(). */

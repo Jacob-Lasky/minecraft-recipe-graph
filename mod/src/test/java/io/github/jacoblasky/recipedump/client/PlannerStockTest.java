@@ -2,6 +2,7 @@ package io.github.jacoblasky.recipedump.client;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES;
 
@@ -439,6 +440,168 @@ public class PlannerStockTest {
         JsonObject placed = PlannerService.liveScenario().getAsJsonObject("placed");
         assertEquals(8, placed.get("appliedenergistics2:drive").getAsInt());
         assertEquals(1, placed.get("thermalexpansion:machine:1").getAsInt());
+    }
+
+    // -- a refusal does not count as an answer worth reusing (#321 §3) --------------------------
+
+    /**
+     * WITNESS. After a refusal, the next plan asks again instead of planning stock-blind.
+     *
+     * ON MASTER THIS FAILS, and it is #321 §3 as a player experiences it: `hold` returned false,
+     * ran the plan on the spot, and priced it against the refusal's empty `have`. The sequence is
+     * the realistic one -- the player reads "no wireless terminal in your inventory", picks the
+     * terminal up, and re-plans within thirty seconds, which is precisely the window in which
+     * master refused to look again.
+     *
+     * ASSERTED ON BOTH HALVES, because either alone would pass with the other broken: the ask goes
+     * out (`hold` returns true) AND the plan does not run yet (it waits for the answer). A version
+     * that re-asked but also planned immediately would produce two solves per open, which is the
+     * cost `PlannerStock`'s class note is arranged to avoid.
+     */
+    @Test
+    public void afterARefusalThePlanAsksAgainRatherThanReusingIt() {
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_TERMINAL));
+        Ran plan = new Ran();
+        assertTrue("the refusal was reused as a fresh read, so the fixed cause is ignored",
+                   PlannerStock.hold(plan, true));
+        assertFalse("the plan must wait for the new answer, not run twice", plan.ran);
+
+        // And the new answer arriving is what runs it -- with the stock the player just fixed.
+        PlannerStock.accept(StockSnapshot.of(
+                Collections.singletonMap("minecraft:iron_ingot", Long.valueOf(377L)),
+                NO_MACHINES).serializeNBT());
+        assertTrue(plan.ran);
+        assertEquals(377L, LiveStock.latest().count("minecraft:iron_ingot"));
+    }
+
+    // -- the wait is bounded (#321 §2) -----------------------------------------------------------
+
+    /**
+     * A parked plan runs once the deadline passes, and knows why it had to.
+     *
+     * WHAT MASTER DOES INSTEAD IS NOTHING AT ALL. `hold` parked the plan with no timeout and the
+     * `alreadyAsked` branch deliberately declined to re-send, so a reply that never came left the
+     * planner showing "nothing planned yet" for the whole session with no explanation anywhere. The
+     * realistic cause is a dedicated server without this mod: measured on #321, 1.12.2 accepts that
+     * connection and silently drops the packet.
+     *
+     * THE `NO_REPLY` SNAPSHOT IS THE POINT, not merely that the plan ran. Running it while
+     * `LiveStock` still held nothing would produce a plan whose caveat says "your ME network has not
+     * been read yet ... open the planner again to ask" -- advice to repeat the thing that just
+     * failed. The reason has to name the server's mod list, and the assertion below is on the
+     * sentence a player reads rather than on the enum.
+     */
+    @Test
+    public void aReplyThatNeverComesStopsBeingWaitedForAndSaysWhy() {
+        Ran plan = new Ran();
+        long asked = 1_000_000L;
+        assertTrue(PlannerStock.hold(plan, true, asked));
+        assertFalse("nothing should happen before the deadline", plan.ran);
+        assertFalse("one millisecond short of the deadline is still waiting",
+                    PlannerStock.releaseIfUnanswered(
+                            asked + PlannerStock.REPLY_TIMEOUT_MILLIS - 1L));
+        assertFalse(plan.ran);
+
+        assertTrue("the deadline passed and the plan is still parked",
+                   PlannerStock.releaseIfUnanswered(asked + PlannerStock.REPLY_TIMEOUT_MILLIS));
+        assertTrue("the plan never ran, so the planner still shows nothing", plan.ran);
+        assertEquals(StockSnapshot.Reason.NO_REPLY, LiveStock.latest().reason());
+        // THE DETAIL PANEL IS WHERE THE DIAGNOSIS GOES, and the always-visible line takes the
+        // short cause -- see `Reason`'s header, and the cap test that made the split necessary.
+        // Asserted on the composed form because that is what `statusOf` hands the caveat.
+        assertTrue("the note has to point at the server's mod list: "
+                   + LiveStock.latest().reason().explanation(),
+                   LiveStock.latest().reason().explanation().contains("may not be installed on it"));
+        // AND IT MUST HEDGE, which review caught the first version failing to do. The five-second
+        // deadline can be missed by a merely BUSY server, and on an INTEGRATED server the mod is
+        // installed by definition -- so a flat "this mod is not installed" would be plainly false to
+        // the single-player who is the likeliest reader of it.
+        assertTrue("the advice must admit the busy case: "
+                   + LiveStock.latest().reason().advice(),
+                   LiveStock.latest().reason().advice().contains("busy"));
+        // NO CHARACTER-LENGTH ASSERTION ON `message()` HERE, deliberately. One was written and
+        // deleted: a count cannot say whether the composed line fits (the field list changes at
+        // runtime and the wrap breaks on spaces), so it would have been a second, weaker and
+        // disagreeing answer beside the real gate --
+        // `PlanCaveatsTest.everyRefusalReasonFitsTheCaveatCapWithThePointerIntact`.
+        assertEquals("the note the player reads on the panel",
+                     "the server did not answer -- it may be busy, or this mod may not be"
+                     + " installed on it",
+                     PlannerStock.statusOf(LiveStock.latest()).note());
+    }
+
+    /**
+     * And the give-up is not itself treated as an answer: the next plan asks again.
+     *
+     * A `NO_REPLY` THAT COUNTED AS FRESH WOULD BE THE WORST OF THE THREE OUTCOMES -- a server that
+     * was merely slow, or one the player has just fixed by installing the mod, would stay written
+     * off for thirty seconds with a plan that says the mod is missing. This is why `NO_REPLY` is a
+     * `Reason` on the existing refusal path rather than a new kind of state.
+     */
+    @Test
+    public void givingUpIsNotAnAnswerAndTheNextPlanAsksAgain() {
+        Ran first = new Ran();
+        long asked = 5_000L;
+        PlannerStock.hold(first, true, asked);
+        PlannerStock.releaseIfUnanswered(asked + PlannerStock.REPLY_TIMEOUT_MILLIS);
+        assertTrue(first.ran);
+        assertFalse("a give-up must never count as a fresh read", LiveStock.isFresh());
+
+        Ran second = new Ran();
+        assertTrue("the next plan has to ask again", PlannerStock.hold(second, true));
+        assertFalse(second.ran);
+    }
+
+    /**
+     * Nothing parked, nothing released -- and the deadline is not reset by a second question.
+     *
+     * TWO WAYS TO GET THIS WRONG, both of which would be invisible. Releasing with nothing waiting
+     * would mint a `NO_REPLY` refusal over a perfectly good snapshot on the first tick of every
+     * session. And resetting the clock on a replacement question would let a player who reopens
+     * the planner every few seconds push the deadline back forever, never reaching the timeout that
+     * exists for them -- which is exactly the case the issue describes, someone reopening a window
+     * that never answers.
+     */
+    @Test
+    public void anIdleTickReleasesNothingAndAReopenDoesNotResetTheClock() {
+        assertFalse("there was nothing to release",
+                    PlannerStock.releaseIfUnanswered(System.currentTimeMillis()));
+        assertNull("a tick with nothing parked must not invent a refusal", LiveStock.latest());
+
+        long asked = 2_000L;
+        PlannerStock.hold(new Ran(), true, asked);
+        Ran reopened = new Ran();
+        // A second question three seconds later replaces the plan and sends NO second ask.
+        assertFalse(PlannerStock.hold(reopened, true, asked + 3_000L));
+        assertTrue("the deadline is measured from the ASK, not from the latest question",
+                   PlannerStock.releaseIfUnanswered(asked + PlannerStock.REPLY_TIMEOUT_MILLIS));
+        assertTrue(reopened.ran);
+    }
+
+    // -- the refusal sentence the caveat line leads with (#321 §1) -------------------------------
+
+    /**
+     * The short actionable sentence, and null when there is not one.
+     *
+     * SHORT IS THE CONSTRAINT AND NOT A PREFERENCE: this string is prepended to a caveat line the
+     * plan panel wraps to three lines and truncates past. `PlanCaveatsTest` asserts the wrap for
+     * every reason; this asserts which of the four states produce a sentence at all.
+     *
+     * "NOBODY HAS ASKED YET" DELIBERATELY PRODUCES NOTHING. Its own note is a long sentence
+     * explaining a consequence, already on the detail panel, and there is no one-line action to
+     * take -- so a line for it would spend the headroom the real refusals need.
+     */
+    @Test
+    public void onlyARefusalHasAOneLineCauseWorthLeadingWith() {
+        assertNull("nobody has asked yet, so there is no action to name",
+                   PlannerStock.refusalSentence());
+
+        LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
+        assertNull("a successful read owes no explanation", PlannerStock.refusalSentence());
+
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        assertEquals(StockSnapshot.Reason.OUT_OF_RANGE.message(),
+                     PlannerStock.refusalSentence());
     }
 
     /** A plan that records whether it was run. */

@@ -16,6 +16,7 @@ import appeng.api.storage.data.IAEItemStack;
 import appeng.api.util.AEPartLocation;
 import appeng.api.util.DimensionalCoord;
 import io.github.jacoblasky.recipedump.DumpCommand;
+import io.github.jacoblasky.recipedump.common.PlacedTileEntities;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.entity.player.EntityPlayer;
@@ -105,10 +106,19 @@ final class Ae2StockReader {
             return StockSnapshot.unavailable(StockSnapshot.Reason.NO_STORAGE);
         }
         handler.usePower(player, POWER_PER_READ, terminal);
-        // ONE CHARGE FOR BOTH HALVES. The machines come off the grid this call already
-        // resolved, behind gates this call already passed, so charging again would be charging
-        // twice for one question -- see POWER_PER_READ on why a plan is one question.
-        return StockSnapshot.of(countsOf(items), placedOf(grid));
+        // ONE CHARGE FOR ALL THREE HALVES, and the arithmetic joke is deliberate: items, grid
+        // machines and loaded tile entities are one question asked once -- see POWER_PER_READ.
+        // Charging per source would make a plan cost more the more of the world it looked at,
+        // which is a tax on honesty.
+        Map<String, Integer> placed = placedOf(grid);
+        // #320 PHASE 2, AND IT MUST STAY BELOW EVERY GATE ABOVE. The loaded-tile-entity scan needs
+        // no AE2 at all -- that is why it lives in `common` and names no AE2 type -- so the ONLY
+        // thing stopping it granting machines to a player with no ME network is its position in
+        // this method, after the terminal, range, power and permission checks have all passed.
+        // #320's balance decision is that nothing is owned without an ME connection. DO NOT hoist
+        // this call above the gates or move it to a handler that does not pass them.
+        PlacedTileEntities.scan(player.getServer(), placed);
+        return StockSnapshot.of(countsOf(items), placed);
     }
 
     /**
@@ -231,13 +241,19 @@ final class Ae2StockReader {
     /**
      * The machines connected to this grid, keyed as item keys, to how many were seen. #320
      *
-     * <h2>THE SCOPE IS THE GRID AND THAT IS THE WHOLE DESIGN DECISION</h2>
+     * <h2>THE GRID IS ONE OF TWO SOURCES SINCE PHASE 2. This is the grid half.</h2>
      *
-     * A machine counts as owned when it is CONNECTED TO THE ME SYSTEM. Jake's call on #320,
-     * and it is what makes this affordable: it needs no world scan, no region read and no
-     * proximity radius -- the three things `Ae2Stock`'s header rejects -- because the grid is
-     * already resolved and already gated. No link, no range, no power or no permission refuses
-     * the machines exactly as it refuses the stock.
+     * A machine counts as owned when it is CONNECTED TO THE ME SYSTEM (phase 1, Jake's call on
+     * #320) or when it is STANDING IN A LOADED CHUNK ({@link PlacedTileEntities}, phase 2). Both
+     * merge into the one `placed` map this returns into, both ride the same gates, and neither
+     * outranks the other -- `Machines.candidateVerdict` tests membership and quotes the key, so
+     * there is nothing a per-source tag could change.
+     *
+     * WHAT THE GRID HALF STILL EARNS ITS KEEP FOR, now that the world is scanned too: a grid node
+     * is not always a tile entity in a loaded chunk. An AE2 PART shares its host tile with the
+     * cable, so a storage bus or an ME interface has a node and no tile of its own, and AE2's
+     * `getMachineRepresentation()` is the only thing that names the part's item. DO NOT delete this
+     * method as redundant with the tile-entity scan; they see overlapping, not identical, sets.
      *
      * <h2>WHAT AE2'S ENUMERATION ACTUALLY RETURNS, measured 2026-08-22 against the pack</h2>
      *
@@ -251,7 +267,13 @@ final class Ae2StockReader {
      * SO A MACHINE ATTACHED THROUGH A STORAGE BUS IS INVISIBLE HERE, and that is not a bug to
      * fix: the bus is the node, and the chest or furnace behind it is not on the grid at all.
      * Modular Machinery CE only REFERENCES `IGridHost` and declares none, so a multiblock
-     * controller is not a grid node either -- which is the limit #320 states on purpose.
+     * controller is not a grid node either.
+     *
+     * NEITHER OF THOSE IS INVISIBLE TO THE PLAYER ANY MORE, and that is what phase 2 changed: both
+     * are tile entities, so {@link PlacedTileEntities} sees them if their chunk is loaded, and
+     * {@link io.github.jacoblasky.recipedump.common.ModularMachineryControllers} reads which machine
+     * a formed controller has become. The sentence above remains true about THIS method and is why
+     * the second source exists.
      *
      * <h2>Why the machine representation and not the block at the node's position</h2>
      *

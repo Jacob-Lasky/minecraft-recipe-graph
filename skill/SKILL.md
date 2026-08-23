@@ -902,23 +902,91 @@ wrong answer delivered with the same confidence as a right one. So a reader ANSW
 which refusal -- rather than leaving a field empty. Never add a scenario field without a reader
 or a declared reason.
 
-**`placed` IS read since #320, and its SCOPE is the thing to carry: a machine counts as owned
-when it is CONNECTED TO THE ME NETWORK your wireless terminal is linked to.** The stock read
-already resolves that grid behind five gates, so `Ae2StockReader.placedOf` enumerates its nodes
-in the same pass and ships an item-key-to-count map back in the same reply -- no world scan, no
-region read, no proximity radius, and nothing granted without an ME connection.
+**`placed` IS read since #320, from TWO SOURCES behind ONE gate, and the pair is the thing to
+carry.** A machine counts as owned when it is CONNECTED TO THE ME NETWORK your wireless terminal is
+linked to (phase 1, `Ae2StockReader.placedOf`) **or** when it is STANDING IN A CHUNK THE SERVER HAS
+LOADED, in any dimension (phase 2, `common/PlacedTileEntities.scan`). Both run inside
+`Ae2StockReader.read`, after all five gates, and merge into the one `placed` map on the wire.
 
-What that scope does NOT cover — **phase 1's scope, not the end state: #320 stays open for
-phase 2**, a server-side scan of loaded tile entities in the same request/reply (formed Modular
-Machinery controllers by reflection, placed generators), designed on the issue:
+**THE GATE IS THE BALANCE PROPERTY AND IT IS POSITIONAL.** The tile-entity scan names no AE2 type
+and needs no AE2 to compute -- that is why it lives in `common` -- so the *only* thing stopping it
+granting machines to a player with no network is the line it is called from. Do not hoist that call
+above the gates and do not call it from a handler that has not passed them; the call site carries a
+DO-NOT comment saying so.
 
-* **A machine sitting off the network reads `buildable`.** The honest answer under this scope; a
-  lower bound rather than a wrong one.
-* **A machine reached only through a storage bus is invisible.** The bus is the grid node; the
-  chest or furnace behind it is not on the grid at all.
-* **Standalone generators are invisible.** A placed `nuclearcraft:water_source` is not a node, so
-  `resolveFreeSources` still falls through to the in-stock path.
-* **MEASURED against the pack, 2026-08-22:** of MeatballCraft's 366 jars, 21 reference
+**Two keys per tile entity, because the two readers spell a placed block differently.** The offline
+region walk keys `placed` by TILE ENTITY ID (`recipegraph/ae2_inventory.py` records `te["id"]`),
+while the graph's machine candidates are ITEM keys. So the scan writes the block's item key (via
+`Block.getItem` -- the pick-block answer, NOT `Item.getItemFromBlock` plus the state's metadata,
+which would make a furnace facing east key as `minecraft:furnace:5` -- `BlockFurnace` stores facing
+as `EnumFacing.getIndex()`, where EAST is 5) and, when it differs, the tile
+entity id as well. Only one is counted when they are equal.
+
+**`Item.getItemFromBlock(block)` AND `Block.getItem(world, pos, state)` ARE DIFFERENT QUESTIONS, AND
+VANILLA OVERRIDES THE SECOND IN BOTH DIRECTIONS.** Measured 2026-08-23: `mob_spawner` HAS an
+`ItemBlock` and `getItem` still answers `EMPTY` (you cannot middle-click a spawner), while
+`lit_furnace` has NO `ItemBlock` and `getItem` still hands back a plain `minecraft:furnace`. **The
+scan calls `Block.getItem`, so that is the only one whose answer matters.** Reading the other one
+produced, in one sitting, a wrong 14-block census, a wrong "this was every base" severity claim, and
+a live probe criterion that could not fail. Through `Block.getItem`: 12 of 254 vanilla blocks answer
+EMPTY and **four have a tile entity** -- `piston_extension` (any piston mid-push), `mob_spawner`,
+`end_portal`, `end_gateway`.
+
+**A BLOCK WITH A TILE ENTITY AND NO PICK-BLOCK ONCE KILLED THE WHOLE READ.** `keyOfPickBlock` answers
+`""` and NEVER null; a null there dereferenced in `scan`, escaped `Ae2StockReader.read`, and arrived
+at the player through `Ae2Stock.read`'s `catch (Throwable)` as `NETWORK_GONE` -- the entire stock
+read gone, item list and grid machines included, after the terminal had been charged. Do not
+hand-pick a block to test this; `PlacedTileEntitiesTest` derives the set, and
+**mutation-run any criterion whose job is to catch a specific crash** -- restoring this blocker made
+the probe PASS, which is how the wrong block was found.
+
+**Formed Modular Machinery controllers, by reflection, in `common/ModularMachineryControllers`.**
+Every MM machine in the pack is the same block, so the generic path answers
+`modularmachinery:blockcontroller` for all 189 of them -- useless, since the graph's candidates are
+`modularmachinery:<registryname>_controller` (`recipegraph/multiblocks.py`). Targets verified by
+`javap` against the pack's own `ModularMachinery-CE-2.2.2.jar`:
+`TileMultiblockMachineController.isStructureFormed()` and `.getFoundMachine()`, then
+`AbstractMachine.getRegistryName()` -- the BASE tile and the ABSTRACT machine, so the factory and
+parallel controllers count too. Unformed contributes nothing, so a half-built structure is not an
+owned machine. It is a SEPARATE class from `ModularMachineryBridge` on purpose: that one's
+`available()` is gated on the blueprint item being registered, which has nothing to do with a
+controller's formed state.
+
+**Performance: a per-blockstate cache, MEASURED at 2026-08-23 in the dev harness.** Per entry: one
+`isInstance`, one `isBlockLoaded` (NOT a bare `getBlockState` -- on the server that goes through
+`getChunkFromBlockCoords`, which can LOAD or generate a chunk), one interned-state lookup and two map
+probes. Asking a block for its item form happens once per distinct `IBlockState`, cached by identity
+because 1.12.2 interns them. `ae2-placed` logs `Result` twice and **the comparison is the evidence, a
+single line is not** (a world of five distinct blocks correctly reports `keyDerivations ==
+tileEntities`):
+
+```
+as placed:                      2 worlds,    5 tile entities,  5 key derivations,  0 ms
+after +1000 minecraft:furnace:  2 worlds, 1005 tile entities,  6 key derivations,  9 ms
+```
+
+**A thousand more entries added ONE derivation** -- the cache working. **But say the cost out loud:**
+~9 us/entry, linear, so 20,000 loaded tile entities is ~180 ms on the server thread -- orders of
+magnitude more than the grid walk's few dozen nodes. It is acceptable because it is once per stock
+REQUEST (a player opening the planner and waiting on it), because the 30 s freshness window stops a
+second open paying again, and because it is bounded by what is already in memory. **DO NOT put this
+behind a tick handler, a poll or a refresh timer** -- `LiveStock`'s header already rejects polling for
+the lighter item list.
+
+What the pair still does NOT cover, which is now one thing rather than three:
+
+* **A machine in an UNLOADED chunk.** Seeing it needs the region read that does not belong on a live
+  server. Your base is loaded when you are standing in it, which is when you plan.
+
+The three items this list used to carry -- an off-grid machine, a standalone
+`nuclearcraft:water_source`, a machine behind a storage bus -- are all tile entities and a loaded one
+is seen. (The water source really is one: `nc.tile.passive.TilePassive$WaterSource`, checked in the
+pack's jar. `resolveFreeSources` checks placed BEFORE stock, so a placed generator now lights that
+branch up; `PlacedEvidenceTest` asserts the `placed:` evidence string rather than the free-ness,
+because `fluid:water` is free by default and a free-ness assertion would pass with the branch dead.)
+
+**MEASURED against the pack, 2026-08-22, on what the GRID walk returns:** of MeatballCraft's 366
+jars, 21 reference
   `appeng.api.networking.IGridHost` and 11 declare it -- AE2 itself plus ExtraCells, ae2stuff,
   ThaumicEnergistics, OpenComputers, EnderIO's ME conduit and the PackagedAuto family, whose
   crafters are real machines. **ModularMachinery-CE only references it and declares none, so an
@@ -937,9 +1005,9 @@ counting as built, which is not what `Evidence.placed` means.
 
 Because the field is live, `summary()` stops naming it and the caveat disappears -- so the scope
 is stated instead by `client.planner.PlanCaveats.PLACED_SCOPE` on the detail panel. **Do not
-"fix" a discrepancy between an in-game plan and an offline one by widening this outside #320's
-phase-2 design** (the loaded-tile-entity scan is the sanctioned widening; a region read or a
-render-thread world scan is not): the
+"fix" the remaining discrepancy between an in-game plan and an offline one with a region read or a
+render-thread world scan.** The loaded-tile-entity scan was the sanctioned widening and it has
+landed; the gap left is unloaded chunks, and closing it needs its own design on its own issue. The
 offline `recipegraph have` reads every tile entity in the save and legitimately sees more.
 
 **Live ME stock is a round trip, and its failure mode is a hang.** `Ae2StockReader` runs on the
@@ -947,12 +1015,51 @@ SERVER and refuses with a named reason -- `NO_TERMINAL`, `NOT_LINKED`, `NETWORK_
 `OUT_OF_RANGE`, `NO_POWER`, `NO_PERMISSION`, `NO_STORAGE` -- six of which are AE2's own tests.
 The seventh is not: `NO_POWER`'s threshold is this mod's own `POWER_PER_READ = 1.0`, whose
 javadoc says the magnitude is a judgement nobody has measured, so a terminal holding under one
-AE opens in AE2 and is refused here. `PlannerStock` waits for the reply rather than planning
-twice, and its javadoc says "WAITING IS SAFE BECAUSE A REPLY IS GUARANTEED", which holds only
-while the far end has the channel: `canAsk()` checks that a connection exists, not that the
-server has the mod. **On a dedicated server without the jar installed, Forge drops the request
-silently and the planner waits forever**, and `hold()` will not re-ask because a question is
-already outstanding. See the README's "What ships where" for the install consequence.
+AE opens in AE2 and is refused here. There is an eighth reason that the server never sends:
+`NO_REPLY`, minted by the CLIENT when a plan has waited past `PlannerStock.REPLY_TIMEOUT_MILLIS`.
+
+**"WAITING IS SAFE BECAUSE A REPLY IS GUARANTEED" WAS FALSE AND THAT JAVADOC DEFENDED A HANG
+(#321).** `canAsk()` checks that a connection EXISTS, not that the server has the mod -- and 1.12.2
+does not refuse such a connection: measured in the decompiled source, `Loader.checkRemoteModList`
+always returns true, `NetworkModHolder.DefaultNetworkChecker.checkCompatible` explicitly accepts a
+client-side-extra mod, and `NetworkDispatcher` hands the unknown channel's payload to vanilla
+handling, which drops it. No kick, no log, no error. **Do not re-derive this; it is measured.**
+(Commit 4dee2ea's release note claims the handshake would refuse it. It does not.)
+
+Three behaviours now follow from that, all in `client/PlannerStock` and `client/LiveStock`:
+
+* **The refusal reason LEADS the always-visible caveat line**, not the detail panel behind a click.
+  `Reason` therefore carries TWO strings: `message()` (short, for the line) and
+  `advice()` (the diagnosis, for the panel), joined by `explanation()`.
+  **NEVER REASON ABOUT WHETHER THE SHORT ONE FITS FROM A CHARACTER COUNT.** The composed line is
+  `message` + `" -- "` + the field list (which changes at runtime as sources go live) + the pointer,
+  and `NodeRowText.wrap` breaks on SPACES at `CONTENT_WIDTH / CHAR_WIDTH` = 64 columns -- so three
+  lines carry well under 192 characters. Measured: the rejected `NO_REPLY` composed to **176**
+  against a nominal 192 and still lost the pointer, because its middle line broke at column 45.
+  `PlanCaveatsTest.everyRefusalReasonFitsTheCaveatCapWithThePointerIntact` composes and wraps the
+  real line for every reason and is the only authority. Two wrong claims have already been caught
+  here by review: "34-46 characters" (the real span is 25-49) and "the wrap is by pixel width" (it
+  is a fixed 6px-per-char column count). Move words into `advice`; do NOT raise `MAX_CAVEAT_LINES`.
+* **A refusal is NOT fresh.** `isFresh` requires `isAvailable()`, so fixing the cause and re-planning
+  re-asks immediately. Success freshness stays 30 s -- that window exists so opening the planner
+  twice does not cost two reads of a megabyte item list, and a refusal costs one enum on the wire.
+* **The wait is BOUNDED.** `client/StockTimeout` ticks once a second off the client tick (registered
+  from `ClientProxy.init`, its own class because `PlannerStock.install()` is called by twenty tests
+  and by a server-thread probe) and `releaseIfUnanswered` gives up after five seconds, accepting a
+  `NO_REPLY` snapshot BEFORE running the parked plan so the caveat names the server's mod list. The
+  deadline is measured from the ASK, so reopening the window cannot push it back forever. A late
+  reply is not lost: it feeds the next plan.
+
+See the README's "What ships where" for the install consequence.
+
+**A SUCCESSFUL read can still lose stock, and it now reports how much (#322).**
+`ScenarioInputs.resolve` drops any `have` key with no key id -- it cannot be priced against -- and
+used to do so with no count, no log and no caveat while `have` reported live. It now counts the keys
+AND the item VOLUME onto `Resolved.strandedStock()`, `PlannerService` keeps the pair from the last
+resolve, and `PlanCaveats.strandedLines` says it only when non-zero. **Volume is the number that
+matters**, not key count: closed #80 measured 11,353 digest keys churning across redumps while
+almost all the items live in plain keys that cannot miss. `PlannerService.strandedStock()` returns
+null before any resolve, which is a DIFFERENT state from "nothing was stranded" and must stay so.
 
 **ModularUI 3.1.5 is required for the SCREENS and for nothing else.** The jar declares no
 dependency on it, so a pack without it still loads the mod and still dumps; the item says what

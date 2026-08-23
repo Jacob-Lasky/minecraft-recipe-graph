@@ -39,7 +39,59 @@ public class LiveStockTest {
         // Now there IS an answer, and it is a refusal -- distinguishable from the null above.
         assertFalse(LiveStock.latest().isAvailable());
         assertEquals(StockSnapshot.Reason.OUT_OF_RANGE, LiveStock.latest().reason());
-        assertTrue(LiveStock.isFresh());
+        // AND IT IS STILL NOT FRESH, which this case used to assert the opposite of. See
+        // `aRefusalIsNeverFreshSoTheNextPlanAsksAgain` for why the flip is the fix and not a
+        // loosening: the two states differ in `latest()`, which is what this case is about, and
+        // they agree about freshness because neither is worth planning against without re-asking.
+        assertFalse(LiveStock.isFresh());
+    }
+
+    /**
+     * WITNESS. A refusal is never fresh, so the plan after it asks again. #321 §3
+     *
+     * ON MASTER THIS FAILS, and the failure is a measured wrong answer rather than a tidiness
+     * complaint. `isFresh` checked only `latest != null` and the thirty-second window, and a
+     * refusal satisfies both -- so: plan, get NO_TERMINAL, pick up your wireless terminal, re-plan
+     * within thirty seconds, and `PlannerStock.hold` saw a fresh snapshot, skipped the ask, and
+     * planned stock-blind against the refusal you had just fixed. The window exists so that opening
+     * the planner twice does not cost two reads of a megabyte item list; re-asking after a refusal
+     * costs a packet carrying one enum value.
+     *
+     * EVERY REFUSAL, NOT THE ONE I THOUGHT OF. `NO_TERMINAL` is the one the issue was reported
+     * from, but the argument is about refusals as a class -- and `NO_REPLY` in particular MUST be
+     * unfresh or a server that was briefly slow would stay written off for thirty seconds.
+     */
+    @Test
+    public void aRefusalIsNeverFreshSoTheNextPlanAsksAgain() {
+        int checked = 0;
+        for (StockSnapshot.Reason reason : StockSnapshot.Reason.values()) {
+            if (reason == StockSnapshot.Reason.OK) {
+                continue;
+            }
+            LiveStock.accept(StockSnapshot.unavailable(reason));
+            assertFalse(reason + " counts as fresh, so re-planning will not re-ask",
+                        LiveStock.isFresh());
+            // The refusal is still HELD -- this narrows what counts as fresh, it does not discard
+            // the answer. `PlannerStock.statusOf` needs the reason to tell the player.
+            assertEquals(reason, LiveStock.latest().reason());
+            checked++;
+        }
+        assertTrue("no refusal was checked, so this asserted nothing", checked > 0);
+    }
+
+    /**
+     * And a SUCCESSFUL read still is, which is the half that must not change.
+     *
+     * THE CONTROL FOR THE WITNESS ABOVE. "A refusal is not fresh" implemented as "nothing is
+     * fresh" would pass that test and would reintroduce the cost the window exists to avoid: two
+     * reads of a megabyte item list every time the planner is opened twice.
+     */
+    @Test
+    public void aSuccessfulReadIsStillFreshForTheFullWindow() {
+        LiveStock.accept(StockSnapshot.of(
+                Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
+        assertTrue("success freshness was narrowed along with refusal freshness",
+                   LiveStock.isFresh());
     }
 
     @Test

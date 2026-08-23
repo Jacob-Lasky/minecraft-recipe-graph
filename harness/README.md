@@ -261,13 +261,66 @@ Access Point, a Molecular Assembler on the grid, and a Wireless Terminal in the 
 inventory linked to the station's serial and charged to full. A vanilla furnace goes down three
 blocks clear of the AE2 line.
 
-**Four criteria, and two of them are NEGATIVE**, because the thing under test is a map that can
-legitimately be empty and "no error" would therefore be worthless: the read succeeds; the
-assembler IS in `placed()`; the furnace is NOT; and through `ScenarioInputs.resolve` the
-assembler's category reads `have` with evidence starting `placed:` while the furnace's reads
-`buildable`. The third criterion is what stops the probe passing on an enumeration that returned
-every tile entity nearby, and the evidence-string check in the fourth is what stops it passing on
-a `have` that came from the machine's ITEM being in stock, which is a route that already worked.
+**Nine criteria, and two of them are NEGATIVE**, because the thing under test is a map that can
+legitimately be empty and "no error" would therefore be worthless: the read succeeds; the assembler
+IS in `placed()`; the furnace IS too; a stone block (no tile entity) is NOT; a mob spawner (a tile
+entity with NO item form) IS, under its tile-entity id; through `ScenarioInputs.resolve` both placed
+categories read `have` with evidence starting `placed:`; a category whose machine was never placed
+still reads `buildable`; a placed generator makes its output free with `placed:` evidence; and the
+caveat is gone. The evidence-string checks are what stop it passing on a `have` that came from the
+machine's ITEM being in stock, which is a route that already worked.
+
+**The mob spawner is a REGRESSION GUARD FOR A REAL BLOCKER, caught in review before it shipped.**
+Vanilla overrides `Block.getItem` on a spawner to return `ItemStack.EMPTY` — you cannot middle-click
+one — so the item-key derivation has nothing to return. The absence used to be normalised into the
+per-blockstate cache but NOT into the local variable, so the first such tile entity dereferenced null
+— and the NPE escaped the scan, escaped `Ae2StockReader.read`, and `Ae2Stock.read`'s
+`catch (Throwable)` delivered it as `NETWORK_GONE`, killing the ENTIRE stock read, phase 1's grid
+machines and the item list with it, after the terminal had been charged. Criterion 1 (the read
+succeeds) is the survival half; the spawner appearing under its tile-entity id is the two-keys
+fallback firing rather than the block being silently dropped.
+
+**`Item.getItemFromBlock` AND `Block.getItem` ARE DIFFERENT QUESTIONS, and confusing them cost two
+passes here.** Vanilla overrides the second in both directions: `mob_spawner` HAS an `ItemBlock` and
+still has no pick-block, while `lit_furnace` has NO `ItemBlock` and still picks as a plain
+`minecraft:furnace`. An earlier cut of this probe read `getItemFromBlock`, concluded the spawner was
+unsuitable, swapped in a brewing stand, and built a census of "14 blocks with no item form" on the
+same wrong function. **The mutation run is what caught it: with the blocker restored the probe
+PASSED**, because a brewing stand's `getItem` answers a real item and the branch was never taken.
+Measured through `Block.getItem`: 12 of 254 vanilla blocks answer EMPTY and **four** have a tile
+entity — `piston_extension` (any piston mid-push), `mob_spawner`, `end_portal`, `end_gateway`. Which
+is exactly the set the review named.
+
+**Always mutation-run a criterion whose job is to catch a specific crash.** A criterion that cannot
+fail looks identical to one that passes.
+
+The probe logs placed keys **with their counts**, which is how the cross-source double-count stays
+observable: anything that is both a grid node and a loaded tile entity (an ME Drive, most AE2
+machines in a loaded chunk) lands as 2. Inert today — every consumer tests membership or `> 0` — and
+`PlacedTileEntities`' class note states it as a limitation with the constraint it implies rather than
+promising it cannot happen.
+
+**THE FURNACE CRITERION WAS INVERTED BY #320 PHASE 2, and the inversion is the measurement.** Under
+phase 1 the furnace had to be ABSENT from `placed()` -- it is not an `IGridHost`, so a grid walk
+cannot see it -- and that assertion was the control against an enumeration that returned everything
+nearby. Phase 2 scans each loaded world's `loadedTileEntityList`, so a furnace in a loaded chunk is
+owned, and master and this branch assert opposite things about it: there is no version of the code
+where both pass. The control moved to a block with no tile entity at all, which is strictly stronger
+because it depends on nothing about where the AE2 blocks went. The stone block is PLACED by the
+probe rather than assumed to exist, since an assertion about absence passes trivially if the thing
+was never there.
+
+**Modular Machinery is NOT covered by this probe and it says so on every run.** MM is not among the
+five staged dev jars, so the formed-controller path is unit-tested against fakes derived from
+`ModularMachinery-CE-2.2.2`'s own `javap` output (`ModularMachineryControllersTest`, plus the two
+fake classes at MM's fully-qualified names carrying that output in their headers) and its live proof
+is pending a full-pack prodshot. The probe also logs the scan's cost -- worlds, tile entities, key
+derivations, milliseconds -- **twice, and the COMPARISON is the evidence**: once as the world stands,
+then again after placing a thousand more of one block in a 10^3 cube. A single line cannot speak to
+the per-block-state cache, because the harness world holds five tile entities of five different types
+and `keyDerivations == tileEntities` is the correct answer there. A thousand more entries adding ZERO
+derivations is the cache working; a matching rise is the cache gone. It is logged rather than
+asserted, because a timing on a host shared with other agents' builds is not a pass/fail.
 
 It uses `ShotScreens.holdCapture` and NOT `requestSettleFrames` — see #319, which is about
 `ae2-probe`'s settle-frame budget being a stopping rule that is sound only by arithmetic nobody

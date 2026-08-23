@@ -82,13 +82,52 @@ public final class LiveStock {
         return latest;
     }
 
-    /** True when a snapshot has arrived and is recent enough to plan against. */
+    /**
+     * True when a snapshot has arrived, SUCCEEDED, and is recent enough to plan against.
+     *
+     * <h2>A REFUSAL IS NEVER FRESH, WHICH IS THE WHOLE OF #321 §3</h2>
+     *
+     * This used to check only `latest != null` and the window, and a refusal satisfies both. The
+     * consequence was measurable and exactly backwards: plan, get `NO_TERMINAL`, pick up your
+     * wireless terminal or walk into range, re-plan within thirty seconds -- and
+     * `PlannerStock.hold` saw a fresh snapshot, skipped the ask, and planned stock-blind again
+     * against the refusal the player had just fixed. The thirty-second window exists so that
+     * opening the planner twice does not cost two reads of a megabyte item list; a refusal costs
+     * nothing to re-ask, and its cause is precisely the thing the player has gone away to change.
+     *
+     * SUCCESS FRESHNESS IS UNCHANGED at thirty seconds. This is a narrowing of what counts as
+     * fresh, not a shortening of the window: the case #321 is about is the one where re-asking is
+     * free and the held answer is worthless.
+     *
+     * NOTE WHAT THIS DOES **NOT** DO. It does not discard the refusal --
+     * {@link PlannerStock#statusOf} still reports the reason to the player, and must, because
+     * "your terminal is out of power" is a lower bound they can act on while an empty `have` is a
+     * confident falsehood. This decides only whether to ASK AGAIN, which is the distinction
+     * `PlannerStock`'s own javadoc draws about staleness.
+     */
     public static boolean isFresh() {
-        return latest != null && System.currentTimeMillis() - receivedAt < FRESH_FOR_MILLIS;
+        StockSnapshot held = latest;
+        return held != null && held.isAvailable()
+                && System.currentTimeMillis() - receivedAt < FRESH_FOR_MILLIS;
     }
 
-    /** Test seam: forget everything, so one test cannot leak into the next. */
-    static void forget() {
+    /**
+     * Test seam: forget everything, so one test cannot leak into the next.
+     *
+     * PUBLIC RATHER THAN PACKAGE PRIVATE SINCE #321, and the reason is a package boundary rather
+     * than a widening of what this is for. The held snapshot now decides what `PlanCaveats` puts on
+     * the always-visible caveat line, and `PlanCaveats` lives in `client.planner` -- so the test
+     * that has to establish "no snapshot at all" is in a different package from the one holding it.
+     * The alternative was `accept(null)`, which spells the same reset as a delivery.
+     *
+     * PRODUCTION MUST NEVER CALL THIS. Clearing a snapshot is not a state the game has: a read
+     * either succeeded, refused, or has not happened, and the last of those is the state BEFORE the
+     * first ask rather than one to return to. A production caller would hand the planner a
+     * nobody-has-asked-yet caveat over a read that DID happen, which is #321 §1's defect inverted.
+     * `SeamInstallationTest.noProductionClassCallsATestOnlySeam` is the gate that says so -- built
+     * because an earlier version of this paragraph claimed a gate that did not exist.
+     */
+    public static void forget() {
         latest = null;
         receivedAt = 0L;
     }

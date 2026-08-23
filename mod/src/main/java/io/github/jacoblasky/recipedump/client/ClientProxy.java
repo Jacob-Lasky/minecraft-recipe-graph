@@ -55,6 +55,12 @@ public class ClientProxy extends CommonProxy {
         // built, and a reader installed by the window would leave the FIRST plan -- the one
         // started as the window opens -- reading as unwired.
         PlannerStock.install();
+        // AND THE CLOCK THAT STOPS A PARKED PLAN WAITING FOREVER (#321). A reply is NOT guaranteed
+        // -- a dedicated server without this mod accepts the connection and silently drops the
+        // packet, measured -- and a plan waiting on one has no other event that could ever notice.
+        // Beside `PlannerStock.install` because the two are the halves of one behaviour: the
+        // reader answers with what landed, and this decides when nothing is going to.
+        StockTimeout.install();
         // BUILD JEI'S STACK INDEX WHEN THE GRAPH LANDS, on the loader thread, so the first
         // context menu does not pay for a walk of ~35,000 item stacks. `indexFor` is
         // null-safe and does nothing useful without JEI, so this is unconditional; the

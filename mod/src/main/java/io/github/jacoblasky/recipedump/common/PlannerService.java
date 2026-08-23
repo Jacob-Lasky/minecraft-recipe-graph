@@ -63,6 +63,21 @@ public final class PlannerService {
     private volatile String targetKey = "";
     private volatile long targetQty;
     private volatile long generation;
+    /**
+     * What the last resolve could not understand about the player's stock. #322
+     *
+     * HELD HERE BECAUSE THIS IS WHERE THE RESOLVE HAPPENS, and #322 asks for the pair to be
+     * "threaded to PlanCaveats". The caveat surface is static and takes no plan -- the render call
+     * sites belong to `PlannerWidgets` -- so the thread runs resolve -> here -> `PlanCaveats`,
+     * which is one hop and no new argument. DO NOT re-derive it in `PlanCaveats` from the live
+     * scenario instead: the filter that strands a key lives in `ScenarioInputs.resolve` and a
+     * second copy of it is a second answer, which is the defect #322 is about wearing a different
+     * hat.
+     *
+     * VOLATILE, like every other field here: written by the plan worker, read by a panel being
+     * built on the client thread.
+     */
+    private volatile ScenarioInputs.Stranded strandedStock = null;
 
     private PlannerService() {
     }
@@ -97,6 +112,18 @@ public final class PlannerService {
 
     public PlanResult result() {
         return result;
+    }
+
+    /**
+     * What the most recent resolve could not understand about the player's stock, or null. #322
+     *
+     * NULL MEANS NO PLAN HAS BEEN RESOLVED THIS SESSION, which is a different statement from
+     * "nothing was stranded" and the caveat must not conflate them: the first has nothing to say,
+     * the second is good news nobody needs told. `ScenarioInputs.Stranded.any()` answers the
+     * second.
+     */
+    public ScenarioInputs.Stranded strandedStock() {
+        return strandedStock;
     }
 
     /**
@@ -237,6 +264,10 @@ public final class PlannerService {
         try {
             ScenarioInputs.Resolved resolved =
                     ScenarioInputs.resolve(graph, liveScenario());
+            // BEFORE THE SOLVE, not after: the solve can throw, and a stranded-stock count is a
+            // fact about the scenario that was resolved rather than about a plan that finished.
+            // A caveat panel opened after a failed plan should still say what the read lost.
+            strandedStock = resolved.strandedStock();
             CostTable costs = costsFor(graph, resolved);
             PlanResult plan = ScenarioInputs.solverFor(graph, resolved, costs, maxNodes)
                     .solve(graph.keyId(key), qty);
@@ -308,6 +339,10 @@ public final class PlannerService {
         detail = "";
         targetKey = "";
         targetQty = 0L;
+        // BACK TO NULL AND NOT TO `Stranded.NONE`. Reset means "no plan has been resolved", and
+        // `NONE` means "one was, and nothing was stranded" -- a reset service claiming the second
+        // would report good news about a read that never happened.
+        strandedStock = null;
         generation++;
         synchronized (priced) {
             priced.clear();

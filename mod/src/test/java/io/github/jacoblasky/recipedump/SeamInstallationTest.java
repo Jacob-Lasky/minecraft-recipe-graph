@@ -774,6 +774,183 @@ public class SeamInstallationTest {
         return type.getName().startsWith(ClassFiles.ROOT_PACKAGE.replace('/', '.') + ".");
     }
 
+    // -- joins that are calls rather than settable seams (#320 phase 2, #321, #322) ------------
+
+    /**
+     * Every new join of this batch is CALLED from production, by `Methodref`.
+     *
+     * <h2>WHY THESE NEED A GATE OF THEIR OWN</h2>
+     *
+     * The scan above finds SETTABLE seams -- a public void method taking one of this mod's
+     * interfaces, on a class holding a field of that type -- which is the shape #191 and #320
+     * broke. None of this batch's joins is that shape: they are plain static calls, and a plain
+     * static call cannot be "installed but never switched on". What it CAN be is written and never
+     * called, which is the same defect with a different silhouette and the one that has now
+     * happened three times in this codebase (#191, #205, #320 phase 1). A `Methodref` in the
+     * caller's constant pool is a yes-or-no answer about bytes: javac does not emit one for a call
+     * it did not compile.
+     *
+     * <h2>WHAT EACH ROW WOULD LOOK LIKE IF IT BROKE, which is why each is worth a row</h2>
+     *
+     * <ul>
+     * <li>`Ae2StockReader` -> `PlacedTileEntities.scan`: the loaded-chunk scan exists, the wire
+     *     carries a `placed` map, and every machine you are standing next to reads `buildable`.
+     *     That is #320 phase 1's world with a phase-2-shaped codebase -- indistinguishable from
+     *     working unless you own a machine off the grid.</li>
+     * <li>`PlacedTileEntities` -> `ModularMachineryControllers.formedMachineKey`: every formed
+     *     multiblock collapses to `modularmachinery:blockcontroller`, which matches no candidate.
+     *     A player with 40 machines owns none of them and the caveat says `placed` is live.</li>
+     * <li>`ClientProxy` -> `StockTimeout.install`: the timeout class is perfect and never ticks,
+     *     so a plan waiting on a server without the mod waits forever -- #321 §2 verbatim, with
+     *     the fix sitting in the jar.</li>
+     * <li>`PlannerService` -> `Resolved.strandedStock`: the count is computed and thrown away and
+     *     the caveat is silent, which is #322 unchanged.</li>
+     * <li>`PlanCaveats` -> `PlannerStock.refusalSentence`: the sentence is computed and the
+     *     always-visible line does not carry it, which is #321 §1 unchanged.</li>
+     * <li>`PlanCaveats` -> `PlannerService.strandedStock`: the numbers reach the service and no
+     *     panel reads them. The far end of #322's thread.</li>
+     * </ul>
+     *
+     * DELIBERATELY NOT DERIVED FROM ANYTHING. The scan above earns its derivation because the seam
+     * SHAPE is detectable; "this call must exist" is a claim about intent and there is nothing in
+     * the bytes to infer the list from. So it is a list, and a join added without a row here is
+     * ungated -- which is a real limitation and is the reason each row above says what its absence
+     * would look like, so the next person can tell whether theirs belongs.
+     */
+    @Test
+    public void everyNewJoinOfThisBatchIsActuallyCalledFromProduction() throws Exception {
+        assertCalls("common/ae2/Ae2StockReader",
+                    "io/github/jacoblasky/recipedump/common/PlacedTileEntities.scan");
+        assertCalls("common/PlacedTileEntities",
+                    "io/github/jacoblasky/recipedump/common/ModularMachineryControllers"
+                    + ".formedMachineKey");
+        assertCalls("client/ClientProxy",
+                    "io/github/jacoblasky/recipedump/client/StockTimeout.install");
+        assertCalls("common/PlannerService",
+                    "io/github/jacoblasky/recipedump/plan/ScenarioInputs$Resolved.strandedStock");
+        assertCalls("client/planner/PlanCaveats",
+                    "io/github/jacoblasky/recipedump/client/PlannerStock.refusalSentence");
+        assertCalls("client/planner/PlanCaveats",
+                    "io/github/jacoblasky/recipedump/common/PlannerService.strandedStock");
+    }
+
+    /**
+     * A test-only reset is called by TESTS ONLY, and never by the shipped mod.
+     *
+     * <h2>WHY THIS GATE EXISTS: A JAVADOC PROMISED IT AND IT DID NOT EXIST</h2>
+     *
+     * `LiveStock.forget()`'s own javadoc said "`SeamInstallationTest` is what would notice a
+     * production caller appearing". Nothing here did. The gate above asserts the OPPOSITE property
+     * (that a join IS called) over a different population, so a reader taking that sentence at face
+     * value was relying on a check nobody had written -- which is the same class of defect as the
+     * write-only seams this whole file is about, one level up: a claim about coverage with no
+     * coverage behind it. So either the sentence goes or the gate does. This is the gate.
+     *
+     * <h2>WHAT A PRODUCTION CALLER WOULD ACTUALLY DO, per seam</h2>
+     *
+     * These are not symmetrical tidiness; each one breaks something specific.
+     *
+     * <ul>
+     * <li>`LiveStock.forget()` — hands the planner "your ME network has not been read yet" over a
+     *     read that DID happen, so the caveat tells the player to go and do the thing that just
+     *     succeeded. #321 §1's defect inverted.</li>
+     * <li>`PlannerStock.forgetWaiting()` — drops a parked plan without running it, so the planner
+     *     sits on IDLE forever with no reply coming and no timeout armed either. That is #321 §2
+     *     restored by a line meant for test isolation.</li>
+     * </ul>
+     *
+     * THE HARNESS IS NOT PRODUCTION and `ProductionCallers` already excludes `shot/`, which matters
+     * here: `Ae2PlacedProbeShot` legitimately drives client state directly, and counting it would
+     * make this gate fail on a probe doing its job.
+     */
+    @Test
+    public void noProductionClassCallsATestOnlySeam() throws Exception {
+        Map<String, Set<String>> callers = ProductionCallers.emptyMap(new LinkedHashSet<String>(
+                Arrays.asList(ClassFiles.ROOT_PACKAGE + "/client/LiveStock.forget()V",
+                              ClassFiles.ROOT_PACKAGE + "/client/PlannerStock.forgetWaiting()V")));
+        ProductionCallers.record(callers);
+        for (Map.Entry<String, Set<String>> entry : callers.entrySet()) {
+            assertEquals(entry.getKey() + " is a TEST-ONLY reset and production calls it: "
+                         + entry.getValue() + " -- see this test's note for what each one breaks",
+                         Collections.emptySet(), entry.getValue());
+        }
+        // AND THE WALK REALLY LOOKED, which is the half that makes an empty result mean something.
+        // Every assertion above passes if `record` matched nothing at all -- a wrong descriptor, a
+        // renamed method, a classes root that moved -- so a reference KNOWN to have production
+        // callers has to come back with some. `readBy` is installed from two production classes.
+        Map<String, Set<String>> control = ProductionCallers.emptyMap(new LinkedHashSet<String>(
+                Arrays.asList(ClassFiles.ROOT_PACKAGE
+                              + "/common/ScenarioSource.readBy(L" + ClassFiles.ROOT_PACKAGE
+                              + "/common/ScenarioSource$Reader;)V")));
+        ProductionCallers.record(control);
+        assertFalse("control: the walk found no caller for a seam production demonstrably installs,"
+                    + " so the empty results above are the search failing rather than the mod being"
+                    + " clean", control.values().iterator().next().isEmpty());
+    }
+
+    /**
+     * NEGATIVE CONTROL for the gate above, and it is doing real work.
+     *
+     * A prefix match over a constant pool matches a lot of things. If `assertCalls` were broken
+     * open -- a `contains` that always answered true, a parse that returned every string in the
+     * file -- every row above would pass forever. So a class that provably does NOT make one of
+     * these calls has to read as not making it: `PinStore` has nothing to do with placed machines.
+     */
+    @Test
+    public void theCallGateRejectsACallThatIsNotThere() throws Exception {
+        Set<String> refs = ClassFiles.methodReferences(
+                ClassFiles.read(classFile("common/PinStore")));
+        assertFalse("PinStore does not scan tile entities, so a gate that says it does would"
+                    + " pass for anything",
+                    named(refs, "io/github/jacoblasky/recipedump/common/PlacedTileEntities.scan"));
+        assertTrue("control: PinStore really does call the seam it installs",
+                   named(refs, "io/github/jacoblasky/recipedump/common/ScenarioSource.readBy"));
+    }
+
+    /**
+     * `caller` names `ownerAndMethod` in its constant pool, nested classes included.
+     *
+     * SEARCHED ACROSS `Caller$1.class` TOO, because a call made from an anonymous inner class --
+     * a `Runnable` handed to `addScheduledTask`, which is exactly how this codebase hops threads --
+     * lands in the INNER class's pool and not the outer one. The class note above records that
+     * trap being hit, and `theAcceptCallLivesInAnInnerClassAndTheScanFindsItAnyway` is the case
+     * that proved the outer-only search was wrong.
+     *
+     * MATCHED WITHOUT THE DESCRIPTOR, unlike `Seam.reference()`. A descriptor pins an overload,
+     * which matters when the question is "which of two setters"; here the methods are unique by
+     * name and a descriptor would make every row break on an unrelated signature change, which is
+     * a gate that cries wolf.
+     */
+    private static void assertCalls(String caller, String ownerAndMethod) throws Exception {
+        File outer = classFile(caller);
+        Set<String> refs = new java.util.LinkedHashSet<String>(
+                ClassFiles.methodReferences(ClassFiles.read(outer)));
+        File dir = outer.getParentFile();
+        String prefix = outer.getName().substring(0, outer.getName().length() - ".class".length())
+                + "$";
+        File[] siblings = dir.listFiles();
+        if (siblings != null) {
+            for (File sibling : siblings) {
+                if (sibling.getName().startsWith(prefix) && sibling.getName().endsWith(".class")) {
+                    refs.addAll(ClassFiles.methodReferences(ClassFiles.read(sibling)));
+                }
+            }
+        }
+        assertTrue(caller + " never calls " + ownerAndMethod + ", so that half of the feature is"
+                   + " written and unreachable -- the #191 shape. References found: " + refs,
+                   named(refs, ownerAndMethod));
+    }
+
+    /** Whether any reference is to this owner and method, whatever its descriptor. */
+    private static boolean named(Set<String> references, String ownerAndMethod) {
+        for (String reference : references) {
+            if (reference.startsWith(ownerAndMethod + "(")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static File classFile(String relative) {
         File file = new File(ClassFiles.classesRoot(),
                              ClassFiles.ROOT_PACKAGE + "/" + relative + ".class");

@@ -840,31 +840,49 @@ exception is the power floor: the one-AE-per-read threshold is this mod's own ju
 (`POWER_PER_READ`, whose comment says outright that nobody has measured the magnitude), so a
 terminal holding under one AE opens in AE2 and is still refused here.
 
-When any of them fails the plan is still produced — costed as though you own nothing — and it
-says so on the `planned without:` caveat line. **Click that line for the specific reason**:
-no terminal, not linked, the network is gone, out of range, no power, no permission, or no
-storage grid. That distinction is the point of the line, because the fix differs: "out of
-range" means walk toward your base, where "not linked" means go and re-link the terminal.
+When any of them fails the plan is still produced — costed as though you own nothing — and **the
+caveat line leads with the reason, with no click needed**: no terminal, not linked, the network is
+gone, out of range, no power, no permission, or no storage grid. That distinction is the point,
+because the fix differs: "out of range" means walk toward your base, where "not linked" means go
+and re-link the terminal. Click the line for the fuller version and for what every other unread
+input costs you.
 
-**A machine counts as owned when it is CONNECTED TO YOUR ME NETWORK.** The same read that
-fetches your stock also enumerates the machines on the grid your terminal is linked to, behind
-the same five gates, so nothing is granted without an ME connection. What that leaves out is
-phase 1's scope — [#320](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/320)
-stays open for phase 2, a server-side scan of loaded tile entities that will see formed
-Modular Machinery multiblocks and placed generators — and worth knowing, because the plan
-carries no caveat about it:
+**Fix the cause and re-plan, and it looks again.** A refusal is not treated as a fresh read, so
+picking up the terminal you had left in a chest works immediately rather than after thirty seconds.
 
-- a machine sitting **off** the network still reads `buildable` — the honest answer under this
-  scope, and a lower bound rather than a wrong one;
-- a machine reached only through a **storage bus** is invisible: the bus is the network node, the
-  chest or furnace behind it is not on the network at all;
-- a **standalone generator** — a placed water source block — is not a node either, so it only
-  makes water free when its item is in stock.
+**And if the server never answers, the planner stops waiting.** A dedicated server without this
+mod in its `mods/` accepts your connection and silently drops the request — 1.12.2 does not refuse
+that handshake — so after five seconds the plan runs anyway and the caveat says the server did not
+answer, rather than leaving the window on "nothing planned yet" for the rest of the session.
 
-The offline tool is wider here and always was: `recipegraph have` reads every tile entity in the
-save from the region files, grid or no grid, so an in-game plan and an offline plan can
-legitimately disagree about one machine. The planner's caveat panel states the in-game scope in
-as many words rather than letting the shorter field name imply the wider read.
+**A machine counts as owned when it is on your ME network, or standing in a loaded chunk.** The
+same read that fetches your stock enumerates the machines on the grid your terminal is linked to
+AND scans every loaded world's tile entities, behind the same five gates, so nothing is granted
+without an ME connection — even the half that needs no AE2 to compute. A formed Modular Machinery
+multiblock contributes the machine it has become, read off MM's own controller tile; an unformed
+controller contributes only the controller block, so a half-built structure is not a machine you
+own. Placed generators count too, which is what makes a water source block make water free rather
+than only its item in a drive.
+
+What that leaves out is one thing:
+
+- a machine in an **unloaded chunk** is not seen. Your base is loaded when you are standing in
+  it, which is when you plan — but a factory in a dimension the server has not touched reads
+  `buildable`, which is a lower bound rather than a wrong answer.
+
+The offline tool is wider on exactly that axis and always was: `recipegraph have` reads every tile
+entity in the save from the region files, loaded or not, so an in-game plan and an offline plan
+can still legitimately disagree about a machine nobody is near. A region read does not belong on a
+live server and a world scan does not belong on a render thread, which is why the in-game scan is
+server-side, once per request, over what is already in memory. The planner's caveat panel states
+the in-game scope in as many words rather than letting the shorter field name imply the wider read.
+
+**A successful read can still lose something, and now it says so.** A stock key the graph has
+never heard of cannot be priced against, and after a redump the digests move — closed
+[#80](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/80) measured 11,353 keys
+churning that way. The caveat panel reports how many entries missed and how many ITEMS they
+carried, because the volume is what decides whether you should care: three keys holding twelve
+items is a curiosity, three holding forty thousand ingots is a wrong plan.
 
 AE2 autocrafting patterns, visited dimensions and ProjectE knowledge are still unread, and each
 one names itself on the caveat line with what its absence costs.

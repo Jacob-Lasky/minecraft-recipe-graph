@@ -3,7 +3,10 @@ package io.github.jacoblasky.recipedump.client.planner;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.github.jacoblasky.recipedump.client.PlannerStock;
+import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
+import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
 
 /**
  * The words the planner uses to admit what it could not see.
@@ -24,8 +27,13 @@ import io.github.jacoblasky.recipedump.common.ScenarioSource;
  * terminal. `ScenarioSource.Status.unavailable`'s own javadoc cites that difference as the
  * whole reason it takes a string rather than a boolean, and the string was the half that never
  * arrived. #191 made this strictly worse rather than better: before it, the unrendered
- * sentence said the same thing every time, and now each refusal names a different thing to do
- * while `summary` still answers `planned without: have` for all of them.
+ * sentence said the same thing every time, and after it each refusal named a different thing to do
+ * while `summary` still answered `planned without: have` for all of them.
+ *
+ * THAT SECOND HALF IS FIXED AND #321 IS WHERE IT WAS ARGUED. {@link #summaryLine} now LEADS with
+ * the refusal reason, so the short actionable sentence is on the line nobody has to click for,
+ * and the detail panel keeps the long consequence notes. The pair of examples above is the
+ * before-and-after of exactly that change; do not read the first line as current behaviour.
  *
  * TWO LEVELS, AND NEITHER LEVEL ALONE WORKS. The notes are around 470 characters across five
  * sources -- roughly eight lines at `PlannerWidgets.CONTENT_WIDTH` -- and the planner body is
@@ -71,24 +79,66 @@ public final class PlanCaveats {
      * every plan forever. The panel sizes to its content and can afford one more line.
      */
     static final String PLACED_SCOPE =
-            "\"placed\" means machines connected to the ME network your wireless terminal is"
-            + " linked to; one sitting off the network still reads as buildable";
+            "\"placed\" means machines on the ME network your wireless terminal is linked to, plus"
+            + " any machine standing in a chunk the server has loaded; one in an unloaded chunk"
+            + " still reads as buildable";
 
     private PlanCaveats() {
     }
 
     /**
-     * The always-visible line: which inputs are missing, and that there is more to read.
+     * What the summary line puts between the refusal reason and the field list.
+     *
+     * A DASH RATHER THAN A FULL STOP, because the two halves are one thought: the reason is WHY
+     * the fields after it are missing. A full stop would read as two unrelated announcements, and
+     * the whole defect #321 §1 describes is a player unable to connect "planned without: have" to
+     * anything they could do.
+     */
+    private static final String REASON_JOIN = " -- ";
+
+    /**
+     * The always-visible line: WHY, which inputs are missing, and that there is more to read.
      *
      * Empty when every input is live, which is what {@link ScenarioSource#summary} already
      * answers and what the panel treats as "reserve no caveat lines".
+     *
+     * <h2>THE REFUSAL REASON LEADS, AND THAT IS #321 §1</h2>
+     *
+     * Before this, the always-visible line was `planned without: have, placed, ...` and the reason
+     * -- the only sentence naming something the player can DO -- was on the detail panel behind a
+     * click they had no reason to make. `ScenarioSource.Status.unavailable`'s own javadoc cites
+     * exactly that difference as why it takes a string rather than a boolean, and the string was
+     * the half that never arrived. So the short form now leads the line:
+     *
+     * <pre>
+     *   before: planned without: have, placed, craftables, ... (click for what each costs you)
+     *   after:  no wireless terminal in your inventory -- planned without: have, placed, ... (...)
+     * </pre>
+     *
+     * FIRST RATHER THAN APPENDED, because a wrapped line is read from the top and the first words
+     * are the ones that get read. The cost is real and is the right trade: a refused read now
+     * spends a third caveat line, and `PlannerWidgets` takes that out of the tree's height. A line
+     * of tree is cheaper than a player who cannot tell a refused read from an empty network.
+     *
+     * <h2>IT MUST FIT, AND `PlanCaveatsTest` IS WHAT SAYS SO</h2>
+     *
+     * `PlannerWidgets` wraps this to `MAX_CAVEAT_LINES` and TRUNCATES past it, and {@link #POINTER}
+     * is the half that must never be the casualty. NO CHARACTER COUNT PREDICTS WHETHER THIS FITS:
+     * the line is four parts, the field list among them changes at runtime, and `NodeRowText.wrap`
+     * breaks on spaces, so three 64-column lines carry well under 192 characters -- the rejected
+     * `NO_REPLY` composed to 176 and still lost the pointer. So
+     * `everyRefusalReasonFitsTheCaveatCapWithThePointerIntact` composes and wraps this line for
+     * EVERY reason and fails if the pointer is gone. DO NOT lengthen a reason message without
+     * running it; it has already caught one that fitted the arithmetic and not the line.
      */
     public static String summaryLine() {
         String summary = ScenarioSource.summary();
         if (summary.isEmpty()) {
             return "";
         }
-        return summary + " " + POINTER;
+        String reason = PlannerStock.refusalSentence();
+        String head = reason == null ? "" : reason + REASON_JOIN;
+        return head + summary + " " + POINTER;
     }
 
     // THERE IS DELIBERATELY NO `any()` HERE. One was written and had no caller outside a test,
@@ -132,6 +182,7 @@ public final class PlanCaveats {
             out.addAll(NodeRowText.wrapRow("every input was read; this plan assumes nothing",
                                            widthPx));
             out.addAll(scopeLines(widthPx));
+            out.addAll(strandedLines(widthPx));
             return out;
         }
         for (int i = 0; i < notes.size(); i++) {
@@ -144,7 +195,56 @@ public final class PlanCaveats {
             out.addAll(NodeRowText.wrapRow((i + 1) + ". " + notes.get(i), widthPx));
         }
         out.addAll(scopeLines(widthPx));
+        out.addAll(strandedLines(widthPx));
         return out;
+    }
+
+    /**
+     * What the graph could not understand about the stock it WAS given. #322
+     *
+     * <h2>A SUCCESSFUL READ CAN STILL HAVE LOST SOMETHING, which is the gap this fills</h2>
+     *
+     * Every other line on this panel is about an input that was not read. This one is about an
+     * input that WAS: `ScenarioInputs.resolve` drops any `have` key the graph has never heard of,
+     * and until #322 it did so with no count, no log and no caveat, while `have` went on reporting
+     * live. So the plan claimed it had consulted your stock while discarding part of it -- and
+     * after a redump or a graph swap the in-game planner is precisely where a player notices
+     * "it told me to make something I have", with nothing to tell that apart from #321's refusals.
+     *
+     * <h2>ONLY WHEN IT CAN MATTER, which is the offline reader's rule and not a new one</h2>
+     *
+     * Silent when nothing was stranded, and silent when no plan has been resolved at all -- the
+     * two are different states and `PlannerService.strandedStock` returns null for the second on
+     * purpose. `gaps.stock_coverage` (#92) is the precedent: it says its piece only when the dump
+     * schema and the digest format could actually disagree.
+     *
+     * <h2>THE VOLUME IS IN THE SENTENCE AND IT IS THE POINT</h2>
+     *
+     * Key count alone is the misleading number -- closed #80 measured 11,353 digest keys churning
+     * across redumps while nearly all the ITEMS sat in plain keys that cannot miss. So the line
+     * carries both, and a player reading "3 stock entries (12 items)" can dismiss it while one
+     * reading "3 stock entries (40,000 items)" knows the plan is wrong.
+     *
+     * UNNUMBERED, LIKE {@link #PLACED_SCOPE} AND FOR ITS REASON: a player counts the numbered
+     * entries against `planned without: a, b, c`, and this is not a missing input.
+     */
+    static List<String> strandedLines(int widthPx) {
+        ScenarioInputs.Stranded stranded = PlannerService.get().strandedStock();
+        if (stranded == null || !stranded.any()) {
+            return new ArrayList<String>();
+        }
+        boolean one = stranded.keys() == 1;
+        String entries = one ? "1 stock entry" : stranded.keys() + " stock entries";
+        // GROUPED, THROUGH THE FORMATTER THE REST OF THE PLANNER USES. A stranded volume is the
+        // number that decides whether this line matters, and `40002 items` is a number a reader has
+        // to count digits on -- which is `NodeRowText.grouped`'s own argument about 934,400 mB. Not
+        // `NumberFormat.getInstance()`, for that method's stated reason: it would render `40.002`
+        // on a German client beside a plan that renders `40,002`.
+        String items = stranded.volume() == 1L
+                ? "1 item" : NodeRowText.grouped(stranded.volume()) + " items";
+        return new ArrayList<String>(NodeRowText.wrapRow(
+                entries + " (" + items + ") did not match this graph, so " + (one ? "it was" : "they"
+                + " were") + " not counted as owned -- is the graph older than your dump?", widthPx));
     }
 
     /**
