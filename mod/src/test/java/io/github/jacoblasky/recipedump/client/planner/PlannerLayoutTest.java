@@ -6,6 +6,7 @@ import io.github.jacoblasky.recipedump.plan.Pins;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -356,8 +357,13 @@ public class PlannerLayoutTest {
 
     /** Every string the panel's text widgets ended up holding, after truncation. */
     private static List<String> texts(ModularPanel panel) {
+        return textIn(panel);
+    }
+
+    /** The same, for any subtree rather than a whole panel. */
+    private static List<String> textIn(IWidget root) {
         List<String> lines = new java.util.ArrayList<String>();
-        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+        for (IWidget widget : HeadlessLayout.flatten(root)) {
             if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
                 lines.add(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
                                   .getKey().getFormatted());
@@ -678,7 +684,8 @@ public class PlannerLayoutTest {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
         for (int width : new int[]{96, 120, 148, 180, 239, 388}) {
             com.cleanroommc.modularui.widget.ParentWidget<?> box =
-                    PlannerWidgets.planNodeContent(node, width, PlannerWidgets.ROW_HEIGHT);
+                    PlannerWidgets.planNodeContent(node, width, PlannerWidgets.ROW_HEIGHT,
+                                                   PlannerActions.NONE);
             HeadlessLayout.layOutPanel("node", PlannerWidgets.PANEL_WIDTH,
                                        PlannerWidgets.PANEL_HEIGHT, box);
             int widest = 0;
@@ -731,7 +738,7 @@ public class PlannerLayoutTest {
         int[][] sizes = {{120, 10}, {80, 14}, {200, 20}};
         for (int[] size : sizes) {
             com.cleanroommc.modularui.widget.ParentWidget<?> box =
-                    PlannerWidgets.planNodeContent(node, size[0], size[1]);
+                    PlannerWidgets.planNodeContent(node, size[0], size[1], PlannerActions.NONE);
             ModularPanel panel = HeadlessLayout.layOutPanel(
                     "node", PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT, box);
             assertEquals("width " + size[0], size[0], box.getArea().w());
@@ -1309,21 +1316,31 @@ public class PlannerLayoutTest {
      * `onMousePressed` is an ordinary method.
      */
     /**
-     * A diagram node opens the node menu, the same way a tree row does.
+     * A node built with actions opens THEIR node menu, the same way a tree row does.
      *
-     * MY OWN COMMENT ON `planNodeContent` SAID THIS WAS IMPOSSIBLE -- "a canvas of clickable
-     * rows would fight" the viewport's hit-testing -- and it was an assumption I had written
-     * as though it were a measured constraint. s1harness measured it in #185 with a real
-     * cursor: `IWidget.isHovering()` agrees with the layout at zoom 0.5, 1.0 and 2.0, so
-     * `getWidgetsAt` routes correctly through both the scroll offset and the zoom matrix.
+     * RENAMED FROM `aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes`, AND THE RENAME IS THE POINT
+     * (#325). Under the old name this test was cited as the assertion covering the diagram, and it
+     * was green for the whole three releases the diagram was inert -- because it built the node
+     * itself, with its own recorder, and never asked `FlowCanvas` what IT built. `FlowCanvas`
+     * passed `PlannerActions.NONE`. The test performed the wiring production omitted, which is the
+     * #191/#323 family one level down, and a test that carries a diagram's name while asserting
+     * nothing about the diagram is worse than no test: it is the claim's strongest-looking
+     * evidence.
      *
-     * This is the headless half of that. It cannot prove hit-testing through a transform --
-     * only a real cursor can, which is what `flow-hit` is for -- but it does prove the widget
-     * is an `Interactable` wired to the actions it was handed, which is the part that was
-     * absent while the comment stood.
+     * SO THE DIAGRAM'S OWN WITNESS MOVED TO `FlowCanvasTest.everyDiagramNodeOpensTheMenuForThe`
+     * `NodeThatWasClicked`, WHICH IS WHERE IT CAN LIVE. That file may import `client.flow`; this
+     * one may not -- `PlannerLayoutTest` writes `FlowLayout`'s node width out as a literal for
+     * exactly that reason, and importing the canvas here "would be the first thing in the package
+     * to do so". What is left here is the factory's own contract: given actions, the node it
+     * returns is a single click target wired to them. That is worth keeping and it is all this can
+     * honestly claim.
+     *
+     * MEASURED BY s1harness IN #185 for the half neither of these tests can reach: `flow-hit`
+     * parks a real cursor and `IWidget.isHovering()` agrees with the layout at zoom 0.5, 1.0 and
+     * 2.0, so `getWidgetsAt` routes correctly through both the scroll offset and the zoom matrix.
      */
     @Test
-    public void aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes() {
+    public void aNodeContentBuiltWithActionsOpensTheirNodeMenu() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
         Recorder recorder = new Recorder();
         ParentWidget<?> box = PlannerWidgets.planNodeContent(node, 214, 26, recorder);
@@ -1336,21 +1353,255 @@ public class PlannerLayoutTest {
     }
 
     /**
-     * The three-argument overload is INERT, and says so rather than defaulting quietly.
+     * `PlannerActions.NONE` really is inert, and a caller now has to ask for it by name.
      *
-     * The failure it enables is a canvas of nodes that look right and do nothing, which no
-     * layout assertion can catch because a layout assertion is what the overload is for.
+     * WHAT THIS USED TO ASSERT AND WHY IT CHANGED. It was
+     * `theThreeArgumentNodeContentIsInertAndNotSilentlyWiredToSomething`, about an overload that
+     * supplied `PlannerActions.NONE` for you. That overload is DELETED (#325): its own javadoc
+     * predicted "a canvas of nodes that look right and do nothing when clicked", `FlowCanvas` was
+     * built on it, and naming the hazard in a comment did not stop the hazard. An inert node is
+     * now something a call site writes out, so the failure is visible where it is made.
+     *
+     * THE ASSERTION IS STILL WORTH HAVING, because the constant is what every layout test in this
+     * file passes: if `NONE` ever started doing something, dozens of assertions about geometry
+     * would begin exercising behaviour and this is the only place that would say so.
      */
     @Test
-    public void theThreeArgumentNodeContentIsInertAndNotSilentlyWiredToSomething() {
+    public void theInertActionsConstantIsStillInert() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, 214, 26);
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, 214, 26, PlannerActions.NONE);
         HeadlessLayout.layOut(wrap(box));
         List<PlannerWidgets.ClickableGroup> clickable = clickables(box);
         assertEquals(1, clickable.size());
         // It clicks, and nothing happens. `PlannerActions.NONE` rather than a null check at
         // the call site -- see that constant for why.
         clickable.get(0).onMousePressed(0);
+    }
+
+    // -- #327: the flow panel's chrome ----------------------------------------------------------
+
+    /**
+     * A TRUNCATED PLAN'S DIAGRAM SAYS SO. The witness for #327.
+     *
+     * `NodeRowText.truncationWarning` carries the comment "SAID, NEVER SILENT", and until now it
+     * was rendered only by {@link PlannerWidgets#plannerPanel}: the flow panel was
+     * `defaultPanel(...).child(canvas)` and nothing else. So a plan cut off at the node cap drew a
+     * diagram shaped exactly like a complete one -- and that is worse on this surface than on the
+     * tree, because a tree that stops has a visible last row while a diagram that stops has a last
+     * column that looks like the end of the plan.
+     *
+     * THE CONTROL IS THE COMPLETE PLAN, and it is what makes this a test rather than a search for a
+     * string. A panel that drew the warning unconditionally -- or drew any red line at all -- would
+     * pass a one-armed version, and would then be crying wolf on every diagram.
+     *
+     * ASSERTED ON THE DRAWN TEXT, through the same `fit` every other line here goes through, so a
+     * warning too long for the panel fails as a cut string rather than passing as a substring
+     * match on the source value.
+     */
+    @Test
+    public void aTruncatedPlansDiagramCarriesTheSameWarningTheTreeDoes() {
+        PlanView truncated = PlanFixtures.load("plan-truncated");
+        assertFalse("the fixture must actually be truncated, or this measures nothing",
+                    NodeRowText.truncationWarning(truncated).isEmpty());
+        List<String> onDiagram = flowPanelText(truncated);
+        assertTrue("the diagram must carry the truncation warning: " + onDiagram,
+                   onDiagram.contains(NodeRowText.fit(
+                           NodeRowText.truncationWarning(truncated),
+                           PlannerWidgets.FLOW_WIDTH - PlannerWidgets.FLOW_PAD * 2)));
+
+        PlanView complete = PlanFixtures.load("plan-in-stock");
+        assertTrue("the control fixture must NOT be truncated",
+                   NodeRowText.truncationWarning(complete).isEmpty());
+        for (String line : flowPanelText(complete)) {
+            assertFalse("a complete plan's diagram must not warn about truncation: " + line,
+                        line.contains("truncated"));
+        }
+    }
+
+    /**
+     * The panel says what it is and how to drive it, and neither line is cut.
+     *
+     * A CUT HINT IS A HINT THAT OMITS THE GESTURE AT THE END, which is the failure `BADGE` records
+     * one surface over: a vocabulary measured from a second copy of itself came out at 66 pixels
+     * and the screenshot read "no known...". Here the string is fixed and the width is fixed, so
+     * this is an arithmetic fact that can simply be asserted -- and it is the only thing on screen
+     * that mentions Escape at all.
+     */
+    @Test
+    public void theFlowPanelSaysWhatItIsAndHowToDriveItWithoutBeingCut() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        List<String> text = flowPanelText(plan);
+        assertTrue("the diagram must name the plan it is of: " + text,
+                   text.contains(NodeRowText.fit(NodeRowText.heading(plan),
+                                                 PlannerWidgets.FLOW_WIDTH
+                                                         - PlannerWidgets.FLOW_PAD * 2)));
+
+        int room = PlannerWidgets.FLOW_WIDTH - PlannerWidgets.FLOW_PAD * 2
+                - PlannerWidgets.FLOW_BUTTON_LABELS.size()
+                        * (PlannerWidgets.FLOW_BUTTON_WIDTH + PlannerWidgets.GAP);
+        assertEquals("the gesture hint must fit beside the buttons, or it silently loses whatever"
+                     + " gesture is written last", PlannerWidgets.FLOW_HINT,
+                     NodeRowText.fit(PlannerWidgets.FLOW_HINT, room));
+        assertTrue("and it must be on the panel: " + text,
+                   text.contains(PlannerWidgets.FLOW_HINT));
+    }
+
+    /**
+     * Every label the flow panel's buttons carry is in the vocabulary they were measured from.
+     *
+     * {@link PlannerWidgets#VIEW_LABELS}' rule, and it exists for the reason recorded there: a
+     * fourth button added to `flowButtons` and not to `FLOW_BUTTON_LABELS` would be measured
+     * against the old widest label and cut, and a truncated button is always a bug because the
+     * vocabulary is fixed.
+     */
+    @Test
+    public void everyFlowButtonLabelIsInTheMeasuredVocabulary() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel panel = PlannerWidgets.flowPanel(plan, new StubDiagram(),
+                                                      PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        PlannerWidgets.ViewBar bar = firstViewBarIn(panel);
+        assertNotNull("the flow panel must carry a button row", bar);
+
+        int buttons = 0;
+        for (IWidget child : bar.getChildren()) {
+            if (!(child instanceof PlannerWidgets.ClickableGroup)) {
+                continue;
+            }
+            buttons++;
+            List<String> labels = textIn(child);
+            assertEquals("a button draws exactly one label", 1, labels.size());
+            assertTrue("'" + labels.get(0) + "' is drawn but was never measured, so the button"
+                       + " row is sized from a vocabulary that does not contain it",
+                       PlannerWidgets.FLOW_BUTTON_LABELS.contains(labels.get(0)));
+            assertTrue("and a measured label must not be cut at the width it was measured for",
+                       child.getArea().width >= labels.get(0).length()
+                               * NodeRowText.CHAR_WIDTH);
+        }
+        assertEquals("every label in the vocabulary must actually be drawn, or the row is being"
+                     + " sized for a button that does not exist",
+                     PlannerWidgets.FLOW_BUTTON_LABELS.size(), buttons);
+    }
+
+    /**
+     * The three buttons do three different things, and Close closes.
+     *
+     * CLICKED THROUGH THE WIDGETS RATHER THAN ASSERTED AS LABELS, which is `Recorder`'s whole
+     * argument: "the panel contains a line reading Close" passes on a panel whose buttons do
+     * nothing, and that is what the first version of every menu in this file was.
+     *
+     * CLOSE IS ASSERTED BY WHERE IT LANDS RATHER THAN BY `isOpen()`, and the reason is a property
+     * of this harness rather than of the button. `HeadlessLayout` opens the panel it is given as
+     * the screen's MAIN panel, so `closeIfOpen` takes its `isMainPanel()` branch and calls
+     * `MCHelper.popScreen`, which needs a Minecraft instance -- measured: it dies in
+     * `MCHelper.hasMc`'s static init. In game the flow panel is a SECONDARY panel opened off
+     * `LivePlannerActions`, where the same call takes `panelManager.closePanel(this)` and returns
+     * with the panel closed. So what is provable here is that the button reaches ModularUI's own
+     * close path, which is the part that was missing: a button wired to nothing throws nothing.
+     */
+    @Test
+    public void theFlowPanelsButtonsCloseItAndDriveTheDiagram() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        StubDiagram diagram = new StubDiagram();
+        ModularPanel panel = PlannerWidgets.flowPanel(plan, diagram, PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        assertTrue("the panel must be open before Close can mean anything", panel.isOpen());
+
+        List<PlannerWidgets.ClickableGroup> buttons = new java.util.ArrayList<
+                PlannerWidgets.ClickableGroup>();
+        for (IWidget child : firstViewBarIn(panel).getChildren()) {
+            if (child instanceof PlannerWidgets.ClickableGroup) {
+                buttons.add((PlannerWidgets.ClickableGroup) child);
+            }
+        }
+
+        // ORDER IS READ OFF THE VOCABULARY, not assumed, so a reordering fails on the button that
+        // moved rather than on whichever assertion happened to be first.
+        int close = PlannerWidgets.FLOW_BUTTON_LABELS.indexOf(PlannerWidgets.CLOSE_DIAGRAM);
+        int root = PlannerWidgets.FLOW_BUTTON_LABELS.indexOf(PlannerWidgets.JUMP_TO_ROOT);
+        int selected = PlannerWidgets.FLOW_BUTTON_LABELS.indexOf(PlannerWidgets.JUMP_TO_SELECTED);
+
+        buttons.get(root).onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("root"), diagram.calls);
+        buttons.get(selected).onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("root", "selected"), diagram.calls);
+
+        String reached = null;
+        try {
+            buttons.get(close).onMousePressed(0);
+        } catch (Throwable expected) {
+            reached = stackOf(expected);
+        }
+        assertNotNull("Close must reach ModularUI's close path; a button wired to nothing gets "
+                      + "through this harness silently, which is what 'no close affordance at "
+                      + "all' looked like before #327", reached);
+        assertTrue("the click must land in ModularPanel.closeIfOpen, not somewhere else: "
+                   + reached, reached.contains("ModularPanel.closeIfOpen"));
+        assertEquals("and Close must not also move the viewport",
+                     java.util.Arrays.asList("root", "selected"), diagram.calls);
+    }
+
+    /** A throwable's stack as `Class.method` lines, for asserting WHERE a click landed. */
+    private static String stackOf(Throwable error) {
+        StringBuilder sb = new StringBuilder(error.toString());
+        for (StackTraceElement frame : error.getStackTrace()) {
+            String owner = frame.getClassName();
+            sb.append("\n  ").append(owner.substring(owner.lastIndexOf('.') + 1))
+              .append('.').append(frame.getMethodName());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A diagram that records what it was asked to do and draws nothing.
+     *
+     * NOT A `FlowCanvas`, and the reason is the direction rule this file already obeys: `flow`
+     * names `planner` and never the reverse, and `PlannerLayoutTest` writes `FlowLayout`'s node
+     * width out as a literal rather than importing it. `Diagram` is the interface that exists so
+     * this panel can be tested -- and driven -- without the canvas.
+     */
+    private static final class StubDiagram
+            extends com.cleanroommc.modularui.widget.ParentWidget<StubDiagram>
+            implements Diagram {
+
+        private final List<String> calls = new java.util.ArrayList<String>();
+
+        StubDiagram() {
+            size(PlannerWidgets.FLOW_CANVAS_WIDTH, 100);
+        }
+
+        @Override
+        public void jumpToRoot() {
+            calls.add("root");
+        }
+
+        @Override
+        public boolean jumpToSelected() {
+            calls.add("selected");
+            return true;
+        }
+    }
+
+    /** Every string the flow panel draws, in tree order. */
+    private static List<String> flowPanelText(PlanView plan) {
+        ModularPanel panel = PlannerWidgets.flowPanel(plan, new StubDiagram(),
+                                                      PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        return textIn(panel);
+    }
+
+    /** The panel's button row, depth first. */
+    private static PlannerWidgets.ViewBar firstViewBarIn(IWidget parent) {
+        if (parent instanceof PlannerWidgets.ViewBar) {
+            return (PlannerWidgets.ViewBar) parent;
+        }
+        for (IWidget child : parent.getChildren()) {
+            PlannerWidgets.ViewBar found = firstViewBarIn(child);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     /** A panel to lay a bare widget out in, since the sizer runs over a panel. */
@@ -2284,7 +2535,7 @@ public class PlannerLayoutTest {
         // depends on `planner` and not the reverse, and a test that inverted that would be the
         // first thing in the package to do so. `FlowCanvasTest` pins the two numbers.
         int width = 209;
-        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, width, 26);
+        ParentWidget<?> box = PlannerWidgets.planNodeContent(node, width, 26, PlannerActions.NONE);
         HeadlessLayout.layOutPanel("two-line-node", PlannerWidgets.PANEL_WIDTH,
                                    PlannerWidgets.PANEL_HEIGHT, box);
 
@@ -2318,7 +2569,8 @@ public class PlannerLayoutTest {
     public void aRowHeightNodeStillDrawsOneLine() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
         ParentWidget<?> box =
-                PlannerWidgets.planNodeContent(node, 209, PlannerWidgets.ROW_HEIGHT);
+                PlannerWidgets.planNodeContent(node, 209, PlannerWidgets.ROW_HEIGHT,
+                                               PlannerActions.NONE);
         HeadlessLayout.layOutPanel("one-line-node", PlannerWidgets.PANEL_WIDTH,
                                    PlannerWidgets.PANEL_HEIGHT, box);
         for (IWidget child : box.getChildren()) {
@@ -2363,7 +2615,8 @@ public class PlannerLayoutTest {
     @Test
     public void hidingDetailKeepsTheQuantityAndTakesTheLabel() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
+        PlannerWidgets.NodeContent box =
+                PlannerWidgets.planNodeContent(node, 209, 26, PlannerActions.NONE);
         HeadlessLayout.layOutPanel("detail-node", PlannerWidgets.PANEL_WIDTH,
                                    PlannerWidgets.PANEL_HEIGHT, box);
 
@@ -2451,7 +2704,8 @@ public class PlannerLayoutTest {
     @Test
     public void aDiagramNodeHighlightsFromTheSameSelectionTheTreeReads() {
         PlanNode node = PlanFixtures.load("plan-in-stock").tree();
-        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(node, 209, 26);
+        PlannerWidgets.NodeContent box =
+                PlannerWidgets.planNodeContent(node, 209, 26, PlannerActions.NONE);
         try {
             assertFalse(box.drawsAsSelected());
             PlanSelection.select(node);
@@ -2517,8 +2771,10 @@ public class PlannerLayoutTest {
                    NodeStatus.isToken(token));
         assertFalse("and the control must not be one", NodeStatus.isToken(item));
 
-        List<IWidget> marked = columnsOf(PlannerWidgets.planNodeContent(token, 209, 26));
-        List<IWidget> plain = columnsOf(PlannerWidgets.planNodeContent(item, 209, 26));
+        List<IWidget> marked = columnsOf(
+                PlannerWidgets.planNodeContent(token, 209, 26, PlannerActions.NONE));
+        List<IWidget> plain = columnsOf(
+                PlannerWidgets.planNodeContent(item, 209, 26, PlannerActions.NONE));
         assertEquals("a token carries exactly one column a plain item does not",
                      plain.size() + 1, marked.size());
 

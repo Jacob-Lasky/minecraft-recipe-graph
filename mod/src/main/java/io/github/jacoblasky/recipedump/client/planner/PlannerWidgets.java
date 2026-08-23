@@ -341,8 +341,13 @@ public final class PlannerWidgets {
      * Borrowing the bracket would spend an established signal on something it does not mean.
      * `MachinesWidgets.modButton` is the precedent that actually fits -- a control on a main
      * panel that opens a sub-panel, drawn as plain text.
+     *
+     * PUBLIC BECAUSE `shot.FlowInteractionShot` LOOKS THIS BUTTON UP BY LABEL, which is
+     * {@link #VIEW_LABELS}' own argument arriving at a caller: an index into the view bar is right
+     * until a third view is added, and then the probe parks its cursor on the wrong button while
+     * still logging the right name. `indexOf` in the measured vocabulary cannot drift.
      */
-    static final String SHOW_DIAGRAM = "Show diagram";
+    public static final String SHOW_DIAGRAM = "Show diagram";
 
     /** See {@link #SHOW_DIAGRAM}. */
     static final String SHOW_TODO = "Show TODO list";
@@ -445,8 +450,104 @@ public final class PlannerWidgets {
      */
     public static final int FLOW_CANVAS_WIDTH = FLOW_WIDTH - FLOW_PAD * 2;
 
-    /** The canvas's height. See {@link #FLOW_CANVAS_WIDTH}. */
-    public static final int FLOW_CANVAS_HEIGHT = FLOW_HEIGHT - FLOW_PAD * 2;
+    /**
+     * The gestures the diagram answers to, said out loud on the panel. #327.
+     *
+     * BECAUSE NOTHING ON SCREEN MENTIONED EVEN ESCAPE. The flow panel was
+     * `defaultPanel(...).child(canvas)` and nothing else -- no heading, no warnings, no way out
+     * that was written down anywhere -- so a reader who had panned into the middle of a 634-node
+     * diagram had to guess. Every verb here is one this canvas actually implements, which is the
+     * only kind of hint worth drawing: `FlowCanvas.onMouseScroll` gates zoom on control,
+     * `onMouseDrag` pans from empty canvas, and Escape is `ModularScreen`'s own.
+     *
+     * MEASURED AGAINST THE WIDTH IT IS DRAWN AT rather than trusted:
+     * `PlannerLayoutTest.theFlowPanelSaysHowToDriveItWithoutBeingCut` asserts `fit` does not cut
+     * it, because a hint that ends in an ellipsis is a hint that omits the gesture at the end.
+     */
+    static final String FLOW_HINT =
+            "drag empty space to pan  ctrl-scroll to zoom  Esc to close";
+
+    /** The flow panel's own close control. See {@link #FLOW_HINT} for why it is drawn at all. */
+    static final String CLOSE_DIAGRAM = "Close";
+
+    /**
+     * Put the plan's root back in frame. See {@link Diagram#jumpToRoot}.
+     *
+     * PUBLIC FOR `shot.FlowInteractionShot`, WHICH NAMES THE BUTTON IT PARKED ON, and for
+     * {@link #SHOW_DIAGRAM}'s reason: a probe log saying "button 1" has to be cross-referenced
+     * with this file to be read at all, and the index is what goes stale when a fourth button
+     * lands. `flow-nav` looks the button up by label in {@link #FLOW_BUTTON_LABELS} rather than by
+     * position for the same reason.
+     */
+    public static final String JUMP_TO_ROOT = "Root";
+
+    /** Put the selected item in frame. See {@link Diagram#jumpToSelected}. */
+    static final String JUMP_TO_SELECTED = "Selected";
+
+    /**
+     * Every label the flow panel's button row can carry, for {@link #FLOW_BUTTON_WIDTH}.
+     *
+     * {@link #VIEW_LABELS}' rule, one panel over, and for the reason recorded there: the badge
+     * column was sized from a second copy of its vocabulary, came out at 66 pixels, and the
+     * screenshot read "no known...". `PlannerLayoutTest.everyFlowButtonLabelIsInTheMeasuredVocabulary`
+     * asserts this holds every label {@link #flowButtons} produces.
+     */
+    public static final List<String> FLOW_BUTTON_LABELS =
+            java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+                    CLOSE_DIAGRAM, JUMP_TO_ROOT, JUMP_TO_SELECTED));
+
+    /** Width of one flow-panel button: the widest label plus a character of slack either end. */
+    public static final int FLOW_BUTTON_WIDTH = widestFlowLabel() + GAP * 2;
+
+    private static int widestFlowLabel() {
+        int widest = 0;
+        for (String label : FLOW_BUTTON_LABELS) {
+            widest = Math.max(widest, label.length());
+        }
+        return widest * NodeRowText.CHAR_WIDTH;
+    }
+
+    /**
+     * How much of the flow panel the chrome above the canvas takes: heading, warnings, buttons.
+     *
+     * A FUNCTION OF THE PLAN AND NOT A CONSTANT, because {@link #warnings} is zero to
+     * {@link #MAX_WARNINGS} lines and a fixed reservation would spend a tenth of the diagram on
+     * blank space in the usual case. The alternative -- a constant band and an overflowing canvas
+     * when the plan has warnings -- fails silently: ModularUI neither clamps nor clips a child
+     * (#125), so the diagram would simply be drawn past the bottom of its own panel.
+     *
+     * THE ONE PLACE THE SPLIT IS DECIDED. {@link #flowPanel} lays the chrome out from this and
+     * `FlowCanvas.forPanel` sizes the canvas from {@link #flowCanvasHeight}, which is this
+     * subtracted from the panel -- so the two cannot disagree about where the boundary is, which
+     * is exactly the drift {@link #FLOW_CANVAS_WIDTH} was introduced to end one axis over.
+     */
+    public static int flowChromeHeight(PlanView plan) {
+        return LINE + 1 + warningCount(plan) * LINE + ROW_HEIGHT + 1;
+    }
+
+    /**
+     * How many warning lines this plan draws, after {@link #MAX_WARNINGS} has rolled the rest up.
+     *
+     * PUBLIC ONLY BECAUSE {@link #warnings} IS NOT, and a test outside this package has to be able
+     * to assert that a fixture it built really does carry the warnings the case is about. A sweep
+     * over "zero, one and the cap" that silently got the cap three times would be measuring one
+     * arrangement three times and reporting three -- which is
+     * `FlowCanvasTest.forPanelSizesTheCanvasToWhatTheChromeLeavesAtEveryWarningCount`'s own
+     * failure mode, so the check belongs in the test rather than in a comment here.
+     */
+    public static int warningCount(PlanView plan) {
+        return warnings(plan).size();
+    }
+
+    /** The y the canvas starts at inside the flow panel. See {@link #flowChromeHeight}. */
+    public static int flowCanvasTop(PlanView plan) {
+        return FLOW_PAD + flowChromeHeight(plan);
+    }
+
+    /** The canvas's height: the panel less its inset and less the chrome above it. */
+    public static int flowCanvasHeight(PlanView plan) {
+        return FLOW_HEIGHT - flowCanvasTop(plan) - FLOW_PAD;
+    }
 
     /**
      * A panel wrapping the flow diagram, sized to the screen.
@@ -462,12 +563,103 @@ public final class PlannerWidgets {
      * quietly overwrite every one of them and turn five assertions about culling into five
      * assertions about a viewport nothing is outside. DO NOT move the sizing in; production and
      * the harness both get it from `FlowCanvas.forPanel`.
+     *
+     * <h2>The chrome, and why a bare canvas was a defect rather than a minimal design (#327)</h2>
+     *
+     * THE WARNINGS ARE THE REASON THIS METHOD GREW A PLAN ARGUMENT. `NodeRowText.truncationWarning`
+     * carries the comment "SAID, NEVER SILENT", and it was rendered only by {@link #plannerPanel}
+     * -- so a plan cut off at the node cap drew a diagram shaped exactly like a complete one. That
+     * is the failure the tree's warning line exists to prevent, on the surface where it is hardest
+     * to notice: a tree that stops has a last row, and a diagram that stops has a last column that
+     * looks like the end of the plan.
+     *
+     * THE SAME LIST AND THE SAME ORDER AS THE TREE PANEL, through {@link #warnings}, rather than a
+     * flow-specific selection. `present.py`'s docstring records what happens when four components
+     * each keep their own copy of a vocabulary, and a diagram that showed the truncation line but
+     * not an overruled pin would be a fifth answer to "what is wrong with this plan".
      */
-    public static ModularPanel flowPanel(IWidget canvas) {
-        ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow",
-                                                       FLOW_WIDTH, FLOW_HEIGHT);
+    public static ModularPanel flowPanel(PlanView plan, final Diagram canvas,
+                                         PlannerActions actions) {
+        final ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow",
+                                                             FLOW_WIDTH, FLOW_HEIGHT);
+        int inner = FLOW_WIDTH - FLOW_PAD * 2;
+        Group chrome = new Group();
+        chrome.pos(FLOW_PAD, FLOW_PAD);
+        chrome.size(inner, flowChromeHeight(plan));
+
+        int y = 0;
+        chrome.child(heading(NodeRowText.heading(plan), inner).pos(0, y));
+        y += LINE + 1;
+        // RED AND ABOVE THE DIAGRAM, which is `plannerPanel`'s own placement and argument: these
+        // are reasons the picture below is not what it appears to be, so a reader who has to pan
+        // to find out has already been misled.
+        for (String warning : warnings(plan)) {
+            chrome.child(line(warning, inner, NodeStatus.INK_NEED).pos(0, y));
+            y += LINE;
+        }
+        chrome.child(flowButtons(inner, panel, canvas).pos(0, y));
+        panel.child(chrome);
         panel.child(canvas);
         return panel;
+    }
+
+    /**
+     * The flow panel's control row: close, and the two jumps, then the gesture hint.
+     *
+     * A `ViewBar` RATHER THAN A NEW MARKER TYPE. That class exists so something can find a row of
+     * buttons without counting widgets -- its own note argues an index "silently starts calling a
+     * tree row a button" the day a third is added -- and this is the same row of the same widget on
+     * a different panel. `PlannerShot` and `PlannerLayoutTest` both already look for it by type.
+     *
+     * THE HINT SHARES THE ROW rather than taking a line of its own, because the diagram is what
+     * the panel is for: all three buttons are 54px wide (the widest label, "Selected", at CHAR_WIDTH plus
+     * GAP either side) and the row is 612, so the hint is
+     * free where a fourth line would cost ten pixels of every plan's picture.
+     */
+    static ViewBar flowButtons(int width, final ModularPanel panel, final Diagram canvas) {
+        ViewBar bar = new ViewBar();
+        bar.size(width, ROW_HEIGHT);
+        List<Entry> entries = new java.util.ArrayList<Entry>();
+        entries.add(new Entry(CLOSE_DIAGRAM, new Runnable() {
+            @Override
+            public void run() {
+                // `closeIfOpen` AND NOT `animateClose`, which is the same call: measured in the
+                // 3.1.5 bytecode, `animateClose` is `closeIfOpen()` and nothing else. The close is
+                // synchronous on this pack because `shouldAnimate` is false without
+                // NeverEnoughAnimations, which is in neither the client's nor the server's jar set
+                // -- so the panel is gone before this returns and `PlannerScreen.PlannerWindow`
+                // sees one fewer open panel on its next tick. That is what makes a deferred
+                // rebuild (#326) resume rather than wait for a screen close.
+                panel.closeIfOpen();
+            }
+        }));
+        entries.add(new Entry(JUMP_TO_ROOT, new Runnable() {
+            @Override
+            public void run() {
+                canvas.jumpToRoot();
+            }
+        }));
+        entries.add(new Entry(JUMP_TO_SELECTED, new Runnable() {
+            @Override
+            public void run() {
+                // THE FALSE ANSWER IS DELIBERATELY NOT REPORTED ON SCREEN. There is nowhere on
+                // this panel to put a transient message, and the honest alternative -- a line that
+                // appears and never goes away -- is worse than a button that does nothing when
+                // there is nothing to jump to. `Diagram.jumpToSelected` returns the boolean so a
+                // test can assert both directions, which is where the claim belongs.
+                canvas.jumpToSelected();
+            }
+        }));
+        int x = 0;
+        for (Entry entry : entries) {
+            ClickableGroup button = new ClickableGroup(entry.action);
+            button.size(FLOW_BUTTON_WIDTH, ROW_HEIGHT);
+            button.child(line(entry.text, FLOW_BUTTON_WIDTH, NodeStatus.INK_CRAFT).pos(0, 0));
+            bar.child(button.pos(x, 0));
+            x += FLOW_BUTTON_WIDTH + GAP;
+        }
+        bar.child(line(FLOW_HINT, width - x, NodeStatus.INK_MUTED).pos(x, 0));
+        return bar;
     }
 
     /** A parent that positions its children absolutely. Concrete because `ParentWidget` is
@@ -1110,17 +1302,22 @@ public final class PlannerWidgets {
         }
     }
 
-    /**
-     * {@link #planNodeContent} with nothing behind the click. THE INERT ONE.
+    /*
+     * DELETED: `planNodeContent(node, width, height)`, the three-argument overload that passed
+     * `PlannerActions.NONE`. #325.
      *
-     * Named as such rather than left as a quiet default, because the failure it enables is a
-     * canvas of nodes that look right and do nothing when clicked -- and no test catches that,
-     * since a layout assertion is exactly what this overload is FOR. If a diagram is meant to
-     * open menus and does not, this is the overload it is on.
+     * ITS OWN JAVADOC PREDICTED THE DEFECT AND THE OVERLOAD IS WHAT ENABLED IT. It read "THE
+     * INERT ONE ... the failure it enables is a canvas of nodes that look right and do nothing
+     * when clicked", and that is precisely what shipped: `FlowCanvas` built every box through it,
+     * so for three releases the diagram had no node menu, no "Add to TODO", no recipe picker and
+     * no way to originate a selection, while `planNodeContent`'s own javadoc a few lines up said
+     * the node was clickable "LIKE row". Naming the hazard in a comment did not stop the hazard.
+     *
+     * A CALLER THAT WANTS AN INERT NODE NOW WRITES `PlannerActions.NONE` AT ITS OWN CALL SITE,
+     * which is the whole change: an inert node becomes a thing a caller asks for out loud rather
+     * than a thing it gets by default. Every remaining caller is a layout assertion, which is
+     * what the overload was for; the one that was not is the reason it is gone.
      */
-    public static NodeContent planNodeContent(PlanNode node, int width, int height) {
-        return planNodeContent(node, width, height, PlannerActions.NONE);
-    }
 
     /**
      * One tree row: indent, icon, quantity, label, meta, badge, and clickable.

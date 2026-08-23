@@ -18,6 +18,7 @@ import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
 import io.github.jacoblasky.recipedump.client.planner.PlanFixtureFiles;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
@@ -146,8 +147,15 @@ public class PlannerShotTest {
         // THE SIZE `openFlow` USES, and since #323 it is the same CALL `openFlow` makes rather
         // than a copy of its two numbers. A different viewport is a different question, and while
         // this was hand-sized it was a claim about `openFlow` that could quietly stop being true.
-        FlowCanvas canvas = FlowCanvas.forPanel(tree);
-        HeadlessLayout.layOut(PlannerWidgets.flowPanel(canvas));
+        //
+        // AND THE SAME PLAN, since #327 gave the panel chrome whose height depends on the plan's
+        // warnings and therefore decides the canvas's height. A `PlanView.empty()` here would
+        // measure a viewport `openFlow` never opens -- 23 pixels taller than the real one, which
+        // is one row of boxes, on the exact question of whether a corner is empty.
+        PlanView plan = new PlanView.Builder().targetName("Synthetic Node 3999").qty(1L)
+                .tree(tree).nodes(4000).maxNodes(4000).build();
+        FlowCanvas canvas = FlowCanvas.forPanel(plan, PlannerActions.NONE);
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(plan, canvas, PlannerActions.NONE));
         FlowLayout.Laid laid = FlowLayout.of(tree);
 
         // The stopping frame, derived rather than written as 0. If SWEEP, PASSES or the frame

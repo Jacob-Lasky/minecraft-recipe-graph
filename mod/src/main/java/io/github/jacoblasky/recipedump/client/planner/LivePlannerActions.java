@@ -208,13 +208,69 @@ public final class LivePlannerActions implements PlannerActions {
     private void open(IPanelHandler handler) {
         // The click sound lives here rather than in the widget: it reaches the sound handler
         // and therefore LWJGL, and a widget that made a noise could not be clicked in a
-        // headless test.
+        // headless test. It is also why the sequencing below is its own method: this line makes
+        // `open` unreachable from a test, and the sequencing is the part worth pinning.
         Interactable.playButtonClickSound();
+        reopen(handler);
+    }
+
+    /**
+     * Show `handler`'s panel FOR THE CURRENT SUBJECT, whatever it was showing before. #315.
+     *
+     * <h2>What was wrong, and it was one method wide</h2>
+     *
+     * Both calls below are INERT WHILE THE PANEL IS OPEN, verified in the ModularUI 3.1.5
+     * bytecode: `SecondaryPanel.openPanel` begins `if (open) return;`, and
+     * `deleteCachedPanel` is `if (open) { queueDelete = true; } else { panel = null; }` -- it
+     * QUEUES the delete for `closePanelInternal` rather than doing it. So clicking a second node
+     * while a menu was up did nothing to the menu at all.
+     *
+     * AND THE CLICK DID REACH THE SECOND NODE, which is what made it a wrong-answer bug rather
+     * than a dead click. `ModularPanel.closeOnOutOfBoundsClick()` is false and `canClickThrough`
+     * is true by default, so the press fell through to the widget beneath, `selectNode` ran and
+     * the highlight moved -- while the menu on screen went on describing AND ACTING ON the FIRST
+     * node. "Add to TODO" from that menu added the wrong item, at the wrong quantity, with the
+     * highlight pointing at the right one. Escape worked because `closeTopPanel` clears `open`,
+     * which finally applies the queued delete.
+     *
+     * IT HITS EVERY HANDLER, not just the node menu, because they all route through here: the row
+     * menu, the recipe picker, the caveats panel, and #323's flow and TODO panels.
+     *
+     * <h2>Why close-then-open rather than ModularUI's own MenuPanel</h2>
+     *
+     * `widgets.menu.MenuPanel` was the candidate -- `ModularScreen.onMousePressed` calls
+     * `closeAllMenus(false, true)` on every open `MenuPanel` BEFORE routing any press, which is
+     * the framework implementing dismiss-then-route. Two measured facts rule it out.
+     * `closeAllMenus` walks the panel for `widgets.menu.Menu` widgets and calls `checkClose` on
+     * each; these panels are built from `Group` and `ClickableGroup`, so it would find none and do
+     * nothing. And `MenuPanel`'s constructor calls `fullScreenInvisible()`, which would make every
+     * menu a screen-sized panel -- swallowing the click-through this surface relies on, and
+     * handing `PlannerAreaSource` a full-screen rectangle to tell JEI to avoid (#328).
+     *
+     * <h2>Why the second `isPanelOpen` check is not defensive padding</h2>
+     *
+     * `closePanel` is `panel.closeIfOpen()`, and that method has two paths on which the panel is
+     * still open when it returns: `cantCloseNow` (set for the duration of a `doSafe`, so a close
+     * requested from inside that panel's own event dispatch is deferred to the end of it) and
+     * `shouldAnimate()`. The second is false on this pack -- it requires NeverEnoughAnimations,
+     * which is in neither the client's nor the server's jar set -- but "correct because a mod is
+     * absent" is exactly the justification that expires without telling anyone. Where the close
+     * has not taken, reopening is the no-op that produced this bug, so the honest outcome is to
+     * leave the panel CLOSING and let the player's next click open the new one: one wasted click
+     * beats a menu that acts on something else.
+     */
+    static void reopen(IPanelHandler handler) {
         if (handler == null) {
             return;
         }
-        // Deleted first, because `simple` caches the panel it built and would otherwise show
-        // the PREVIOUS node's menu on the second click.
+        if (handler.isPanelOpen()) {
+            handler.closePanel();
+            if (handler.isPanelOpen()) {
+                return;
+            }
+        }
+        // Deleted AFTER the close and BEFORE the open: `simple` caches the panel it built, and
+        // with `open` now false this actually nulls the cache instead of queueing the request.
         handler.deleteCachedPanel();
         handler.openPanel();
     }
@@ -347,7 +403,16 @@ public final class LivePlannerActions implements PlannerActions {
                                           net.minecraft.entity.player.EntityPlayer player) {
                     // THE WIDGET COMES FROM THE SOURCE AND IS NOT BUILT HERE. `client.flow` may
                     // not be named from this package; see `FlowSource`.
-                    return PlannerWidgets.flowPanel(flowSource.diagramFor(currentPlan));
+                    //
+                    // `this` IS HANDED TO THE CANVAS AS WELL AS TO THE PANEL (#325), so a click on
+                    // a diagram node opens the same node menu a tree row opens -- recipe picker,
+                    // Add to TODO, favourite, and a selection originating from the diagram. Until
+                    // this argument existed the canvas built every box through the inert overload
+                    // of `PlannerWidgets.planNodeContent` and the diagram was a picture.
+                    return PlannerWidgets.flowPanel(
+                            currentPlan,
+                            flowSource.diagramFor(currentPlan, LivePlannerActions.this),
+                            LivePlannerActions.this);
                 }
             }, true);
         }

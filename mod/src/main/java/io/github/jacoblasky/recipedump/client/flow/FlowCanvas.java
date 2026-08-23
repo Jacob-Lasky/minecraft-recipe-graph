@@ -12,6 +12,10 @@ import com.cleanroommc.modularui.widget.scroll.HorizontalScrollData;
 import com.cleanroommc.modularui.widget.scroll.VerticalScrollData;
 
 import io.github.jacoblasky.recipedump.client.ScreenCursor;
+import io.github.jacoblasky.recipedump.client.planner.Diagram;
+import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
+import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
 import io.github.jacoblasky.recipedump.graph.IntArray;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
@@ -34,7 +38,7 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
  * dict of status strings: adding a status draws silently wrong. This diagram is component
  * five and calls theirs.
  */
-public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
+public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implements Diagram {
 
     /**
      * The narrowest node that carries everything a two-line node can draw.
@@ -122,15 +126,28 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
      * viewports -- 300x180 -- to give `FlowCulling` something to drop. Sizing inside the panel
      * would overwrite every one of those and turn assertions about culling into assertions about
      * a viewport nothing is outside, without failing.
+     *
+     * A PLAN AND NOT A TREE SINCE #327, because the panel's chrome is sized from the plan's
+     * WARNINGS and the canvas takes what is left. `PlannerWidgets.flowCanvasTop` and
+     * `flowCanvasHeight` are the one place that split is decided, so a truncated plan's diagram
+     * gets a shorter viewport and a warning line above it rather than a full-height viewport
+     * drawn over the words -- which is what would happen if either side kept its own number.
      */
-    public static FlowCanvas forPanel(PlanNode tree) {
-        FlowCanvas canvas = new FlowCanvas(tree);
-        canvas.pos(PlannerWidgets.FLOW_PAD, PlannerWidgets.FLOW_PAD);
-        canvas.size(PlannerWidgets.FLOW_CANVAS_WIDTH, PlannerWidgets.FLOW_CANVAS_HEIGHT);
+    public static FlowCanvas forPanel(PlanView plan, PlannerActions actions) {
+        FlowCanvas canvas = new FlowCanvas(plan.tree(), actions);
+        canvas.pos(PlannerWidgets.FLOW_PAD, PlannerWidgets.flowCanvasTop(plan));
+        canvas.size(PlannerWidgets.FLOW_CANVAS_WIDTH, PlannerWidgets.flowCanvasHeight(plan));
         return canvas;
     }
 
-    public FlowCanvas(PlanNode tree) {
+    /**
+     * @param actions where a click on a node goes. REQUIRED, and `PlannerActions.NONE` has to be
+     *                written out by a caller that wants an inert diagram. #325: this argument did
+     *                not exist, the constructor reached for the inert overload of
+     *                `PlannerWidgets.planNodeContent`, and every node on every diagram in three
+     *                releases did nothing when clicked.
+     */
+    public FlowCanvas(PlanNode tree, PlannerActions actions) {
         super(new HorizontalScrollData(), new VerticalScrollData());
         this.laid = FlowLayout.of(tree);
         this.culling = new FlowCulling(laid);
@@ -166,8 +183,14 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
             // border. That border is also what makes this read as a graph at all: in a list a
             // row is bounded by the rows above and below it, and the first screenshot of this
             // canvas was three nodes and an elbow that read as unrelated captions.
-            PlannerWidgets.NodeContent widget = PlannerWidgets
-                    .planNodeContent(box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT);
+            //
+            // THE ACTIONS ARE THE CONSTRUCTOR'S AND NOT `PlannerActions.NONE` (#325). This line
+            // called the three-argument overload, which hard-coded the inert actions, so the
+            // diagram drew nodes that looked exactly like clickable tree rows and were not: no
+            // node menu, no "Add to TODO", no recipe picker, no selection from the diagram. That
+            // overload is deleted, so the choice now has to be made here and can be read here.
+            PlannerWidgets.NodeContent widget = PlannerWidgets.planNodeContent(
+                    box.node, FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT, actions);
             widget.background(GuiTextures.MC_BACKGROUND);
             widget.pos(box.x, box.y);
             widget.size(FlowLayout.NODE_WIDTH, FlowLayout.NODE_HEIGHT);
@@ -467,6 +490,163 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * THE THREE METHODS THIS DELEGATES TO WERE ALL WRITTEN, TESTED AND HARNESS-ONLY.
+     * `panToBox`, `rootBox` and `fullyShowing` landed with #293 and their only callers outside
+     * `FlowCanvasTest` were in `shot/`. That is the #191 shape at the level of a feature rather
+     * than of a seam: nothing was broken, and a reader panned into the middle of a 634-node
+     * diagram had no way back short of closing the window.
+     */
+    @Override
+    public void jumpToRoot() {
+        panToBox(rootBox());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * THE NEAREST OCCURRENCE TO THE CURRENT CENTRE, NOT THE FIRST, and the choice is about what a
+     * jump is for. The same key appears once per parent that needs it -- `PlanSelection`'s class
+     * note is about exactly this -- so "the first" is an arbitrary one of six, and pressing the
+     * button twice from two different places would send the reader to the same distant box both
+     * times. Nearest makes the button mean "show me this item" from wherever you are.
+     *
+     * AND IT IS EXPLICITLY NOT A WAY TO REACH THE CLICKED OCCURRENCE. `PlanSelection.selectedNode`
+     * is the only thing that knows which one that was, and re-deriving it from the key by walking
+     * is the wrong-quantity bug that note forbids. Nothing here returns a node, so nothing here
+     * can be mistaken for that.
+     */
+    @Override
+    public boolean jumpToSelected() {
+        String key = PlanSelection.selectedKey();
+        if (key.isEmpty()) {
+            return false;
+        }
+        int centreX = getScrollX() + getArea().width / 2;
+        int centreY = getScrollY() + getArea().height / 2;
+        int best = -1;
+        long bestDistance = Long.MAX_VALUE;
+        for (int i = 0; i < laid.size(); i++) {
+            FlowLayout.Box box = laid.boxes.get(i);
+            if (!key.equals(box.node.key())) {
+                continue;
+            }
+            long dx = Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom) - centreX;
+            long dy = Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom) - centreY;
+            long distance = dx * dx + dy * dy;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        if (best < 0) {
+            return false;
+        }
+        panToBox(best);
+        return true;
+    }
+
+    /**
+     * How far the mouse has to move before a press on empty canvas becomes a pan.
+     *
+     * WHY A THRESHOLD IS NEEDED AT ALL, since a press on a NODE never reaches this widget:
+     * ModularUI consults the hovered widgets innermost first, so a `NodeContent` takes its own
+     * press and returns SUCCESS before the canvas is asked. What is left is a press on the gaps
+     * BETWEEN nodes -- which is most of the canvas -- and there a one-pixel tremor between press
+     * and release would shift the whole diagram under a reader who thought they had clicked
+     * nothing. Anchoring on the press position means crossing the threshold does not jump either.
+     */
+    private static final int DRAG_THRESHOLD = 3;
+
+    /** Where the mouse and the viewport were when the press landed. Client thread only. */
+    private int anchorMouseX;
+    private int anchorMouseY;
+    private int anchorScrollX;
+    private int anchorScrollY;
+
+    /** A press landed on the canvas body and no scrollbar claimed it. */
+    private boolean armed;
+
+    /** The armed press has crossed {@link #DRAG_THRESHOLD} and is now a pan. */
+    private boolean panning;
+
+    /**
+     * Arm a drag-pan, unless the scrollbar wanted this press.
+     *
+     * THE SCROLLBAR GETS FIRST REFUSAL, which is what `super` answers: measured in the 3.1.5
+     * bytecode, `AbstractScrollWidget.onMousePressed` is `scroll.mouseClicked(context) ? SUCCESS :
+     * IGNORE` and nothing else -- so it takes a press on the thumb and ignores every press on the
+     * canvas body. Panning the content on a press the thumb accepted would move the view twice
+     * per drag, once from each mechanism.
+     *
+     * SUCCESS ON THE BODY, WHICH IS WHAT ROUTES `onMouseDrag` HERE. ModularUI hands drags to the
+     * widget that accepted the press, so returning IGNORE -- which is what this widget did until
+     * now, and why the diagram could only be panned by its scrollbars -- means no drag is ever
+     * delivered.
+     */
+    @Override
+    public com.cleanroommc.modularui.api.widget.Interactable.Result onMousePressed(int button) {
+        com.cleanroommc.modularui.api.widget.Interactable.Result result =
+                super.onMousePressed(button);
+        if (result != null && result.accepts) {
+            armed = false;
+            panning = false;
+            return result;
+        }
+        anchorMouseX = getContext().getAbsMouseX();
+        anchorMouseY = getContext().getAbsMouseY();
+        anchorScrollX = getScrollX();
+        anchorScrollY = getScrollY();
+        armed = true;
+        panning = false;
+        return com.cleanroommc.modularui.api.widget.Interactable.Result.SUCCESS;
+    }
+
+    /**
+     * Drag the canvas body to pan, once the press has moved far enough to mean it.
+     *
+     * THE DELTA IS AGAINST THE ANCHOR AND NOT AGAINST THE LAST FRAME, so the accumulated offset
+     * cannot drift: a per-frame delta loses whatever the clamp swallowed at an edge, and the
+     * diagram then no longer returns to where it started when the mouse does.
+     *
+     * THE SIGN IS INVERTED ON PURPOSE. Dragging the content left must reveal what is to the
+     * RIGHT, which is a larger scroll offset -- this is grab-and-move, the gesture every map and
+     * every node-link diagram in the pack uses, and the opposite of what a scrollbar does.
+     */
+    @Override
+    public void onMouseDrag(int button, long timeSinceClick) {
+        super.onMouseDrag(button, timeSinceClick);
+        if (!armed) {
+            return;
+        }
+        int dx = anchorMouseX - getContext().getAbsMouseX();
+        int dy = anchorMouseY - getContext().getAbsMouseY();
+        if (!panning && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) {
+            return;
+        }
+        panning = true;
+        getScrollArea().getScrollX().scrollTo(getScrollArea(),
+                clampToRange(anchorScrollX + dx, FlowZoom.scaledExtent(laid.width, zoom),
+                             getArea().width));
+        getScrollArea().getScrollY().scrollTo(getScrollArea(),
+                clampToRange(anchorScrollY + dy, FlowZoom.scaledExtent(laid.height, zoom),
+                             getArea().height));
+    }
+
+    @Override
+    public boolean onMouseRelease(int button) {
+        armed = false;
+        panning = false;
+        return super.onMouseRelease(button);
+    }
+
+    /** Whether a drag-pan is in progress. For a test or a log. */
+    public boolean isPanning() {
+        return panning;
+    }
+
+    /**
      * Put the real cursor over the centre of box `index`. Returns false if it is off screen.
      *
      * FOR THE HIT-TEST PROBE, and it is the first thing in this project to move a mouse.
@@ -536,6 +716,51 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> {
     /** How many boxes the layout produced. */
     public int nodeCount() {
         return laid.size();
+    }
+
+    /**
+     * The plan node box `index` draws.
+     *
+     * FOR THE HARNESS, and specifically so a probe can assert that the menu a click OPENED is the
+     * menu for the box that was CLICKED. `flow-node-menu` reads the box under the real cursor from
+     * {@link #boxAtCursor} -- the layout's own answer -- and this turns it into the node whose label
+     * the menu panel must be titled with. Without it the strongest available verdict would be "a
+     * node menu is on top", which is equally true of the menu for the wrong node, and a screenshot
+     * of it is equally convincing. Same discrimination `jei-keybind` makes about the hovered stack.
+     */
+    public PlanNode boxNode(int index) {
+        return laid.boxes.get(index).node;
+    }
+
+    /**
+     * A point in the canvas that is inside no box, in SCREEN pixels relative to the canvas, or
+     * null when the diagram is dense enough that there is none on screen.
+     *
+     * FOR THE DRAG-PAN PROBE, and the reason it searches rather than computing is `parkCursorOverBox`'s
+     * one level over: a press on a NODE is taken by the node -- ModularUI consults hovered widgets
+     * innermost first -- so a probe that guessed at an empty point and hit a box would drive the
+     * node menu and report the canvas as unable to pan. The column gap is 40px and the row pitch
+     * leaves gaps, so a coarse sweep finds one; returning null rather than a guess is what makes
+     * "no empty point" a distinguishable outcome from "panning is broken".
+     *
+     * THE INSET IS THE CALLER'S DRAG BUDGET, NOT PADDING. The sweep used to start at (2,2) --
+     * and after `panToBox(rootBox())` the layout's top-left corner is guaranteed empty, so
+     * (2,2) is what it returned. A probe that then drags UP-LEFT from there aims the cursor
+     * OFF-SCREEN; `ScreenCursor.park` does not clamp, the OS does, and the measured pan comes
+     * out as the distance to the screen edge rather than the drag. So a caller that intends to
+     * drag by N passes N, and every point returned can move N in ANY direction while staying
+     * inside the canvas.
+     */
+    public int[] emptyPointOnScreen(int inset) {
+        int lo = Math.max(2, inset);
+        for (int y = lo; y < getArea().height - inset; y += 4) {
+            for (int x = lo; x < getArea().width - inset; x += 4) {
+                if (boxAt(toLayoutX(x), toLayoutY(y)) < 0) {
+                    return new int[] {x, y};
+                }
+            }
+        }
+        return null;
     }
 
     /** Direct children per box, so an edge sweep can start from what is visible. */

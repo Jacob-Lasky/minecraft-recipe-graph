@@ -1,7 +1,5 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
-import com.cleanroommc.modularui.api.widget.IWidget;
-
 /**
  * Where the flow diagram's widget comes from, for the one package that may not name it. #323.
  *
@@ -42,6 +40,15 @@ public interface FlowSource {
      * `WidgetTree.resizeInternal` catches Throwable around the whole resize and only logs it, so
      * the panel opens and draws an empty grey rectangle with nothing on screen saying why.
      * `FlowCanvas.forPanel` is the implementation of this sentence.
+     *
+     * @param actions where a click on a diagram node goes. #325: until this argument existed the
+     *                canvas built every node through the inert overload of
+     *                `PlannerWidgets.planNodeContent`, so a diagram was a picture -- no node menu,
+     *                no "Add to TODO", no recipe picker, and no way to originate a selection --
+     *                while `planNodeContent`'s own javadoc said the node was clickable "LIKE row".
+     *                A CONSTRUCTOR ARGUMENT AND NOT A SETTER, for the reason this interface's
+     *                class note gives about itself: a settable seam with a well-behaved no-op
+     *                default is how every joint in this mod that has come apart was built.
      */
-    IWidget diagramFor(PlanView plan);
+    Diagram diagramFor(PlanView plan, PlannerActions actions);
 }

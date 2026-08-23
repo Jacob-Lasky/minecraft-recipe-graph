@@ -331,7 +331,14 @@ final class PlannerShot {
         // their own `pos(4, 4).size(612, 372)`, which is how the first production opener came to
         // have no source for the two numbers at all; the factory is now the only statement of
         // them and the panel's own constants are what it reads.
-        PlannerScreen.openPanel(PlannerWidgets.flowPanel(FlowCanvas.forPanel(plan.tree())));
+        //
+        // `PlannerActions.NONE` IS WRITTEN OUT (#325). It used to be the default the deleted
+        // three-argument `planNodeContent` supplied, which is how a diagram of inert nodes came to
+        // have three green screenshots. This screen photographs the SELECTION WASH and clicks
+        // nothing, so inert is the right answer here -- said out loud rather than inherited.
+        FlowCanvas canvas = FlowCanvas.forPanel(plan, PlannerActions.NONE);
+        PlannerScreen.openPanel(
+                PlannerWidgets.flowPanel(plan, canvas, PlannerActions.NONE));
     }
 
     /**
@@ -514,16 +521,19 @@ final class PlannerShot {
                 throw new IllegalArgumentException("bad zoom '" + value + "' in '" + arg + "'");
             }
         }
-        PlanNode tree = flowTree(spec);
+        PlanView plan = flowPlan(spec);
         // ARMED HERE TOO, AND IT WAS NOT UNTIL #213. `openTree` armed the seam and this did
         // not, so every screenshot of the diagram was taken against `NodeActions.NONE` -- the
         // icon column was charged on all 634 nodes of `plan-fluid-chain` and nothing was ever
         // drawn in it. The picture looked like a diagram with no icons, which is also what a
         // diagram with a broken icon lookup looks like.
-        armNodeActions(tree);
-        final FlowCanvas canvas = FlowCanvas.forPanel(tree);
+        armNodeActions(plan.tree());
+        // INERT ACTIONS, SAID OUT LOUD (#325). This screen is a frame-timing sweep and a
+        // photograph; it presses nothing, so a live `PlannerActions` would add a menu nobody opens.
+        // `planner-view-flow` is the screen that drives the real one.
+        final FlowCanvas canvas = FlowCanvas.forPanel(plan, PlannerActions.NONE);
         canvas.setZoom(zoom);
-        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(plan, canvas, PlannerActions.NONE));
         ShotScreens.animate(new ShotScreens.Animated() {
             /** Most nodes drawn in any one frame so far. See the note where it is updated. */
             private int peakDrawn;
@@ -663,9 +673,15 @@ final class PlannerShot {
             spec = arg.substring(0, at);
             zoom = Float.parseFloat(arg.substring(at + 1));
         }
-        final FlowCanvas canvas = FlowCanvas.forPanel(flowTree(spec));
+        PlanView plan = flowPlan(spec);
+        // INERT ACTIONS, DELIBERATELY, AND THIS IS THE ONE SCREEN WHERE THAT MATTERS (#325). The
+        // probe compares `isHovering()` against the layout's own answer and NEVER PRESSES -- it
+        // parks a cursor and reads two booleans -- so a live `PlannerActions` here would change
+        // nothing it measures and would put a `LivePlannerActions` with no attached panel behind
+        // every node. `planner-view-flow` is the screen that drives the real one end to end.
+        final FlowCanvas canvas = FlowCanvas.forPanel(plan, PlannerActions.NONE);
         canvas.setZoom(zoom);
-        PlannerScreen.openPanel(PlannerWidgets.flowPanel(canvas));
+        PlannerScreen.openPanel(PlannerWidgets.flowPanel(plan, canvas, PlannerActions.NONE));
         ShotScreens.animate(new ShotScreens.Animated() {
             @Override
             public void step(int frame) {
@@ -1103,11 +1119,39 @@ final class PlannerShot {
      * still made against a fixture.
      */
     private static PlanNode flowTree(String arg) {
+        return flowPlan(arg).tree();
+    }
+
+    /**
+     * The same, as the PLAN the flow panel now needs. #327.
+     *
+     * A PLAN AND NOT A TREE BECAUSE THE PANEL DRAWS THE PLAN'S WARNINGS. `PlannerWidgets.flowPanel`
+     * takes a `PlanView` since #327 -- the truncation line and the overruled pins go above the
+     * diagram, and the canvas is sized to what is left -- so a synthetic tree has to arrive wearing
+     * one. It carries the node count it really has rather than a zero, so `NodeRowText.heading`
+     * and the truncation check describe the picture instead of describing nothing.
+     *
+     * `truncated(false)` IS THE HONEST VALUE AND NOT A DEFAULT. A synthetic tree is exactly the
+     * size it was asked for -- `syntheticIsExactAtEverySizeAndAlwaysHasOneRoot` counts it at 600
+     * sizes -- so it is not a plan the solver gave up on, and claiming otherwise would put a
+     * warning on a performance shot that is measuring frames rather than reporting a plan.
+     */
+    private static PlanView flowPlan(String arg) {
         String wanted = arg == null ? "" : arg.trim();
-        if (wanted.startsWith("synthetic:")) {
-            return synthetic(Integer.parseInt(wanted.substring("synthetic:".length())));
+        if (!wanted.startsWith("synthetic:")) {
+            return fixture(wanted);
         }
-        return fixture(wanted).tree();
+        int nodes = Integer.parseInt(wanted.substring("synthetic:".length()));
+        PlanNode tree = synthetic(nodes);
+        return new PlanView.Builder()
+                .target("synthetic:node" + (nodes - 1))
+                .targetName("Synthetic Node " + (nodes - 1))
+                .qty(1L)
+                .tree(tree)
+                .nodes(nodes)
+                .maxNodes(nodes)
+                .truncated(false)
+                .build();
     }
 
     /**
@@ -1214,6 +1258,24 @@ final class PlannerShot {
     private static PlanView fixture(String name) {
         String wanted = name == null || name.trim().isEmpty() ? DEFAULT_FIXTURE : name.trim();
         return PlanFixtureFiles.load(wanted);
+    }
+
+    /**
+     * The same, for a screen in another file that wants its own default.
+     *
+     * PACKAGE-VISIBLE AND EXPLICIT ABOUT THE FALLBACK, rather than making {@link #fixture} visible
+     * and its `DEFAULT_FIXTURE` shared. `FlowInteractionShot` deliberately defaults to a TRUNCATED
+     * plan, because the chrome it drives has a warning line to draw only on one -- and inheriting
+     * this file's default would have made that a property of whichever screen happened to run.
+     */
+    static PlanView fixtureFor(String name, String fallback) {
+        String wanted = name == null || name.trim().isEmpty() ? fallback : name.trim();
+        return PlanFixtureFiles.load(wanted);
+    }
+
+    /** {@link #book}, for a screen in another file. See {@link #fixtureFor}. */
+    static PlanBook bookFor(PlanView plan) {
+        return book(plan);
     }
 
     /**

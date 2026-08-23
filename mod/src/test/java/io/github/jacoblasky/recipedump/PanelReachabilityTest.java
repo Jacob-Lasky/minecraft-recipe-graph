@@ -225,8 +225,14 @@ public class PanelReachabilityTest {
      */
     @Test
     public void theHarnessOpensTheFlowPanelAndStillDoesNotCount() throws Exception {
+        // THE DESCRIPTOR MOVED WITH #325/#327 AND IS SPELT OUT FOR THE REASON BELOW: the panel now
+        // takes the PLAN whose warnings it draws above the diagram, the `Diagram` it wraps, and the
+        // `PlannerActions` its own controls call. A stale descriptor here matches nothing and the
+        // assertion that follows is what says so, which is why it is worded as loudly as it is.
+        String plannerPackage = "L" + ClassFiles.ROOT_PACKAGE + "/client/planner/";
         String flowPanel = ClassFiles.ROOT_PACKAGE + "/client/planner/PlannerWidgets.flowPanel"
-                + "(Lcom/cleanroommc/modularui/api/widget/IWidget;)L" + PANEL + ";";
+                + "(" + plannerPackage + "PlanView;" + plannerPackage + "Diagram;"
+                + plannerPackage + "PlannerActions;)L" + PANEL + ";";
         String shot = ClassFiles.ROOT_PACKAGE + "/shot/PlannerShot";
 
         Set<String> fromHarness = ClassFiles.methodReferences(
@@ -245,6 +251,55 @@ public class PanelReachabilityTest {
                     openers.get(flowPanel).isEmpty());
         assertFalse("the harness contributed itself as an opener",
                     openers.get(flowPanel).contains(shot));
+    }
+
+    /**
+     * NO PRODUCTION PANEL IS SCREEN-SIZED, because JEI is told to lay out around all of them.
+     *
+     * #328'S OTHER HALF, AND IT IS HERE RATHER THAN BESIDE THAT FIX BECAUSE IT IS A CLAIM ABOUT
+     * EVERY PANEL. `PlannerAreaSource.occupiedAreas` now reports every open panel's rectangle, so a
+     * `fullScreenInvisible()` panel would tell JEI to avoid the whole screen and its item list
+     * would silently vanish for as long as the planner was open. That is not hypothetical: it is
+     * exactly what ModularUI's own `widgets.menu.MenuPanel` is -- its constructor calls
+     * `fullScreenInvisible()` -- and `MenuPanel` was the candidate fix considered for #315 before
+     * this and the click-through both ruled it out. Recorded as a test rather than as a paragraph,
+     * because the failure has no symptom on this side of the seam at all.
+     *
+     * `invisible()` IS NOT FORBIDDEN, only the full-screen form. A widget can be invisible for
+     * ordinary reasons; a panel claiming the whole screen is the thing that breaks the area report.
+     *
+     * THE CONTROL IS THAT THE SCAN FINDS SOMETHING AT ALL. A search over compiled classes for a
+     * method nobody calls returns the empty set whether the rule holds or the scan is broken, so
+     * the assertion below checks the scan can see a call ModularUI method that IS made --
+     * `ModularPanel.defaultPanel`, which every panel in this mod goes through.
+     */
+    @Test
+    public void noPlannerPanelIsScreenSizedBecauseJeiIsToldToAvoidThem() throws Exception {
+        List<String> offenders = new ArrayList<String>();
+        int sawDefaultPanel = 0;
+        List<java.io.File> classes = ClassFiles.under(ClassFiles.ROOT_PACKAGE);
+        for (java.io.File file : classes) {
+            String name = ClassFiles.internalName(file);
+            if (ProductionCallers.isHarness(name)) {
+                continue;
+            }
+            Set<String> refs = ClassFiles.methodReferences(ClassFiles.read(file));
+            for (String ref : refs) {
+                if (ref.startsWith(PANEL + ".fullScreenInvisible")) {
+                    offenders.add(name + " -> " + ref);
+                }
+                if (ref.startsWith(PANEL + ".defaultPanel")) {
+                    sawDefaultPanel++;
+                }
+            }
+        }
+        assertTrue("the scan must be able to see a ModularPanel call that IS made, or an empty"
+                   + " offender list means nothing; searched " + classes.size() + " classes",
+                   sawDefaultPanel > 0);
+        assertEquals("a full-screen panel would tell JEI to avoid the whole screen, because"
+                     + " PlannerAreaSource reports every open panel (#328) -- JEI's item list"
+                     + " would silently disappear whenever this one was open",
+                     Collections.<String>emptyList(), offenders);
     }
 
     /**

@@ -759,6 +759,24 @@ way to see. The buttons are the fix, and `PanelReachabilityTest` is the part tha
 fixed: it fails when any panel builder in the mod has no opener outside the harness, which is
 what neither the layout tests nor the screenshots could notice.
 
+**The diagram is a surface you work from, not a picture.** Click any box in it and you get the
+same menu a tree row gives you — the recipe picker, "Add to TODO", "Favourite" — and the box you
+clicked becomes the selection, so every other occurrence of that item lights up across the whole
+diagram. Drag the empty canvas to pan it, control-scroll to zoom, and the row under the heading
+carries **Close**, **Root** (put the plan's root back in frame) and **Selected** (jump to the item
+you have selected, nearest occurrence first). The heading names the plan and the same red warning
+lines the tree carries sit above the canvas, so a plan cut off at the node cap says so here too
+rather than drawing a diagram shaped exactly like a complete one.
+
+Until this landed the boxes were inert: they looked exactly like clickable tree rows and nothing
+happened when you clicked them
+([#325](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/325)), the panel had no
+heading, no warnings and no way out that was written down anywhere
+([#327](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/327)), and anything that
+changed the plan or the book — including "Add to TODO" from the diagram itself — closed it under
+the click that used it
+([#326](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/326)).
+
 **`=` is the headline interaction.** Point at anything in JEI's item list or in an open recipe
 and press it: no window to open first, no item to type. It is bound to `=` by default because
 Just Enough Calculation — the thing this is a better version of — uses that key for exactly

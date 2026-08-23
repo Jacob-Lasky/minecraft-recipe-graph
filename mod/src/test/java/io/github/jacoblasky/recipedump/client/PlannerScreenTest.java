@@ -480,6 +480,162 @@ public class PlannerScreenTest {
      */
     private static final int PADDED_GRAPH_BYTES = 16 * 1024 * 1024;
 
+    // -- #326: the window must not reopen over an open sub-panel --------------------------------
+
+    /**
+     * THE GUARD: a sub-panel being open is what stops the window rebuilding itself.
+     *
+     * WHY IT IS A GUARD RATHER THAN A WITNESS. The defect is not visible in a value -- the window
+     * did exactly what it was written to do, `ClientGUI.open` a replacement -- and driving that
+     * needs a live client. So the policy is what is asserted, exactly as
+     * `clearSelectionIfPlanChanged` is, and the mutation that shows it can fail is deleting the
+     * `!aSubPanelIsOpen(...)` clause from `PlannerWindow.onUpdate`, which reddens
+     * {@link #theWindowConsultsThePanelCountBeforeRebuildingItself} below.
+     *
+     * THE ONE-PANEL ARM IS MEASURED AGAINST THE REAL `PanelManager` and it is the arm that
+     * matters, because it is the case a wrong threshold would break: a guard that answered true for
+     * a bare planner would stop the window EVER rebuilding, which is worse than the bug being
+     * fixed. A fresh planner really does report exactly one open panel, and this asks the real
+     * class rather than asserting it.
+     *
+     * THE MULTI-PANEL ARM CANNOT BE, AND SAYING SO IS PART OF THE EVIDENCE. Measured while writing
+     * this: `PanelManager.openPanel` calls `ModularPanel.onOpen`, which calls `shouldAnimate()`,
+     * which asks `Loader.isModLoaded` about NeverEnoughAnimations -- and with no Forge `Loader`
+     * that is a NullPointerException out of `ModularUI$Mods.isLoaded`. No headless test can put two
+     * panels on a screen, so the second arm is a claim about the threshold and nothing more, and
+     * `PlannerScreen.aSubPanelIsOpen` takes an int so that the signature says the same thing.
+     */
+    @Test
+    public void anOpenSubPanelDefersTheRebuildAndABarePlannerStillRebuilds() {
+        ModularPanel planner = ModularPanel.defaultPanel("mcrecipedump_planner",
+                                                         PlannerWidgets.PANEL_WIDTH,
+                                                         PlannerWidgets.PANEL_HEIGHT);
+        HeadlessLayout.layOut(planner);
+        com.cleanroommc.modularui.screen.PanelManager panels =
+                planner.getScreen().getPanelManager();
+
+        assertEquals("the main panel is the only thing open on a fresh planner", 1,
+                     panels.getOpenPanelCount());
+        assertFalse("with only the planner up there is nothing to lose, so a rebuild is fine",
+                    PlannerScreen.aSubPanelIsOpen(panels.getOpenPanelCount()));
+
+        assertTrue("a menu, the picker, the diagram or the TODO panel over the planner is a "
+                   + "sub-panel a rebuild would destroy",
+                   PlannerScreen.aSubPanelIsOpen(2));
+        assertTrue("and so is a menu opened from the diagram, which is three deep",
+                   PlannerScreen.aSubPanelIsOpen(3));
+    }
+
+    /**
+     * A count of zero means the screen has not opened its main panel yet: nothing to protect.
+     *
+     * NOT A DEFENSIVE BRANCH. `ModularScreen` is constructed before `onResize` opens the main
+     * panel, and `onUpdate` can run in between; answering true there would defer a rebuild for a
+     * sub-panel that does not exist, on the one tick where the window has nothing on screen at all.
+     */
+    @Test
+    public void aScreenWithNoPanelsOpenYetHasNothingToProtect() {
+        assertFalse(PlannerScreen.aSubPanelIsOpen(0));
+    }
+
+    /**
+     * The window actually consults it, which is the half a policy test cannot see.
+     *
+     * THIS IS THE #191 GATE APPLIED TO A CONDITIONAL RATHER THAN TO A SEAM. `aSubPanelIsOpen`
+     * could be perfectly correct, perfectly tested, and never called -- which is what
+     * `SeamInstallationTest` exists for one level up, and what this file's own
+     * `clearSelectionIfPlanChanged` tests could not have caught either. A bytecode scan is the
+     * only thing that can assert it here, because `onUpdate` needs a constructed `ModularScreen`
+     * and a live `ClientGUI`.
+     *
+     * THE CHAIN IS TWO LINKS AND BOTH ARE ASSERTED: `PlannerWindow.onUpdate` must reference
+     * `PlannerScreen.aSubPanelIsOpen`, and that method must reference
+     * `PanelManager.getOpenPanelCount`. Checking only the first would pass against a version of
+     * the method that had stopped reading the manager; checking only the second would pass against
+     * a method nobody calls.
+     */
+    @Test
+    public void theWindowConsultsThePanelCountBeforeRebuildingItself() throws Exception {
+        Set<String> window = io.github.jacoblasky.recipedump.ClassFiles.methodReferences(
+                io.github.jacoblasky.recipedump.ClassFiles.read(new File(
+                        io.github.jacoblasky.recipedump.ClassFiles.classesRoot(),
+                        io.github.jacoblasky.recipedump.ClassFiles.ROOT_PACKAGE
+                                + "/client/PlannerScreen$PlannerWindow.class")));
+        // The window routes through `settleThisTick` since the review fix -- the clear and the
+        // reopen defer TOGETHER -- so the chain is now three links, asserted across two classes.
+        assertTrue("PlannerWindow.onUpdate must route its decision through settleThisTick; "
+                   + "without that call #326 is unfixed and no assertion about the policy "
+                   + "would notice: " + window,
+                   references(window, "PlannerScreen.settleThisTick"));
+        assertTrue("and it must ask the PanelManager for the count rather than keeping a list "
+                   + "of panel names of its own: " + window,
+                   references(window, "PanelManager.getOpenPanelCount"));
+        Set<String> outer = io.github.jacoblasky.recipedump.ClassFiles.methodReferences(
+                io.github.jacoblasky.recipedump.ClassFiles.read(new File(
+                        io.github.jacoblasky.recipedump.ClassFiles.classesRoot(),
+                        io.github.jacoblasky.recipedump.ClassFiles.ROOT_PACKAGE
+                                + "/client/PlannerScreen.class")));
+        assertTrue("and settleThisTick's own class must consult aSubPanelIsOpen, or the "
+                   + "decision method stopped reading the panel count: " + outer,
+                   references(outer, "PlannerScreen.aSubPanelIsOpen"));
+        // THE CONTROL: this scan can see a call the window definitely makes. Without it an empty
+        // reference set -- a wrong path, a class that failed to parse -- would satisfy nothing and
+        // fail loudly, but a set that happened to be missing only the two above would not be
+        // distinguishable from a scan that is looking in the wrong place.
+        assertTrue("the scan must find a call onUpdate definitely makes, or an absence above "
+                   + "says nothing about the code: " + window,
+                   references(window, "PlannerScreen.stamp"));
+    }
+
+    /**
+     * A selection made on an open sub-panel survives a plan-generation bump (#326's second
+     * half). The reopen was deferred behind the sub-panel guard first and the CLEAR was not,
+     * so pinning a recipe from a diagram node's picker put `clearSelectionIfPlanChanged` on
+     * every tick for as long as the diagram stayed open -- wiping the wash the click had just
+     * made. `settleThisTick` is the one decision both actions now stand behind; this drives it
+     * the way `onUpdate` does, at both panel counts.
+     *
+     * WITNESS BY MUTATION rather than against master: the method did not exist before the fix,
+     * so a master run is a compile error, not an assertion. Moving the clear above the guard
+     * inside `settleThisTick` turns the first assertion red (measured), which is the defect
+     * restored with every signature intact.
+     */
+    @Test
+    public void aSelectionMadeUnderAnOpenSubPanelSurvivesAPlanGenerationBump() {
+        PlanSelection.select(NODE);
+        try {
+            assertFalse("with a sub-panel open (count 2) the tick must settle NOTHING",
+                        PlannerScreen.settleThisTick(2, 1L, 2L));
+            assertTrue("and the selection must still be standing afterwards",
+                       PlanSelection.isSelected(NODE.key()));
+
+            assertTrue("with only the main panel open the tick settles",
+                       PlannerScreen.settleThisTick(1, 1L, 2L));
+            assertFalse("and a moved generation clears the selection exactly then",
+                        PlanSelection.isSelected(NODE.key()));
+
+            PlanSelection.select(NODE);
+            assertTrue("an unmoved generation also settles",
+                       PlannerScreen.settleThisTick(1, 2L, 2L));
+            assertTrue("but clears nothing, because the plan did not change",
+                       PlanSelection.isSelected(NODE.key()));
+        } finally {
+            // Static state; a failed assertion above must not leak a selection into the next
+            // test.
+            PlanSelection.clear();
+        }
+    }
+
+    /** Whether any reference in `refs` names `suffix`, ignoring the descriptor. */
+    private static boolean references(Set<String> refs, String suffix) {
+        for (String ref : refs) {
+            if (ref.contains(suffix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The load `startPaddedLoadFrom` deliberately did not wait for. See that method. */
     private static void awaitGraph() throws Exception {
         long deadline = System.currentTimeMillis() + 60_000L;

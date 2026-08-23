@@ -877,10 +877,37 @@ Two things the gate cannot see, both stated on it: that the opener is REACHED ra
 compiled (a button behind a false condition satisfies it), and that the panel is usable once
 open. The second is not hypothetical -- `flowPanel` took a canvas that only the harness ever
 sized, so the first production opener would have opened a correctly wired window around a
-zero-size diagram. `FlowCanvas.forPanel` is the answer and `PlannerWidgets.FLOW_CANVAS_WIDTH`
-the one statement of the numbers. What covers "reached" is a picture: the `planner-view-flow` and
-`planner-view-todo` shot screens park the real cursor on a button, click only what ModularUI
-agrees is under it, and assert the panel that opened is the one the button claims.
+zero-size diagram. `FlowCanvas.forPanel` is the answer, and the numbers are stated once, in
+`PlannerWidgets`: `FLOW_CANVAS_WIDTH` for the width and `flowCanvasTop`/`flowCanvasHeight` for
+the vertical split, which since #327 is a FUNCTION OF THE PLAN because the chrome above the
+diagram is one line per warning. A canvas sized from a constant while the chrome grew would be
+drawn over its own heading, silently, since ModularUI neither clamps nor clips a child.
+
+What covers "reached" is a picture: the `planner-view-flow` and `planner-view-todo` shot screens
+park the real cursor on a button, click only what ModularUI agrees is under it, and assert the
+panel that opened is the one the button claims.
+
+**AND "REACHABLE" IS NOT "USABLE", WHICH IS THE THIRD THING THE GATE CANNOT SEE AND THE ONE THAT
+COST THE MOST (#325).** With #323's buttons landed, the diagram was reachable, correctly sized,
+photographed at three zooms and covered by layout tests -- and every node in it was INERT.
+`FlowCanvas` built each box through `PlannerWidgets.planNodeContent`'s three-argument overload,
+which hard-coded `PlannerActions.NONE`, so there was no node menu, no "Add to TODO", no recipe
+picker and no way to originate a selection from the diagram. The overload's own javadoc named the
+hazard -- "THE INERT ONE ... a canvas of nodes that look right and do nothing when clicked" --
+and naming it in a comment did not stop it. The overload is now DELETED, so an inert node is
+something a call site has to ask for out loud, and actions reach the canvas as a constructor
+argument through `FlowSource.diagramFor(plan, actions)`.
+
+**The test that should have caught it was the #191 shape one level down.**
+`PlannerLayoutTest.aDiagramNodeOpensTheNodeMenuLikeATreeRowDoes` built the node itself, with its
+own recorder, and clicked that -- so it asserted that the FACTORY wires a node, which was true,
+and said nothing about what `FlowCanvas` passed it. **A test that carries a surface's name while
+asserting nothing about that surface is worse than no test: it is the claim's strongest-looking
+evidence.** The witness now lives in `FlowCanvasTest.everyDiagramNodeOpensTheMenuForTheNodeThat`
+`WasClicked`, which reads the canvas's OWN children and asserts the recorded key per box, and
+the live half is the `flow-node-menu` shot screen, which clicks a node with the real cursor and
+asserts the menu's TITLE against the label of the box the layout says was under it -- because a
+photograph of an open node menu is equally consistent with the menu for the WRONG node.
 
 **The item's recipe is all-vanilla and that was deliberate**: a Book over Comparator, Crafting
 Table, Ender Pearl. It once held an AE2 Wireless Receiver, which made the calculator

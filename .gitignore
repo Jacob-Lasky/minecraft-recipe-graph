@@ -27,3 +27,12 @@ dist/
 # pure-Java core. Outside `mod/build/` on purpose -- a `mod/build/` written by a container
 # running as another uid is the "the tests pass and the build still fails" trap in the skill.
 .ci-java/
+
+# Gate and harness logs written at the worktree root -- `tools/check.sh`, `mod/tools/build-jar.sh`
+# and `harness/prodclient/prodshot.sh` are all driven as `setsid ... > something.log`, and a
+# `git add -A` afterwards commits whichever ones happen to be lying there. That has happened:
+# a 4 MB prodshot log and a `.fuse_hidden*` stub -- the artifact FUSE leaves behind when a file
+# is unlinked while a process still holds it open -- both reached a commit and had to be removed.
+# Root-level only, so a log a script deliberately tracks somewhere else is unaffected.
+/*.log
+.fuse_hidden*

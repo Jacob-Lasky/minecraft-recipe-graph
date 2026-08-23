@@ -2,7 +2,6 @@ package io.github.jacoblasky.recipedump.client;
 
 import java.util.function.Function;
 
-import com.cleanroommc.modularui.api.widget.IWidget;
 import com.cleanroommc.modularui.factory.ClientGUI;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.ModularScreen;
@@ -11,10 +10,12 @@ import com.cleanroommc.modularui.screen.viewport.ModularGuiContext;
 import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
+import io.github.jacoblasky.recipedump.client.planner.Diagram;
 import io.github.jacoblasky.recipedump.client.planner.FlowSource;
 import io.github.jacoblasky.recipedump.client.planner.LivePlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlanSelection;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
+import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerAreaSource;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
@@ -304,8 +305,8 @@ public final class PlannerScreen {
      */
     private static final FlowSource DIAGRAMS = new FlowSource() {
         @Override
-        public IWidget diagramFor(PlanView plan) {
-            return FlowCanvas.forPanel(plan.tree());
+        public Diagram diagramFor(PlanView plan, PlannerActions actions) {
+            return FlowCanvas.forPanel(plan, actions);
         }
     };
 
@@ -433,12 +434,71 @@ public final class PlannerScreen {
             // `PlannerEntry.resumeWhenTheGraphLands` and the counter note above.
             PlannerEntry.resumeWhenTheGraphLands();
             long generation = plans();
-            clearSelectionIfPlanChanged(plans, generation);
             long now = stamp(book);
-            if (now != drawn) {
+            if (settleThisTick(getPanelManager().getOpenPanelCount(), plans, generation)
+                    && now != drawn) {
                 ClientGUI.open(new PlannerWindow(book, now, generation));
             }
         }
+    }
+
+    /**
+     * Clear a stale selection and say whether this tick may rebuild -- ONE decision, because
+     * the two must defer TOGETHER (#326). The reopen got the sub-panel guard first and the
+     * clear did not, so a plan-generation bump while the diagram was open (pin a recipe from a
+     * diagram node's picker) re-ran {@link PlanSelection#clear} EVERY TICK until the panel
+     * closed -- wiping the wash a diagram click had just made, while the deferred rebuild
+     * correctly waited. Both actions now stand behind the same gate, so closing the sub-panel
+     * is what lets one clear and one rebuild happen, in that order, once: the replacement
+     * window latches the new generation, and {@link #clearSelectionIfPlanChanged} goes quiet
+     * again.
+     */
+    static boolean settleThisTick(int openPanelCount, long drawnGeneration,
+                                  long currentGeneration) {
+        if (aSubPanelIsOpen(openPanelCount)) {
+            return false;
+        }
+        clearSelectionIfPlanChanged(drawnGeneration, currentGeneration);
+        return true;
+    }
+
+    /**
+     * Is anything open OVER the planner right now: a menu, the picker, the diagram, the TODO list?
+     *
+     * #326: THE WINDOW USED TO REBUILD REGARDLESS, and its own class note said what that costs --
+     * "REOPENING THROWS AWAY SCROLL POSITION AND ANY OPEN SUB-PANEL". That was acceptable while no
+     * sub-panel outlived a click. #323 made the diagram and the TODO panel player-reachable and
+     * #325 gave diagram nodes a menu, so "click a node, Add to TODO" bumps the book revision, moves
+     * {@link #stamp}, and closed the diagram under the very click that used it.
+     *
+     * THE COUNT AND NOT A LIST OF NAMES, so a sub-panel added later is covered by construction.
+     * The main panel is always one of the open panels while the screen is up, so anything past one
+     * is something a click opened -- `PlannerShot.ClickViewButton.verdict` reads the same counter
+     * for the same reason, and it is the number `PanelManager` maintains rather than one this file
+     * keeps.
+     *
+     * ZERO IS "NOTHING TO LOSE", NOT "SOMETHING IS OPEN". There is a window between constructing
+     * the screen and opening its main panel; a count of zero there means the rebuild may proceed,
+     * which is the same answer as one.
+     *
+     * THE DEFERRAL RESUMES BY ITSELF AND NEEDS NO FLAG. `drawn` is final on the window and every
+     * term of {@link #stamp} only ever goes up, so `now != drawn` stays true for as long as the
+     * player leaves the sub-panel open, and the tick after they close it takes the rebuild. What
+     * that costs is a tree that is momentarily stale UNDER an open diagram, which is the cheapest
+     * honest reading of the issue's own "skip the reopen while a sub-panel is open, rebuild on its
+     * close".
+     *
+     * AN `int` AND NOT THE `PanelManager`, WHICH IS ABOUT WHAT A TEST CAN REACH. Opening a second
+     * panel in a JUnit JVM is impossible: `PanelManager.openPanel` calls `ModularPanel.onOpen`,
+     * which calls `shouldAnimate()`, which asks `Loader.isModLoaded` about NeverEnoughAnimations
+     * and NPEs with no Forge `Loader`. So the multi-panel arm can only ever be a claim about the
+     * threshold, and taking an int says so rather than dressing it up as a claim about the
+     * manager. `PlannerScreenTest` drives the real manager for the one-panel case, asserts the
+     * threshold here, and scans `PlannerWindow`'s bytecode for the call -- because a correct policy
+     * nobody consults is the #191 shape and no policy test can see it.
+     */
+    static boolean aSubPanelIsOpen(int openPanelCount) {
+        return openPanelCount > 1;
     }
 
     /**

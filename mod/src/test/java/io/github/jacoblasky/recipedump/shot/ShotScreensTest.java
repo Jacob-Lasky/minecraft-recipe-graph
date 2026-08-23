@@ -198,6 +198,15 @@ public class ShotScreensTest {
                 // not. Both are kept: the direct ones are the layout subject, these are the
                 // reachability evidence.
                 "planner-view-flow", "planner-view-todo",
+                // AND WAVE 2 ADDED THESE TWO, which are the only screens that press a button on
+                // the DIAGRAM. `flow`, `flow-hit` and `flow-selected` above all photograph the
+                // canvas and none of them clicks it, which is how #325 -- every diagram node
+                // inert, wired to `PlannerActions.NONE` -- survived three releases underneath
+                // three green screenshots. `flow-node-menu` clicks a node and asserts the menu's
+                // title against the box the layout says was under the cursor; `flow-nav` drags
+                // the empty canvas and then presses Root. Both would go red if their wiring were
+                // removed and none of the three above would.
+                "flow-nav", "flow-node-menu",
                 "planner-yield", "row-menu", "sources", "world-probe");
 
         List<String> actual = new ArrayList<String>(ShotScreens.names());

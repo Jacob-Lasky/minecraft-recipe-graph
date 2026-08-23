@@ -541,6 +541,23 @@ public final class ShotScreens {
                 PlannerShot.openViewTodo(arg);
             }
         });
+        // THE DIAGRAM DRIVEN RATHER THAN PHOTOGRAPHED (#325, #326, #327, #328). `flow`, `flow-hit`
+        // and `flow-selected` above all photograph a canvas and none of them presses a button on
+        // one, which is how a diagram of inert nodes came to have three green screenshots. These
+        // two click through the real screen; see `FlowInteractionShot` for what each verdict
+        // discriminates.
+        register("flow-node-menu", new Opener() {
+            @Override
+            public void open(String arg) {
+                FlowInteractionShot.openNodeMenu(arg);
+            }
+        });
+        register("flow-nav", new Opener() {
+            @Override
+            public void open(String arg) {
+                FlowInteractionShot.openNav(arg);
+            }
+        });
         register("planner-caveats", new Opener() {
             @Override
             public void open(String arg) {
