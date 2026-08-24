@@ -363,7 +363,7 @@ public final class LivePlannerActions implements PlannerActions {
      * The caveats panel, built at open time like the other two.
      *
      * AND FOR A SHARPER REASON THAN THEY HAVE. `ScenarioSource.status` is documented as being
-     * read per plan and not cached, because a grid can go out of range between two plans -- so
+     * read per plan and not cached, because a grid can go unloaded between two plans -- so
      * a panel built once at attach time would keep showing the refusal that applied when the
      * window opened. `open` deletes the cached panel before every open, which is what makes
      * this re-ask.

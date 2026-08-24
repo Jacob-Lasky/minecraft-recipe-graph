@@ -37,7 +37,7 @@ public enum ScenarioSource {
      * THE DECLARED CONSTANT IS NOW A FAULT REPORT, not a roadmap entry. It is reached only
      * when NOTHING has installed a reader, which since #191 means the client wiring did not
      * run -- every ordinary not-read-yet case is a reader ANSWERING, and it names which one:
-     * nobody has asked, or no terminal, or out of range. Phrased to read as wrong for
+     * nobody has asked, or no terminal, or the network is not loaded. Phrased to read as wrong for
      * {@link Status#unavailable}'s reason: a tidy sentence here would look like ordinary UI
      * and nobody would report it.
      *
@@ -92,10 +92,16 @@ public enum ScenarioSource {
      * </ul>
      *
      * BOTH RIDE THE SAME GATE, which is the balance property #320 settled: the whole read happens
-     * inside `Ae2StockReader.read`, after the wireless terminal, range, power and EXTRACT-permission
-     * checks, so no link, no range, no power or no permission refuses the machines exactly as it
-     * refuses the items. Nothing is granted without an ME connection -- even the half that needs no
-     * AE2 to compute.
+     * inside `Ae2StockReader.read`, after the wireless-terminal, link, grid-resolves, power and
+     * EXTRACT-permission checks, so no terminal, no link, an unloaded grid, no power or no
+     * permission refuses the machines exactly as it refuses the items. Nothing is granted without an
+     * ME connection -- even the half that needs no AE2 to compute.
+     *
+     * THIS LISTED A RANGE CHECK UNTIL #331 AND THERE IS NO LONGER ONE. The gate it named had never
+     * passed on this pack -- see `Ae2StockReader.read` for the measurement -- and the grid-resolves
+     * check is what carries this balance argument now. A second copy of a gate list is a second
+     * chance for it to rot: `Ae2StockReader.read` is the authority, and this paragraph exists only
+     * to say that the placed scan sits below all of it.
      *
      * <h2>WHAT IT STILL DOES NOT SEE, which is now one thing rather than three</h2>
      *
@@ -224,7 +230,7 @@ public enum ScenarioSource {
          * Reading did not happen or refused. `why` is shown to the player verbatim.
          *
          * MAKE IT SAY WHAT TO DO. "AE2 stock is not read yet" tells a player nothing they can
-         * act on; "no wireless access point in range" tells them to walk toward their base.
+         * act on; "your wireless terminal is out of power" tells them what to go and charge.
          * That difference is the whole reason this takes a string rather than a boolean.
          *
          * AN EMPTY REASON IS REPLACED WITH SOMETHING THAT READS AS WRONG, deliberately, and
@@ -264,7 +270,7 @@ public enum ScenarioSource {
 
     /** Answers for a source that can only know at runtime whether it read anything. */
     public interface Reader {
-        /** Called per plan, not cached: a grid can go out of range between two plans. */
+        /** Called per plan, not cached: a grid can go unloaded between two plans. */
         Status status();
     }
 
@@ -291,7 +297,7 @@ public enum ScenarioSource {
      *
      * WHY A READER RATHER THAN A FLAG THE CALLER FLIPS. Only the thing doing the reading
      * knows whether it read anything: `StockSnapshot` distinguishes "the network is empty"
-     * from "there is no network in range" from "you have no wireless terminal", and a caller
+     * from "your network is not loaded" from "you have no wireless terminal", and a caller
      * setting `live = true` after calling it would be re-deriving that from the outside and
      * getting it wrong the first time a read failed. It also means the caveat can name WHICH
      * refusal happened rather than restating a compile-time sentence.

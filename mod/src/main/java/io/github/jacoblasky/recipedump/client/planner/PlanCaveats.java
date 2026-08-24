@@ -6,6 +6,7 @@ import java.util.List;
 import io.github.jacoblasky.recipedump.client.PlannerStock;
 import io.github.jacoblasky.recipedump.common.PlannerService;
 import io.github.jacoblasky.recipedump.common.ScenarioSource;
+import io.github.jacoblasky.recipedump.common.ae2.StockSnapshot;
 import io.github.jacoblasky.recipedump.plan.ScenarioInputs;
 
 /**
@@ -83,7 +84,60 @@ public final class PlanCaveats {
             + " any machine standing in a chunk the server has loaded; one in an unloaded chunk"
             + " still reads as buildable";
 
+    /**
+     * The consequence of a refused stock read, for the top of the panel. #331
+     *
+     * <h2>THE REFUSAL WAS THE QUIETEST THING ON A PANEL THAT WAS SHOUTING THE WRONG ANSWER</h2>
+     *
+     * #321 got the refusal's own words onto {@link #summaryLine}, which is real progress and was
+     * not enough: that line renders at the FOOTER, under the tree, in one wrapped block a reader
+     * arrives at last. Meanwhile every row of the tree above it says `needed`, in red, at full
+     * height. Measured on 0.11.0: Jake read a plan solved against a refused read and reported "the
+     * ingredients still aren't being detected correctly" -- the mod knew exactly why it had read
+     * nothing, said so, and was outvoted by its own tree.
+     *
+     * SO THIS IS A SECOND LINE AND NOT A LOUDER FIRST ONE. The two say different things on
+     * purpose: this one names the CONSEQUENCE for the rows underneath it, and {@link #summaryLine}
+     * keeps the CAUSE, the field list and the way in. Printing the cause twice on one 220-pixel
+     * panel would spend a line of tree to say what is already three lines below.
+     *
+     * <h2>FIXED TEXT, WHICH IS THE ONLY FORM THAT CANNOT BE CUT</h2>
+     *
+     * 59 characters against the tree panel's 64-character line, so it fits with slack and fits
+     * FOREVER -- there is no runtime part to grow. That is deliberate rather than lucky: the
+     * composed alternative, `reason + " -- " + consequence`, runs to 106 characters at
+     * `NOT_LINKED` and would wrap to two lines on a panel that pays for them out of the tree, or
+     * be truncated, which is the failure {@link #POINTER} exists to name. The reason is already
+     * carried, in full, one line-block below. `PlannerLayoutTest` pins the no-cut claim.
+     *
+     * <h2>SILENT FOR `NO_AE2`, AND THAT IS THE ONE EXCEPTION</h2>
+     *
+     * `PlannerStock.refusedReason` is where that is argued: a pack with no Applied Energistics has
+     * no network to fail to read, and a red line on every plan for the rest of the game is noise
+     * that gets tuned out -- taking the line that matters with it. Every other refusal is a state
+     * the player is IN and can leave.
+     */
+    static final String STOCK_REFUSED =
+            "your ME network was not read, so everything reads as needed";
+
     private PlanCaveats() {
+    }
+
+    /**
+     * {@link #STOCK_REFUSED} when the stock read refused, and "" otherwise.
+     *
+     * A METHOD RATHER THAN THE CONSTANT AT THE CALL SITE, so the `NO_AE2` exception is decided
+     * once. Two panels draw this now -- the tree panel and the diagram's chrome band -- and a
+     * second copy of the condition is how `present.py`'s four private status dictionaries
+     * happened. Empty string rather than null, matching {@link #summaryLine}, so both callers
+     * reserve their height the same way.
+     */
+    public static String stockRefusalLine() {
+        StockSnapshot.Reason refused = PlannerStock.refusedReason();
+        if (refused == null || refused == StockSnapshot.Reason.NO_AE2) {
+            return "";
+        }
+        return STOCK_REFUSED;
     }
 
     /**

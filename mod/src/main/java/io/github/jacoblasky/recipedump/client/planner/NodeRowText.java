@@ -780,10 +780,20 @@ public final class NodeRowText {
         boolean chanced = chance > 0.0 && chance < 1.0;
         // `per_run` GIVES UP ITS PLACE TO THE CHANCE, and this is measured rather than a taste
         // call (#252). All three parts plus a realistic label do not fit: at `PANEL_WIDTH` the
-        // label column is 53 characters at depth 0 and 45 at the indent cap, `1,000 runs, 0.004
+        // label column is 37 characters at depth 0 and 29 at the indent cap, `1,000 runs, 0.004
         // per run, 0.1%` is 31, and a 20-character name like `Mildly Recursive Goo` puts the
         // row at 54. The percentage is then cut at EVERY depth, which is how the first two
         // planner shots came back byte-identical: the cut landed before the part that differed.
+        //
+        // THOSE TWO NUMBERS READ 53 AND 45 UNTIL #332 AND WERE WRONG, IN THE DIRECTION THAT
+        // FLATTERS. They omitted the BADGE column, which `badgeWidthFor` reserves on every
+        // full-width tree row including at the cap, so they overstated the label by 93px -- 16
+        // characters. `NodeRowTextTest.NARROWEST_LABEL_COLUMN_PX`'s own javadoc had already
+        // caught and recorded the same mistake in a test literal ("a derivation that omits the
+        // badge gives 53 and 45 and is measuring a row this panel never draws") while this copy
+        // sat here saying it. The conclusion above survives -- 31 + 3 + 20 does not fit 37
+        // either, and fits it less -- but do not re-derive from these figures without going
+        // through `columnAtDepth`.
         //
         // SO THE CHOICE IS WHICH TWO NUMBERS SURVIVE, NOT HOW TO PHRASE THREE. Dropping the
         // per-run quantity takes the row to 16 characters of meta and the percentage then
@@ -813,19 +823,35 @@ public final class NodeRowText {
             // `theYieldSurvivesTheCutUpToATwentySixCharacterLabelAndNotBeyond`, which measures
             // both against real label lengths rather than a short synthetic one.
             //
-            // THIS DOES NOT FIT ON MOST ROWS, AND THE NUMBER IS HERE RATHER THAN FLATTERING.
-            // The label column is 37 characters at depth 0 and 29 at the indent cap -- the
-            // badge takes 93px of every full-width tree row -- so after a 3-character separator
-            // this 16-character meta leaves 18 characters of label at the top and 10 at the
-            // bottom. Measured over the committed fixtures, the yield is cut from 574 of 769
-            // rows in `plan-fluid-chain` (74.6%) and 35 of 52 in `plan-truncated` (67.3%).
+            // IT FITS ON A LONG LABEL AND NOT ON A LONGER ONE, and the width is tight rather
+            // than hopeless. The label column is 37 characters at depth 0 and 29 at the indent
+            // cap -- the badge takes 93px of every full-width tree row -- so after a 3-character
+            // separator this 16-character meta leaves 18 characters of label at the top and 10
+            // at the bottom. `theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy` measures
+            // that boundary; do not re-derive it from the figures here.
+            //
+            // MEASURED 2026-08-23 OVER EVERY COMMITTED PLAN FIXTURE: 21 nodes carry a
+            // `yield_chance` at all, 18 of them draw the percentage and 3 lose it to the cut --
+            // `plan-fluid-chain` 6 chanced with 1 cut, `plan-multiblock` and
+            // `plan-no-machine-declared` 7 with 1 each, `plan-truncated` 1 with none. That count
+            // is IDENTICAL at indent 6/cap 8, 10/5, 10/8 and 12/4, so the #332 indent change
+            // moved it by nothing and neither will the next one; what decides it is the label,
+            // not the depth.
+            //
+            // THIS PARAGRAPH SAID "THIS DOES NOT FIT ON MOST ROWS ... 574 of 769 rows in
+            // plan-fluid-chain (74.6%) and 35 of 52 in plan-truncated (67.3%)", AND THAT WAS
+            // NEVER TRUE OF ANY TREE. At the revision where `plan-fluid-chain` had 769 nodes it
+            // had ZERO nodes carrying a `yield_chance` (checked back through six revisions of the
+            // fixture; the first non-zero count is 6, at #290's regeneration), so no arithmetic
+            // makes 574 rows lose a percentage none of them drew. The same pair of figures had
+            // been copied into `NodeRowTextTest`. A measured-looking number is not a measurement:
+            // if you shorten this further, re-run the count rather than adjusting a percentage.
             //
             // IT IS STILL THE BEST FORM AVAILABLE, which is the argument for shipping it. The
             // prose it replaced is 23 characters against this 4, so it was lost on strictly
             // more rows, and before #252 the number was drawn on NONE. Buying the remainder
             // means evicting the badge or the machine, which is the trade #232 is under a hard
-            // no-eviction constraint against. Anyone shortening this further should move these
-            // percentages and update them here and in the test.
+            // no-eviction constraint against.
             sb.append(", ").append(percent(chance));
         }
         return sb.toString();

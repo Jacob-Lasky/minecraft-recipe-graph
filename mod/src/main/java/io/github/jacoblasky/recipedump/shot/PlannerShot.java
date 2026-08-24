@@ -730,12 +730,20 @@ final class PlannerShot {
 
     /** `planner-view-flow`: the diagram, opened by clicking the button that offers it. */
     static void openViewFlow(String arg) {
-        openView(arg, 0, "mcrecipedump_flow");
+        openView(arg, PlannerWidgets.SHOW_DIAGRAM, "mcrecipedump_flow");
     }
 
-    /** `planner-view-todo`: the TODO panel, likewise. */
+    /**
+     * `planner-view-todo`: the totals panel, likewise.
+     *
+     * THE SHOT NAME AND THE PANEL ID KEEP THE OLD WORD ON PURPOSE. #332 renamed the BUTTON from
+     * `Show TODO list` to `Show totals` and the panel's heading with it, but `planner-view-todo` is
+     * the name `ShotScreens` registers, the entry `ShotScreensTest` holds in its measured list of
+     * screen names, and the stem of a committed screenshot in `docs/shots/`. None of those is
+     * something a player reads, and the panel does still carry the plan book's TODO section.
+     */
     static void openViewTodo(String arg) {
-        openView(arg, 1, "mcrecipedump_todo");
+        openView(arg, PlannerWidgets.SHOW_TOTALS, "mcrecipedump_todo");
     }
 
     /**
@@ -769,7 +777,7 @@ final class PlannerShot {
      * window, so the screen asserts the panel by name and `ShotScreens.expectReport` makes
      * silence a failed run rather than a clean one -- `jei-keybind`'s discipline.
      */
-    private static void openView(String arg, int index, String expected) {
+    private static void openView(String arg, String label, String expected) {
         PlanView plan = fixture(arg);
         // ARMED, like `openTree` and for its reason: the tree and the TODO panel both draw an
         // icon per row, and a shot taken against `NodeActions.NONE` is a picture of the icon
@@ -777,7 +785,7 @@ final class PlannerShot {
         armNodeActions(plan.tree());
         PlannerScreen.openPlan(plan, book(plan));
         ShotScreens.expectReport(expected);
-        ShotScreens.holdCapture(new ClickViewButton(index, expected));
+        ShotScreens.holdCapture(new ClickViewButton(label, expected));
     }
 
     /**
@@ -854,7 +862,19 @@ final class PlannerShot {
          */
         private static final int OPEN_POLLS = 4;
 
-        private final int index;
+        /**
+         * The label of the button to park on, resolved to a position through
+         * {@link PlannerWidgets#VIEW_LABELS}.
+         *
+         * BY LABEL AND NOT BY INDEX, WHICH IS `SHOW_DIAGRAM`'S OWN STATED CONTRACT and was broken
+         * here: this class took a hand-written 0 and 1 while logging
+         * `VIEW_LABELS.get(index)`, so the day a third view is inserted the probe parks its cursor
+         * on the wrong button and reports the right NAME. That is precisely the drift that javadoc
+         * says "cannot" happen because the harness looks the button up by label -- and
+         * `FlowInteractionShot` does, and this did not. `indexOf` in the measured vocabulary is the
+         * form that goes red instead of lying.
+         */
+        private final String label;
         private final String expected;
 
         /** The panel the buttons were read off, kept only so the verdict can reach its screen. */
@@ -865,9 +885,20 @@ final class PlannerShot {
         /** Set once the click has been delivered; {@link #poll} then counts the open wait. */
         private boolean clicked;
 
-        ClickViewButton(int index, String expected) {
-            this.index = index;
+        ClickViewButton(String label, String expected) {
+            this.label = label;
             this.expected = expected;
+        }
+
+        /**
+         * Where this label sits in the view bar, or -1 when the vocabulary does not hold it.
+         *
+         * -1 IS A CALLER BUG AND IS REPORTED RATHER THAN CLAMPED. A missing label means somebody
+         * renamed a button without renaming its shot, and the honest outcome is a run that times
+         * out with its verdict still owed -- see `busy()`.
+         */
+        private int index() {
+            return PlannerWidgets.VIEW_LABELS.indexOf(label);
         }
 
         @Override
@@ -879,6 +910,16 @@ final class PlannerShot {
             List<PlannerWidgets.ClickableGroup> buttons =
                     panel == null ? new java.util.ArrayList<PlannerWidgets.ClickableGroup>()
                                   : viewButtons(panel);
+            int index = index();
+            if (index < 0) {
+                // LOUDLY, AND EVERY POLL IS FINE HERE: the run is going to time out anyway and a
+                // silent wait for a button that cannot exist is the failure `flow-hit`'s
+                // "a skipped probe that says nothing is a probe that passes" names.
+                ShotHarness.log("planner-view: '" + label + "' is not in VIEW_LABELS "
+                                + PlannerWidgets.VIEW_LABELS + " -- a button was renamed and its"
+                                + " shot was not");
+                return true;
+            }
             if (buttons.size() <= index || buttons.get(index).getArea().height <= 0) {
                 // NOT LAID OUT YET, or the bar is not there at all. Both are "come back next
                 // poll" and the run's own timeout is the backstop -- `ScrollToRow`'s shape,
@@ -887,7 +928,6 @@ final class PlannerShot {
                 return true;
             }
             PlannerWidgets.ClickableGroup button = buttons.get(index);
-            String label = PlannerWidgets.VIEW_LABELS.get(index);
             if (clicked) {
                 if (poll < OPEN_POLLS) {
                     poll++;

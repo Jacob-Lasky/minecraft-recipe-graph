@@ -36,6 +36,28 @@ import org.junit.Test;
 public class PlannerLayoutTest {
 
     /**
+     * THE PANEL READS TWO STATIC SINGLETONS AND THIS CLASS USED TO RESET NEITHER.
+     *
+     * `plannerPanel` calls `PlanCaveats.summaryLine` (`ScenarioSource`) and, since #331,
+     * `PlanCaveats.stockRefusalLine` (`LiveStock` through `PlannerStock`). Both are process-wide,
+     * so a case in ANY class that leaves a refused snapshot behind adds a red line to the top of
+     * every panel built here and shifts every `y` below it -- and the cases that count clickables
+     * or measure the caveat block's box would then be measuring a panel nobody arranged.
+     *
+     * IT WAS ALREADY A LATENT HAZARD AND #331 MADE IT A REAL ONE. Before that line existed the
+     * inherited state could only change the caveat block's HEIGHT, and
+     * `clickingTheCaveatOpensWhatThePlanCouldNotSee` asserted `summaryLine` was non-empty rather
+     * than making it so, which is a test reading whatever the JVM handed it. `@Before` as well as
+     * `@After` for `PlanCaveatsTest`'s stated reason: another class can leave this behind.
+     */
+    @org.junit.Before
+    @org.junit.After
+    public void isolate() {
+        io.github.jacoblasky.recipedump.common.ScenarioSource.resetReaders();
+        io.github.jacoblasky.recipedump.client.LiveStock.forget();
+    }
+
+    /**
      * A SHOPPING ROW KEEPS THE QUANTITY A CLICK WOULD HAVE TO ACT ON. #251.
      *
      * `addEntries` built `new Line(key, text, colour)` and dropped everything else, so the row
@@ -129,8 +151,10 @@ public class PlannerLayoutTest {
         List<PlannerWidgets.ClickableGroup> rows = clickables(todo);
         assertFalse("a shopping row must be clickable at all", rows.isEmpty());
 
-        // The FIRST clickable is the first shopping row: `todoLines` puts the shopping list at
-        // the top and headers carry no row, so nothing clickable precedes it.
+        // The FIRST clickable is the first shopping row: since #332 `todoLines` opens with the
+        // summed shopping list, and headers carry no row, so nothing clickable precedes it. It
+        // held before that too, but only because this book is empty -- a populated one used to
+        // put its own clickable rows above the shopping list.
         rows.get(0).onMousePressed(0);
 
         assertEquals("clicking a shopping row opens the ROW menu, carrying that row's own"
@@ -610,10 +634,15 @@ public class PlannerLayoutTest {
         // broke by exactly one row. Mirroring the production rule rather than the count keeps
         // this an identity between the two layers instead of a number that rots.
         List<String> machines = NodeRowText.machineLines(plan.machinesToBuild(), inner);
-        int expected = 1 + 1 // "nothing on the list", "still needed for this plan:"
-                + 1          // "nothing outstanding": plan-in-stock has an empty shopping list
+        // #332 REORDERED THESE AND ADDED ONE. The plan book's rows moved from the top to the
+        // bottom and grew a header of their own -- `on your TODO list:` over the placeholder --
+        // which is one more row than the bare `nothing on the list` that used to lead the panel.
+        // Written in panel order so a future reorder is visible in the diff.
+        int expected = 1          // "still needed for this plan:"
+                + 1              // "nothing outstanding": plan-in-stock has an empty shopping list
                 + (machines.isEmpty() ? 0 : 1 + machines.size())
-                + 1 + NodeRowText.entryLines(plan.usedFromStock(), inner).size();
+                + 1 + NodeRowText.entryLines(plan.usedFromStock(), inner).size()
+                + 1 + 1;         // "on your TODO list:", "nothing on the list"
         assertEquals("every composed line must become a row", expected, rows);
     }
 
@@ -959,6 +988,16 @@ public class PlannerLayoutTest {
      * population the fix operates on; if a fixture regeneration moves it, a reach of 22 means
      * something different and this fails rather than quietly re-scaling. The same regeneration
      * already took the collision count from 17 to 13 under this branch once.
+     *
+     * AND IT IS A LABEL-COLUMN TEST WITHOUT SAYING SO, WHICH #332 DISCOVERED THE HARD WAY. The
+     * reach is decided by `labelAndMeta`, which takes the fragment only if the whole line still
+     * fits the column -- so this number moves with `PlannerWidgets.INDENT` and
+     * `MAX_INDENT_DEPTH`. It survived #332's change (INDENT 6 -> 10, cap 8 -> 5) at 22 of 61
+     * because the product was held near 48px and the column at the cap stayed 29 characters, and
+     * the deliberate mutation to indent 10 / cap 8 -- which narrows it to 24 -- takes this test
+     * red along with `theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor`. Recorded
+     * because the next person moving those constants will want to know this is one of the tests
+     * that answers; the mutation row is in `evidence-331-332/mutation-reds.txt`.
      *
      * The counted property is the row SHAPE the fix emits -- `label (fragment)` -- read off the
      * widgets the screen builds, not off the helper that writes the string.
@@ -2327,14 +2366,19 @@ public class PlannerLayoutTest {
         // sat here until a reviewer pointed at it: the width is DERIVED from the longest entry of
         // `VIEW_LABELS`, so for any label drawn from that same list the budget is its own length
         // plus slack and `fit` cannot cut. It agreed with every bug it could have had. So the
-        // number is spelt out instead: 14 characters of "Show TODO list" at `CHAR_WIDTH` 6, plus
+        // number is spelt out instead: 12 characters of "Show diagram" at `CHAR_WIDTH` 6, plus
         // `GAP` twice. A test that spells its expectation with the thing it is testing is the
         // shape `SeamInstallationTest.aDescriptorIsSpeltTheWayTheConstantPoolSpellsIt` refuses for
         // the same reason, and the membership assertion above is what keeps the two lists welded.
+        //
+        // IT WAS 90 UNTIL #332, WHEN THE WIDEST LABEL CHANGED HANDS. "Show TODO list" was 14
+        // characters and "Show totals" is 11, so `SHOW_DIAGRAM` is now the one the cell is
+        // measured against -- which is exactly the recount this literal exists to force, and it
+        // did force it.
         assertEquals("VIEW_BUTTON_WIDTH is no longer the widest label plus two gaps, so either a"
                      + " label changed length or the slack did; recount rather than adjusting"
                      + " this number",
-                     90, PlannerWidgets.VIEW_BUTTON_WIDTH);
+                     78, PlannerWidgets.VIEW_BUTTON_WIDTH);
     }
 
     /**
@@ -2457,12 +2501,16 @@ public class PlannerLayoutTest {
         PlanBook book = new PlanBook();
         book.setTodo(named.key(), 64L);
         List<PlannerWidgets.Line> lines = PlannerWidgets.todoLines(plan, book, 248);
-        assertEquals("64x " + named.label(), lines.get(0).text);
-        assertFalse("the key must not appear in the words: " + lines.get(0).text,
-                    lines.get(0).text.contains(named.key()));
+        // THE LAST ROW SINCE #332, NOT THE FIRST. The book's rows are an appendix under their own
+        // heading now that the summed totals lead the panel, so this reads from the end -- and
+        // `anEmptyPlanBookStillGetsItsHeadingAndSaysItIsEmpty` is what pins that they are last.
+        PlannerWidgets.Line row = lines.get(lines.size() - 1);
+        assertEquals("64x " + named.label(), row.text);
+        assertFalse("the key must not appear in the words: " + row.text,
+                    row.text.contains(named.key()));
         // AND THE KEY IS STILL REACHABLE, on the row, because that is what the icon lookup
         // needs. Showing a name and losing the identity would be the same defect mirrored.
-        assertEquals(named.key(), lines.get(0).key);
+        assertEquals(named.key(), row.key);
     }
 
     /**
@@ -2478,7 +2526,9 @@ public class PlannerLayoutTest {
         book.setTodo("thaumadditions:vis_pod#0116bb2287a7", 3L);
         List<PlannerWidgets.Line> lines =
                 PlannerWidgets.todoLines(PlanFixtures.load("plan-in-stock"), book, 248);
-        assertEquals("3x thaumadditions:vis_pod#0116bb2287a7", lines.get(0).text);
+        // LAST, SINCE #332 MOVED THE BOOK BELOW THE PLAN'S TOTALS.
+        assertEquals("3x thaumadditions:vis_pod#0116bb2287a7",
+                     lines.get(lines.size() - 1).text);
     }
 
     /**
@@ -2888,5 +2938,509 @@ public class PlannerLayoutTest {
             current = current.children().get(0);
         }
         return current;
+    }
+
+    // -- #331: a refused stock read is unmissable on the plan -----------------------------------
+
+    /**
+     * Install a refused ME read the way the game does, so `PlanCaveats` answers from it.
+     *
+     * WHICH REASON IS ARBITRARY, AND THAT IS THE POINT OF THE PROMINENCE LINE: it says the same
+     * thing for every refusal, because what it names is the CONSEQUENCE for the rows below rather
+     * than the cause. So these cases pick refusals that can actually be handed to a player -- never
+     * the retired `OUT_OF_RANGE` (#331) -- and nothing here depends on which one.
+     *
+     * THROUGH `LiveStock` AND `PlannerStock.install`, NEVER BY STUBBING A `ScenarioSource` READER.
+     * The claim under test is that the refusal travels from the held snapshot to the panel, and a
+     * stubbed reader returning a string I supplied asserts that a string I supplied comes back --
+     * which `PlanCaveatsTest`'s own header calls the shape of a test that passes for as long as the
+     * defect exists.
+     */
+    private static void refuse(
+            io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason reason) {
+        io.github.jacoblasky.recipedump.client.LiveStock.accept(
+                io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.unavailable(reason));
+        io.github.jacoblasky.recipedump.client.PlannerStock.install();
+    }
+
+    /** The y of the first text widget on `panel` whose string is exactly `text`, or -1. */
+    private static int yOfLine(ModularPanel panel, String text) {
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget
+                    && text.equals(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
+                                           .getKey().getFormatted())) {
+                return widget.getArea().y();
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * WITNESS. A refused stock read is said ABOVE the tree, not only under it.
+     *
+     * ON MASTER THIS FAILS, AND THE FAILING HALF IS THE POSITION RATHER THAN THE WORDS. #321
+     * already got the refusal's own reason onto `PlanCaveats.summaryLine`, which renders at the
+     * FOOTER -- so a test that only looked for a string about the refusal passed while the defect
+     * was live. What Jake actually read on 0.11.0 was a tree of rows saying `needed`, in red, at
+     * full height, and he reported "the ingredients still aren't being detected correctly". So the
+     * assertion is that the admission is above the thing it contradicts.
+     *
+     * ASSERTED ON THE DRAWN STRING, through the same `fit` every line here goes through, so a
+     * sentence too long for the column fails as a cut string rather than passing as a substring
+     * match on the source constant.
+     */
+    @Test
+    public void aRefusedStockReadIsSaidAboveTheTreeAndNotOnlyInTheFooter() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_POWER);
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(),
+                                                        recorder());
+        HeadlessLayout.layOut(panel);
+
+        int refusalY = yOfLine(panel, PlanCaveats.STOCK_REFUSED);
+        assertTrue("the refusal never reached the panel at all: " + dumpText(panel),
+                   refusalY >= 0);
+        int treeY = findList(panel).getArea().y();
+        assertTrue("the refusal is drawn at " + refusalY + ", at or below the tree it contradicts"
+                   + " at " + treeY + " -- a reader who has just been told he needs everything"
+                   + " does not scroll past it to find out why",
+                   refusalY < treeY);
+    }
+
+    /**
+     * CONTROL. A successful read draws no refusal line.
+     *
+     * WITHOUT THIS THE WITNESS IS SATISFIED BY A PANEL THAT ALWAYS SHOUTS, which is worse than
+     * silence: a red line on every plan is noise that gets tuned out, and it takes the line that
+     * matters with it. That is `staleGraphWarning`'s own argument for staying silent on `MATCHES`.
+     */
+    @Test
+    public void aSuccessfulStockReadDrawsNoRefusalLine() {
+        io.github.jacoblasky.recipedump.client.LiveStock.accept(
+                io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.of(
+                        java.util.Collections.singletonMap("minecraft:stone", Long.valueOf(1L)),
+                        io.github.jacoblasky.recipedump.common.ae2.Snapshots.NO_MACHINES));
+        io.github.jacoblasky.recipedump.client.PlannerStock.install();
+        ModularPanel panel = PlannerWidgets.plannerPanel(PlanFixtures.load("plan-in-stock"),
+                                                        emptyBook(), matching(), recorder());
+        HeadlessLayout.layOut(panel);
+        assertEquals("a read that succeeded must not claim it was refused",
+                     "", PlanCaveats.stockRefusalLine());
+        assertEquals("...and nothing on the panel may say so either: " + dumpText(panel),
+                     -1, yOfLine(panel, PlanCaveats.STOCK_REFUSED));
+    }
+
+    /**
+     * CONTROL. A pack with no Applied Energistics is silent, forever.
+     *
+     * THE ONE REFUSAL THAT IS NOT A STATE THE PLAYER CAN LEAVE. Every other reason is somewhere he
+     * is standing; `NO_AE2` is a property of the modpack, so a red line about an ME network would
+     * be permanent furniture on a game that has none. `PlannerStock.refusedReason` is where that
+     * exception is argued.
+     */
+    @Test
+    public void withoutAppliedEnergisticsThereIsNoRefusalLineToDraw() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_AE2);
+        assertEquals("a pack with no AE2 has no ME network to fail to read",
+                     "", PlanCaveats.stockRefusalLine());
+        // AND THE DISCRIMINATOR: the same call on a real refusal is not empty, so this is a
+        // statement about `NO_AE2` rather than about a method that always answers "".
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_POWER);
+        assertEquals(PlanCaveats.STOCK_REFUSED, PlanCaveats.stockRefusalLine());
+    }
+
+    /**
+     * GUARD. The refusal line fits the tree panel's column with nothing cut.
+     *
+     * IT IS FIXED TEXT AND THE COLUMN IS FIXED, so this is an arithmetic fact that can simply be
+     * asserted -- and it is the assertion that makes `PlanCaveats.STOCK_REFUSED`'s "fits FOREVER"
+     * claim checkable rather than a promise. Both panels that draw it are checked, because the tree
+     * panel is the narrower of the two and a line that fits there cannot wrap on the diagram.
+     */
+    @Test
+    public void theRefusalLineIsNeverCutOnEitherPanelThatDrawsIt() {
+        assertEquals("the refusal line does not fit the tree panel's column; shorten the words"
+                     + " rather than widening the panel",
+                     PlanCaveats.STOCK_REFUSED,
+                     NodeRowText.fit(PlanCaveats.STOCK_REFUSED, PlannerWidgets.CONTENT_WIDTH));
+        assertEquals("...nor the diagram's chrome band",
+                     PlanCaveats.STOCK_REFUSED,
+                     NodeRowText.fit(PlanCaveats.STOCK_REFUSED,
+                                     PlannerWidgets.FLOW_WIDTH - PlannerWidgets.FLOW_PAD * 2));
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NOT_LINKED);
+        ModularPanel panel = PlannerWidgets.plannerPanel(PlanFixtures.load("plan-in-stock"),
+                                                        emptyBook(), matching(), recorder());
+        HeadlessLayout.layOut(panel);
+        assertTrue("and it must reach the panel uncut: " + dumpText(panel),
+                   texts(panel).contains(PlanCaveats.STOCK_REFUSED));
+    }
+
+    /**
+     * Clicking the refusal line opens the panel that explains it.
+     *
+     * A RED LINE THAT LOOKS LIKE THE CLICKABLE CAVEAT AND IS NOT ONE is the "look right and do
+     * nothing" failure `planNodeContent`'s inert overload warns about, and ModularUI reports
+     * nothing for it. The gesture is written down on the footer line rather than here -- see
+     * `plannerPanel` -- so this is the affordance a player finds by trying.
+     *
+     * BY POSITION AND NOT BY INDEX. The refusal block is the FIRST clickable outside the view bar,
+     * because it is added directly under it; `clickingTheCaveatOpensWhatThePlanCouldNotSee` takes
+     * the LAST one, and the two together pin that the panel has two independent ways in.
+     */
+    @Test
+    public void clickingTheRefusalLineOpensWhatThePlanCouldNotSee() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NETWORK_GONE);
+        Recorder recorder = new Recorder();
+        ModularPanel panel = PlannerWidgets.plannerPanel(PlanFixtures.load("plan-in-stock"),
+                                                        emptyBook(), matching(), recorder);
+        HeadlessLayout.layOut(panel);
+
+        PlannerWidgets.ClickableGroup block = blockHolding(panel, PlanCaveats.STOCK_REFUSED);
+        assertNotNull("the refusal is drawn on nothing clickable: " + dumpText(panel), block);
+        assertEquals("a zero-height target draws its line and cannot be hit",
+                     PlannerWidgets.LINE, block.getArea().h());
+        assertEquals("and it must be as wide as the line it sits under",
+                     PlannerWidgets.CONTENT_WIDTH, block.getArea().w());
+        block.onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("caveats"), recorder.calls);
+    }
+
+    /** The innermost clickable block that draws `text`, or null. */
+    private static PlannerWidgets.ClickableGroup blockHolding(ModularPanel panel, String text) {
+        PlannerWidgets.ClickableGroup found = null;
+        for (PlannerWidgets.ClickableGroup group : clickables(panel)) {
+            if (textIn(group).contains(text)) {
+                found = group;
+            }
+        }
+        return found;
+    }
+
+    // -- #329: the diagram carries the caveat, not only the truncation warning ------------------
+
+    /**
+     * WITNESS. The diagram admits a stock-blind plan instead of looking fully-informed.
+     *
+     * ON MASTER THIS FAILS AND `aTruncatedPlansDiagramCarriesTheSameWarningTheTreeDoes` PASSES,
+     * which is the whole of #329: #327 repeated the LOUD problem on this panel and left the quiet
+     * one on the tree's footer. A player who opens the diagram and never scrolls the tree learned
+     * that the plan was CUT and not that it had been solved against an empty inventory -- and
+     * every node in the picture reads as needed.
+     *
+     * BOTH LINES, BECAUSE THEY SAY DIFFERENT THINGS. The refusal line is the consequence for the
+     * nodes on screen; the caveat line is the cause, the field list and the way in.
+     */
+    @Test
+    public void theDiagramCarriesTheCaveatLineAndTheRefusalAndNotOnlyTheWarnings() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_POWER);
+        PlanView plan = PlanFixtures.load("plan-truncated");
+        List<String> text = flowPanelText(plan);
+        assertTrue("the diagram must say the plan was solved without your stock: " + text,
+                   text.contains(PlanCaveats.STOCK_REFUSED));
+        List<String> caveat = PlannerWidgets.flowCaveatLines();
+        assertFalse("the fixture must produce a caveat line, or this measures nothing",
+                    caveat.isEmpty());
+        for (String line : caveat) {
+            assertTrue("the diagram dropped a caveat line: " + line + " from " + text,
+                       text.contains(line));
+        }
+        assertTrue("the way in has to survive onto this panel too: " + text,
+                   rejoin(caveat).contains(PlanCaveats.POINTER));
+    }
+
+    /**
+     * GUARD. The chrome band reserves the height its new lines take.
+     *
+     * WHAT FAILS SILENTLY OTHERWISE. `FlowCanvas.forPanel` sizes the canvas from
+     * `flowCanvasHeight`, which is the panel less `flowChromeHeight` -- so a line DRAWN by
+     * `flowPanel` and not counted by `flowChromeHeight` puts the button row past the bottom of its
+     * own band and the canvas underneath it. ModularUI neither clamps nor clips (#125), so it is
+     * simply drawn wrong and nothing reports it. That is the same trap `flowChromeHeight`'s
+     * "ONE PLACE THE SPLIT IS DECIDED" note was written for.
+     *
+     * THE BUTTON ROW IS THE PROBE BECAUSE IT IS LAST IN THE BAND. Anything uncounted above it
+     * pushes it out, so one assertion covers the refusal line and the caveat block together.
+     */
+    @Test
+    public void theDiagramsChromeReservesTheHeightItDraws() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_POWER);
+        PlanView plan = PlanFixtures.load("plan-truncated");
+        assertTrue("the fixture must carry a warning too, so this covers all three kinds of line",
+                   PlannerWidgets.warningCount(plan) > 0);
+        ModularPanel panel = PlannerWidgets.flowPanel(plan, new StubDiagram(),
+                                                     PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+
+        int bandBottom = panel.getArea().y() + PlannerWidgets.FLOW_PAD
+                         + PlannerWidgets.flowChromeHeight(plan);
+        Area bar = firstViewBarIn(panel).getArea();
+        assertTrue("the button row ends at " + (bar.y() + bar.h()) + ", past the chrome band at "
+                   + bandBottom + " -- a line is drawn that flowChromeHeight does not count, so"
+                   + " the canvas is sized over the top of it",
+                   bar.y() + bar.h() <= bandBottom);
+        // AND NOTHING THE CHROME DREW REACHES INTO THE CANVAS. `FlowCanvas.forPanel` starts the
+        // diagram at `flowCanvasTop`, so a chrome line below that point is drawn over the picture
+        // -- the same defect from the other side, and the one the button-row check above cannot
+        // see if some line is drawn out of order rather than uncounted.
+        //
+        // NOT `flowCanvasHeight == FLOW_HEIGHT - flowCanvasTop - FLOW_PAD`, WHICH WAS HERE FIRST
+        // AND IS VACUOUS: that is the body of `flowCanvasHeight` restated, so it agrees with every
+        // bug it could have had. Same shape as the `fit(label, VIEW_BUTTON_WIDTH)` assertion a
+        // reviewer caught on `everyViewLabelIsInTheMeasuredVocabularyAndFitsItsButton`.
+        int canvasTop = panel.getArea().y() + PlannerWidgets.flowCanvasTop(plan);
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
+                Area box = widget.getArea();
+                assertTrue("a chrome line runs to " + (box.y() + box.h()) + ", into the canvas"
+                           + " that starts at " + canvasTop + ": "
+                           + ((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
+                                   .getKey().getFormatted(),
+                           box.y() + box.h() <= canvasTop);
+            }
+        }
+    }
+
+    /**
+     * Clicking the diagram's caveat opens the same panel the tree's caveat opens.
+     *
+     * `PlanCaveats.POINTER` IS INSIDE THOSE WORDS AND IT NAMES A GESTURE, so drawing them inert
+     * would put a written-down affordance on screen that does nothing -- worse than saying nothing
+     * at all, and the reason #329 called a third sub-panel opener a real scope increase rather
+     * than optional.
+     */
+    @Test
+    public void clickingTheDiagramsCaveatOpensWhatThePlanCouldNotSee() {
+        refuse(io.github.jacoblasky.recipedump.common.ae2.StockSnapshot.Reason.NO_POWER);
+        Recorder recorder = new Recorder();
+        ModularPanel panel = PlannerWidgets.flowPanel(PlanFixtures.load("plan-in-stock"),
+                                                     new StubDiagram(), recorder);
+        HeadlessLayout.layOut(panel);
+        List<String> caveat = PlannerWidgets.flowCaveatLines();
+        PlannerWidgets.ClickableGroup block = blockHolding(panel, caveat.get(0));
+        assertNotNull("the diagram's caveat is drawn on nothing clickable: " + dumpText(panel),
+                      block);
+        assertEquals("the target must be as tall as the caveat is",
+                     PlannerWidgets.LINE * caveat.size(), block.getArea().h());
+        block.onMousePressed(0);
+        assertEquals(java.util.Arrays.asList("caveats"), recorder.calls);
+    }
+
+    private static String rejoin(List<String> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(line);
+        }
+        return sb.toString();
+    }
+
+    // -- #332: the totals stop hiding, and a level of indent reads as one -----------------------
+
+    /**
+     * Every section this panel can draw, in the order it must draw them. #332
+     *
+     * ONE LIST RATHER THAN SEVEN ASSERTIONS, so a section inserted in `todoLines` and not here
+     * fails rather than slipping in wherever it landed. It is the same argument
+     * {@link PlannerWidgets#VIEW_LABELS} makes about a measured vocabulary: a second copy of an
+     * ordering that nothing welds to the first is an ordering that drifts.
+     */
+    private static final List<String> SECTIONS_IN_ORDER =
+            java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+                    "still needed for this plan:",
+                    "machines to build:",
+                    "used from your stock:",
+                    "drawn from infinite sources:",
+                    "go and get:",
+                    "transmuted from EMC:",
+                    "on your TODO list:"));
+
+    /**
+     * WITNESS. The panel leads with what the plan still needs, and the plan book comes last.
+     *
+     * ON MASTER THIS FAILS ON THE ORDER ALONE, which is the point: every section asserted here
+     * already rendered before #332, and a membership test would have passed for the whole life of
+     * the defect. What was wrong is that the first thing a player read was the personal list --
+     * usually "nothing on the list" -- so a panel that sums the plan advertised itself as a
+     * favourites feature and never got opened twice.
+     *
+     * <h2>OVER EVERY FIXTURE, BECAUSE NO SINGLE ONE CARRIES ALL SEVEN SECTIONS</h2>
+     *
+     * The first version of this test named `plan-truncated` and asserted it had a from-stock
+     * section. It does not -- it has a nineteen-row shopping list and no `used_from_stock` at all
+     * -- so the test failed on its own premise, and the version that would have "passed" is the one
+     * that quietly dropped the assertion. `addEntries` and `addSection` both omit an empty section
+     * entirely, so ANY single-fixture ordering check is really a check over whichever subset that
+     * fixture happens to populate.
+     *
+     * SO THE SWEEP ASSERTS RELATIVE ORDER OVER WHAT IS PRESENT, and then asserts that the union
+     * across fixtures covered every section -- which is what stops a run where three sections
+     * never appeared from reading as a check of seven. That second half is the control, and
+     * without it this is `PlanFixtureTest`'s skipped-gate shape: an ordering nothing exercised,
+     * reported green.
+     */
+    @Test
+    public void everyTotalsSectionAppearsInOrderWithTheShoppingListFirstAndTheBookLast() {
+        java.util.Set<String> everSeen = new java.util.LinkedHashSet<String>();
+        for (String fixture : PlanFixtures.names()) {
+            PlanView plan = PlanFixtures.load(fixture);
+            PlanBook book = new PlanBook();
+            book.setTodo(plan.tree().key(), 7L);
+            List<PlannerWidgets.Line> lines =
+                    PlannerWidgets.todoLines(plan, book, PlannerWidgets.TODO_WIDTH);
+
+            int previous = -1;
+            String previousName = "(nothing)";
+            for (String section : SECTIONS_IN_ORDER) {
+                int at = indexOfText(lines, section);
+                if (at < 0) {
+                    continue;
+                }
+                everSeen.add(section);
+                assertTrue(fixture + ": `" + section + "` is drawn at " + at + ", above `"
+                           + previousName + "` at " + previous + " -- the panel's sections are"
+                           + " out of order: " + lines, at > previous);
+                previous = at;
+                previousName = section;
+            }
+
+            assertEquals(fixture + ": the summed shopping list has to be the FIRST thing on the"
+                         + " panel, not the personal list: " + lines,
+                         0, indexOfText(lines, "still needed for this plan:"));
+            int todo = indexOfText(lines, "on your TODO list:");
+            assertTrue(fixture + ": the plan book always gets its heading", todo >= 0);
+            assertEquals(fixture + ": the plan book is an appendix, so its one row is the last"
+                         + " thing on the panel: " + lines, lines.size() - 2, todo);
+        }
+        assertEquals("the sweep never exercised every section, so it checked a shorter order than"
+                     + " it claims; seen: " + everSeen,
+                     new java.util.LinkedHashSet<String>(SECTIONS_IN_ORDER), everSeen);
+    }
+
+    /**
+     * The plan book's section keeps its header and its placeholder when it is empty.
+     *
+     * THE ONE PLACE THIS PANEL DEPARTS FROM `addSection`'s HEADER RULE, deliberately. That rule
+     * refuses a header over no rows because it reads as a list that failed to load -- but the book
+     * is a WRITE path (`PlanBookEdit.SET_TODO` since #140), so a player who adds an item and then
+     * finds no section at all cannot tell a working write from a broken one. It is
+     * `PlanCaveats.detailLines`' "NOT AN EMPTY PANEL" argument, one panel over.
+     */
+    @Test
+    public void anEmptyPlanBookStillGetsItsHeadingAndSaysItIsEmpty() {
+        List<PlannerWidgets.Line> lines =
+                PlannerWidgets.todoLines(PlanFixtures.load("plan-in-stock"), emptyBook(),
+                                         PlannerWidgets.TODO_WIDTH);
+        int todo = indexOfText(lines, "on your TODO list:");
+        assertTrue("an empty book still owes the player its heading: " + lines, todo >= 0);
+        assertEquals("...and has to say it is empty rather than trailing off",
+                     "nothing on the list", lines.get(todo + 1).text);
+        assertEquals("which is the last thing on the panel", lines.size() - 1, todo + 1);
+    }
+
+    /** Where `text` first appears in `lines`, or -1. */
+    private static int indexOfText(List<PlannerWidgets.Line> lines, String text) {
+        for (int i = 0; i < lines.size(); i++) {
+            if (text.equals(lines.get(i).text)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The button and the panel heading are about TOTALS, and neither says TODO. #332
+     *
+     * ASSERTED ON THE WORDS THE PLAYER READS, not on the constants. `SHOW_TOTALS` and
+     * `TOTALS_TITLE` could both be renamed to anything and this would still be checking that the
+     * two surfaces agree with each other; what it is really pinning is that the word `TODO` is no
+     * longer the NAME of a panel whose contents are five sections of plan arithmetic. The plan
+     * book's own section heading still says TODO, and must, because that section really is the
+     * TODO list -- so this checks the button and the heading rather than the whole panel.
+     */
+    @Test
+    public void theTotalsButtonAndHeadingNameTotalsRatherThanTheTodoList() {
+        assertTrue("the view bar must offer the totals: " + PlannerWidgets.VIEW_LABELS,
+                   PlannerWidgets.VIEW_LABELS.contains(PlannerWidgets.SHOW_TOTALS));
+        for (String label : PlannerWidgets.VIEW_LABELS) {
+            assertFalse("a view button still advertises the TODO list: " + label,
+                        label.contains("TODO"));
+        }
+        assertFalse("the panel heading still names its smallest section: "
+                    + PlannerWidgets.TOTALS_TITLE,
+                    PlannerWidgets.TOTALS_TITLE.contains("TODO"));
+        ModularPanel panel = PlannerWidgets.todoPanel(PlanFixtures.load("plan-in-stock"),
+                                                      emptyBook(), PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        assertTrue("the heading has to actually reach the panel: " + dumpText(panel),
+                   texts(panel).contains(PlannerWidgets.TOTALS_TITLE));
+    }
+
+    /**
+     * GUARD. One level of tree indent is wider than one character of the font.
+     *
+     * THE ASSERTION THAT GOES RED IF ANYONE PUTS `INDENT` BACK TO 6, which is the whole reason it
+     * is a floor rather than an equality: 6 is exactly `NodeRowText.CHAR_WIDTH`, and an equality
+     * against 10 would fail for a 12 that is also fine. Reported on 0.11.0 as "it doesn't indent
+     * enough when i'm in list view of the ingredients" -- at one glyph a level, and with no text at
+     * the start of a row to count the step against, an eight-deep plan read as a flat list.
+     *
+     * AND THE RENDERED OFFSET, NOT ONLY THE CONSTANT. `row` is what applies the indent, and a
+     * change that raised the constant while dropping the multiplication would leave this half
+     * green -- which is the shape of the vacuous assertion
+     * `everyViewLabelIsInTheMeasuredVocabularyAndFitsItsButton` records a reviewer catching.
+     */
+    @Test
+    public void oneLevelOfIndentIsWiderThanOneCharacterAndTheRowHonoursIt() {
+        assertTrue("INDENT is " + PlannerWidgets.INDENT + " against a " + NodeRowText.CHAR_WIDTH
+                   + "px glyph, so a level of nesting does not read as one (#332)",
+                   PlannerWidgets.INDENT > NodeRowText.CHAR_WIDTH);
+
+        PlanNode leaf = deepest(PlanFixtures.load("plan-fluid-chain").tree());
+        int shallow = firstChildX(PlannerWidgets.row(leaf, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                    recorder()));
+        int deeper = firstChildX(PlannerWidgets.row(leaf, 1, PlannerWidgets.CONTENT_WIDTH,
+                                                   recorder()));
+        assertEquals("one level of depth must move the row by exactly INDENT; the constant and"
+                     + " `row`'s arithmetic have come apart",
+                     PlannerWidgets.INDENT, deeper - shallow);
+    }
+
+    /**
+     * The cap and the indent move together, so the label column does not silently narrow.
+     *
+     * THE PRODUCT IS THE CONSTRAINT AND NEITHER FACTOR IS. `MAX_INDENT_DEPTH`'s javadoc does this
+     * arithmetic out loud: at 8 levels of 10 pixels the label column would be 24 characters, which
+     * after `meta`'s 16 and a 3-character separator leaves five characters of item NAME. So this
+     * pins the budget rather than either number, and it is the assertion that fails if someone
+     * raises `INDENT` again without re-doing the sum.
+     *
+     * 53 IS THE CEILING BECAUSE 29 CHARACTERS IS THE FLOOR. `NodeRowTextTest.theYieldSurvivesOnly`
+     * `TheShortestLabelsAndTheColumnSaysWhy` requires a 10-character label plus a 16-character meta
+     * to survive at the cap, which is 29 characters, which is 174 pixels -- and the column is
+     * `CONTENT_WIDTH` less the indent, less 68 for the icon and quantity columns, less 93 for the
+     * badge. That leaves 53 pixels for the whole indent.
+     */
+    @Test
+    public void theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor() {
+        int budget = PlannerWidgets.INDENT * PlannerWidgets.MAX_INDENT_DEPTH;
+        assertTrue("the indent budget is " + budget + "px, which narrows the label column below"
+                   + " the 29 characters the yield test measures against; drop MAX_INDENT_DEPTH"
+                   + " rather than the column", budget <= 53);
+        assertTrue("...and it must actually indent something", budget > 0);
+    }
+
+    /** The x of a row's first positioned child, after layout. */
+    private static int firstChildX(ParentWidget<?> row) {
+        ModularPanel panel = HeadlessLayout.layOutPanel(
+                "indent", PlannerWidgets.PANEL_WIDTH, PlannerWidgets.PANEL_HEIGHT, row);
+        int leftmost = Integer.MAX_VALUE;
+        for (IWidget child : row.getChildren()) {
+            leftmost = Math.min(leftmost, child.getArea().x());
+        }
+        assertTrue("the row drew no children to measure", leftmost < Integer.MAX_VALUE);
+        assertTrue(panel.getArea().w() > 0);
+        return leftmost;
     }
 }

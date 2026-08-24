@@ -121,7 +121,11 @@ public class MachineCaveatsTest {
         ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
             @Override
             public ScenarioSource.Status status() {
-                return ScenarioSource.Status.unavailable("no wireless access point in range");
+                // A REFUSAL THE MOD CAN ACTUALLY PRODUCE. This said "no wireless access point
+                // in range" until #331 deleted that gate, which made it a stub quoting a
+                // sentence no player can ever be shown -- harmless to the assertion and a
+                // standing invitation to conclude the range rule is still current.
+                return ScenarioSource.Status.unavailable("your wireless terminal is out of power");
             }
         });
         assertTrue(MachineCaveats.missing().contains(ScenarioSource.HAVE.field()));

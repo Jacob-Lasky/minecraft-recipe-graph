@@ -76,7 +76,7 @@ public final class LiveStock {
      *
      * NULL AND A REFUSAL ARE DIFFERENT ANSWERS. Null means nobody has asked yet; a refusal
      * means the server answered and said why not. A caller that treats them alike will report
-     * "no network in range" before it has looked.
+     * "your network is not loaded" before it has looked.
      */
     public static StockSnapshot latest() {
         return latest;

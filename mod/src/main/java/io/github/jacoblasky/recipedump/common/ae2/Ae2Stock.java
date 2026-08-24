@@ -30,11 +30,28 @@ import net.minecraft.entity.player.EntityPlayer;
  *
  * <ul>
  * <li>which network -- the terminal's encryption key, through AE2's locatable registry;</li>
- * <li>whether you are close enough -- an {@code IWirelessAccessPoint} on that grid whose own
- *     {@code getRange()} covers you, which is the same test AE2's wireless terminal makes;</li>
+ * <li>whether that network is THERE -- the key resolving to a grid the registry can answer for,
+ *     which needs a loaded, registered security station;</li>
  * <li>whether the terminal can run -- the handler's own {@code hasPower};</li>
  * <li>whether you may look -- {@code ISecurityGrid.hasPermission(player, EXTRACT)}.</li>
  * </ul>
+ *
+ * <h2>THERE IS NO PROXIMITY TEST, AND THERE WAS ONE UNTIL #331</h2>
+ *
+ * This list carried a fifth entry -- "whether you are close enough", an
+ * {@code IWirelessAccessPoint} on the grid whose own {@code getRange()} covers you, on the
+ * argument that it is the same test AE2's wireless terminal makes. It is the same test AE2 makes
+ * and this pack's terminal does not make it: measured 2026-08-23 by a full region scan of the
+ * reference save, there is not one vanilla {@code IWirelessAccessPoint} in any dimension, and
+ * {@code ae2wut}'s universal terminal opens the wrapped terminals through the underlying mods' own
+ * GUI factories. So the gate refused every read the mod ever attempted. {@link Ae2StockReader#read}
+ * carries the full measurement and the reason a range check must not be added back on the strength
+ * of AE2's API alone.
+ *
+ * WHAT THAT COSTS, STATED RATHER THAN GLOSSED: a player can now read a network they are nowhere
+ * near, which their terminal already lets them do on this pack. What it does NOT cost is the
+ * balance rule -- a link to a live grid is still required, so nothing is owned without an ME
+ * connection, which is candidate 2's rejection restated and unchanged.
  *
  * THE RECIPE AGREES WITH IT, AND USED TO AGREE MORE LITERALLY. The calculator's recipe once
  * put an AE2 Wireless Receiver in the item for the stated reason that it reads your network at

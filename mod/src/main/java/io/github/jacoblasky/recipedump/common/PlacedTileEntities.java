@@ -35,10 +35,19 @@ import net.minecraft.world.WorldServer;
  * <h2>THE GATE IS UNCHANGED AND THAT IS THE BALANCE PROPERTY</h2>
  *
  * This runs from {@code Ae2StockReader.read}, AFTER every gate that read passes: a linked wireless
- * terminal in the inventory, an active access point in range, power in the terminal, and EXTRACT
- * permission on the network. No link, no range, no power or no permission and no machine counts as
- * owned, exactly as no item counts as held. Nothing here is granted without an ME connection, which
- * is #320's stated balance decision. DO NOT call this from anywhere that has not passed that gate.
+ * terminal in the inventory, a grid the encryption key RESOLVES to, power in the terminal, and
+ * EXTRACT permission on the network. No terminal, no link, no live grid, no power or no permission
+ * and no machine counts as owned, exactly as no item counts as held. Nothing here is granted without
+ * an ME connection, which is #320's stated balance decision. DO NOT call this from anywhere that has
+ * not passed that gate.
+ *
+ * THE LIST WAS FIVE GATES AND IS FOUR SINCE #331, WHICH MAKES THE GRID GATE LOAD-BEARING. It used to
+ * include "an active access point in range"; that check was measured never to pass on this pack --
+ * no vanilla {@code IWirelessAccessPoint} exists anywhere in the reference save -- and was deleted,
+ * so the thing now standing between a linked key and this scan is that the key resolves against a
+ * LIVE grid through AE2's locatable registry, which needs a loaded, registered security station.
+ * `Ae2StockReader.read` carries the measurement. That gate is carrying an argument it used to
+ * share; do not weaken it and do not hoist this call above it.
  *
  * <h2>CHUNK-LOADED-ONLY IS THE HONEST SCOPE, and it is stated to the player</h2>
  *
@@ -341,8 +350,9 @@ public final class PlacedTileEntities {
      *
      * NEVER THROWS, AND NEVER PROPAGATES A THROW. `getItem` runs arbitrary mod code inside a
      * player's stock read; a `Throwable` escaping here reaches `Ae2Stock.read`'s catch-all and the
-     * player is told "the linked network no longer exists" for a read that was fine. An empty
-     * stack is the honest answer for a block this cannot key.
+     * player is told "your network is not loaded, or no longer exists" for a read that was fine
+     * (`StockSnapshot.Reason.NETWORK_GONE`, reworded by #331). An empty stack is the honest
+     * answer for a block this cannot key.
      */
     private static ItemStack pickBlock(World world, BlockPos pos, IBlockState state) {
         try {

@@ -45,16 +45,61 @@ public final class PlannerWidgets {
 
     public static final int LINE = 10;
     public static final int ROW_HEIGHT = 11;
-    /** Per level of depth. Six pixels is legible and keeps a ten-deep chain on screen. */
-    public static final int INDENT = 6;
+    /**
+     * Per level of depth. #332
+     *
+     * <h2>SIX PIXELS WAS ONE CHARACTER, AND ONE CHARACTER DOES NOT READ AS A LEVEL</h2>
+     *
+     * {@link NodeRowText#CHAR_WIDTH} is 6, so the old value indented each level by exactly the
+     * width of one glyph -- and since the tree's rows begin with an icon and a right-aligned
+     * quantity rather than with text, there is no character grid for the eye to count that step
+     * against. Reported on 0.11.0 as "it doesn't indent enough when i'm in list view of the
+     * ingredients": an eight-deep plan read as a flat list, which is the one thing the tree exists
+     * to show that the totals panel does not.
+     *
+     * TEN, NOT TWELVE, AND THE LABEL COLUMN IS WHAT DECIDES IT. Ten pixels is a level and two
+     * thirds of a character clear of the old value; twelve would be a tidier two characters and
+     * would cost either another level off {@link #MAX_INDENT_DEPTH} or a character of the label
+     * column, and the label is the item's NAME -- {@link #badgeWidthFor} already records that the
+     * label wins every width argument on this panel.
+     *
+     * THE TOTAL INDENT BUDGET IS WHAT WAS HELD FIXED, not this number: 5 levels at 10 pixels is 50
+     * where 8 at 6 was 48, so the narrowest label column the tree can draw is unchanged at 29
+     * characters. That is deliberate and it is measured -- see {@link #MAX_INDENT_DEPTH}.
+     */
+    public static final int INDENT = 10;
     /**
      * Indentation stops here.
      *
-     * `plan-fluid-chain` is 634 nodes and runs deeper than eight levels; without a cap the
-     * label column would be pushed off the right edge and, per rule 2 above, nothing would
-     * say so. The tree structure is still readable because the rows above are still indented.
+     * `plan-fluid-chain` is 703 nodes and runs to depth 20; without a cap the label column would
+     * be pushed off the right edge and, per rule 2 above, nothing would say so. The tree structure
+     * is still readable because the rows above are still indented.
+     *
+     * <h2>FIVE SINCE #332, AND THE ARITHMETIC IS THE ARGUMENT</h2>
+     *
+     * `row` charges `INDENT * min(depth, this)`, then {@link #ICON} + {@link #GAP} + {@link #QTY} +
+     * `GAP` = 68 pixels, and {@link #badgeWidthFor} then takes {@link #BADGE} + `GAP` = 93 on every
+     * full-width tree row, cap included (`PlannerLayoutTest.aFullWidthTreeRowStillCarriesItsBadge`
+     * `EvenAtTheIndentCap`). Out of {@link #CONTENT_WIDTH}'s 388 that leaves the label:
+     *
+     * <pre>
+     *   depth 0    388 - 0  - 68 - 93 = 227px = 37 characters
+     *   the cap    388 - 50 - 68 - 93 = 177px = 29 characters   (8 x 6 = 48 before; 29 as well)
+     * </pre>
+     *
+     * SO THE CAP CAME DOWN BECAUSE {@link #INDENT} WENT UP, AND THE PRODUCT IS WHAT MATTERS. At
+     * 8 levels of 10 pixels the column would be 24 characters, which after `NodeRowText.meta`'s
+     * 16 characters and a 3-character separator leaves FIVE characters of item name -- and
+     * `theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy` measures that boundary rather
+     * than trusting it. 5 x 10 keeps the column exactly where 8 x 6 had it.
+     *
+     * WHAT IS PAID FOR IT IS DEPTH RESOLUTION PAST FIVE, AND IT IS THE CHEAP SIDE. Measured over
+     * the 2,289 nodes in the committed fixtures, 67% already sat AT the old cap of 8 and were
+     * already drawn flat; 86% sit at or past 5. So the cap was never what made a deep chain
+     * readable -- the rows ABOVE it are -- and making levels 1 to 5 individually distinguishable
+     * buys more than a sixth, seventh and eighth indistinguishable step did.
      */
-    public static final int MAX_INDENT_DEPTH = 8;
+    public static final int MAX_INDENT_DEPTH = 5;
 
     /**
      * The item-icon column, filled by {@link NodeActions#iconFor} or
@@ -151,7 +196,7 @@ public final class PlannerWidgets {
      * {@link #PICKER_WIDTH} went from 330: the rows grew a column that tells them apart and
      * 260 cut it.
      *
-     * MEASURED, NOT ESTIMATED. The panel carries five sections now instead of one and their
+     * MEASURED, NOT ESTIMATED. The panel carries seven sections now instead of one and their
      * rows are no longer "some quantity of a name": a shopping row whose label collides with
      * another carries its registry key, and a free row names the generator supplying it. The
      * longest key-bearing row across every fixture is
@@ -349,8 +394,39 @@ public final class PlannerWidgets {
      */
     public static final String SHOW_DIAGRAM = "Show diagram";
 
-    /** See {@link #SHOW_DIAGRAM}. */
-    static final String SHOW_TODO = "Show TODO list";
+    /**
+     * See {@link #SHOW_DIAGRAM} for the verb and the missing brackets. #332
+     *
+     * <h2>"Show TODO list" NAMED THE SMALLEST SECTION OF THE PANEL AND HID THE REST</h2>
+     *
+     * Everything behind this button is a TOTAL: the summed shopping list, the machines to build,
+     * what was drawn from stock, from infinite sources and from EMC, and what to go and get. The
+     * plan book's personal list is one section of seven and is usually the empty one.
+     *
+     * SEVEN, AND THE ENUMERATION ABOVE OMITTED `go and get:` UNTIL IT WAS COUNTED. That is how the
+     * figure came out at six. {@link #todoLines} is the list; `PlannerLayoutTest`'s
+     * `SECTIONS_IN_ORDER` is the assertion. Count there rather than trusting a number here. So the button advertised a favourites
+     * feature, and the player who wanted "what do I actually need" -- which is what #332 was
+     * reported asking for, "unless it actually enumerates / sums all of the items that we need" --
+     * opened it once, read "nothing on the list", and never opened it again.
+     *
+     * TOTALS RATHER THAN "list" OR "summary". `Show list` says nothing the tree does not already
+     * offer, and the tree IS a list; `summary` is what the footer line is. The word has to name
+     * the thing the panel does that no other surface does, which is add the plan up.
+     *
+     * THREE CHARACTERS SHORTER THAN THE LABEL IT REPLACES, WHICH MOVES {@link #VIEW_BUTTON_WIDTH}.
+     * It was the widest entry in {@link #VIEW_LABELS} at 14 characters, so the view bar's cell
+     * width is now measured against {@link #SHOW_DIAGRAM}'s 12 --
+     * `PlannerLayoutTest.everyViewLabelIsInTheMeasuredVocabularyAndFitsItsButton` spells that
+     * number out and will fail until it is recounted, which is the point of spelling it out.
+     *
+     * PUBLIC FOR THE SAME REASON {@link #SHOW_DIAGRAM} IS, and it should have been from the start.
+     * `shot.PlannerShot.openViewTodo` took a hand-written index 1 into the view bar while logging
+     * `VIEW_LABELS.get(1)` -- which is exactly the drift `SHOW_DIAGRAM`'s javadoc says the harness
+     * avoids by looking the button up by label, and it was not true of that caller. It is now, and
+     * this constant is what it looks up.
+     */
+    public static final String SHOW_TOTALS = "Show totals";
 
     /**
      * Every label a view button can carry, for {@link #VIEW_BUTTON_WIDTH} to measure.
@@ -368,7 +444,7 @@ public final class PlannerWidgets {
      */
     public static final List<String> VIEW_LABELS =
             java.util.Collections.unmodifiableList(
-                    java.util.Arrays.asList(SHOW_DIAGRAM, SHOW_TODO));
+                    java.util.Arrays.asList(SHOW_DIAGRAM, SHOW_TOTALS));
 
     /**
      * Width of one view button: the widest label plus one character of slack.
@@ -520,9 +596,69 @@ public final class PlannerWidgets {
      * `FlowCanvas.forPanel` sizes the canvas from {@link #flowCanvasHeight}, which is this
      * subtracted from the panel -- so the two cannot disagree about where the boundary is, which
      * is exactly the drift {@link #FLOW_CANVAS_WIDTH} was introduced to end one axis over.
+     *
+     * <h2>IT IS NOW A FUNCTION OF THE PLAN *AND* OF THE SCENARIO, WHICH IS #329'S ONE COST</h2>
+     *
+     * The caveat block ({@link #flowCaveatLines}) and the refusal line both come from
+     * {@link PlanCaveats}, which reads the live `ScenarioSource` and `PlannerStock` rather than
+     * anything in the arguments -- the same exception {@link #plannerPanel} already makes and for
+     * the reason recorded there: whether an input was READ is a fact about the scenario and there
+     * is nothing in a `PlanView` to derive it from.
+     *
+     * SO THE TWO READS MUST HAPPEN IN ONE BREATH, AND THEY DO. `LivePlannerActions` builds the
+     * canvas and the panel in a single expression -- `flowPanel(plan, flowSource.diagramFor(...),
+     * ...)` -- and `PlannerShot` calls `forPanel` on the line above `flowPanel`. A stock reply
+     * landing between them would size the canvas against one chrome height and lay the chrome out
+     * at another, and #125's rule means the overflow would be drawn rather than reported. DO NOT
+     * move either call further from the other, and DO NOT cache this per plan: a cached height is
+     * a third answer.
      */
     public static int flowChromeHeight(PlanView plan) {
-        return LINE + 1 + warningCount(plan) * LINE + ROW_HEIGHT + 1;
+        return LINE + 1
+                + refusalLineCount() * LINE
+                + warningCount(plan) * LINE
+                + flowCaveatLines().size() * LINE
+                + ROW_HEIGHT + 1;
+    }
+
+    /**
+     * One when a refused stock read has something to say, zero otherwise. #331
+     *
+     * ONE LINE OR NONE, NEVER WRAPPED, because `PlanCaveats.STOCK_REFUSED` is fixed text measured
+     * against the NARROWER of the two panels that draw it. The flow panel is 612 pixels inside its
+     * inset against the tree panel's 388, so a line that fits the tree cannot wrap here.
+     */
+    private static int refusalLineCount() {
+        return PlanCaveats.stockRefusalLine().isEmpty() ? 0 : 1;
+    }
+
+    /**
+     * The caveat line, wrapped to the FLOW panel's width. #329
+     *
+     * <h2>WHY THE DIAGRAM OWES THIS AT ALL</h2>
+     *
+     * #327 gave the flow panel the plan heading and the warnings, on the argument that a plan cut
+     * off at the node budget draws a diagram shaped exactly like a complete one. A plan solved
+     * against a REFUSED stock read is the same defect with a louder wrong answer: every node reads
+     * as needed, and a player who opens the diagram and never scrolls the tree learns nothing about
+     * it. `staleGraphWarning`'s rule -- repeat the verdict where the wrong answer is actually read
+     * -- decides it, and the diagram is now a surface where plans are read.
+     *
+     * WRAPPED TO THE FLOW PANEL'S OWN WIDTH AND NOT THE TREE'S. At 612 pixels inside the inset
+     * this is 102 characters a line against the tree's 64, so the worst composed line -- the
+     * longest refusal plus the full field list plus the pointer, 162 characters -- takes two lines
+     * here where it takes three there. Wrapping to `CONTENT_WIDTH` and drawing the result at 612
+     * would break the same sentence into more, shorter lines than it needs and spend the diagram's
+     * height on the difference.
+     *
+     * STILL CAPPED BY {@link #MAX_CAVEAT_LINES}, and the cap means the same thing on both panels:
+     * the CANVAS pays for these lines exactly as the tree does. That constant's javadoc forbids
+     * raising it for anything but a longer field list, and that still holds -- a wider panel is not
+     * a reason to raise a cap counted in lines.
+     */
+    static List<String> flowCaveatLines() {
+        return NodeRowText.wrap(PlanCaveats.summaryLine(), FLOW_WIDTH - FLOW_PAD * 2,
+                                MAX_CAVEAT_LINES);
     }
 
     /**
@@ -579,7 +715,7 @@ public final class PlannerWidgets {
      * not an overruled pin would be a fifth answer to "what is wrong with this plan".
      */
     public static ModularPanel flowPanel(PlanView plan, final Diagram canvas,
-                                         PlannerActions actions) {
+                                         final PlannerActions actions) {
         final ModularPanel panel = ModularPanel.defaultPanel("mcrecipedump_flow",
                                                              FLOW_WIDTH, FLOW_HEIGHT);
         int inner = FLOW_WIDTH - FLOW_PAD * 2;
@@ -590,6 +726,17 @@ public final class PlannerWidgets {
         int y = 0;
         chrome.child(heading(NodeRowText.heading(plan), inner).pos(0, y));
         y += LINE + 1;
+        // THE SAME ORDER AS THE TREE PANEL, which is this method's standing rule and the reason
+        // `warnings` is shared rather than reselected here: a diagram that ranked these
+        // differently would be a second answer to "what is wrong with this plan". Refusal, then
+        // warnings, then the caveat block; the tree panel's `staleGraphWarning` has no counterpart
+        // here because `flowPanel` is not handed a schema.
+        String refusal = PlanCaveats.stockRefusalLine();
+        if (!refusal.isEmpty()) {
+            chrome.child(caveatBlock(java.util.Collections.singletonList(refusal), inner, actions)
+                                 .pos(0, y));
+            y += LINE;
+        }
         // RED AND ABOVE THE DIAGRAM, which is `plannerPanel`'s own placement and argument: these
         // are reasons the picture below is not what it appears to be, so a reader who has to pan
         // to find out has already been misled.
@@ -597,10 +744,60 @@ public final class PlannerWidgets {
             chrome.child(line(warning, inner, NodeStatus.INK_NEED).pos(0, y));
             y += LINE;
         }
+        // #329. THE TRUNCATION WARNING WITHOUT THE CAVEAT MADE A STOCK-BLIND PLAN LOOK
+        // FULLY-INFORMED: #327 repeated the loud problem here and left the quiet one on the tree
+        // panel's footer, so a player who read the diagram learned that the plan was CUT and not
+        // that it had been solved against an empty inventory.
+        //
+        // CLICKABLE, TO THE PANEL THE TREE'S OWN CAVEAT OPENS. `PlanCaveats.POINTER` is inside
+        // these words and it names a gesture, so drawing them inert would be a written-down
+        // affordance that does nothing -- worse than saying nothing. That is the third sub-panel
+        // opener #329 deferred; `actions.openCaveats` already exists and takes no argument, so it
+        // costs this one call.
+        List<String> caveat = flowCaveatLines();
+        if (!caveat.isEmpty()) {
+            chrome.child(caveatBlock(caveat, inner, actions).pos(0, y));
+            y += LINE * caveat.size();
+        }
         chrome.child(flowButtons(inner, panel, canvas).pos(0, y));
         panel.child(chrome);
         panel.child(canvas);
         return panel;
+    }
+
+    /**
+     * A red block of caveat lines, as one click target that opens the panel explaining them.
+     *
+     * ONE CLICK TARGET OVER THE WHOLE BLOCK, not one per line, which was `plannerPanel`'s own
+     * argument before this method existed: the lines are one wrapped sentence, and a reader who
+     * clicked its second half and got nothing would conclude the panel does not open rather than
+     * that they had missed.
+     *
+     * ONE SPELLING FOR FOUR BLOCKS (#329, #331). The tree panel draws the refusal line and the
+     * caveat block; the flow panel now draws both as well. Four hand-built `ClickableGroup`s is
+     * four chances for one of them to forget `size()` -- and an unsized group draws every line and
+     * is silently unclickable, which is exactly what
+     * `PlannerLayoutTest.theCaveatsClickTargetCoversItsLines` exists to catch and what ModularUI
+     * reports nothing for.
+     *
+     * IT DOES NOT RESERVE ITS OWN HEIGHT. The caller advances `y` and, on the tree panel, takes
+     * the height out of the tree BEFORE sizing it -- ModularUI neither clamps nor clips (#125), so
+     * a block positioned after the tree without that subtraction is drawn past the panel's bottom
+     * edge and nothing says so.
+     */
+    static ClickableGroup caveatBlock(List<String> lines, int width,
+                                      final PlannerActions actions) {
+        ClickableGroup block = new ClickableGroup(new Runnable() {
+            @Override
+            public void run() {
+                actions.openCaveats();
+            }
+        });
+        block.size(width, LINE * lines.size());
+        for (int i = 0; i < lines.size(); i++) {
+            block.child(line(lines.get(i), width, NodeStatus.INK_NEED).pos(0, i * LINE));
+        }
+        return block;
     }
 
     /**
@@ -889,7 +1086,7 @@ public final class PlannerWidgets {
                 actions.openFlow(plan);
             }
         }));
-        views.add(new Entry(SHOW_TODO, new Runnable() {
+        views.add(new Entry(SHOW_TOTALS, new Runnable() {
             @Override
             public void run() {
                 actions.openTodo(plan, book);
@@ -967,6 +1164,36 @@ public final class PlannerWidgets {
         body.child(viewBar(CONTENT_WIDTH, views(plan, book, actions)).pos(0, y));
         y += ROW_HEIGHT + 1;
 
+        // THE LOUDEST THING ON THIS PANEL IS THE TREE SAYING `needed`, AND UNTIL #331 THE ONE
+        // LINE EXPLAINING IT WAS THE QUIETEST. `PlanCaveats.summaryLine` renders at the FOOTER,
+        // below the tree, and it carries the refusal's own reason (#321) -- but a reader who has
+        // just been told, in red, at full height, that he needs four thousand things he owns does
+        // not scroll past that to a footer. Jake did not: he reported "the ingredients still
+        // aren't being detected correctly" against a plan whose footer said why.
+        //
+        // TOP AND FOOTER SAY DIFFERENT THINGS, which is what keeps this from being a second copy.
+        // This is the CONSEQUENCE for the rows below it; the footer keeps the CAUSE, the field
+        // list and the way in. See `PlanCaveats.STOCK_REFUSED` for why the reason is not repeated
+        // here and for why the text is fixed rather than composed.
+        //
+        // ABOVE `staleGraphWarning`, AND THAT ORDER IS ARGUED RATHER THAN INHERITED. A schema
+        // mismatch is the graver claim -- the whole tree may be answering from data this build
+        // cannot read -- but it is rare, it is repeated in full on the Graph tab, and the fix is
+        // several minutes of redumping. A refused read is the ordinary state of playing away from
+        // your base, it is the one a player can leave in thirty seconds, and it is the one that
+        // was measured reaching nobody. The line a reader can act on goes where reading starts.
+        //
+        // CLICKABLE, THOUGH THE GESTURE IS WRITTEN DOWN ON THE FOOTER LINE AND NOT HERE. A player
+        // who tries the red line and gets nothing concludes the panel does not open; one who never
+        // tries loses nothing, because `PlanCaveats.POINTER` is still on screen below. Spending
+        // characters on a second pointer would cost the consequence its slack.
+        String refusal = PlanCaveats.stockRefusalLine();
+        if (!refusal.isEmpty()) {
+            body.child(caveatBlock(java.util.Collections.singletonList(refusal),
+                                   CONTENT_WIDTH, actions).pos(0, y));
+            y += LINE;
+        }
+
         // ABOVE THE OTHER WARNINGS, AND NOT INSIDE THEM (#285). `warnings` is capped at
         // MAX_WARNINGS and rolls the overflow up as "+N more recipe choice(s)", so a stale-graph
         // line handed to it could be dropped by a pin the player made -- and dropped under a
@@ -1021,23 +1248,9 @@ public final class PlannerWidgets {
         y += treeHeight + 2;
         body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
         if (!caveat.isEmpty()) {
-            // ONE CLICK TARGET OVER THE WHOLE CAVEAT, not one per line: the lines are one
-            // wrapped sentence, and a reader who clicked its second half and got nothing would
-            // conclude the panel does not open rather than that they had missed.
-            ClickableGroup rows = new ClickableGroup(new Runnable() {
-                @Override
-                public void run() {
-                    actions.openCaveats();
-                }
-            });
-            rows.size(CONTENT_WIDTH, LINE * caveat.size());
-            for (int i = 0; i < caveat.size(); i++) {
-                rows.child(line(caveat.get(i), CONTENT_WIDTH, NodeStatus.INK_NEED)
-                                   .pos(0, i * LINE));
-            }
             // The block starts one line below the footer, and `footerLines` above already took
-            // its whole height out of the tree.
-            body.child(rows.pos(0, y + LINE));
+            // its whole height out of the tree. `caveatBlock` owns the one-target-per-block rule.
+            body.child(caveatBlock(caveat, CONTENT_WIDTH, actions).pos(0, y + LINE));
         }
 
         return ModularPanel.defaultPanel("mcrecipedump_planner", PANEL_WIDTH, PANEL_HEIGHT)
@@ -1740,7 +1953,12 @@ public final class PlannerWidgets {
     }
 
     /**
-     * The TODO panel: the plan book's list, with what the plan still needs.
+     * The totals panel: everything this plan adds up to, with the plan book's list beneath it.
+     *
+     * WHAT IT LEADS WITH IS THE WHOLE OF #332. It carried all seven sections before that issue
+     * and led with the book's personal list, so a panel that summed the plan advertised itself as a
+     * favourites feature. {@link #SHOW_TOTALS} and {@link #TOTALS_TITLE} carry that argument, and
+     * {@link #todoLines} carries the order.
      *
      * "Still needed" is recomputed from the plan rather than stored, because the book holds
      * what the player ASKED for and the plan holds what is left after stock. Storing the
@@ -1764,6 +1982,24 @@ public final class PlannerWidgets {
      * answer different questions and blurring them is how the aggregate-versus-occurrence
      * confusion finds a fourth place to live.
      */
+    /**
+     * The totals panel's heading. #332
+     *
+     * IT USED TO SAY `TODO`, over a panel whose first rows were the plan book's personal list and
+     * whose remaining six sections were every total the plan computes. A heading naming the
+     * smallest and usually-empty section is how a player concludes the window is a favourites
+     * feature -- which is what {@link #SHOW_TOTALS} replaced the button label for, and a button
+     * that promises totals opening a panel headed TODO would just move the confusion one click in.
+     *
+     * NOT DRAWN AS A {@link #heading}, WHICH IS THE PRE-EXISTING CHOICE AND IS KEPT. `heading` is
+     * `INK_CRAFT`, the same ink the view-bar buttons use, and this panel's rows carry five inks
+     * already; `INK_MUTED` says "this is a label, not a row" without adding a sixth meaning to a
+     * colour. `caveatsPanel` makes the same departure from `heading` in the other direction, for
+     * the argument written at its own call site -- it heads itself `INK_NEED` because every line
+     * under it is a caveat. Neither panel wants the view bar's ink.
+     */
+    static final String TOTALS_TITLE = "plan totals";
+
     public static ModularPanel todoPanel(PlanView plan, PlanBook book, PlannerActions actions) {
         int width = TODO_WIDTH;
         int inner = width - PADDING * 2;
@@ -1776,8 +2012,15 @@ public final class PlannerWidgets {
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
-        body.child(line("TODO", inner, NodeStatus.INK_MUTED).pos(0, 0));
+        body.child(line(TOTALS_TITLE, inner, NodeStatus.INK_MUTED).pos(0, 0));
         body.child(rowList(lines, inner, listHeight, actions).pos(0, LINE + 1));
+        // THE PANEL ID STAYS `mcrecipedump_todo` THOUGH THE PANEL IS NO LONGER HEADED TODO, and
+        // that is a decision rather than an oversight (#332). It is an identifier a player never
+        // sees, and it is the name `PlannerShot.openViewTodo` asserts, the `planner-view-todo`
+        // shot screen registered in `ShotScreens`, the entry `ShotScreensTest` holds in its
+        // measured list of screen names, and the filename of a committed screenshot in
+        // `docs/shots/`. Renaming it would churn all five to change nothing anybody reads -- and
+        // the panel does still carry the plan book's TODO section, so the word is not even wrong.
         return ModularPanel.defaultPanel("mcrecipedump_todo", width, height).child(body);
     }
 
@@ -1805,18 +2048,17 @@ public final class PlannerWidgets {
         // not mention still renders as the key, which is exactly the row #190 was protecting.
         PlanNames names = PlanNames.of(plan);
         List<Line> lines = new java.util.ArrayList<Line>();
-        for (String key : book.todoKeys()) {
-            // #190's UNIT RULE, KEPT: `amount` and not `quantity`, so 934,400 mB of water does not
-            // read as `934,400x` four lines above a shopping row rendering the same fluid as
-            // `934,400 mB Water`. One panel cannot measure the same fluid two ways.
-            lines.add(new Line(key,
-                               NodeRowText.amount(book.todoQuantity(key), Keys.kind(key))
-                                       + " " + names.labelFor(key),
-                               NodeStatus.INK_CRAFT));
-        }
-        if (lines.isEmpty()) {
-            lines.add(new Line("", "nothing on the list", NodeStatus.INK_MUTED));
-        }
+        // THE SUMMED SHOPPING LIST LEADS, AND UNTIL #332 IT CAME SIXTH. The plan book's personal
+        // list was first, so the panel opened on "nothing on the list" -- and the totals a player
+        // opened it for were below the fold of a list that scrolls. Reported on 0.11.0: "i feel
+        // that the list view is completely unnecessary, unless it actually enumerates / sums all of
+        // the items that we need", against a panel that had enumerated and summed them all along.
+        //
+        // ORDER IS THE WHOLE FIX HERE AND NOT A TIDY-UP, which is why `PlannerLayoutTest`'s
+        // `everyTotalsSectionAppearsInOrderWithTheShoppingListFirstAndTheBookLast` asserts the
+        // section ORDER rather than the membership: every one of these sections rendered before
+        // this change, in an order that buried the answer. That test holds its own copy of the
+        // ordering, so a section inserted here and not there fails rather than slipping in.
         lines.add(new Line("", "still needed for this plan:", NodeStatus.INK_MUTED));
         if (plan.shoppingList().isEmpty()) {
             lines.add(new Line("", "nothing outstanding", NodeStatus.INK_MUTED));
@@ -1841,6 +2083,41 @@ public final class PlannerWidgets {
                    widthPx);
         addEntries(lines, "go and get:", plan.tokensNeeded(), NodeStatus.INK_NEED, widthPx);
         addEntries(lines, "transmuted from EMC:", plan.fromEmc(), NodeStatus.INK_OK, widthPx);
+        // THE PERSONAL LIST GOES LAST, AND IT KEEPS ITS PLACEHOLDER (#332). It is the one section
+        // here that is not about THIS plan -- the book holds what the player asked for across
+        // sessions, and the six sections above hold what the plan worked out -- so it reads as an
+        // appendix rather than as a seventh total, which is what it is.
+        //
+        // IT NOW NEEDS A HEADER, WHICH IT DID NOT WHEN IT WAS FIRST. Standing at the top of the
+        // panel under the word TODO, the rows explained themselves; six sections down they would
+        // read as more of the plan's arithmetic.
+        //
+        // AND THE HEADER IS DRAWN EVEN WHEN THE LIST IS EMPTY, which is the one place this panel
+        // departs from `addSection`'s "a header standing over no rows is a claim the panel cannot
+        // support". The book is a WRITE path -- the node menu's "Add to TODO" has sent
+        // `PlanBookEdit.SET_TODO` since #140 -- so a player who adds an item and then finds no
+        // section at all cannot tell a working write from a broken one. `addSection`'s rule is
+        // about a list that failed to load; this is about a list that is legitimately empty and has
+        // to say so, which is `PlanCaveats.detailLines`' "NOT AN EMPTY PANEL" argument.
+        //
+        // #190's UNIT RULE, KEPT: `amount` and not `quantity`, so 934,400 mB of water does not
+        // read as `934,400x` four lines above a shopping row rendering the same fluid as
+        // `934,400 mB Water`. One panel cannot measure the same fluid two ways.
+        //
+        // #190's KEY RULE, KEPT: the label comes from `PlanNames`, which reads the name off the
+        // plan the key came from and invents nothing; a key the CURRENT plan does not mention
+        // still renders as the key, which is the row #190 was protecting.
+        lines.add(new Line("", "on your TODO list:", NodeStatus.INK_MUTED));
+        int before = lines.size();
+        for (String key : book.todoKeys()) {
+            lines.add(new Line(key,
+                               NodeRowText.amount(book.todoQuantity(key), Keys.kind(key))
+                                       + " " + names.labelFor(key),
+                               NodeStatus.INK_CRAFT));
+        }
+        if (lines.size() == before) {
+            lines.add(new Line("", "nothing on the list", NodeStatus.INK_MUTED));
+        }
         return lines;
     }
 

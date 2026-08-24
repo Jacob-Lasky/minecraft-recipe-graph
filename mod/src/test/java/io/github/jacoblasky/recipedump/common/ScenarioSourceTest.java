@@ -123,8 +123,8 @@ public class ScenarioSourceTest {
         //
         // That was exactly the failure `Status.unavailable`'s own javadoc argues against in
         // the sentence justifying why it takes a string rather than a boolean: "AE2 stock is
-        // not read yet" tells a player nothing they can act on, "no wireless access point in
-        // range" tells them to walk toward their base. The strings were written for that
+        // not read yet" tells a player nothing they can act on, "your wireless terminal is out
+        // of power" tells them what to go and charge. The strings were written for that
         // reason and the player got the boolean. `client.planner.PlanCaveats` renders them
         // now, so a note that went missing would also be a blank line on the caveats panel --
         // but this loop is still the assertion that every not-live source HAS one, and a
@@ -269,8 +269,8 @@ public class ScenarioSourceTest {
     @Test
     public void aReaderCanSayWHICHRefusalHappened() {
         // THE POINT OF THE WHOLE SEAM. "AE2 stock is not read yet" tells a player nothing
-        // they can act on. `StockSnapshot` knows the difference between an empty network, no
-        // network in range, and no wireless terminal, and only it knows -- a caller flipping
+        // they can act on. `StockSnapshot` knows the difference between an empty network, an
+        // unloaded one, and no wireless terminal, and only it knows -- a caller flipping
         // a boolean afterwards would be re-deriving that from outside and getting it wrong
         // the first time a read failed.
         ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
@@ -287,21 +287,23 @@ public class ScenarioSourceTest {
 
     @Test
     public void theReaderIsAskedEveryTimeRatherThanCached() {
-        // A grid can go out of range between two plans, so a status resolved once at install
-        // would keep claiming a read that no longer happens.
+        // A grid can go unloaded between two plans, so a status resolved once at install would
+        // keep claiming a read that no longer happens. (It said "out of range" until #331.)
         final java.util.concurrent.atomic.AtomicInteger calls =
                 new java.util.concurrent.atomic.AtomicInteger();
         ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
             @Override
             public ScenarioSource.Status status() {
                 return calls.incrementAndGet() > 1
-                        ? ScenarioSource.Status.unavailable("out of range")
+                        ? ScenarioSource.Status.unavailable("your network is not loaded")
                         : ScenarioSource.Status.available();
             }
         });
         assertTrue(ScenarioSource.HAVE.live());
         assertFalse(ScenarioSource.HAVE.live());
-        assertEquals("out of range", ScenarioSource.HAVE.note());
+        // A REFUSAL THE MOD CAN ACTUALLY PRODUCE, since #331 retired the out-of-range one. The
+        // sibling stub below was corrected for this on that issue and this one was missed.
+        assertEquals("your network is not loaded", ScenarioSource.HAVE.note());
     }
 
     @Test
@@ -377,7 +379,9 @@ public class ScenarioSourceTest {
         ScenarioSource.HAVE.readBy(new ScenarioSource.Reader() {
             @Override
             public ScenarioSource.Status status() {
-                return ScenarioSource.Status.unavailable("no wireless access point in range");
+                // See the note in `MachineCaveatsTest`: a refusal the mod can actually produce,
+                // since #331 retired the out-of-range one.
+                return ScenarioSource.Status.unavailable("your wireless terminal is out of power");
             }
         });
         assertTrue(ScenarioSource.liveDocument()

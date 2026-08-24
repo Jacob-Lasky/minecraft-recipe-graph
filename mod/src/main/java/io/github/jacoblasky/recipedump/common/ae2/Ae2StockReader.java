@@ -4,7 +4,6 @@ import appeng.api.AEApi;
 import appeng.api.config.SecurityPermissions;
 import appeng.api.features.ILocatable;
 import appeng.api.features.IWirelessTermHandler;
-import appeng.api.implementations.tiles.IWirelessAccessPoint;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridBlock;
 import appeng.api.networking.IGridHost;
@@ -14,7 +13,6 @@ import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.util.AEPartLocation;
-import appeng.api.util.DimensionalCoord;
 import io.github.jacoblasky.recipedump.DumpCommand;
 import io.github.jacoblasky.recipedump.common.PlacedTileEntities;
 import java.util.LinkedHashMap;
@@ -23,12 +21,19 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
 
 /**
- * THE ONLY CLASS IN THIS MOD THAT NAMES AN AE2 TYPE.
+ * THE ONLY CLASS OUTSIDE `shot/` THAT NAMES AN AE2 TYPE.
  *
  * Loaded exclusively through {@link Ae2Stock}, after its presence check. A reference to this
  * class from anywhere that loads unconditionally would make the mod fail to load on a pack
  * without AE2 -- the same eager-resolution trap the ProjectE and Modular Machinery bridges
  * document at length. DO NOT import it anywhere else.
+ *
+ * "OUTSIDE `shot/`" RATHER THAN "IN THIS MOD", WHICH IS WHAT THIS SAID AND WAS NOT TRUE:
+ * `shot.Ae2ProbeShot` and `shot.Ae2PlacedProbeShot` both import `appeng` types. They are harness
+ * classes, only ever reached by the screenshot harness on a world that has AE2, so they do not
+ * put the load-time trap back -- but a header that overstates its own rule is a header the next
+ * reader stops believing, and `Ae2StockTest`'s range-gate scan excludes `shot/` for exactly this
+ * reason.
  *
  * {@link Ae2Stock} carries the argument for WHY it is the wireless terminal's network and not
  * some other; this class is only the walk.
@@ -71,18 +76,54 @@ final class Ae2StockReader {
         }
         IGrid grid = gridFor(encoded);
         if (grid == null) {
-            // The network the terminal names is gone -- the security terminal was broken, or
-            // the grid was dismantled. Distinct from "not linked", because the fix is
-            // different: one is re-link, the other is go and look at your base.
+            // AE2's locatable registry cannot answer for the serial on the terminal. That is
+            // ONE VERDICT OVER TWO WORLDS and the reason cannot tell them apart: the security
+            // station is not loaded, or it is not there any more. Distinct from "not linked",
+            // because the fix differs -- one is re-link, the other is go and look at your base.
+            //
+            // NOT-LOADED IS THE LIKELIER HALF ON A SERVER and the message leads with it (#331);
+            // see `Reason.NETWORK_GONE`. This comment led with "the security terminal was broken,
+            // or the grid was dismantled" until then, which is the half a player cannot act on.
+            //
+            // AND SINCE #331 THIS GATE CARRIES #320's BALANCE RULE ALONE, because the range check
+            // above it is gone. A registry hit means a loaded, registered security station, which
+            // is what "the player has an ME connection" now rests on.
             return StockSnapshot.unavailable(StockSnapshot.Reason.NETWORK_GONE);
         }
 
-        if (!inRangeOfAccessPoint(grid, player)) {
-            return StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE);
-        }
-        // Power AFTER range, matching the order AE2's own terminal reports them in: being out
-        // of range is the more common and more actionable answer, and charging for a read
-        // that was going to fail anyway would be a quiet theft.
+        // THERE IS NO RANGE GATE HERE ANY MORE, AND THE ONE THAT WAS HERE NEVER PASSED. #331
+        //
+        // `inRangeOfAccessPoint` walked the grid for an ACTIVE `IWirelessAccessPoint` whose own
+        // `getRange()` covered the player, in the player's current dimension. Its javadoc claimed
+        // an invariant -- "a player who can open their terminal here can read their network here"
+        // -- and that invariant was FALSE ON THIS PACK THE DAY IT WAS WRITTEN.
+        //
+        // MEASURED 2026-08-23, full region scan of every dimension in the reference save: there is
+        // not ONE vanilla `IWirelessAccessPoint` in the entire world. The base networks through
+        // `ae2stuff:wireless` connectors (103 of them, 28 controllers, one security station,
+        // quantum-bridged into DIM43), and the pack's `ae2wut` universal terminal opens the wrapped
+        // terminals through the underlying mods' own GUI factories -- verified in the jar: it
+        // delegates to ae2fc, mekeng and ae2exttable rather than enforcing AE2's access-point rule.
+        // So the terminal opens anywhere and this gate refused everywhere. Every live stock read
+        // since 0.11.0 shipped came back OUT_OF_RANGE, including standing inside the base, and it
+        // was reported as "the ingredients still aren't being detected correctly".
+        //
+        // THE GATES ARE NOW EXACTLY WHAT THE PACK'S OWN TERMINAL ENFORCES: a terminal in the
+        // inventory, a link, a grid that resolves and is loaded, power, and EXTRACT permission.
+        //
+        // #320's BALANCE RULE STILL HOLDS, AND `gridFor` IS NOW THE WHOLE OF IT. That rule is that
+        // nothing is owned without an ME connection, and the connection is the linked encryption
+        // key resolving against a LIVE grid: `gridFor` goes through AE2's locatable registry, which
+        // answers only for a security station that is loaded and registered, so a player with no
+        // network -- or whose base is unloaded -- still gets `NETWORK_GONE` and owns nothing. That
+        // gate was one of five of `Ae2Stock`'s access questions and is now one of four -- that
+        // list, not the five-gate chain named above, which counts the terminal too -- carrying an
+        // argument the range check used to share. DO NOT weaken it, and DO NOT let `PlacedTileEntities.scan` below rise above it.
+        //
+        // DO NOT RESTORE A RANGE CHECK because AE2's own terminal makes one. That was the reasoning
+        // the first time and the pack does not obey it; a gate that refuses every real read is not
+        // fidelity, it is a mod that does not work. If a future pack does enforce access points,
+        // measure the save for `IWirelessAccessPoint` before adding it back.
         if (!handler.hasPower(player, POWER_PER_READ, terminal)) {
             return StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER);
         }
@@ -114,7 +155,10 @@ final class Ae2StockReader {
         // #320 PHASE 2, AND IT MUST STAY BELOW EVERY GATE ABOVE. The loaded-tile-entity scan needs
         // no AE2 at all -- that is why it lives in `common` and names no AE2 type -- so the ONLY
         // thing stopping it granting machines to a player with no ME network is its position in
-        // this method, after the terminal, range, power and permission checks have all passed.
+        // this method, after the terminal, link, grid, power and permission checks have all passed.
+        // (IT SAID "terminal, range, power and permission" UNTIL #331, naming a gate that is gone
+        // and omitting the one that now carries the balance rule alone. A list of the gates a call
+        // must stay below is worthless if it names gates that do not exist.)
         // #320's balance decision is that nothing is owned without an ME connection. DO NOT hoist
         // this call above the gates or move it to a handler that does not pass them.
         PlacedTileEntities.scan(player.getServer(), placed);
@@ -155,51 +199,6 @@ final class Ae2StockReader {
         }
         IGridNode node = ((IGridHost) found).getGridNode(AEPartLocation.INTERNAL);
         return node == null ? null : node.getGrid();
-    }
-
-    /**
-     * Whether any ACTIVE access point on this grid has the player inside its own range.
-     *
-     * THE RANGE IS AE2'S, NOT THIS MOD'S. `IWirelessAccessPoint.getRange()` is what AE2's own
-     * wireless terminal tests against, so a player who can open their terminal here can read
-     * their network here and the two can never disagree about where the boundary is.
-     *
-     * Squared distance, so no square root and no risk of a rounding difference at the exact
-     * boundary. Dimension is checked first: a range is a number of blocks and blocks in
-     * another dimension are not near anything.
-     *
-     * WALKS THE NODES AND TESTS `instanceof` RATHER THAN CALLING `getMachines`. Two reasons,
-     * and the first is that it does not compile otherwise: `getMachines` is typed
-     * `Class&lt;? extends IGridHost&gt;` and `IWirelessAccessPoint` extends `IActionHost`,
-     * which is a different interface. The second is the better one -- `getMachines` matches a
-     * registered concrete class, so it would find AE2's own access point and miss any other
-     * mod's implementation of the same interface, while this finds both.
-     */
-    private static boolean inRangeOfAccessPoint(IGrid grid, EntityPlayer player) {
-        int dimension = player.world.provider.getDimension();
-        for (IGridNode node : grid.getNodes()) {
-            Object machine = node.getMachine();
-            if (!(machine instanceof IWirelessAccessPoint)) {
-                continue;
-            }
-            IWirelessAccessPoint point = (IWirelessAccessPoint) machine;
-            if (!point.isActive()) {
-                continue;
-            }
-            DimensionalCoord at = point.getLocation();
-            if (at == null || at.getWorld() == null
-                    || at.getWorld().provider.getDimension() != dimension) {
-                continue;
-            }
-            double range = point.getRange();
-            double dx = at.x - player.posX;
-            double dy = at.y - player.posY;
-            double dz = at.z - player.posZ;
-            if (dx * dx + dy * dy + dz * dz <= range * range) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

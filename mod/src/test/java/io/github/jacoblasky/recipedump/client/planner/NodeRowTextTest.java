@@ -437,7 +437,13 @@ public class NodeRowTextTest {
      * IndentCap` asserts `badgeWidthFor(CONTENT_WIDTH, deepestStart) == BADGE`, at the worst
      * case, and it passes. So the label column is 37 characters at depth 0 falling to 29 at the
      * cap. A derivation that omits the badge gives 53 and 45 and is measuring a row this panel
-     * never draws.
+     * never draws -- and `NodeRowText.yieldBit` carried exactly that mistake in a comment until
+     * #332, so the wrong pair really does get written down.
+     *
+     * ALL FOUR OF THOSE NUMBERS SURVIVED #332 UNCHANGED, which is the point of that change rather
+     * than a coincidence: `INDENT` went 6 to 10 and `MAX_INDENT_DEPTH` went 8 to 5, and 50px is
+     * within two pixels of 48, so every column here rounds to the same character count. The
+     * derivation below is what makes that checkable instead of asserted.
      */
     private static final int NARROWEST_LABEL_COLUMN_PX =
             PlannerWidgets.CONTENT_WIDTH
@@ -785,7 +791,11 @@ public class NodeRowTextTest {
         // `badgeWidthFor` that `PlannerWidgets.row` does, so it moves when the panel moves.
         //
         // What the real column leaves for the yield, after a 3-character separator and this
-        // 16-character meta: 18 characters at depth 0, 14 at depth 4, 10 at the indent cap.
+        // 16-character meta: 18 characters at depth 0, 12 at depth 4, 10 at the indent cap.
+        // Re-counted at #332, which took `INDENT` from 6 to 10 and `MAX_INDENT_DEPTH` from 8 to
+        // 5. The two ends did not move -- the product 5 x 10 is within 2px of the old 8 x 6, and
+        // `theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor` is what holds it there
+        // -- but the middle did, because depth 4 is now one level off the cap instead of four.
         for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH; depth++) {
             String fitted = NodeRowText.fit(
                     "Iron Ingot" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
@@ -796,9 +806,15 @@ public class NodeRowTextTest {
 
         // AND THE LIMIT, WHICH IS THE HONEST HALF. `Everwatching Eye` is the longest label in
         // the reference plans that keeps the yield at all, and it keeps it only while the row
-        // is shallow; at the indent cap even that is cut. Measured over the committed fixtures,
-        // the yield is lost on 574 of 769 rows in `plan-fluid-chain` (74.6%) and 35 of 52 in
-        // `plan-truncated` (67.3%).
+        // is shallow; at the indent cap even that is cut.
+        //
+        // MEASURED 2026-08-23 OVER EVERY COMMITTED PLAN FIXTURE: of the 21 nodes that carry a
+        // `yield_chance` at all, 18 draw the percentage and 3 lose it to the cut -- and that
+        // count is identical at indent 6/cap 8, 10/5, 10/8 and 12/4, so #332's indent change
+        // moved it by nothing. This comment said "574 of 769 rows in plan-fluid-chain (74.6%)
+        // and 35 of 52 in plan-truncated (67.3%)", copied from `NodeRowText.yieldBit`, and both
+        // copies were wrong: at the revision where that fixture had 769 nodes, ZERO of them
+        // carried a `yield_chance`. See that method for the full correction.
         //
         // THAT IS NOT AN ARGUMENT AGAINST THIS FORM, and the alternative is what settles it:
         // `yields 0.1% of the time` is 23 characters against this 4, so it is lost on strictly

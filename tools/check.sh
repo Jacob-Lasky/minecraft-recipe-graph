@@ -19,6 +19,14 @@
 # <pid>` for children; `/proc/<pid>` existing proves identity, never liveness. The same rule and
 # the measurement behind it are in `harness/README.md`.
 #
+# EVERY `gradlew` LINE HERE CARRIES `--no-watch-fs`, AND IT IS NOT AN OPTIMISATION. Gradle's
+# file-system watcher dies inside `BuildLifecycleAwareVirtualFileSystem` / `FileWatchingFilter`
+# when a second process is touching the same `GRADLE_USER_HOME`, and it does so BEFORE any test
+# runs -- so the failure reads as a broken build rather than as contention between agents. A
+# private `GRADLE_CACHE` is the other half of the fix and does NOT replace this one: the watcher
+# bites on a private cache too, the moment two builds overlap. Do not drop the flag to shorten
+# the line.
+#
 # IT TAKES THE CONTAINER GATE AROUND ITS CONTAINERS AND NOT AROUND ITSELF. Several agents share
 # this host and three 8 GB JVMs against 20 GB free is a real problem, so `tools/gate.sh`
 # serialises them -- but the python arm is eleven minutes that starts no container, and holding
@@ -436,8 +444,8 @@ if [ "$want_java" -eq 1 ]; then
             -e GRADLE_USER_HOME=/gradle \
             -e RECIPEGRAPH_ORACLE="/build/$(basename "$ORACLE")" \
             -w /repo/mod eclipse-temurin:25-jdk \
-            ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods=/deps \
-                cleanTest test > "$log" 2>&1 || fail=1
+            ./gradlew --no-daemon --no-watch-fs -Dorg.gradle.jvmargs=-Xmx6g \
+                -Ppack_mods=/deps cleanTest test > "$log" 2>&1 || fail=1
     elif command -v java >/dev/null 2>&1; then
         # Gradle's own default GRADLE_USER_HOME when the shared cache is absent: naming a
         # missing directory does not fail, it makes RFG re-decompile Minecraft (~9 min) every run.
@@ -446,7 +454,8 @@ if [ "$want_java" -eq 1 ]; then
             export GRADLE_USER_HOME
         fi
         RECIPEGRAPH_ORACLE="$ORACLE" gated sh -c 'cd mod && ./gradlew --no-daemon \
-            -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods="$1" cleanTest test' -- "$PACK_MODS" \
+            --no-watch-fs -Dorg.gradle.jvmargs=-Xmx6g -Ppack_mods="$1" cleanTest test' \
+            -- "$PACK_MODS" \
             > "$log" 2>&1 || fail=1
     else
         echo "!! neither docker nor java found -- THE JAVA ARM DID NOT RUN AT ALL."

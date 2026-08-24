@@ -463,7 +463,7 @@ public final class PlannerScreen {
     }
 
     /**
-     * Is anything open OVER the planner right now: a menu, the picker, the diagram, the TODO list?
+     * Is anything open OVER the planner right now: a menu, the picker, the diagram, the totals?
      *
      * #326: THE WINDOW USED TO REBUILD REGARDLESS, and its own class note said what that costs --
      * "REOPENING THROWS AWAY SCROLL POSITION AND ANY OPEN SUB-PANEL". That was acceptable while no

@@ -350,11 +350,32 @@ public final class PlannerStock {
      * REFUSAL has a one-line cause, which is why only a refusal gets a line.
      */
     public static String refusalSentence() {
+        StockSnapshot.Reason refused = refusedReason();
+        return refused == null ? null : refused.message();
+    }
+
+    /**
+     * The refusal the held snapshot carries, or null when nothing was refused. #331
+     *
+     * THE REASON RATHER THAN ITS SENTENCE, because a caller can need to tell refusals APART. The
+     * only one so far is `PlanCaveats.stockRefusalLine`, which is silent for `NO_AE2`: a pack
+     * without Applied Energistics has no ME network to fail to read, so a red line at the top of
+     * every plan forever would be noise -- and noise at the top of the panel is how the line that
+     * matters gets tuned out, which is `staleGraphWarning`'s own argument for staying silent on
+     * `MATCHES`.
+     *
+     * {@link #refusalSentence} IS THIS PLUS `.message()` AND IS KEPT, rather than every caller
+     * doing the null dance. It is the older half of the pair and the one the caveat line's
+     * refusal-led form (#321) is written against; two ways to ask the same question is what
+     * `PlanCaveats`'s missing `any()` note refuses, and this is not that -- one answers WHICH and
+     * one answers WHAT TO SAY, and the second is derived from the first here so they cannot drift.
+     */
+    public static StockSnapshot.Reason refusedReason() {
         StockSnapshot held = LiveStock.latest();
         if (held == null || held.isAvailable()) {
             return null;
         }
-        return held.reason().message();
+        return held.reason();
     }
 
     /**

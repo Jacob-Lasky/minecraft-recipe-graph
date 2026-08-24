@@ -261,6 +261,13 @@ Access Point, a Molecular Assembler on the grid, and a Wireless Terminal in the 
 inventory linked to the station's serial and charged to full. A vanilla furnace goes down three
 blocks clear of the AE2 line.
 
+**THE ACCESS POINT IS NO LONGER ONE OF THE GATES, AND THE PROBE STILL PLACES IT** (#331). It used to
+be what put the player "in range"; that check was deleted after a full region scan of the reference
+save found no vanilla `IWirelessAccessPoint` in any dimension, so it had refused every read the mod
+ever made. It stays in the setup because "the setup a player would have" is the point of this probe
+and a real base has one — not because the read needs it. See `Ae2PlacedProbeShot`'s `ACCESS`
+javadoc, and do not read its presence here as evidence that a range gate exists.
+
 **Nine criteria, and two of them are NEGATIVE**, because the thing under test is a map that can
 legitimately be empty and "no error" would therefore be worthless: the read succeeds; the assembler
 IS in `placed()`; the furnace IS too; a stone block (no tile entity) is NOT; a mob spawner (a tile
@@ -502,17 +509,21 @@ running the check at all. So each bullet says whether it was measured.
   **WHAT IT DOES NOT PROVE: anything about production.** The two paths share only their last
   two calls, `getGridNode(AEPartLocation.INTERNAL)` and `getGrid()`. `ae2-probe` reaches those
   from a tile entity it placed itself; `Ae2StockReader` reaches them by finding a wireless
-  terminal in the player's inventory, reading its encryption key, resolving that through AE2's
-  locatable registry, and checking the player against an `IWirelessAccessPoint`'s range. **None
-  of those four steps is exercised here.** What is established is that the environment can HOST
-  the test, which is the thing that was in doubt.
+  terminal in the player's inventory, reading its encryption key, and resolving that through AE2's
+  locatable registry. **None of those three steps is exercised here.** (It was four until #331
+  deleted the fourth, a range check against an `IWirelessAccessPoint` that a region scan of the
+  reference save proved could never pass -- there is no such block anywhere in the world.) What is
+  established is that the environment can HOST the test, which is the thing that was in doubt.
 
   **THAT PROBE NOW EXISTS, for the machine half: `ae2-placed`.** #320. It builds the security
-  station, the access point and the linked, charged wireless terminal, then calls
-  `Ae2Stock.read(player)` itself — so all four steps above are exercised, and a refusal names
-  which gate stopped. What it still does not cover is the PACKET: `StockRequestMessage` and
-  `StockReplyMessage` are asserted by `StockSnapshotTest` and `PlannerStockTest` over a real NBT
-  round trip, not by a client-server hop. The stock half of the read has no probe of its own
+  station, an access point and the linked, charged wireless terminal, then calls
+  `Ae2Stock.read(player)` itself — so all three steps above are exercised, and a refusal names
+  which gate stopped. **It still places the access point and that is now scaffolding rather than a
+  requirement** (#331 deleted the range gate): a realistic network has one, and leaving it keeps the
+  probe's world the same as the one its committed output was taken against. Removing it would be a
+  fine follow-up and is not a fix. What it still does not cover is the PACKET:
+  `StockRequestMessage` and `StockReplyMessage` are asserted by `StockSnapshotTest` and
+  `PlannerStockTest` over a real NBT round trip, not by a client-server hop. The stock half of the read has no probe of its own
   either; `ae2-placed` reads it as a side effect and logs the item count, which is evidence but
   not an assertion.
 * **It is not a substitute for the real pack. TRUE BY CONSTRUCTION.** Five staged jars -- ten

@@ -326,14 +326,21 @@ public class PlanCaveatsTest {
      * A runtime refusal's own words are what the panel shows, not the compile-time constant.
      *
      * THIS IS WHAT #191 MADE URGENT. Before it, the unrendered sentence said the same thing
-     * every time; now each refusal names a different thing to go and do -- no access point in
-     * range, no terminal in your inventory, nobody has asked yet -- while `summary()` still
-     * answers `planned without: have` for all three. If the panel showed the declared constant
-     * instead of the reader's answer, this whole feature would be decorative.
+     * every time; now each refusal names a different thing to go and do -- your network is not
+     * loaded, no terminal in your inventory, the terminal is out of power, nobody has asked yet --
+     * while `summary()` still answers `planned without: have` for all of them. If the panel showed
+     * the declared constant instead of the reader's answer, this whole feature would be decorative.
      */
     @Test
     public void aRuntimeRefusalsOwnWordsAreWhatTheDetailPanelShows() {
-        final String refusal = "no wireless access point in range";
+        // THE REAL WORDING OF A REAL REFUSAL, taken from the enum rather than spelt here, so it
+        // cannot come to quote a message the mod no longer sends -- which is what happened to this
+        // literal twice over: it read "no wireless access point in range" through #331's rewording
+        // and then through #331 RETIRING that reason altogether. Which reason it is does not matter
+        // to this test; that it differs from `HAVE`'s declared constant does, and the assertion
+        // below checks that rather than assuming it. `NO_POWER` because it is a refusal a player
+        // can actually be handed.
+        final String refusal = StockSnapshot.Reason.NO_POWER.message();
         // READ BEFORE THE READER IS INSTALLED, which is the only moment it is reachable:
         // `note()` answers from the reader afterwards, so capturing it later would compare the
         // refusal with itself and the second assertion below would pass vacuously.
@@ -411,10 +418,19 @@ public class PlanCaveatsTest {
      *
      * THE CAP TRUNCATES, and `POINTER`'s own javadoc says it is the half that must never be the
      * casualty -- "drop a field name from the list first, since the fields are recoverable from the
-     * panel and the way in is not". Leading the line with a reason spends 34-46 characters of a
+     * panel and the way in is not". Leading the line with a reason spends 25 to 49 characters of a
      * budget that had roughly one line of headroom, so "it fits" is a measurement rather than an
      * argument, and it has to hold for the LONGEST reason rather than for the one I happened to
-     * try. This is the test to run before lengthening any `Reason.message()`.
+     * try. This is the test to run before lengthening any `Reason.message()`, and #331 ran it:
+     * `NETWORK_GONE` went from 35 characters to 47 on the strength of this passing afterwards. The
+     * figure said "34-46" until then, which was wrong at both ends -- `Reason`'s own header records
+     * the same correction and is the authority on the range.
+     *
+     * IT STILL SWEEPS `OUT_OF_RANGE`, WHICH NOTHING MINTS. That value is retired (#331 deleted the
+     * range gate it reported, having measured that the gate never passed on this pack) but stays
+     * decodable off the wire, so if a mismatched build ever sends it the sentence has to fit rather
+     * than shove the pointer off the line. Sweeping `values()` rather than a hand-kept list is what
+     * makes that free.
      */
     @Test
     public void everyRefusalReasonFitsTheCaveatCapWithThePointerIntact() {
@@ -445,6 +461,83 @@ public class PlanCaveatsTest {
             checked++;
         }
         assertTrue("no reason was checked, so this asserted nothing", checked > 0);
+    }
+
+    // THE OUT-OF-RANGE WITNESS THAT STOOD HERE IS GONE, AND ITS SUBJECT WITH IT. #331
+    //
+    // It asserted that the refusal names the dimension rather than a distance, which was the right
+    // fix for the wrong defect: a region scan of every dimension in the reference save found not one
+    // vanilla `IWirelessAccessPoint` anywhere, and the pack's `ae2wut` terminal opens through the
+    // wrapped mods' own GUI factories, so `Ae2StockReader`'s range gate had never passed for anyone
+    // -- including inside the base. Better wording on a refusal that should never have fired is a
+    // tidier bug. The gate is deleted and the reason is retired.
+    //
+    // WHAT REPLACED IT AND WHERE, because a deleted test that is not replaced is a deleted
+    // assertion: `Ae2StockTest.noRangeGateSurvivesToRefuseALinkedLoadedGridWith`
+    // `NoAccessPoint` scans the compiled reader's constant pool for `IWirelessAccessPoint` and for
+    // `OUT_OF_RANGE` and finds neither,
+    // with a control proving the scan can see the gates that remain. That is the regression test for
+    // the reported world -- a linked, loaded, powered, permitted grid with no access point anywhere
+    // reads OK -- expressed at the only level a JUnit run can reach it, because an `EntityPlayer`
+    // cannot be constructed here and a faked grid would assert that a mock matches my code. It
+    // lives in that class rather than this one because it is a fact about the READER, not about the
+    // words on the caveat line.
+
+    /**
+     * WITNESS. The gone-network refusal leads with the cause a player can act on. #331
+     *
+     * ON MASTER THE MESSAGE IS "the linked network no longer exists", which is true of exactly one
+     * of the two states that reach this reason and is the rarer one. The grid is found from the
+     * security station the encryption key names, so a base whose chunks are not in memory is
+     * indistinguishable from one that was dismantled -- and on a server with nobody at the base,
+     * unloaded is ordinary. One of those a player can fix in a minute; the other tells him his ME
+     * system has been deleted.
+     *
+     * BOTH HALVES ARE NAMED, because the read genuinely cannot tell them apart. Claiming only the
+     * alarming one is the defect `NO_REPLY`'s hedge exists to avoid, one reason over.
+     */
+    @Test
+    public void theGoneNetworkRefusalLeadsWithNotLoadedRatherThanDeleted() {
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NETWORK_GONE));
+        PlannerStock.install();
+        String line = PlanCaveats.summaryLine();
+        String message = StockSnapshot.Reason.NETWORK_GONE.message();
+        assertTrue("the summary line must carry the reason: " + line, line.contains(message));
+        assertTrue("`not loaded` has to be the first cause read, because it is the one a player"
+                   + " can act on: " + message,
+                   message.indexOf("not loaded") >= 0
+                           && message.indexOf("not loaded") < message.indexOf("no longer"));
+        assertTrue("both halves stay, because the read cannot tell them apart: " + message,
+                   message.contains("no longer exists"));
+        String rejoined = rejoin(PlanCaveats.detailLines(PlannerWidgets.PANEL_WIDTH));
+        assertTrue("and the detail panel must point at the loaded-chunk cause: " + rejoined,
+                   rejoined.contains("unloaded"));
+    }
+
+    /**
+     * WITNESS. A refused read gets a line of its own that names the CONSEQUENCE. #331
+     *
+     * ON MASTER THERE IS NO SUCH LINE, and #321's refusal-led {@link PlanCaveats#summaryLine} is
+     * why that was not obvious: the words existed, at the footer, under a tree of rows saying
+     * `needed` in red. `PlannerLayoutTest.aRefusedStockReadIsSaidAboveTheTreeAndNotOnlyInTheFooter`
+     * is the half that asserts WHERE it lands; this is the half that asserts the two lines say
+     * different things, because two copies of the cause would be a line of tree spent on nothing.
+     */
+    @Test
+    public void theRefusalLineNamesTheConsequenceAndNotTheCauseAgain() {
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_TERMINAL));
+        PlannerStock.install();
+        String prominent = PlanCaveats.stockRefusalLine();
+        assertFalse("a refused read owes the player a line of its own", prominent.isEmpty());
+        assertFalse("it must not repeat the cause the footer already carries in full: "
+                    + prominent,
+                    prominent.contains(StockSnapshot.Reason.NO_TERMINAL.message()));
+        assertTrue("and it must say what the rows below it are wrong about: " + prominent,
+                   prominent.contains("needed"));
+        assertTrue("the footer keeps the cause, so between them nothing is lost: "
+                   + PlanCaveats.summaryLine(),
+                   PlanCaveats.summaryLine()
+                           .startsWith(StockSnapshot.Reason.NO_TERMINAL.message()));
     }
 
     // -- stock the graph could not understand (#322) --------------------------------------------

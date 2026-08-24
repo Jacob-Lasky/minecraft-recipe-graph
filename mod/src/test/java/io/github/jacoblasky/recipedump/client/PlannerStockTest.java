@@ -65,14 +65,42 @@ public class PlannerStockTest {
 
     @Test
     public void aRefusalIsReportedAsTheREASONRatherThanAsNotReadYet() {
-        // The point of the whole seam. "Out of range" tells the player to walk to their base;
-        // "not read yet" tells them nothing, and the two are indistinguishable to a planner
-        // that only knows whether a snapshot exists.
+        // The point of the whole seam. "Your network is not loaded" tells the player to go and
+        // look at their base; "not read yet" tells them nothing, and the two are indistinguishable
+        // to a planner that only knows whether a snapshot exists.
+        //
+        // THE ILLUSTRATION USED TO BE "Out of range", WHICH #331 RETIRED. A comment that teaches
+        // the seam with a refusal nothing mints is teaching it with a refusal no player can be
+        // shown -- see the note below on why this case refuses with `NETWORK_GONE`.
+        //
+        // AGAINST `explanation` AND NOT `message`, AND IT ASSERTED `message` UNTIL #331. This note
+        // lands on the detail panel, which sizes to its content, so `statusOf` deliberately emits
+        // the LONG form -- and the two strings are the same string for any reason whose advice is
+        // empty. This case used to pick `OUT_OF_RANGE`, whose advice WAS empty, so it agreed with
+        // the wrong accessor for as long as that held. The discriminator below is what stops it
+        // going quiet again: it fails if the reason under test ever loses its advice, which is the
+        // condition that made the old assertion vacuous.
+        //
+        // `NETWORK_GONE` RATHER THAN `OUT_OF_RANGE`, which #331 retired outright: the range gate it
+        // reported was measured never to pass on this pack and was deleted, so nothing mints that
+        // value and a test asserting how it reads would be testing a sentence no player can see.
+        StockSnapshot.Reason reason = StockSnapshot.Reason.NETWORK_GONE;
+        assertFalse("this case only tests anything while the reason has an advice sentence; the"
+                    + " short and long forms are otherwise the same string",
+                    reason.message().equals(reason.explanation()));
         ScenarioSource.Status status = PlannerStock.statusOf(
-                StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+                StockSnapshot.unavailable(reason));
         assertFalse(status.live());
-        assertEquals(StockSnapshot.Reason.OUT_OF_RANGE.message(), status.note());
+        assertEquals(reason.explanation(), status.note());
         assertEquals(null, status.contents());
+        // AND THE SHORT FORM IS WHAT THE ALWAYS-VISIBLE LINE GETS, which is the other half of the
+        // pair and the reason both strings exist. Through `LiveStock` because that is where
+        // `refusalSentence` reads from -- it answers about the HELD snapshot rather than about one
+        // handed to it, which is what lets the caveat line be built with no arguments.
+        LiveStock.accept(StockSnapshot.unavailable(reason));
+        assertEquals(reason.message(), PlannerStock.refusalSentence());
+        assertEquals("and the same read answers which reason it was",
+                     reason, PlannerStock.refusedReason());
     }
 
     @Test
@@ -128,13 +156,15 @@ public class PlannerStockTest {
 
     @Test
     public void theReaderFollowsTheHeldSnapshotRatherThanTheOneItWasInstalledWith() {
-        // A grid can go out of range between two plans, so the reader has to look each time.
+        // A grid can go unloaded between two plans, so the reader has to look each time.
+        // (It said "out of range" until #331 deleted that gate; the shape of the test is the
+        // same, it just needs a refusal that can actually happen.)
         PlannerStock.install();
         assertFalse(ScenarioSource.HAVE.live());
         LiveStock.accept(StockSnapshot.of(
                 Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
         assertTrue(ScenarioSource.HAVE.live());
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
         assertFalse(ScenarioSource.HAVE.live());
     }
 
@@ -364,7 +394,7 @@ public class PlannerStockTest {
         // exactly like a grid with no machines on it -- so the assertion is on the CAVEAT, not
         // on the verdict: the verdict is the same either way and only one of them is honest.
         RecipeGraph graph = pressGraph();
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
         PlannerStock.install();
 
         assertFalse(ScenarioSource.PLACED.live());
@@ -416,15 +446,15 @@ public class PlannerStockTest {
 
     @Test
     public void thePlacedReaderFollowsTheHeldSnapshotRatherThanTheOneItWasInstalledWith() {
-        // A grid can go out of range between two plans, so the reader has to look each time --
-        // the same rule the `have` reader obeys, asserted separately because it is a second
-        // reader and a second chance to cache.
+        // A grid can go unloaded between two plans, so the reader has to look each time -- the
+        // same rule the `have` reader obeys, asserted separately because it is a second reader and
+        // a second chance to cache. (It said "out of range" until #331 deleted that gate.)
         PlannerStock.install();
         assertFalse(ScenarioSource.PLACED.live());
         LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(),
                                           Snapshots.machines("mod:press", 1)));
         assertTrue(ScenarioSource.PLACED.live());
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
         assertFalse(ScenarioSource.PLACED.live());
     }
 
@@ -599,8 +629,8 @@ public class PlannerStockTest {
         LiveStock.accept(StockSnapshot.of(Collections.<String, Long>emptyMap(), NO_MACHINES));
         assertNull("a successful read owes no explanation", PlannerStock.refusalSentence());
 
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
-        assertEquals(StockSnapshot.Reason.OUT_OF_RANGE.message(),
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
+        assertEquals(StockSnapshot.Reason.NO_POWER.message(),
                      PlannerStock.refusalSentence());
     }
 

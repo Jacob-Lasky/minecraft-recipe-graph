@@ -28,6 +28,31 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
  */
 public class FlowCanvasTest {
 
+    /**
+     * The same process-wide state `PlannerLayoutTest.isolate` resets, for the same reason. #331
+     *
+     * SINCE #331 THE CHROME BAND'S HEIGHT DEPENDS ON TWO STATICS, so `flowChromeHeight` -- and
+     * therefore `flowCanvasHeight`, which every case below measures -- is no longer a function of
+     * the plan alone. `PlannerWidgets.flowChromeHeight` reserves a line for
+     * `PlanCaveats.stockRefusalLine` (`LiveStock`, through `PlannerStock`) and one per
+     * `flowCaveatLines` (`ScenarioSource`), so a case in ANY class that leaves a refused snapshot
+     * or an uninstalled reader behind shrinks this canvas by 10 to 40 pixels with nothing saying so.
+     *
+     * IT IS LATENT HERE TODAY AND THAT IS NOT A REASON TO LEAVE IT. Every assertion in
+     * `forPanelSizesTheCanvasToWhatTheChromeLeavesAtEveryWarningCount` is either differential (the
+     * three-distinct-heights sweep) or generous (`> FLOW_HEIGHT / 2`), so inherited state moves the
+     * numbers without failing anything -- which is precisely the shape `PlannerLayoutTest.isolate`
+     * calls "a test reading whatever the JVM handed it". Any case added here that filters or clamps
+     * on the ABSOLUTE canvas height becomes order-dependent the moment it lands. `@Before` as well
+     * as `@After` because another class can leave this behind.
+     */
+    @org.junit.Before
+    @org.junit.After
+    public void isolate() {
+        io.github.jacoblasky.recipedump.common.ScenarioSource.resetReaders();
+        io.github.jacoblasky.recipedump.client.LiveStock.forget();
+    }
+
     @Test
     public void theLayoutsNodeWidthClearsWhatTheNodeActuallyNeeds() {
         // THE ONE COUPLING THE SPLIT CREATES. `FlowLayout` writes 209 out rather than

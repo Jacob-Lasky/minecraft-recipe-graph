@@ -83,9 +83,21 @@ public final class StockSnapshot {
      * SO THE ONLY AUTHORITY IS
      * `PlanCaveatsTest.everyRefusalReasonFitsTheCaveatCapWithThePointerIntact`, which composes and
      * wraps the REAL line for every value below. RUN IT before lengthening a message. For scale
-     * only, the ten messages span 25 characters (`NO_REPLY`) to 49 (`NOT_LINKED`, which predates
-     * this branch) -- measured 2026-08-23, after review caught an earlier version of this paragraph
-     * claiming "34-46", which was wrong at both ends.
+     * only, the EIGHT REFUSAL messages span 25 characters (`NO_REPLY`) to 49 (`NOT_LINKED`) --
+     * measured 2026-08-23 and re-counted after #331 lengthened `NETWORK_GONE` to 47, which moved
+     * the middle of the range and neither end. `OK`'s "read" is not counted: it is never composed
+     * into a caveat line, so including it would make the floor 4 and the range meaningless. So the
+     * count is `values().length` MINUS ONE -- nine values, eight refusals.
+     *
+     * THIS PARAGRAPH HAS NOW BEEN WRONG ABOUT THE COUNT THREE TIMES: "ten messages", then "34-46",
+     * then "nine refusals" written by the #331 re-count that fixed everything except the number.
+     * That is the standing argument for running the test instead of reading this, and for counting
+     * `Reason.values()` rather than the entries in this list.
+     *
+     * SEVEN OF THE EIGHT CAN ACTUALLY APPEAR. {@link Reason#OUT_OF_RANGE} is retired and nothing
+     * mints it, but the cap test still composes and wraps its line, and that is deliberate rather
+     * than an oversight: the value is still decodable off the wire, so if a mismatched build ever
+     * does send it the sentence has to fit rather than shove the way-in pointer off the line.
      *
      * THE TEST HAS ALREADY CAUGHT ONE: `NO_REPLY` was first written as "the server did not answer
      * -- this mod may not be installed on it", 64 characters, and it pushed the way-in pointer off
@@ -106,8 +118,70 @@ public final class StockSnapshot {
         NO_AE2("Applied Energistics is not installed"),
         NO_TERMINAL("no wireless terminal in your inventory"),
         NOT_LINKED("your wireless terminal is not linked to a network"),
-        NETWORK_GONE("the linked network no longer exists"),
-        OUT_OF_RANGE("no wireless access point in range"),
+        /**
+         * The encryption key names a network this read cannot find. #331
+         *
+         * <h2>NOT LOADED LEADS, BECAUSE ON A SERVER IT IS THE LIKELIER HALF</h2>
+         *
+         * The message used to be "the linked network no longer exists", which is true of exactly
+         * one of the two states that reach here and is the rarer one. `Ae2StockReader` locates the
+         * grid from the security station the terminal's encryption key names, so a network whose
+         * base chunks are simply not in memory is indistinguishable from one that was dismantled
+         * -- and on a multiplayer server, with nobody standing at the base, unloaded is the
+         * ordinary case. Measured on #331: Jake logged out in dimension 20 tens of thousands of
+         * blocks from his base, and "no longer exists" told him his ME system had been deleted.
+         *
+         * A PLAYER CAN ACT ON "not loaded" AND CANNOT ACT ON "gone", which is what settles the
+         * order rather than which is more often true. Both are named because the read genuinely
+         * cannot tell them apart, and claiming only the alarming one is the same defect
+         * {@link #NO_REPLY}'s hedge exists to avoid one reason over.
+         */
+        NETWORK_GONE("your network is not loaded, or no longer exists",
+                     "on a server the chunks holding its security station may simply be"
+                     + " unloaded -- is anyone standing near your base?"),
+        /**
+         * NOTHING MINTS THIS ANY MORE. #331
+         *
+         * <h2>THE GATE IT REPORTED IS GONE, BECAUSE IT NEVER PASSED</h2>
+         *
+         * `Ae2StockReader` used to refuse a read when no ACTIVE `IWirelessAccessPoint` on the grid
+         * had the player inside its own range, on the argument that this is the test AE2's own
+         * wireless terminal makes. It is -- and this pack's terminal does not make it. Measured
+         * 2026-08-23 by a full region scan of every dimension in the reference save: not ONE vanilla
+         * access point exists in the world, the base networks through `ae2stuff:wireless` connectors,
+         * and `ae2wut`'s universal terminal opens the wrapped terminals through the underlying mods'
+         * own GUI factories. So the gate refused EVERY live read from 0.11.0 onwards, including
+         * standing inside the base, and it reached the player as "the ingredients still aren't being
+         * detected correctly". The gate is deleted; see {@link
+         * io.github.jacoblasky.recipedump.common.ae2.Ae2StockReader#read} for the measurement and for
+         * why an access-point check must not be restored on the strength of AE2's API alone.
+         *
+         * <h2>THE VALUE STAYS, AND THAT IS NOT COMPATIBILITY WORK</h2>
+         *
+         * Backwards compatibility is explicitly not a constraint on this project before v1.x.x, so
+         * this is NOT kept to decode an old payload. It is kept because {@link
+         * StockSnapshot#deserializeNBT} maps an unrecognised reason to {@link #NETWORK_GONE}, and a
+         * client and server one jar apart during a rolling reinstall would then turn a refusal this
+         * build cannot name into a claim about the player's base. Deleting the constant buys nothing
+         * and costs one wrong sentence in a window nobody chose to be in.
+         *
+         * DEPRECATED SO A RE-MINT IS A COMPILER WARNING, and
+         * `Ae2StockTest.nothingInProductionMintsTheRetiredRangeRefusal` is the part that actually
+         * fails: an annotation is advice and that test is the gate. Every test that wanted merely
+         * "some refusal" was moved off this value when it was deprecated, so a warning here means a
+         * caller genuinely reached for the retired one rather than that the suite is noisy.
+         *
+         * THE MESSAGE SAYS IT IS RETIRED RATHER THAN DESCRIBING A BOUNDARY. An earlier pass on #331
+         * reworded this to "no access point covers you in this dimension" with advice explaining
+         * where the range came from, which was a better sentence about a gate that had already been
+         * measured never to fire. A plausible player-facing sentence on an unreachable value is how
+         * a reader concludes the range rule is still current; if this string ever renders, the bug is
+         * that it was minted.
+         */
+        @Deprecated
+        OUT_OF_RANGE("this refusal is retired and should not appear",
+                     "the range gate it reported was deleted in #331 after it was measured never"
+                     + " to pass on this pack -- seeing this means a build minted it by mistake"),
         NO_POWER("your wireless terminal is out of power"),
         NO_PERMISSION("you do not have extract access to that network"),
         NO_STORAGE("that network has no storage attached"),

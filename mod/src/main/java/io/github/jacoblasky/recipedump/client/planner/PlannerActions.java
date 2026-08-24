@@ -69,7 +69,14 @@ public interface PlannerActions {
     void openFlow(PlanView plan);
 
     /**
-     * Open the TODO panel: the plan book's list, and what this plan still needs of it. #323.
+     * Open the totals panel: what this plan adds up to, with the plan book's list beneath it.
+     *
+     * #323 FOR THE WIRING, #332 FOR THE NAME AND THE ORDER. This line read "the TODO panel: the
+     * plan book's list, and what this plan still needs of it" until #332, which is the old name
+     * over the old order -- the book led the panel then. `PlannerWidgets.todoPanel` is the
+     * implementation and carries the argument; the method keeps its `openTodo` name because
+     * `PlanBookEdit.SET_TODO` and the node menu's "Add to TODO" are the write path and were not
+     * renamed.
      *
      * THE READ HALF OF A WRITE PATH THAT SHIPPED WITHOUT IT. {@link #addToTodo} has sent
      * `PlanBookEdit.SET_TODO` to the server since #140 and the node menu has offered it in every

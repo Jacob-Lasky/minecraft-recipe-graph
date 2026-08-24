@@ -13,8 +13,8 @@ import net.minecraftforge.fml.common.network.simpleimpl.MessageContext;
  * Server to client: what the network holds, or the named reason it could not be read.
  *
  * A REFUSAL IS A REPLY, not a dropped packet. Every failure path on the server sends one of
- * these carrying a `Reason`, because a client that asked and heard nothing cannot tell "no
- * network in range" from "the packet was lost" -- and the sensible thing to do about those
+ * these carrying a `Reason`, because a client that asked and heard nothing cannot tell "your
+ * network is not loaded" from "the packet was lost" -- and the sensible thing to do about those
  * two is different. `StockSnapshot` refuses to carry an empty map and an OK at the same time,
  * so the distinction survives the wire by construction.
  *

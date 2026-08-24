@@ -98,7 +98,7 @@ if command -v docker >/dev/null 2>&1; then
         -v "$(host_path "$PACK_MODS")":/deps:ro \
         -v "$(host_path "$GRADLE_CACHE")":/gradle \
         -e GRADLE_USER_HOME=/gradle -w /repo/mod eclipse-temurin:25-jdk \
-        ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
+        ./gradlew --no-daemon --no-watch-fs -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods=/deps build
 else
     command -v java >/dev/null 2>&1 || {
         echo "[build-jar] neither docker nor java found; one of them is required." >&2
@@ -112,8 +112,8 @@ else
         GRADLE_USER_HOME=$GRADLE_CACHE
         export GRADLE_USER_HOME
     fi
-    gated sh -c 'cd mod && ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3g \
-        -Ppack_mods="$1" build' -- "$PACK_MODS"
+    gated sh -c 'cd mod && ./gradlew --no-daemon --no-watch-fs \
+        -Dorg.gradle.jvmargs=-Xmx3g -Ppack_mods="$1" build' -- "$PACK_MODS"
 fi
 
 built="mod/build/libs/mc-recipe-dump-$next.jar"

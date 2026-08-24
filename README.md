@@ -745,11 +745,21 @@ now and the claim is honoured by carrying a link rather than by proximity. See t
 on `Ae2Stock` for why that swap changes nothing about how stock is read.
 
 **Two buttons on the planner open the other two windows.** Under the heading are **Show
-diagram** and **Show TODO list**: the first opens the flow diagram of the plan you are looking
-at, the second opens the TODO panel — the list "Add to TODO" writes to, beside what this plan
-still needs of it. The tree stays where it was underneath; both are windows over it rather than
-tabs that replace it. The row costs the tree one visible line, which is the same trade the
-browse screens make for their tab strip: a window you cannot find is a window that did not ship.
+diagram** and **Show totals**: the first opens the flow diagram of the plan you are looking
+at, the second opens the totals panel — everything this plan adds up to, led by the summed
+"still needed for this plan" shopping list, then the machines to build, then what came from
+your stock, from infinite sources, from a go-and-get token and from EMC. The list "Add to TODO"
+writes to is the last section, under its own heading.
+
+That button said **Show TODO list** and that panel led with the plan book until
+[#332](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/332). Every total above was
+already computed and already drawn — but the button named the smallest section of the panel and
+the panel opened on "nothing on the list", so a window that enumerates and sums everything you
+need advertised itself as a favourites feature and nobody opened it twice.
+
+The tree stays where it was underneath; both are windows over it rather than tabs that replace
+it. The row costs the tree one visible line, which is the same trade the browse screens make for
+their tab strip: a window you cannot find is a window that did not ship.
 
 Until 0.10.1 neither had an opener at all. Both panels rendered, both were photographed by the
 screenshot harness every run, and the only callers of either were the harness and the tests
@@ -836,12 +846,12 @@ which outranks every automatic one.
 
 The verdicts are only as good as what the mod could read, and the panel says so rather than
 implying otherwise: `verdicts computed without: have, placed` means the ME network could not be
-read at all — no wireless terminal, out of range, out of power — so **every machine reads as
-buildable rather than owned**. That line names only the inputs a machine verdict actually uses,
-which is a shorter list than the planner's.
+read at all — no wireless terminal, no link, the network not loaded, out of power — so **every
+machine reads as buildable rather than owned**. That line names only the inputs a machine
+verdict actually uses, which is a shorter list than the planner's.
 
-With a linked terminal in range, both inputs are live and the line disappears. **A machine
-counts as owned when it is connected to your ME network**: the read that fetches your stock also
+With a linked terminal and the network loaded, both inputs are live and the line disappears.
+**A machine counts as owned when it is connected to your ME network**: the read that fetches your stock also
 enumerates the grid's own machines, so a Packager or a Drive on the network reads `have` while
 the same machine sitting off the network still reads `buildable`. That scope is narrower than
 the offline tool's, which reads every tile entity in the save, and the planner's caveat panel
@@ -849,21 +859,46 @@ says so in as many words.
 
 **Live ME stock is read through a WIRELESS TERMINAL, on AE2's own terms — with one exception.**
 In game there is no `have` file: the planner asks the server to read your network, and the
-server answers only when you have a linked wireless terminal in your inventory, are inside the
-range of an *active* wireless access point on that network **in the dimension you are standing
-in**, have at least one AE unit of power in the terminal, and hold extract permission on the
-network's security grid. Six of those seven checks are the tests AE2's own wireless terminal
-makes, so a terminal you can open is almost always a network the planner can read. The
-exception is the power floor: the one-AE-per-read threshold is this mod's own judgement
-(`POWER_PER_READ`, whose comment says outright that nobody has measured the magnitude), so a
-terminal holding under one AE opens in AE2 and is still refused here.
+server answers only when you have a linked wireless terminal in your inventory, that link resolves
+to a network AE2 can currently find, you have at least one AE unit of power in the terminal, and
+you hold extract permission on the network's security grid. **There is no distance check and no
+dimension check, because the pack's own terminal does not make one either** — see below. The one exception to
+"these are AE2's own tests" is the power floor: the one-AE-per-read threshold is this mod's own
+judgement (`POWER_PER_READ`, whose comment says outright that nobody has measured the magnitude), so
+a terminal holding under one AE opens in AE2 and is still refused here.
+
+**THERE WAS A RANGE CHECK AND IT NEVER PASSED ONCE.** Through 0.11.0 the read also required an
+*active* wireless access point on the network within its own range, in the dimension you were
+standing in — a faithful copy of vanilla AE2's rule, added on the reasoning that a terminal you can
+open should be a network you can read. A full region scan of every dimension in the reference save
+on 2026-08-23 found **not one vanilla wireless access point in the entire world**: the base networks
+through `ae2stuff:wireless` connectors, and the `ae2wut` universal terminal opens the wrapped
+terminals through the underlying mods' own GUI paths rather than enforcing AE2's access-point rule.
+So every live read the mod ever made came back "out of range", including standing inside the
+base, and it looked like broken ingredient detection
+([#331](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/331)). The check is gone. The
+lesson worth keeping is that copying a host mod's rule out of its API is not the same as matching
+what the pack in front of you actually does.
 
 When any of them fails the plan is still produced — costed as though you own nothing — and **the
-caveat line leads with the reason, with no click needed**: no terminal, not linked, the network is
-gone, out of range, no power, no permission, or no storage grid. That distinction is the point,
-because the fix differs: "out of range" means walk toward your base, where "not linked" means go
-and re-link the terminal. Click the line for the fuller version and for what every other unread
-input costs you.
+plan says so twice, above the tree and below it**. Above: `your ME network was not read, so
+everything reads as needed`, in red, directly under the two view buttons, and repeated in the
+flow diagram's own chrome so the picture is not the one surface that looks fully-informed. Below,
+on the caveat line, **the reason itself, with no click needed**: no terminal, not linked, the
+network is not loaded or gone, no power, no permission, or no storage grid. Click either line for
+the fuller version and for what every other unread input costs you.
+
+That distinction is the point, because the fix differs: "your network is not loaded, or no longer
+exists" usually means nobody is standing near your base and the chunks holding its security station
+are out of memory, where "not linked" means go and re-link the terminal and "out of power" means go
+and charge it.
+
+Both halves are there because
+[#331](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/331) found that the caveat
+line alone lost the argument. It renders under the tree, and the tree above it was a full window
+of rows saying `needed` in red — so the report that came back was "the ingredients still aren't
+being detected correctly" against a plan that had said exactly why. The line above the tree names
+the consequence; the line below it keeps the cause.
 
 **Fix the cause and re-plan, and it looks again.** A refusal is not treated as a fresh read, so
 picking up the terminal you had left in a chest works immediately rather than after thirty seconds.

@@ -47,16 +47,17 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
  * <h2>WHY THIS EXISTS WHEN `ae2-probe` ALREADY WALKS A GRID</h2>
  *
  * `Ae2ProbeShot` is explicit that it proves the ENVIRONMENT and not the production path -- the
- * two share only their last two calls, and its own header lists the four steps it never
- * exercises: finding a wireless terminal in the player's inventory, reading its encryption key,
- * resolving that key through AE2's locatable registry, and range-checking the player against an
- * `IWirelessAccessPoint`. `harness/README.md` says outright that "the probe that drives the real
- * path" is owed. This is that probe, for the machine half.
+ * two share only their last two calls, and its own header lists the three steps it never
+ * exercises: finding a wireless terminal in the player's inventory, reading its encryption key, and
+ * resolving that key through AE2's locatable registry. (A fourth, range-checking the player against
+ * an `IWirelessAccessPoint`, was deleted by #331 -- measured never to pass on this pack.)
+ * `harness/README.md` says outright that "the probe that drives the real path" is owed. This is that
+ * probe, for the machine half.
  *
  * IT CALLS `Ae2Stock.read(player)` AND NOTHING BELOW IT. That is the entry point
  * `StockRequestMessage.Handler` calls in game, so every gate is the real gate: no terminal, no
- * link, no access point in range, no power, no permission all refuse here exactly as they refuse
- * a player. A probe that reached into `Ae2StockReader.placedOf` would be testing my own
+ * link, no live grid, no power, no permission all refuse here exactly as they refuse a player. A
+ * probe that reached into `Ae2StockReader.placedOf` would be testing my own
  * enumeration against my own expectation of it -- mocked tests confirm parser shape, not wire
  * shape, and the shape in question is AE2's.
  *
@@ -151,10 +152,25 @@ final class Ae2PlacedProbeShot {
      * A wireless terminal's encryption key is the SERIAL OF A SECURITY STATION, resolved through
      * AE2's locatable registry -- so without one there is no key to write on the terminal and
      * `Ae2StockReader` refuses with `NOT_LINKED` before it looks at anything else. This is one of
-     * the four steps `ae2-probe` never reaches.
+     * the three steps `ae2-probe` never reaches.
      */
     private static final String SECURITY = "appliedenergistics2:security_station";
-    /** What makes the player "in range". Its own `getRange()` is the test the reader makes. */
+    /**
+     * An access point on the grid. NO LONGER REQUIRED FOR THE READ, AND STILL PLACED.
+     *
+     * It used to be the thing that made the player "in range", and its own `getRange()` was the test
+     * the reader made. #331 deleted that gate after a region scan of the reference save found no
+     * `IWirelessAccessPoint` anywhere in the world -- so the gate refused every read the mod ever
+     * made, and the pack's own terminal never enforced it.
+     *
+     * KEPT BECAUSE THE PROBE'S JOB IS A REALISTIC NETWORK, NOT A MINIMAL ONE. A real base has an
+     * access point, the committed probe output was taken against a world that has one, and removing
+     * it would re-photograph the probe to prove something the constant-pool scan in
+     * `Ae2StockTest.noRangeGateSurvivesToRefuseALinkedLoadedGridWithNoAccessPoint`
+     * already proves without a boot.
+     * Dropping it is a fine follow-up; it is not a fix, and it must not be dropped while claiming
+     * the removal is what shows the gate is gone.
+     */
     private static final String ACCESS = "appliedenergistics2:wireless_access_point";
     /**
      * The machine that should read as owned: a real AE2 machine with a real item form.

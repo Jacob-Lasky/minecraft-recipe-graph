@@ -18,8 +18,10 @@ import org.junit.Test;
  *
  * "Nobody has asked yet", "the server said no and why", and "here is what you own" are three
  * different things, and the first two are the pair that gets conflated. A planner that treats
- * a null as a refusal reports "no network in range" before it has looked -- which is a
- * confident answer to a question nobody put.
+ * a null as a refusal reports "your network is not loaded" before it has looked -- which is a
+ * confident answer to a question nobody put. (It quoted "no network in range" until #331 deleted
+ * the range gate; a class note that quotes a sentence the mod cannot produce is a standing
+ * invitation to conclude that gate is still there.)
  */
 public class LiveStockTest {
 
@@ -35,10 +37,10 @@ public class LiveStockTest {
         assertNull(LiveStock.latest());
         assertFalse(LiveStock.isFresh());
 
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
         // Now there IS an answer, and it is a refusal -- distinguishable from the null above.
         assertFalse(LiveStock.latest().isAvailable());
-        assertEquals(StockSnapshot.Reason.OUT_OF_RANGE, LiveStock.latest().reason());
+        assertEquals(StockSnapshot.Reason.NO_POWER, LiveStock.latest().reason());
         // AND IT IS STILL NOT FRESH, which this case used to assert the opposite of. See
         // `aRefusalIsNeverFreshSoTheNextPlanAsksAgain` for why the flip is the fix and not a
         // loosening: the two states differ in `latest()`, which is what this case is about, and
@@ -120,12 +122,12 @@ public class LiveStockTest {
 
     @Test
     public void aRefusalReplacesAGoodReadRatherThanLeavingTheOldOneStanding() {
-        // The important direction. If the network goes out of range, the planner must stop
+        // The important direction. If the network goes unloaded, the planner must stop
         // planning against what it used to hold -- keeping the last good read is exactly the
         // stale-file behaviour this whole phase exists to retire.
         LiveStock.accept(StockSnapshot.of(
                 Collections.singletonMap("minecraft:stone", Long.valueOf(64L)), NO_MACHINES));
-        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE));
+        LiveStock.accept(StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER));
 
         assertFalse(LiveStock.latest().isAvailable());
         assertEquals(0L, LiveStock.latest().count("minecraft:stone"));

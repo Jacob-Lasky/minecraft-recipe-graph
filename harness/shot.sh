@@ -178,6 +178,20 @@ shot_run() {
     # mount, but the Java test suite would not: DigestFixtureTest reads
     # tests/fixtures/nbt_digest.json from above `mod/` and fails with a bare IOException that
     # names nothing. Keep the mount the same shape as the one the skill documents for `build`.
+    #
+    # `--no-watch-fs` ON THE `gradlew` LINE BELOW, FOR `tools/check.sh`'s REASON. Gradle's
+    # file-system watcher dies inside `BuildLifecycleAwareVirtualFileSystem` when a second process
+    # touches the same `GRADLE_USER_HOME`, before anything runs, so it reads as a broken build
+    # rather than as contention -- and a shot run is the long job most likely to overlap another
+    # agent's test run. Do not drop the flag to shorten the line.
+    #
+    # DO NOT PUT A COMMENT BETWEEN ANY TWO LINES OF THE `docker run` BELOW. Every line of it ends
+    # in a backslash, so a `#` line there is not a comment: it becomes an argument to `docker run`
+    # and `./gradlew` becomes a new command executed on the HOST, which fails with
+    # `./gradlew: not found` (exit 127) because the cwd is the repository root, not `mod/`.
+    # `sh -n` accepts it -- this is valid syntax that does the wrong thing.
+    # `tests/test_prodshot_gate_span.py::test_the_shot_is_rendered_by_the_image_this_run_built`
+    # is what catches it.
     docker run --rm \
         --user 99:100 \
         --memory="$MEMORY" --memory-swap="$MEMORY" \
@@ -190,7 +204,7 @@ shot_run() {
         -e XVFB_SCREEN="${SHOT_WIDTH}x${SHOT_HEIGHT}x24" \
         -w /repo/mod \
         "$IMAGE" \
-        ./gradlew --no-daemon --console=plain runClient \
+        ./gradlew --no-daemon --no-watch-fs --console=plain runClient \
             -Ppack_mods=/deps \
             -Dorg.gradle.jvmargs=-Xmx1g \
             -Dmcrecipedump.shot="$SCREEN" \

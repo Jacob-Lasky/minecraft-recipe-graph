@@ -71,9 +71,10 @@ import net.minecraftforge.common.MinecraftForge;
  * IT PROVES THE ENVIRONMENT AND NOT THE PRODUCTION PATH, and the two share only their last two
  * calls: `getGridNode(AEPartLocation.INTERNAL)` and `getGrid()`. This class reaches those from
  * a tile entity it placed itself. `Ae2StockReader` reaches them by finding a wireless terminal
- * in the player's inventory, reading its encryption key, resolving that key through AE2's
- * locatable registry, and range-checking the player against an `IWirelessAccessPoint` -- NONE
- * of which happens here. So a green run here says the harness can host such a test; it says
+ * in the player's inventory, reading its encryption key, and resolving that key through AE2's
+ * locatable registry -- NONE of which happens here. (There was a fourth, range-checking the player
+ * against an `IWirelessAccessPoint`; #331 deleted it after measuring that no such block exists
+ * anywhere in the reference save, so the gate refused every read the mod ever made.) So a green run here says the harness can host such a test; it says
  * nothing whatever about whether the real read works. See #191.
  *
  * ONLY REACHED THROUGH THE SCREEN REGISTRY, like `JeiRecipeShot`, so a client without AE2

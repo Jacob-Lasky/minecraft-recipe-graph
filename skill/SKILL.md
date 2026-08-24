@@ -849,7 +849,8 @@ screenshots, and is unreachable in game. Two were in that state through 0.10.0 a
 
 **#323 FIXED BOTH AND REPLACED THE GREP WITH A TEST.** The planner panel now carries a view bar
 under its heading -- `PlannerWidgets.viewBar`, two `ClickableGroup` buttons reading **Show
-diagram** and **Show TODO list** -- routed through `PlannerActions.openFlow` / `openTodo` to
+diagram** and **Show totals** (`Show TODO list` until #332, which also moved the summed shopping
+list to the top of that panel) -- routed through `PlannerActions.openFlow` / `openTodo` to
 panel handlers on `LivePlannerActions`, the same shape the node menu and the picker already
 used. Buttons rather than a keybind because #313 is the cautionary case at the other end: the
 plan key could not fire while JEI was on screen, so the MVP's only entry point was a chord that
@@ -1039,11 +1040,40 @@ offline `recipegraph have` reads every tile entity in the save and legitimately 
 
 **Live ME stock is a round trip, and its failure mode is a hang.** `Ae2StockReader` runs on the
 SERVER and refuses with a named reason -- `NO_TERMINAL`, `NOT_LINKED`, `NETWORK_GONE`,
-`OUT_OF_RANGE`, `NO_POWER`, `NO_PERMISSION`, `NO_STORAGE` -- six of which are AE2's own tests.
-The seventh is not: `NO_POWER`'s threshold is this mod's own `POWER_PER_READ = 1.0`, whose
-javadoc says the magnitude is a judgement nobody has measured, so a terminal holding under one
-AE opens in AE2 and is refused here. There is an eighth reason that the server never sends:
-`NO_REPLY`, minted by the CLIENT when a plan has waited past `PlannerStock.REPLY_TIMEOUT_MILLIS`.
+`NO_POWER`, `NO_PERMISSION`, `NO_STORAGE`. `NO_POWER`'s threshold is this mod's own
+`POWER_PER_READ = 1.0`, whose javadoc says the magnitude is a judgement nobody has measured, so a
+terminal holding under one AE opens in AE2 and is refused here.
+
+**`OUT_OF_RANGE` IS RETIRED AND THE GATE IT REPORTED IS DELETED (#331), AND THIS IS THE MOST
+EXPENSIVE THING ON THIS PAGE.** The reader used to require an ACTIVE `IWirelessAccessPoint` on the
+grid whose own `getRange()` covered the player -- a faithful copy of vanilla AE2's rule, whose
+javadoc claimed the invariant "a player who can open their terminal here can read their network
+here". **That invariant was false on this pack the day it was written.** Measured 2026-08-23 by a
+full region scan of every dimension in the reference save: there is not ONE vanilla
+`IWirelessAccessPoint` in the world. The base networks through `ae2stuff:wireless` connectors (103
+of them, 28 controllers, one security station, quantum-bridged into DIM43), and the pack's `ae2wut`
+universal terminal opens the wrapped terminals through the underlying mods' own GUI factories --
+verified in the jar, it delegates to ae2fc/mekeng/ae2exttable rather than enforcing AE2's rule.
+
+So the gate refused EVERY live read from 0.11.0 onward, including standing inside the base, and it
+reached the player as *"the ingredients still aren't being detected correctly"*. **COPYING A HOST
+MOD'S RULE FROM ITS API IS NOT THE SAME AS MATCHING WHAT THE PACK DOES**, and no test could catch it
+because nothing in a JUnit run can reach that path -- which is why the replacement assertion is a
+constant-pool scan (`Ae2StockTest.noRangeGateSurvivesToRefuseALinkedLoadedGridWithNoAccessPoint`):
+a gate's PRESENCE needs a live grid, its ABSENCE is a fact about the compiled class. Before adding
+any proximity check back, scan the save for the interface first.
+back, scan the save for the interface first.
+
+The gates are now: terminal present, linked, grid resolves against AE2's locatable registry, power,
+EXTRACT permission. The grid-resolves gate is what carries #320's balance rule on its own now.
+
+One further reason is never sent by the server at all: `NO_REPLY`, minted by the CLIENT when a plan
+has waited past `PlannerStock.REPLY_TIMEOUT_MILLIS`. **Do not give these an ordinal here.** This
+line read *"there is an eighth reason"* until the #331 audit -- an ordinal anchored to a list that
+still contained `OUT_OF_RANGE`, so when the retirement shortened the list the number was left
+pointing at nothing. `Reason` has NINE values and EIGHT refusals, seven of which can actually
+appear. Count `StockSnapshot.Reason.values()`, which is what that enum's own javadoc has now been
+wrong about three times.
 
 **"WAITING IS SAFE BECAUSE A REPLY IS GUARANTEED" WAS FALSE AND THAT JAVADOC DEFENDED A HANG
 (#321).** `canAsk()` checks that a connection EXISTS, not that the server has the mod -- and 1.12.2

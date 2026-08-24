@@ -49,7 +49,7 @@ public class StockSnapshotTest {
         assertTrue(empty.isAvailable());
         assertEquals(0, empty.distinctKeys());
 
-        StockSnapshot refused = StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE);
+        StockSnapshot refused = StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER);
         assertFalse(refused.isAvailable());
         assertEquals(0, refused.distinctKeys());
     }
@@ -68,9 +68,15 @@ public class StockSnapshotTest {
 
     @Test
     public void everyRefusalNamesSomethingDifferentToGoAndDo() {
-        // Nine reasons and nine distinct sentences: "no wireless terminal" and "out of range"
-        // are different problems with different fixes, and collapsing them into one "could
-        // not read your network" would make the message useless exactly when it matters.
+        // Nine reasons and nine distinct sentences: "no wireless terminal" and "your network is
+        // not loaded" are different problems with different fixes, and collapsing them into one
+        // "could not read your network" would make the message useless exactly when it matters.
+        //
+        // NINE IS `values().length`, WHICH IS WHAT THIS LOOP ITERATES, AND IT COUNTS `OK`. Eight
+        // of the nine are refusals. Counted 2026-08-24: OK, NO_TERMINAL, NOT_LINKED, NETWORK_GONE,
+        // OUT_OF_RANGE, NO_POWER, NO_PERMISSION, NO_STORAGE, NO_REPLY. The illustration above said
+        // "out of range" until #331 retired it -- a comment that teaches the rule with a sentence
+        // no player can be shown teaches it with nothing.
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (StockSnapshot.Reason reason : StockSnapshot.Reason.values()) {
             assertNotNull(reason.message());
@@ -325,7 +331,7 @@ public class StockSnapshotTest {
         // travels beside it on `ScenarioSource`. The assertion is on the pairing, not on the
         // emptiness: a reader that shipped this document without the reason would be back at
         // the confidently-wrong plan.
-        StockSnapshot refused = StockSnapshot.unavailable(StockSnapshot.Reason.OUT_OF_RANGE);
+        StockSnapshot refused = StockSnapshot.unavailable(StockSnapshot.Reason.NO_POWER);
         assertTrue(refused.document().entrySet().isEmpty());
         assertFalse(refused.isAvailable());
     }
