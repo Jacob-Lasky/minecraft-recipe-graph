@@ -8,12 +8,14 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import com.cleanroommc.modularui.screen.ModularPanel;
+import com.cleanroommc.modularui.screen.viewport.GuiViewportStack;
 
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
+import io.github.jacoblasky.recipedump.graph.IntArray;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 /**
@@ -664,6 +666,577 @@ public class FlowCanvasTest {
                     canvas.jumpToSelected());
         assertEquals(beforeX, canvas.getScrollX());
         io.github.jacoblasky.recipedump.client.planner.PlanSelection.clear();
+    }
+
+    // -- #330: the edges are painted in the space the nodes land in -----------------------------
+
+    /**
+     * EVERY EDGE MEETS THE TWO NODES IT JOINS, AT EVERY SCROLL AND EVERY ZOOM. The witness for
+     * #330.
+     *
+     * WHAT WAS WRONG. `FlowCanvas.draw` painted each edge in raw LAYOUT coordinates, and the
+     * javadoc on the method that drew them said "the viewport transform is already applied". It is
+     * not: measured in the ModularUI 3.1.5 bytecode, `InternalWidgetTree.drawTree` calls
+     * `IWidget.draw` at offset 135 and does not reach `pushViewport` / `transformChildren` until
+     * 188 and 194, so the scroll translate and the zoom scale reach the canvas's CHILDREN -- the
+     * node widgets -- and not the canvas's own painting. At scroll 0 and zoom 1 the two spaces are
+     * the same numbers. Every prodshot of this diagram was taken there, and `flow-nav2.png`
+     * PASSED while showing edge fragments stranded at the bottom of the canvas.
+     *
+     * <h2>The probe is two pieces of code that do not share the answer</h2>
+     *
+     * The rectangles come from {@link FlowCanvas#edgeSegments}, which is the call `draw` makes.
+     * Where they LAND is asked of {@link FlowCanvas#boxAt} -- `FlowCulling`'s index -- through
+     * {@link FlowCanvas#toLayoutX}, the production inverse that `flow-hit` compares against
+     * ModularUI's own hit-testing on every harness run. So the question put here is the one that
+     * matters to a reader: is the pixel this edge ends on inside the node it points at. Asserting
+     * the endpoint against `toScreenX(child.x)` instead would be the conversion agreeing with
+     * itself.
+     *
+     * <h2>The control is the part that makes it a test</h2>
+     *
+     * A zero from a screen is a claim about the screen until the screen has been made to fail. So
+     * the UNTRANSFORMED coordinates -- the ones the broken sweep used -- are fed to the same
+     * probe, and the run requires that they land somewhere other than the node for a good many of
+     * the pairs checked. Without that, every assertion above would be equally satisfied by the
+     * pre-#330 code at scroll 0, which is exactly where it was always measured.
+     *
+     * COUNTED AND NOT ASSERTED PAIR BY PAIR, because the two spaces really do coincide for one
+     * box per offset -- the one whose `box.x * (zoom - 1)` happens to equal the scroll -- and a
+     * per-pair control would be red against correct code there. That coincidence is not a
+     * weakness of the control; it is the bug's own camouflage, and at scroll 0 it covers every
+     * box at once.
+     *
+     * BOTH ENDS, because they fail differently. The elbow leaves the parent's RIGHT border and
+     * arrives at the child's LEFT border, so a sweep that converted only the origin, or that
+     * scaled the width as well as the position, gets one of the two right.
+     *
+     * A NON-INTEGER ZOOM IS IN THE SWEEP ON PURPOSE, AND ONLY ONE OF THE TWO EVER CONTRIBUTES A
+     * CHECK, WHICH IS WORTH WRITING DOWN RATHER THAN LEAVING TO BE REDISCOVERED. A fractional
+     * zoom is where a rounding mistake shows -- the culler rounds a screen RECTANGLE outward onto
+     * layout pixels, which is right for covering and wrong for a point, and reusing it here would
+     * put every endpoint a pixel short of the node in the same direction at both ends. The
+     * fractional zoom this test actually measures at is `FlowZoom.LABEL_LEGIBLE`, 0.75.
+     *
+     * 1.37 AND `FlowZoom.MAX` CONTRIBUTE NOTHING HERE AND CANNOT, because a parent and a child
+     * span `COLUMN_PITCH + NODE_WIDTH` = 458 layout pixels: above about 1.13 no pair fits inside
+     * a 520px canvas and the both-wholly-in-frame filter rejects every one of them. They stay in
+     * the list because the filter is what skips them and because the loop is cheap, not because
+     * they are covered. What covers them instead is
+     * `FlowZoomTest.theZoomScalesTheLayoutPointAndTheScrollIsSubtractedAfterIt`, which pins the
+     * composition at zoom 2 with the view 400 along, {@link
+     * #modularUisOwnViewportMatrixAgreesWithTheConversionTheEdgesUse}, which compares the
+     * conversion with ModularUI's own matrix across the whole zoom range, and
+     * {@link #theSweepPaintsEveryVisibleEdgeThroughTheSeamAndNothingOutsideTheCanvas}, which runs
+     * the whole sweep at 1.37.
+     *
+     * SO THE ZOOMS ARE ASSERTED BY NAME AND NOT BY COUNT. `size() >= 3` was exactly the number
+     * that is reachable, so it read as slack while having none, and one pair fewer anywhere would
+     * have failed with a count instead of with the name of the zoom that stopped contributing.
+     */
+    @Test
+    public void everyEdgeMeetsTheNodesItJoinsAtEveryScrollAndZoom() {
+        PlanNode tree = PlanTrees.deepFan(3, 4);
+        FlowCanvas canvas = inert(tree);
+        // WIDE ENOUGH TO HOLD A PARENT AND A CHILD AT ONCE, which the 300x180 used elsewhere in
+        // this file is not: a column pitch is 249px, so an edge needs 458 of layout across before
+        // both of its ends can be in frame. Production gives the canvas 612x372.
+        canvas.pos(0, 0).size(520, 300);
+        HeadlessLayout.layOut(panelAround(canvas));
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+        assertTrue("the fixture must be bigger than the viewport in both directions",
+                   laid.width > 520 && laid.height > 300);
+
+        float[] zooms = {FlowZoom.MIN, FlowZoom.LABEL_LEGIBLE, FlowZoom.DEFAULT, 1.37f,
+                         FlowZoom.MAX};
+        double[] fractions = {0.0, 0.29, 0.61, 1.0};
+        // WHICH ZOOMS AND WHICH OFFSETS ACTUALLY PRODUCED A CHECK, rather than a bare count.
+        // A total says nothing about coverage: forty checks all taken at zoom 0.5 with the view
+        // at the origin is the exact blind spot #330 lived in, and it would satisfy a threshold.
+        java.util.Set<Float> zoomsChecked = new java.util.HashSet<Float>();
+        java.util.Set<String> offsetsChecked = new java.util.HashSet<String>();
+        int checked = 0;
+        int controlled = 0;
+        for (float zoom : zooms) {
+            canvas.setZoom(zoom);
+            for (double fraction : fractions) {
+                canvas.panToFraction(fraction, fraction);
+                canvas.updateVisible();
+                for (int child = 0; child < canvas.nodeCount(); child++) {
+                    int parent = canvas.parentOf(child);
+                    // BOTH BOXES WHOLLY IN FRAME, so every segment of the elbow is inside the
+                    // canvas and none of them is clipped -- which keeps this test about the
+                    // conversion and leaves the clip to
+                    // `aSpanIsClippedToTheCanvasAndDroppedWhenNoneOfItIsInside`.
+                    if (parent < 0 || !canvas.fullyShowing(parent)
+                            || !canvas.fullyShowing(child)) {
+                        continue;
+                    }
+                    checked++;
+                    zoomsChecked.add(zoom);
+                    offsetsChecked.add(zoom + "@" + canvas.getScrollX() + ","
+                                       + canvas.getScrollY());
+                    IntArray out = new IntArray();
+                    canvas.edgeSegments(parent, child, out);
+                    assertEquals("an unclipped elbow is three rectangles at zoom " + zoom
+                                 + " scroll " + canvas.getScrollX() + "," + canvas.getScrollY(),
+                                 12, out.size());
+
+                    // The elbow's last run is horizontal and ends ON the child's left border, so
+                    // the pixel the edge arrives at is its right-hand end.
+                    int arrivalX = out.get(8) + out.get(10);
+                    int arrivalY = out.get(9);
+                    assertEquals("the edge must arrive inside the child it points at, at zoom "
+                                 + zoom + " scroll " + canvas.getScrollX() + ","
+                                 + canvas.getScrollY() + " (arrival " + arrivalX + ","
+                                 + arrivalY + ", child rect "
+                                 + java.util.Arrays.toString(canvas.boxRectOnScreen(child)) + ")",
+                                 child, boxUnder(canvas, arrivalX + INSIDE, arrivalY));
+
+                    // And the first run leaves the parent's right border.
+                    int departureX = out.get(0);
+                    int departureY = out.get(1);
+                    assertEquals("the edge must leave from inside the parent, at zoom " + zoom
+                                 + " scroll " + canvas.getScrollX() + "," + canvas.getScrollY()
+                                 + " (departure " + departureX + "," + departureY + ", parent rect"
+                                 + " " + java.util.Arrays.toString(canvas.boxRectOnScreen(parent))
+                                 + ")",
+                                 parent, boxUnder(canvas, departureX - INSIDE, departureY));
+
+                    // THE MIDDLE OF THE NODE'S HEIGHT, not its top. An elbow drawn at `box.y`
+                    // touches the border rather than the node and looks like a rounding error.
+                    int[] rect = canvas.boxRectOnScreen(child);
+                    assertTrue("the edge must arrive at the child's vertical centre, not its"
+                               + " edge: arrival y " + arrivalY + " against rect "
+                               + java.util.Arrays.toString(rect),
+                               Math.abs(arrivalY - (rect[1] + rect[3] / 2)) <= 1);
+
+                    // THE CONTROL, COUNTED RATHER THAN ASSERTED PER PAIR, and the reason is the
+                    // bug's own shape. Where the pre-#330 sweep put this edge is fed to the same
+                    // probe; for almost every box it lands on a different box or on none, which
+                    // is what gives the assertions above teeth. It is not asserted here for each
+                    // pair because the two spaces genuinely COINCIDE for one box per offset --
+                    // the one where `scrollX = box.x * (zoom - 1)` -- and a control that claimed
+                    // otherwise would be red against correct code. That coincidence is the whole
+                    // reason this survived three releases: at scroll 0 it holds for every box.
+                    FlowLayout.Box box = laid.boxes.get(child);
+                    if (child != boxUnder(canvas, box.x + INSIDE,
+                                          box.y + FlowLayout.NODE_HEIGHT / 2)) {
+                        controlled++;
+                    }
+                }
+            }
+        }
+        assertTrue("the sweep must actually have found edges to check; it checked " + checked,
+                   checked > 12);
+        for (float zoom : new float[] {FlowZoom.MIN, FlowZoom.LABEL_LEGIBLE, FlowZoom.DEFAULT}) {
+            assertTrue("every zoom at which a parent and a child can both fit this canvas must"
+                       + " have contributed a check, and " + zoom + " did not: " + zoomsChecked,
+                       zoomsChecked.contains(Float.valueOf(zoom)));
+        }
+        assertTrue("at six or more distinct zoom-and-offset combinations, or the sweep only ever"
+                   + " looked at one arrangement: " + offsetsChecked,
+                   offsetsChecked.size() >= 6);
+        assertTrue("the probe must be able to TELL the two spaces apart: at more than four of"
+                   + " the " + checked + " checked pairs the untransformed coordinates must land"
+                   + " somewhere other than the node, or every assertion above would pass on the"
+                   + " code #330 is about; it was " + controlled, controlled > 4);
+    }
+
+    /**
+     * How far inside a node's border the probe aims, in SCREEN pixels.
+     *
+     * TWO AND NOT ONE, because at `FlowZoom.MIN` one screen pixel is two layout pixels and the
+     * conversion back rounds -- so a one-pixel nudge can land on the border it was meant to clear.
+     * A node is 209 layout pixels wide, so four is nowhere near the far side.
+     */
+    private static final int INSIDE = 2;
+
+    /**
+     * Which box the canvas says is under a SCREEN point, through the production inverse.
+     *
+     * THE POINT OF ROUTING THROUGH `toLayoutX`/`boxAt` rather than comparing rectangles: those two
+     * are `FlowCulling`'s index reached through the conversion `flow-hit` measures against
+     * ModularUI's own hit-testing, so a pass here is two independent pieces of code agreeing about
+     * where a pixel is. See {@link #everyEdgeMeetsTheNodesItJoinsAtEveryScrollAndZoom}.
+     */
+    private static int boxUnder(FlowCanvas canvas, int screenX, int screenY) {
+        return canvas.boxAt(canvas.toLayoutX(screenX), canvas.toLayoutY(screenY));
+    }
+
+    /**
+     * The sweep draws every visible edge, through the one conversion, and nothing outside the
+     * canvas.
+     *
+     * DRIVES THE PRODUCTION SWEEP. `FlowCanvas.draw` is `sweepEdges(PAINT)` and one line of
+     * `super`, so this is the frame's own walk over the culled set with the last hop -- a
+     * rectangle to the screen -- swapped for a recorder. `updateVisible` before it is the other
+     * half of the same frame.
+     *
+     * THE COUNT IS ASSERTED AGAINST `edgeSegments` PER PAIR, which is what makes this a statement
+     * that the sweep uses the seam rather than a second copy of the arithmetic. A sweep that
+     * painted in layout coordinates would not merely draw in the wrong place: at this offset most
+     * of its rectangles fall outside the canvas and are dropped by the clip, so the count itself
+     * moves.
+     *
+     * AND NOTHING LEAVES THE CANVAS, which is the defect the fix would otherwise have introduced.
+     * The `Stencil` that keeps the node widgets inside the viewport is applied by
+     * `AbstractScrollWidget.preDraw` at drawTree offset 171 and the draw happens at 135, so an
+     * edge is not clipped by anything the framework does. This fixture is the case that proves
+     * it: a 200-leaf fan centres its root on the middle of a 6,400 pixel column, so the visible
+     * leaves' edges all come from a parent thousands of pixels off the top of the canvas, and
+     * every one of those elbows would be painted straight over the panel's heading and off its
+     * frame without the clip.
+     */
+    @Test
+    public void theSweepPaintsEveryVisibleEdgeThroughTheSeamAndNothingOutsideTheCanvas() {
+        // `fan` AND NOT `deepFan`, AND THE FIRST VERSION OF THIS TEST GOT IT WRONG. A deep fan's
+        // middle columns are SPARSE: at depth 1 a 3x4 tree has three boxes spread over 2,592
+        // pixels of height, so a 300px viewport at zoom 1.37 landed on TWO nodes and the
+        // precondition below failed against perfectly good code. Measured, not guessed -- the
+        // run reported `drawnLastFrame() = 2`. A one-deep fan puts every leaf in one column at
+        // the row pitch, so a viewport of this size always holds several, and each of them has
+        // an edge to the root whether or not the root itself is on screen.
+        PlanNode tree = PlanTrees.fan(200);
+        FlowCanvas canvas = inert(tree);
+        canvas.pos(0, 0).size(520, 300);
+        HeadlessLayout.layOut(panelAround(canvas));
+
+        canvas.setZoom(1.37f);
+        canvas.panToFraction(0.41, 0.53);
+        canvas.updateVisible();
+        assertTrue("the culler must have put something on screen, or the sweep has no work: "
+                   + canvas.drawnLastFrame(), canvas.drawnLastFrame() > 3);
+        assertTrue("and the view must really have scrolled, or layout and screen coincide",
+                   canvas.getScrollX() > 0 && canvas.getScrollY() > 0);
+
+        RectRecorder recorded = new RectRecorder();
+        canvas.sweepEdges(recorded);
+        assertTrue("the sweep must have drawn something: " + recorded.rects.size(),
+                   recorded.rects.size() > 6);
+
+        // EXPECTED FROM THE SEAM, pair by pair, over the same walk `sweepEdges` makes: each
+        // visible box's parent edge and each of its children's.
+        int expected = 0;
+        IntArray out = new IntArray();
+        for (int box = 0; box < canvas.nodeCount(); box++) {
+            if (!canvas.isVisible(box)) {
+                continue;
+            }
+            int parent = canvas.parentOf(box);
+            if (parent >= 0) {
+                canvas.edgeSegments(parent, box, out);
+                expected += out.size() / 4;
+            }
+            for (int child = 0; child < canvas.nodeCount(); child++) {
+                // ONCE PER EDGE, which is the rule `sweepEdges` follows and the reason this
+                // count is worth asserting: a visible child draws the edge from its own side,
+                // and `EDGE` is translucent, so painting it twice is 64% opacity where a line
+                // with one culled end gets 40%.
+                if (canvas.parentOf(child) == box && !canvas.isVisible(child)) {
+                    canvas.edgeSegments(box, child, out);
+                    expected += out.size() / 4;
+                }
+            }
+        }
+        assertEquals("the sweep must paint exactly what edgeSegments produces for the visible"
+                     + " boxes, or it is doing its own arithmetic", expected,
+                     recorded.rects.size());
+
+        for (int[] rect : recorded.rects) {
+            assertTrue("a painted rectangle must be inside the canvas, or the edge is drawn over"
+                       + " the panel's own chrome: " + java.util.Arrays.toString(rect)
+                       + " against 520x300",
+                       rect[0] >= 0 && rect[1] >= 0 && rect[2] > 0 && rect[3] > 0
+                       && rect[0] + rect[2] <= 520 && rect[1] + rect[3] <= 300);
+        }
+    }
+
+    /**
+     * Aiming at a parent and a child puts BOTH of them wholly in frame, and the canvas says no
+     * when no offset could. The witness for #330's scenario fix.
+     *
+     * THE ARITHMETIC THE PROD SHOT GOT STUCK ON, and it is worth writing the numbers down. A child
+     * sits exactly `COLUMN_PITCH` right of its parent, so a pair spans `COLUMN_PITCH +
+     * NODE_WIDTH` = 458 layout pixels. Centre either END on the production 612px canvas and the
+     * other overruns the panel by 48. `flow-nav` drags 60px, searched the boxes that happened to
+     * be in frame, found every pair with one end clipped, and reported "no edge can be measured"
+     * as a FAILURE -- while the PNG beside it showed the #330 fix working. Reaching a measurable
+     * state is navigation; refusing to is a verdict about the scenario.
+     *
+     * AT THE PRODUCTION GEOMETRY, THROUGH `forPanel` AND `flowPanel`, because the numbers are the
+     * whole claim: a test at the 300x180 used elsewhere in this file would report that nothing
+     * fits and would be telling the truth about the wrong panel.
+     *
+     * THE PAIR IS PICKED AWAY FROM THE LAYOUT'S EDGES ON PURPOSE. `panToBox` CLAMPS, so centring
+     * a parent at x=0 leaves the child in frame anyway -- which would make the "centring one end
+     * is not enough" control below pass for a reason that has nothing to do with the aim.
+     *
+     * AND THE IMPOSSIBLE CASE IS ASSERTED TOO. At `FlowZoom.MAX` a pair needs 916 pixels and no
+     * offset fits it into 612, so {@link FlowCanvas#pairFitsTheViewport} must answer NO rather
+     * than let a caller pan and hope. That is the one case where the shot is right to fail, and a
+     * screen that never says no turns it back into the silent skip this replaced.
+     */
+    @Test
+    public void aimingAtAPairPutsBothOfItsBoxesWhollyInFrame() {
+        PlanNode tree = PlanTrees.deepFan(3, 4);
+        PlanView plan = planWithWarnings(tree, 0);
+        FlowCanvas canvas = FlowCanvas.forPanel(plan, PlannerActions.NONE);
+        HeadlessLayout.layOut(PlannerWidgets.flowPanel(plan, canvas, PlannerActions.NONE));
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+        int width = canvas.getArea().width;
+        int height = canvas.getArea().height;
+        // ASSERTED AGAINST THE PANEL'S OWN CONSTANTS, not against 612 written out again: a
+        // literal here would pass while disagreeing with the panel, and every number in this
+        // test's reasoning is derived from the canvas being the production one.
+        assertEquals("this must be the production canvas or the numbers below are about nothing",
+                     PlannerWidgets.FLOW_CANVAS_WIDTH, width);
+        assertEquals(PlannerWidgets.flowCanvasHeight(plan), height);
+
+        int parent = -1;
+        int child = -1;
+        for (int c = 0; c < canvas.nodeCount() && child < 0; c++) {
+            int p = canvas.parentOf(c);
+            if (p < 0 || !canvas.pairFitsTheViewport(p, c)) {
+                continue;
+            }
+            FlowLayout.Box box = laid.boxes.get(p);
+            if (box.x < width || box.y < height) {
+                continue;
+            }
+            parent = p;
+            child = c;
+        }
+        assertTrue("the production canvas must hold SOME parent and child away from the layout's"
+                   + " edges at zoom 1, or flow-nav's measurement is impossible by construction",
+                   child >= 0);
+
+        // THE NEGATIVE FIRST, because "the pair is in frame after aiming" is a claim only a
+        // viewport that was NOT already showing it can make.
+        canvas.panToFraction(0, 0);
+        assertFalse("the origin must not already show a pair this deep, or the aim below proves"
+                    + " nothing", canvas.fullyShowing(parent) && canvas.fullyShowing(child));
+
+        canvas.panToPair(parent, child);
+        assertTrue("aiming at the pair must put the parent wholly in frame: "
+                   + java.util.Arrays.toString(canvas.boxRectOnScreen(parent)) + " against "
+                   + width + "x" + height, canvas.fullyShowing(parent));
+        assertTrue("and the child too: "
+                   + java.util.Arrays.toString(canvas.boxRectOnScreen(child)) + " against "
+                   + width + "x" + height, canvas.fullyShowing(child));
+
+        // CENTRING ONE END IS NOT ENOUGH, which is the reason this method exists rather than a
+        // second `panToBox` call. Without this the test would pass for a `panToPair` that simply
+        // delegated to `panToBox`.
+        canvas.panToBox(parent);
+        assertFalse("centring the parent must leave the child past the panel edge, or panToPair"
+                    + " is solving a problem that does not exist: child "
+                    + java.util.Arrays.toString(canvas.boxRectOnScreen(child)) + " on a canvas "
+                    + width + " wide", canvas.fullyShowing(child));
+
+        canvas.setZoom(FlowZoom.MAX);
+        assertFalse("a pair needs COLUMN_PITCH + NODE_WIDTH scaled -- 916 at MAX -- and that does"
+                    + " not fit " + width + ", so this must answer no rather than let the caller"
+                    + " pan and hope", canvas.pairFitsTheViewport(parent, child));
+        canvas.setZoom(FlowZoom.DEFAULT);
+        assertTrue("and it must say yes again at zoom 1, or it is answering no to everything",
+                   canvas.pairFitsTheViewport(parent, child));
+    }
+
+    /** Every rectangle the sweep produced, in order. */
+    private static final class RectRecorder implements FlowCanvas.RectSink {
+
+        private final java.util.List<int[]> rects = new java.util.ArrayList<int[]>();
+
+        @Override
+        public void rect(int x, int y, int width, int height) {
+            rects.add(new int[] {x, y, width, height});
+        }
+    }
+
+    /**
+     * A span is clipped to the canvas rather than drawn over the panel, and a span with nothing
+     * inside it is DROPPED rather than squashed against the border.
+     *
+     * BOTH SIGNS OF "NOTHING VISIBLE" ARE REACHABLE AND THE TEST SAYS SO. A span wholly to the
+     * left answers a negative length, and so does one wholly to the right; a caller testing
+     * `== 0` instead of `<= 0` would take a negative length as "no clipping needed" and paint a
+     * full-width rectangle for every edge whose far end is off the left of the canvas -- which on
+     * a scrolled diagram is most of them, and would read as a solid band across the middle of the
+     * diagram rather than as a missing line.
+     */
+    @Test
+    public void aSpanIsClippedToTheCanvasAndDroppedWhenNoneOfItIsInside() {
+        assertEquals("a span wholly inside is untouched", 10,
+                     FlowCanvas.clippedLength(5, 10, 100));
+        assertEquals("a span running off the right end keeps what fits", 5,
+                     FlowCanvas.clippedLength(95, 10, 100));
+        assertEquals("a span starting left of zero keeps what is inside", 4,
+                     FlowCanvas.clippedLength(-6, 10, 100));
+        assertEquals("a span longer than the canvas is the whole canvas", 100,
+                     FlowCanvas.clippedLength(-50, 300, 100));
+        assertTrue("a span wholly left of the canvas must answer a length no caller draws: "
+                   + FlowCanvas.clippedLength(-40, 10, 100),
+                   FlowCanvas.clippedLength(-40, 10, 100) <= 0);
+        assertTrue("and so must one wholly right of it: "
+                   + FlowCanvas.clippedLength(140, 10, 100),
+                   FlowCanvas.clippedLength(140, 10, 100) <= 0);
+        assertTrue("an empty canvas can hold nothing", FlowCanvas.clippedLength(0, 10, 0) <= 0);
+    }
+
+    /**
+     * NOTHING BUT THE SINK DRAWS AN EDGE, so the coordinates are always ones a test can read.
+     *
+     * THE #191 GATE APPLIED TO A PAINT CALL. The two tests above drive `sweepEdges` and can say
+     * everything about where an edge goes -- and they would go on passing if `draw` stopped
+     * calling the sweep and painted in layout coordinates again, because a headless test cannot
+     * see a `GuiDraw` call. That is not a hypothetical regression: it is the exact code #330
+     * replaced, and it survived three releases with `flow-nav2.png` cited as its proof.
+     *
+     * SO THE POLICY IS WHAT IS PINNED, and it is the policy that makes the sweep observable at
+     * all: every rectangle this package paints goes through `FlowCanvas.RectSink`, and the one
+     * implementation that reaches `GuiDraw` is a nested class of `FlowCanvas` and not
+     * `FlowCanvas` itself. Reintroducing the bug means painting from `draw`, which puts a
+     * `GuiDraw.drawRect` reference into `FlowCanvas.class` and reddens this.
+     *
+     * THE HOLDER IS SEARCHED, NOT NAMED `FlowCanvas$1`. An anonymous class's number is
+     * positional and shifts the moment anyone declares an earlier one, so a hardcoded index is
+     * wrong today or wrong at the next edit. Asserting that EXACTLY ONE nested class holds the
+     * call is also the stronger statement: a second painter is the thing being forbidden.
+     *
+     * AND THE CONVERSION IS ASSERTED AS A SECOND LINK, because a sweep that went through the
+     * sink and dropped `FlowZoom.toScreen` would satisfy everything above and be the original
+     * bug with more indirection.
+     */
+    @Test
+    public void theOnlyThingThatPaintsAnEdgeIsTheSinkTheSweepHandsRectanglesTo() throws Exception {
+        java.util.List<String> painters = new java.util.ArrayList<String>();
+        boolean sawFlowCanvas = false;
+        for (java.io.File classFile : io.github.jacoblasky.recipedump.ClassFiles.under(
+                io.github.jacoblasky.recipedump.ClassFiles.ROOT_PACKAGE + "/client/flow")) {
+            String name = io.github.jacoblasky.recipedump.ClassFiles.internalName(classFile);
+            java.util.Set<String> refs = io.github.jacoblasky.recipedump.ClassFiles
+                    .methodReferences(io.github.jacoblasky.recipedump.ClassFiles.read(classFile));
+            if (name.endsWith("/FlowCanvas")) {
+                sawFlowCanvas = true;
+                assertTrue("FlowCanvas must convert layout coordinates into screen coordinates"
+                           + " through FlowZoom.toScreen; without it every edge is painted where"
+                           + " the diagram was at scroll 0 and zoom 1 (#330): " + refs,
+                           references(refs, "FlowZoom.toScreen"));
+                // THE CONTROL: this scan can see a call FlowCanvas certainly makes. Without it an
+                // empty reference set -- a wrong path, a class that failed to parse -- would make
+                // every assertion here vacuous, and the absence of `GuiDraw.drawRect` below would
+                // be a statement about the scan rather than about the code.
+                assertTrue("the scan must find a call FlowCanvas definitely makes, or an absence"
+                           + " here says nothing: " + refs,
+                           references(refs, "FlowCulling.visibleIn"));
+            }
+            if (references(refs, "GuiDraw.drawRect")) {
+                painters.add(name);
+            }
+        }
+        assertTrue("the scan must have found FlowCanvas itself", sawFlowCanvas);
+        assertEquals("exactly one class in this package may paint an edge, and it is the sink"
+                     + " sweepEdges hands its rectangles to: " + painters, 1, painters.size());
+        assertTrue("the painter must be a nested class of FlowCanvas and NOT FlowCanvas itself;"
+                   + " a paint call in the canvas is a coordinate no headless test can read,"
+                   + " which is how #330 survived three releases: " + painters,
+                   painters.get(0).contains("/FlowCanvas$"));
+    }
+
+    private static boolean references(java.util.Set<String> refs, String suffix) {
+        for (String ref : refs) {
+            if (ref.contains(suffix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * MODULARUI'S OWN VIEWPORT MATRIX AGREES WITH THE CONVERSION THE EDGES USE, at the zooms and
+     * offsets where the two candidate composition orders differ. The claim #330's fix rests on,
+     * executed rather than read.
+     *
+     * WHY NOTHING ELSE HERE COULD MAKE THIS CLAIM. Every other assertion about #330 compares
+     * `FlowZoom.toScreen` with itself or with `FlowCanvas.toLayoutX`, which is this repository's
+     * own inverse -- so a conversion that composed the scroll translate and the zoom scale in the
+     * WRONG ORDER, consistently, would satisfy all of them. `zoom * (layout - scroll)` is identical
+     * at zoom 1 and at scroll 0 and diverges by `scroll * (zoom - 1)` elsewhere, and until this
+     * test the only thing that said which order was right was a reading of the ModularUI bytecode.
+     * An instrument that is correct where it was checked and cannot be checked anywhere else is the
+     * exact shape #330 spent three releases hiding behind.
+     *
+     * SO THE FRAMEWORK IS ASKED DIRECTLY, AND IT NEEDS NO WINDOW. `GuiViewportStack` is plain JOML
+     * arithmetic: `pushMatrix` on an empty stack builds an identity `TransformationMatrix`, and
+     * `translate`, `scale` and `transformX` reach neither GL nor Minecraft. So the REAL
+     * {@link FlowCanvas#transformChildren} runs here over a real stack -- the method
+     * `InternalWidgetTree.drawTree` calls at offset 194, where `super` translates by `-scroll` and
+     * the override scales by `zoom` -- and `transformX` reads whatever matrix JOML composed from
+     * those two calls. That is the space the node widgets land in, computed by code this repository
+     * did not write.
+     *
+     * WITHIN ONE PIXEL, BECAUSE THE TWO ROUND DIFFERENTLY AND BOTH ROUNDINGS ARE DELIBERATE.
+     * `TransformationMatrix.transformX` ends in `f2i`, which truncates toward zero;
+     * {@link FlowZoom#toScreen} rounds to nearest, for the reason its own note gives. One pixel is
+     * the whole of the permitted disagreement, and the control below requires the other order to
+     * be outside it -- otherwise agreeing with ModularUI here would say nothing.
+     */
+    @Test
+    public void modularUisOwnViewportMatrixAgreesWithTheConversionTheEdgesUse() {
+        PlanNode tree = PlanTrees.deepFan(3, 4);
+        FlowCanvas canvas = inert(tree);
+        canvas.pos(0, 0).size(520, 300);
+        HeadlessLayout.layOut(panelAround(canvas));
+        FlowLayout.Laid laid = FlowLayout.of(tree);
+
+        int compared = 0;
+        int discriminating = 0;
+        for (float zoom : new float[] {FlowZoom.MIN, FlowZoom.LABEL_LEGIBLE, FlowZoom.DEFAULT,
+                                       1.37f, FlowZoom.MAX}) {
+            canvas.setZoom(zoom);
+            for (double fraction : new double[] {0.0, 0.29, 0.61, 1.0}) {
+                canvas.panToFraction(fraction, fraction);
+                GuiViewportStack stack = new GuiViewportStack();
+                stack.pushMatrix();
+                canvas.transformChildren(stack);
+                // EVERY SEVENTH BOX AND NOT ALL 121, because the claim is about the map rather
+                // than about the boxes -- one matrix answers for every one of them -- and the
+                // coverage that matters is the twenty zoom-and-offset combinations around this.
+                for (int i = 0; i < laid.size(); i += 7) {
+                    FlowLayout.Box box = laid.boxes.get(i);
+                    int x = box.x + FlowLayout.NODE_WIDTH / 2;
+                    int y = box.y + FlowLayout.NODE_HEIGHT / 2;
+                    int frameworkX = stack.transformX(x, y);
+                    int frameworkY = stack.transformY(x, y);
+                    compared++;
+                    assertTrue("ModularUI puts layout " + x + "," + y + " at " + frameworkX + ","
+                               + frameworkY + " and the conversion the edges use says "
+                               + canvas.toScreenX(x) + "," + canvas.toScreenY(y) + ", at zoom "
+                               + zoom + " scroll " + canvas.getScrollX() + ","
+                               + canvas.getScrollY(),
+                               Math.abs(frameworkX - canvas.toScreenX(x)) <= 1
+                               && Math.abs(frameworkY - canvas.toScreenY(y)) <= 1);
+                    // THE CONTROL: the other composition order, which is what this fix would have
+                    // been if the bytecode had been read backwards. It has to sit further from
+                    // ModularUI's answer than the pixel of slack allowed above, or that assertion
+                    // is satisfied by both formulas and distinguishes nothing.
+                    if (Math.abs(frameworkX - Math.round(zoom * (x - canvas.getScrollX()))) > 1
+                            || Math.abs(frameworkY
+                                        - Math.round(zoom * (y - canvas.getScrollY()))) > 1) {
+                        discriminating++;
+                    }
+                }
+            }
+        }
+        assertTrue("the sweep must have compared something: " + compared, compared > 100);
+        // A MAJORITY AND NOT ALL OF THEM, because the two orders genuinely agree at zoom 1 and at
+        // scroll 0 -- eight of the twenty offsets swept here -- and a control that demanded
+        // otherwise would be red against correct code. That agreement is the bug's camouflage
+        // rather than a gap in this test: it is why #330 survived every screenshot ever taken.
+        assertTrue("the other composition order must be more than a pixel from ModularUI's answer"
+                   + " at most of the points compared, or agreeing with it proves nothing: "
+                   + discriminating + " of " + compared, discriminating * 2 > compared);
     }
 
     /**

@@ -17,6 +17,7 @@ import io.github.jacoblasky.recipedump.client.jei.PlannerGuiHandler;
 import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
 import io.github.jacoblasky.recipedump.client.planner.PlanView;
 import io.github.jacoblasky.recipedump.client.planner.PlannerWidgets;
+import io.github.jacoblasky.recipedump.graph.IntArray;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 
 /**
@@ -96,6 +97,32 @@ final class FlowInteractionShot {
      * BOTH OFFSETS ARE LOGGED, before and after, because the verdict is a boolean and the
      * MAGNITUDE is what says the pan followed the hand rather than merely moving. A drag of 60
      * pixels that moved the view by 4 is a broken pan that passes a "did it move" check.
+     *
+     * AND SINCE #330, THE PAN IS FOLLOWED BY AN EDGE-TO-NODE MEASUREMENT, because a scrolled
+     * canvas is the state in which the edges were wrong for three releases and this screen was
+     * already standing in it. `flow-nav2.png` shows craft nodes mid-canvas with orphaned edge
+     * fragments near the bottom edge, and it PASSED: the verdict asserted scroll offsets and node
+     * names and never asked whether a line touched a box. See {@link DragThenJump#findTheEdge}.
+     *
+     * THE MEASUREMENT NAVIGATES TO A STATE IT CAN BE TAKEN IN, which is the correction to the
+     * first version of it: on this fixture the drag leaves every parent/child pair with one end
+     * clipped by the panel, and "nothing measurable" was being reported as a failure of the code.
+     * See {@link DragThenJump#navigateToAMeasurablePair}.
+     *
+     * SO THIS SCREEN MAKES TWO CLAIMS THAT WANT THE VIEW IN DIFFERENT PLACES, AND THE ORDER IS
+     * WHAT KEEPS THEM FROM CANCELLING. The Root-jump proof needs the root OFF frame before the
+     * click; the adjacency measurement needs a pair panned wholly INTO frame, and on this layout
+     * the nearest such pair is the root's own edge. Run the navigation first and the pan puts the
+     * root back, so the jump proves nothing -- measured on rerun 3. The drag and the jump are
+     * therefore asserted where they happen, the measurement follows, and one verdict at the end
+     * reports both. `DragThenJump`'s step constants carry the invariant and
+     * `FlowInteractionShotTest` pins it.
+     *
+     * WHICH MEANS THE PNG SHOWS THE MEASURED-PAIR VIEW. The capture lands when the hold releases,
+     * which is now after the adjacency block -- so the screenshot is the diagram panned to the
+     * parent and child the numbers in the verdict are about, rather than the drag state or the
+     * root. That is the right pairing of picture and claim; `w-edges-nav.png` from rerun 2 remains
+     * the artifact for the drag state.
      */
     static void openNav(String arg) {
         PlanView plan = PlannerShot.fixtureFor(arg, DEFAULT_FIXTURE);
@@ -373,7 +400,43 @@ final class FlowInteractionShot {
 
     // -- flow-nav ------------------------------------------------------------------------------
 
-    private static final class DragThenJump extends DriveTheDiagram {
+    static final class DragThenJump extends DriveTheDiagram {
+
+        /**
+         * The gesture's steps, in the order they run.
+         *
+         * `DRAG_AND_RELEASE` RATHER THAN `DRAG`, and `ROOT_JUMP` rather than `JUMP_TO_ROOT`: this
+         * class already has a `DRAG` (the gesture's 60px distance) and reads
+         * `PlannerWidgets.JUMP_TO_ROOT` (the button's label), and a step sharing either name
+         * would compile while reading as the other thing.
+         *
+         * NAMED AND NOT LITERAL, BECAUSE THE ORDER IS A CONTRACT BETWEEN TWO PROOFS THAT SHARE ONE
+         * VIEWPORT. `flow-nav` makes two independent claims about this canvas and each needs the
+         * view in a DIFFERENT state:
+         *
+         *   - `ROOT_JUMP` needs the root OFF frame before the click, or "the button
+         *     brought it into frame" is satisfied by a root that never left;
+         *   - the #330 adjacency measurement needs a parent and child BOTH wholly in frame, which
+         *     on this layout means panning somewhere the drag did not land.
+         *
+         * Those two states are incompatible, so the order is what keeps them from cancelling. It
+         * has been wrong once in each direction: the measurement first, and it had nothing
+         * measurable to look at; the navigation before the jump, and the pan put the root back so
+         * the jump proved nothing (`rootShowingBefore` was true, measured on rerun 3 at scroll
+         * 0,132 with the nearest pair being box 0 -> 1, the root's own edge).
+         *
+         * DO NOT REORDER `ROOT_JUMP` AFTER `NAVIGATE`. `FlowInteractionShotTest` pins it,
+         * because the failure is a passing-looking verdict about the wrong thing rather than a
+         * crash.
+         */
+        static final int PRESS = 0;
+        static final int DRAG_AND_RELEASE = 1;
+        static final int ROOT_JUMP = 2;
+        static final int NAVIGATE = 3;
+        static final int MEASURE = 4;
+        static final int ARRIVAL = 5;
+        static final int DEPARTURE = 6;
+        static final int VERDICT = 7;
 
         private int[] anchor;
         private int scrollXBeforeDrag;
@@ -382,19 +445,282 @@ final class FlowInteractionShot {
         private int scrollYAfterDrag;
         private int step;
         private int since;
+        /**
+         * Everything found wrong, accumulated across the steps that measure it.
+         *
+         * A FIELD BECAUSE THE PROOFS NO LONGER SHARE A STEP. The drag and the Root jump are
+         * asserted where they happen -- they have to be, the viewport moves afterwards -- and the
+         * #330 findings are added at the end, so the single pass/fail report needs somewhere to
+         * collect them both.
+         */
+        private final List<String> wrong = new ArrayList<String>();
 
         /** How far the probe drags. Well past `FlowCanvas`'s threshold, and inside the canvas. */
         private static final int DRAG = 60;
 
+        /**
+         * How far inside a node's border the edge probe aims, in screen pixels.
+         *
+         * THE EDGE STOPS ON THE BORDER, WHICH IS THE POINT: the elbow's last run ends at the
+         * child's left edge, so the pixel to ask about is just inside it. Two rather than one
+         * because a node's own nine-slice frame occupies the outermost pixel and the answer
+         * there would be about the border rather than about the node.
+         */
+        private static final int INSIDE = 2;
+
+        // -- #330: the edge-to-node measurement, taken while the view is scrolled --------------
+
+        /** The parent/child pair being measured, or -1 when none was found. */
+        private int edgeParent = -1;
+        private int edgeChild = -1;
+        /** The rectangles `FlowCanvas.draw` paints for that pair, as {x,y,w,h} quads. */
+        private final IntArray segments = new IntArray();
+        private int arrivalX;
+        private int arrivalY;
+        private int departureX;
+        private int departureY;
+        private int[] childRect;
+        private int[] parentRect;
+        /** -2 = not probed yet, -1 = nothing there, otherwise a box index. */
+        private int arrivalHovered = -2;
+        private int arrivalLayoutBox = -2;
+        private int departureHovered = -2;
+        private int departureLayoutBox = -2;
+
         @Override
         boolean drive(ModularScreen screen, FlowCanvas canvas, int poll) {
-            if (step == 0) {
+            if (step == PRESS) {
                 return pressOnEmptyCanvas(screen, canvas);
             }
-            if (step == 1) {
+            if (step == DRAG_AND_RELEASE) {
                 return dragAndRelease(screen, canvas);
             }
-            return jumpBackToTheRoot(screen, canvas);
+            // THE ROOT JUMP BEFORE THE NAVIGATION, and see the step constants for why the order
+            // is load-bearing rather than incidental.
+            if (step == ROOT_JUMP) {
+                return jumpBackToTheRoot(screen, canvas);
+            }
+            if (step == NAVIGATE) {
+                return navigateToAMeasurablePair(canvas);
+            }
+            if (step == MEASURE) {
+                return findTheEdge(canvas);
+            }
+            if (step == ARRIVAL) {
+                return probeTheEdgeEnd(canvas, true);
+            }
+            if (step == DEPARTURE) {
+                return probeTheEdgeEnd(canvas, false);
+            }
+            return reportTheVerdict();
+        }
+
+        /**
+         * Pick a parent/child pair both wholly in frame and read the rectangles the canvas paints
+         * for the edge between them. #330.
+         *
+         * PROGRAMMATIC BECAUSE THE PICTURE ALREADY LIED ONCE. `flow-nav2.png` was produced by
+         * this very screen with every edge in the wrong place, and it was cited as the artifact
+         * that proved the diagram worked. So the numbers are read here and asserted, and the
+         * screenshot is what a human looks at afterwards rather than the evidence.
+         *
+         * THE RECTANGLES COME FROM `FlowCanvas.edgeSegments`, WHICH IS THE CALL `draw` MAKES.
+         * Not a re-derivation of it: the sweep loops over the culled boxes and hands each pair to
+         * that method, so what is measured below is the geometry that was painted this frame.
+         *
+         * BOTH BOXES WHOLLY IN FRAME, so all three segments of the elbow are inside the canvas
+         * and none is clipped -- which keeps this a measurement of the conversion rather than of
+         * the clip, and means the arrival pixel is a pixel the cursor can be parked on.
+         */
+        /**
+         * Pan until some parent and child are both wholly in frame, and say which. #330.
+         *
+         * "NOTHING MEASURABLE HERE" IS A NAVIGATION STEP, NOT A VERDICT, AND THE FIRST VERSION
+         * GOT THAT WRONG. It searched the boxes that happened to be in frame after the drag, and
+         * on `plan-truncated` every pair had at least one end clipped by the panel edge -- so the
+         * shot exited on its own "no edge can be measured" report while the PNG beside it showed
+         * the #330 fix working. A probe that can reach a measurable state and declines to is
+         * reporting on the scenario, not on the code.
+         *
+         * THE PAIR IS CHOSEN FROM THE LAYOUT AND NOT FROM WHAT IS VISIBLE, because visibility is
+         * the thing about to be arranged. What disqualifies a pair is that it CANNOT fit -- a
+         * child sits `COLUMN_PITCH` right of its parent, so the pair spans 458 layout pixels and
+         * needs 916 at `FlowZoom.MAX`, which no pan fits into a 612px canvas. That is the only
+         * case left that fails, and it fails loudly with the numbers.
+         *
+         * NEAREST TO THE CENTRE OF THE DRAGGED VIEW, so the navigation is the smallest one that
+         * works and the measurement still happens near where the drag left off. Through
+         * `FlowCanvas.panToPair`, which is the production aim: centring either END leaves the
+         * other 48 pixels past the panel, which is exactly how this scenario got stuck.
+         */
+        private boolean navigateToAMeasurablePair(FlowCanvas canvas) {
+            Area area = canvas.getArea();
+            int fitting = 0;
+            int atTheOrigin = 0;
+            for (int child = 0; child < canvas.nodeCount(); child++) {
+                int parent = canvas.parentOf(child);
+                if (parent < 0 || !canvas.pairFitsTheViewport(parent, child)) {
+                    continue;
+                }
+                fitting++;
+                canvas.panToPair(parent, child);
+                // BOTH OFFSETS MUST BE NON-ZERO, AND THIS IS THE POINT OF MEASURING AT ALL. At
+                // scroll 0 the pre-#330 sweep painted in the RIGHT PLACE, because layout and
+                // screen coordinates are the same numbers there -- so a measurement taken at an
+                // offset of zero on an axis cannot tell the fix from the bug on that axis. Rerun 3
+                // measured at scroll 0,132: correct, and blind on x. `panToPair` clamps, so aiming
+                // at a pair within half a viewport of the layout's origin lands exactly there,
+                // which is also why the nearest pair to a just-jumped-to root is the worst
+                // possible choice.
+                if (canvas.getScrollX() <= 0 || canvas.getScrollY() <= 0) {
+                    atTheOrigin++;
+                    continue;
+                }
+                // Belt and braces against the clamp: with no clamping both ends are in frame by
+                // construction, so this only fires at the far edges of the layout.
+                if (!canvas.fullyShowing(parent) || !canvas.fullyShowing(child)) {
+                    continue;
+                }
+                edgeParent = parent;
+                edgeChild = child;
+                ShotHarness.log("flow-nav #330: " + fitting + " of this plan's edges fit a "
+                                + area.width + "x" + area.height + " canvas at zoom "
+                                + canvas.zoom() + " and " + atTheOrigin + " of those aim at an"
+                                + " offset of zero on an axis; navigated to box " + edgeParent
+                                + " -> " + edgeChild + "; scroll " + canvas.getScrollX() + ","
+                                + canvas.getScrollY());
+                step = MEASURE;
+                since = 0;
+                return true;
+            }
+            ShotScreens.reportFail("no parent and child pair can be measured on a " + area.width
+                                   + "x" + area.height + " canvas at zoom " + canvas.zoom()
+                                   + ": " + fitting + " fit at all and " + atTheOrigin + " of"
+                                   + " those aim at an offset of zero on an axis, where layout"
+                                   + " and screen coordinates coincide and the measurement would"
+                                   + " pass against the bug (#330): " + canvas.cursorDiagnostic());
+            return false;
+        }
+
+        /**
+         * Read the rectangles the canvas paints for the pair {@link #navigateToAMeasurablePair}
+         * aimed at. #330.
+         *
+         * PROGRAMMATIC BECAUSE THE PICTURE ALREADY LIED ONCE. `flow-nav2.png` was produced by this
+         * very screen with every edge in the wrong place, and it was cited as the artifact that
+         * proved the diagram worked. So the numbers are read here and asserted, and the screenshot
+         * is what a human looks at afterwards rather than the evidence.
+         *
+         * THE RECTANGLES COME FROM `FlowCanvas.edgeSegments`, WHICH IS THE CALL `draw` MAKES. Not
+         * a re-derivation of it: the sweep loops over the culled boxes and hands each pair to that
+         * method, so what is measured below is the geometry that was painted this frame.
+         *
+         * THE AIM IS VERIFIED RATHER THAN ASSUMED. `panToPair` clamps, so a pair within half a
+         * viewport of an edge of the layout can be asked for and not delivered; this is where that
+         * shows up, with both rectangles in the message.
+         */
+        private boolean findTheEdge(FlowCanvas canvas) {
+            if (!canvas.fullyShowing(edgeParent) || !canvas.fullyShowing(edgeChild)) {
+                ShotScreens.reportFail("panToPair aimed at boxes " + edgeParent + " -> "
+                                       + edgeChild + " and they are still not both wholly in"
+                                       + " frame: parent "
+                                       + java.util.Arrays.toString(
+                                               canvas.boxRectOnScreen(edgeParent))
+                                       + ", child "
+                                       + java.util.Arrays.toString(
+                                               canvas.boxRectOnScreen(edgeChild))
+                                       + " against " + canvas.getArea().width + "x"
+                                       + canvas.getArea().height + " (#330)");
+                return false;
+            }
+            canvas.edgeSegments(edgeParent, edgeChild, segments);
+            parentRect = canvas.boxRectOnScreen(edgeParent);
+            childRect = canvas.boxRectOnScreen(edgeChild);
+            if (segments.size() != 12) {
+                ShotScreens.reportFail("an unclipped elbow must be three rectangles and this one"
+                                       + " is " + (segments.size() / 4) + " (#330)");
+                return false;
+            }
+            // The elbow leaves the parent's right border with its first run and arrives at the
+            // child's left border with its last, so the two ends are the first quad's left edge
+            // and the last quad's right edge.
+            departureX = segments.get(0);
+            departureY = segments.get(1);
+            arrivalX = segments.get(8) + segments.get(10);
+            arrivalY = segments.get(9);
+            ShotHarness.log("flow-nav #330: box " + edgeParent + " -> " + edgeChild
+                            + " at zoom " + canvas.zoom() + " scroll " + canvas.getScrollX()
+                            + "," + canvas.getScrollY()
+                            + "; painted " + quads(segments)
+                            + "; parent rect " + java.util.Arrays.toString(parentRect)
+                            + ", child rect " + java.util.Arrays.toString(childRect)
+                            + "; departure " + departureX + "," + departureY
+                            + ", arrival " + arrivalX + "," + arrivalY);
+            step = ARRIVAL;
+            since = 0;
+            return true;
+        }
+
+        /**
+         * Park the real cursor just inside the node an edge end touches, and ask TWO independent
+         * sources what is there. #330.
+         *
+         * THE POINT OF DRIVING A REAL CURSOR IS THAT MODULARUI ANSWERS. `FlowCanvas.hoveredBox`
+         * reads `IWidget.isHovering`, which is the verdict `getWidgetsAt` produced this frame by
+         * walking the viewport stack's INVERSE -- the framework's own opinion about where it put
+         * that node widget on screen, computed by code this repository did not write. That is the
+         * half a self-consistent conversion cannot fake: an edge painted in layout coordinates
+         * lands the cursor wherever the diagram was before it scrolled, and ModularUI reports the
+         * node that is really there, or none.
+         *
+         * `boxAtCursor` IS ASKED AS WELL AND IT IS A DIFFERENT QUESTION. That one is the layout's
+         * answer through `toLayoutX`, so the two together are `flow-hit`'s comparison narrowed to
+         * one pixel that matters. Reported separately, because "the layout disagrees" and
+         * "ModularUI disagrees" have different causes and a single boolean would hide which.
+         *
+         * FIVE SETTLE POLLS, which is what `flow-hit` measured a cursor move to need before the
+         * hover flags catch up. Re-parked every poll, per `ScrollToRow`'s fix: whatever swallowed
+         * the first attempt, the last poll before the read is a parked one.
+         */
+        private boolean probeTheEdgeEnd(FlowCanvas canvas, boolean arrival) {
+            Area area = canvas.getArea();
+            int x = arrival ? arrivalX + INSIDE : departureX - INSIDE;
+            int y = arrival ? arrivalY : departureY;
+            ScreenCursor.park(area.x + x, area.y + y);
+            if (since++ < SETTLE_POLLS) {
+                return true;
+            }
+            int hovered = canvas.hoveredBox();
+            int layoutBox = canvas.boxAtCursor();
+            if (arrival) {
+                arrivalHovered = hovered;
+                arrivalLayoutBox = layoutBox;
+            } else {
+                departureHovered = hovered;
+                departureLayoutBox = layoutBox;
+            }
+            ShotHarness.log("flow-nav #330: parked " + INSIDE + "px inside the "
+                            + (arrival ? "child" : "parent") + " at the "
+                            + (arrival ? "arrival" : "departure") + " end (" + x + "," + y
+                            + " on the canvas, screen " + (area.x + x) + "," + (area.y + y)
+                            + "); ModularUI says hoveredBox=" + hovered
+                            + ", the layout says boxAt=" + layoutBox
+                            + ", wanted " + (arrival ? edgeChild : edgeParent)
+                            + " [" + canvas.cursorDiagnostic() + "]");
+            step = arrival ? DEPARTURE : VERDICT;
+            since = 0;
+            return true;
+        }
+
+        /** The quads in `out` as `x,y wxh` triples, for the log. */
+        private static String quads(IntArray out) {
+            StringBuilder text = new StringBuilder();
+            for (int i = 0; i + 3 < out.size(); i += 4) {
+                text.append(i == 0 ? "" : " | ").append(out.get(i)).append(',')
+                        .append(out.get(i + 1)).append(' ').append(out.get(i + 2))
+                        .append('x').append(out.get(i + 3));
+            }
+            return text.toString();
         }
 
         private boolean pressOnEmptyCanvas(ModularScreen screen, FlowCanvas canvas) {
@@ -427,7 +753,7 @@ final class FlowInteractionShot {
                             + "); the screen " + (taken ? "took" : "did NOT take") + " it;"
                             + " scroll before the drag = " + scrollXBeforeDrag + ","
                             + scrollYBeforeDrag);
-            step = 1;
+            step = DRAG_AND_RELEASE;
             since = 0;
             return true;
         }
@@ -451,7 +777,7 @@ final class FlowInteractionShot {
                             + scrollXAfterDrag + "," + scrollYAfterDrag
                             + "  (moved " + (scrollXAfterDrag - scrollXBeforeDrag) + ","
                             + (scrollYAfterDrag - scrollYBeforeDrag) + ")");
-            step = 2;
+            step = ROOT_JUMP;
             since = 0;
             return true;
         }
@@ -483,7 +809,6 @@ final class FlowInteractionShot {
                             + " and is now " + (rootShowingAfter ? "in frame" : "STILL off frame")
                             + "; scroll " + canvas.getScrollX() + "," + canvas.getScrollY());
 
-            List<String> wrong = new ArrayList<String>();
             int movedX = scrollXAfterDrag - scrollXBeforeDrag;
             int movedY = scrollYAfterDrag - scrollYBeforeDrag;
             if (movedX != DRAG || movedY != DRAG) {
@@ -494,11 +819,67 @@ final class FlowInteractionShot {
                           + " and must move it by " + DRAG + "," + DRAG);
             }
             if (rootShowingBefore) {
-                wrong.add("the drag left the root in frame, so the jump below proves nothing");
+                // ASSERTED HERE AND NOT AT THE END, because by the end the view has moved twice.
+                // This is the reason `ROOT_JUMP` runs before `NAVIGATE`: the pan that finds a
+                // measurable pair can put the root back in frame, and then this reads as a drag
+                // that never left it. Measured on rerun 3.
+                wrong.add("the drag left the root in frame, so the jump proves nothing");
             }
             if (!rootShowingAfter) {
                 wrong.add("'" + PlannerWidgets.JUMP_TO_ROOT + "' did not bring the root wholly"
                           + " into frame");
+            }
+            step = NAVIGATE;
+            since = 0;
+            return true;
+        }
+
+        /**
+         * One pass or fail for the whole gesture, after every measurement has been taken. #330.
+         *
+         * ITS OWN STEP BECAUSE THE TWO PROOFS NO LONGER SHARE A VIEWPORT. The drag and the Root
+         * jump are asserted where they happen -- they have to be, the view moves afterwards -- and
+         * the #330 findings are added here, so this is the one place that reports. A hold that
+         * reported twice would have the second report overwrite the first.
+         *
+         * THE CAPTURE LANDS AFTER THIS, so the PNG shows the MEASURED-PAIR view: the diagram
+         * panned to the parent and child the adjacency probe measured, not the drag state and
+         * not the root. That is a deliberate consequence of the ordering -- it shows the state the
+         * numbers in this verdict are about. `w-edges-nav.png` from rerun 2 remains the artifact
+         * for the drag state.
+         */
+        private boolean reportTheVerdict() {
+            if (arrivalHovered != edgeChild) {
+                // THE FRAMEWORK'S OWN ANSWER. An edge painted in LAYOUT coordinates puts this
+                // pixel where the diagram would be at scroll 0, which at the non-zero offset
+                // `navigateToAMeasurablePair` insists on is somewhere else entirely -- so
+                // ModularUI reports the node that is really there, a different one or none.
+                wrong.add("the edge into box " + edgeChild + " arrives at " + arrivalX + ","
+                          + arrivalY + ", where ModularUI says box " + arrivalHovered + " is"
+                          + " (child rect " + java.util.Arrays.toString(childRect) + ") (#330)");
+            }
+            if (arrivalLayoutBox != edgeChild) {
+                wrong.add("and the layout puts box " + arrivalLayoutBox + " under that pixel"
+                          + " rather than " + edgeChild + " (#330)");
+            }
+            if (departureHovered != edgeParent) {
+                // BOTH ENDS, because they fail differently: a sweep that converted the origin
+                // and not the extent, or scaled the width as well as the position, gets one of
+                // the two right and would pass a one-ended check.
+                wrong.add("the edge out of box " + edgeParent + " leaves " + departureX + ","
+                          + departureY + ", where ModularUI says box " + departureHovered + " is"
+                          + " (parent rect " + java.util.Arrays.toString(parentRect) + ") (#330)");
+            }
+            if (departureLayoutBox != edgeParent) {
+                wrong.add("and the layout puts box " + departureLayoutBox + " under that pixel"
+                          + " rather than " + edgeParent + " (#330)");
+            }
+            if (childRect != null && Math.abs(arrivalY - (childRect[1] + childRect[3] / 2)) > 1) {
+                // THE MIDDLE OF THE NODE, NOT ITS TOP. An elbow drawn at `box.y` touches the
+                // frame rather than the node and reads as a rounding error rather than as a
+                // missing conversion.
+                wrong.add("the edge arrives at y " + arrivalY + " and the child's centre is "
+                          + (childRect[1] + childRect[3] / 2) + " (#330)");
             }
             if (wrong.isEmpty()) {
                 ShotScreens.reportPass();

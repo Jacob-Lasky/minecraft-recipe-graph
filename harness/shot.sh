@@ -62,8 +62,23 @@ if [ "$#" -gt 0 ]; then shift; fi
 . "$(dirname "$0")/../tools/gate.sh"
 
 HOST_CODING="${HOST_CODING:-/mnt/user/misc/coding}"
-REPO_NAME="${REPO_NAME:-$(basename "$(cd "$(dirname "$0")/.." && pwd)")}"
-HOST_REPO="${HOST_REPO:-$HOST_CODING/$REPO_NAME}"
+# HOST_REPO IS DERIVED BY TRANSLATING THE REPO ROOT'S CONTAINER PATH, NOT BY BASENAME -- the
+# same correction `prodclient/prodshot.sh` carries, for the same measured failure. A git
+# worktree's root is /coding/.recipegraph-build/wt-<name>, so basename made this
+# $HOST_CODING/wt-<name>, which exists on no host: the `-v` source is resolved on the UnRAID
+# HOST, docker creates the missing directory, and the mount succeeds against NOTHING -- so the
+# run dies inside the container on a file that is sitting right there outside it.
+#
+# Everything under this container's /coding is the host's $HOST_CODING/<same suffix>, worktree
+# or not, so the suffix is the one honest answer; the basename form survives only as the
+# fallback for a repo that does not live under /coding. DO NOT reduce this back to
+# `$HOST_CODING/$(basename ...)`: `tests/test_prodclient_harness.py` asserts that BOTH harness
+# scripts translate, because #330 fixed prodshot.sh and left this line alone.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+case "$REPO_ROOT" in
+    /coding/*) HOST_REPO="${HOST_REPO:-$HOST_CODING/${REPO_ROOT#/coding/}}" ;;
+    *)         HOST_REPO="${HOST_REPO:-$HOST_CODING/$(basename "$REPO_ROOT")}" ;;
+esac
 HOST_BUILD="${HOST_BUILD:-$HOST_CODING/.recipegraph-build}"
 
 # This container's view of the same three places, for the checks below and for reading the

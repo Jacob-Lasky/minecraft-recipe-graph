@@ -65,8 +65,18 @@ if [ "$#" -gt 0 ]; then shift; fi
 . "$(dirname "$0")/../../tools/gate.sh"
 
 HOST_CODING="${HOST_CODING:-/mnt/user/misc/coding}"
-REPO_NAME="${REPO_NAME:-$(basename "$(cd "$(dirname "$0")/../.." && pwd)")}"
-HOST_REPO="${HOST_REPO:-$HOST_CODING/$REPO_NAME}"
+# HOST_REPO is derived by TRANSLATING the repo root's container path, not by basename. A git
+# worktree's root is /coding/.recipegraph-build/wt-<name>, and basename made that
+# $HOST_CODING/wt-<name> -- a path that exists on no host, which per the warning above mounts
+# an EMPTY directory and dies as "/harness/launch.sh: not found" (measured 2026-08-24, exit
+# 127 after a green build). Everything under this container's /coding is the host's
+# $HOST_CODING/<same suffix>, worktree or not, so the suffix is the one honest answer; the
+# basename form survives only as the fallback for a repo that does not live under /coding.
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+case "$REPO_ROOT" in
+    /coding/*) HOST_REPO="${HOST_REPO:-$HOST_CODING/${REPO_ROOT#/coding/}}" ;;
+    *)         HOST_REPO="${HOST_REPO:-$HOST_CODING/$(basename "$REPO_ROOT")}" ;;
+esac
 HOST_BUILD="${HOST_BUILD:-$HOST_CODING/.recipegraph-build}"
 LOCAL_BUILD="${LOCAL_BUILD:-/coding/.recipegraph-build}"
 

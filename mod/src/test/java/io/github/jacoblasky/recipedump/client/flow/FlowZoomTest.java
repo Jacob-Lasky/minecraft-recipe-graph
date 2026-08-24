@@ -179,6 +179,90 @@ public class FlowZoomTest {
         }
     }
 
+    /**
+     * The forward map lands every layout point inside the box the inverse maps it back to (#330).
+     *
+     * THE ROUND TRIP IS THE ASSERTION, and it is the property the edges actually need: an edge
+     * endpoint converted with {@link FlowZoom#toScreen} must, when put back through the inverse
+     * the canvas hit-tests with, come back to the layout pixel it started from -- or near enough
+     * that it is still inside the 209x26 node. `FlowCanvas.toLayoutX` is
+     * `floor((screen + scroll) / zoom)`, which is the inverse ModularUI is measured to agree with
+     * by `flow-hit` on every harness run.
+     *
+     * SWEPT RATHER THAN SPOT-CHECKED, per this file's header. The error is bounded by the
+     * rounding, so one pixel of layout at zoom 1 and two at 0.5 -- what must not happen is a
+     * drift that GROWS with the offset, which is what the wrong composition order produces.
+     */
+    @Test
+    public void aLayoutPointConvertedToScreenComesBackToWhereItStarted() {
+        for (float zoom : ZOOMS) {
+            for (int scroll = 0; scroll < 4000; scroll += 37) {
+                for (int layout = 0; layout < 20000; layout += 211) {
+                    int screen = FlowZoom.toScreen(layout, zoom, scroll);
+                    int back = (int) Math.floor((screen + scroll) / (double) zoom);
+                    int slack = (int) Math.ceil(1.0 / zoom);
+                    assertTrue("zoom " + zoom + " scroll " + scroll + " layout " + layout
+                            + " -> screen " + screen + " -> layout " + back,
+                            Math.abs(back - layout) <= slack);
+                }
+            }
+        }
+    }
+
+    /**
+     * The scale is INSIDE the translate, which is the one thing about this that can be silently
+     * wrong (#330).
+     *
+     * MEASURED FROM THE BYTECODE, NOT ASSUMED. `AbstractScrollWidget.transformChildren` calls
+     * `IViewportStack.translate(-scrollX, -scrollY)`, `FlowCanvas.transformChildren` then calls
+     * `stack.scale(zoom, zoom)`, and `GuiViewportStack` implements both with JOML's
+     * post-multiplying `Matrix4f.translate` and `Matrix4f.scale` -- so a child's point comes out
+     * at `layout * zoom - scroll`.
+     *
+     * THE OTHER ORDER AGREES AT ZOOM 1 AND AT SCROLL 0, which is the whole reason it is worth a
+     * test: `zoom * (layout - scroll)` is identical everywhere a screenshot of an unzoomed
+     * diagram at the origin could look, and diverges by `scroll * (zoom - 1)` -- 400 pixels at
+     * zoom 2 with the view 400 along. This asserts the agreement AND the divergence, because
+     * only the second one distinguishes the two formulas.
+     */
+    @Test
+    public void theZoomScalesTheLayoutPointAndTheScrollIsSubtractedAfterIt() {
+        assertEquals("at zoom 1 the conversion is a plain translate", 300 - 120,
+                FlowZoom.toScreen(300, 1.0f, 120));
+        assertEquals("and at scroll 0 it is a plain scale", 600,
+                FlowZoom.toScreen(300, 2.0f, 0));
+        assertEquals("a layout point at zoom 2 with the view 400 along", 600 - 400,
+                FlowZoom.toScreen(300, 2.0f, 400));
+        assertEquals("the other order would give " + (2.0f * (300 - 400)) + " here, which is the"
+                + " same answer only when the zoom is 1 or the scroll is 0", 200,
+                FlowZoom.toScreen(300, 2.0f, 400));
+        assertTrue("the two formulas must really differ at this offset, or the assertion above"
+                + " pins nothing",
+                FlowZoom.toScreen(300, 2.0f, 400) != Math.round(2.0f * (300 - 400)));
+        // AND THE CLAMP APPLIES, so a NaN or an out-of-range zoom cannot put an edge at
+        // `Integer.MIN_VALUE` instead of drawing nothing.
+        assertEquals(FlowZoom.toScreen(300, FlowZoom.DEFAULT, 10),
+                FlowZoom.toScreen(300, Float.NaN, 10));
+        assertEquals(FlowZoom.toScreen(300, FlowZoom.MAX, 10),
+                FlowZoom.toScreen(300, 99f, 10));
+    }
+
+    /**
+     * Half a node is not an integer, and rounding it before scaling loses the half.
+     *
+     * WHY THE PARAMETER IS A `double`. An edge meets a node at the middle of its 26px height,
+     * which is 13 exactly -- but `parkCursorOverBox` centres on half of a 209px WIDTH, and 104.5
+     * scaled by 2 is 209 while 104 scaled by 2 is 208. A pixel is not much on its own; it is
+     * enough for the cursor probe and the drawn edge to disagree about which pixel is the centre,
+     * which is the kind of one-off that reads as a broken probe.
+     */
+    @Test
+    public void aFractionalLayoutCoordinateKeepsItsHalfPixelUntilAfterTheScale() {
+        assertEquals(209, FlowZoom.toScreen(104.5, 2.0f, 0));
+        assertEquals(208, FlowZoom.toScreen(104, 2.0f, 0));
+        assertEquals("13 at zoom 1 is still 13", 13, FlowZoom.toScreen(13, 1.0f, 0));
+    }
+
     @Test
     public void zoomIsClampedAndNaNDoesNotBecomeABlankDiagram() {
         assertEquals(FlowZoom.MIN, FlowZoom.clamp(0.01f), 0.0f);

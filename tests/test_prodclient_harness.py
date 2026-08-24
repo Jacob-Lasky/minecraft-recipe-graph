@@ -38,6 +38,18 @@ def read(name):
         return handle.read()
 
 
+def read_harness(name):
+    """A script one level up, in `harness/` itself.
+
+    `shot.sh` is not part of the production-client harness, but it bind-mounts the repository
+    into a container exactly as `prodshot.sh` does, so the one assertion below that is about
+    THAT has to be able to reach both. See
+    `test_both_container_harnesses_translate_the_repo_path_rather_than_basenaming_it`.
+    """
+    with open(os.path.join(REPO, "harness", name), encoding="utf-8") as handle:
+        return handle.read()
+
+
 def strip_comments(text):
     """Shell comments, removed, because a script that EXPLAINS a setting mentions it too.
 
@@ -82,6 +94,43 @@ class ProdClientHarnessTest(unittest.TestCase):
             self.assertEqual(in_launch, in_prodshot,
                              f"{var} differs: launch.sh says {in_launch!r}, "
                              f"prodshot.sh says {in_prodshot!r}")
+
+    def test_both_container_harnesses_translate_the_repo_path_rather_than_basenaming_it(self):
+        """A `-v` whose source does not exist on the host mounts an EMPTY directory, silently.
+
+        `prodshot.sh` and `shot.sh` each bind-mount the repository into their container, and the
+        source of a `-v` is resolved on the UnRAID HOST rather than in this container. Both
+        derived it as `$HOST_CODING/$(basename <repo root>)`, which is right for a normal
+        checkout and wrong for a git WORKTREE: the root is `/coding/.recipegraph-build/wt-<name>`,
+        basename is `wt-<name>`, and `$HOST_CODING/wt-<name>` exists nowhere. Docker creates the
+        missing directory and mounts nothing into it, so the run fails on a file that is sitting
+        right there outside the container -- measured as `/harness/launch.sh: not found`, exit
+        127, after a green build.
+
+        THE ONLY HONEST DERIVATION IS THE SUFFIX. Everything under this container's `/coding` is
+        the host's `$HOST_CODING/<same suffix>`, worktree or not, so the prefix is the whole of
+        the translation. `prodshot.sh` already did exactly this one screen further down, for
+        `HOST_OBJECTS`; the basename form contradicted its own file.
+
+        ASSERTED FOR BOTH SCRIPTS BECAUSE ONLY ONE OF THEM WAS FIXED. #330 corrected
+        `prodshot.sh` and left `shot.sh` holding the identical line -- the two-copies-one-fix
+        shape that makes the next worktree screenshot fail the same way for the same reason, and
+        the reason this is a sweep over both rather than an assertion about one.
+        """
+        pattern = r"HOST_REPO[^\n]*#/coding/"
+        # THE SCREEN IS MADE TO FAIL FIRST. A regex that matched nothing would pass this test by
+        # reporting both scripts clean, so the pre-#330 line is fed to it and must be rejected.
+        self.assertNotRegex('HOST_REPO="${HOST_REPO:-$HOST_CODING/$REPO_NAME}"', pattern,
+                            "the pattern accepts the basename form, so it screens nothing")
+        for label, text in (("prodclient/prodshot.sh", read("prodshot.sh")),
+                            ("shot.sh", read_harness("shot.sh"))):
+            body = strip_comments(text)
+            self.assertIn("HOST_REPO", body,
+                          f"{label} no longer derives HOST_REPO, so this asserts nothing about it")
+            self.assertRegex(body, pattern,
+                             f"{label} must translate its /coding path into the host one rather "
+                             f"than basename it: a -v source that exists on no host mounts an "
+                             f"empty directory and the failure names a missing file")
 
     def test_the_container_cap_stays_under_the_host_ceiling(self):
         """8g is not a style preference. Tower runs the household's Home Assistant and its

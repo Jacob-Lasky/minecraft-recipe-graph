@@ -206,6 +206,7 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
                 counts[box.parent]++;
             }
         }
+        this.onScreen = new boolean[laid.size()];
         this.childrenOf = new int[laid.size()][];
         for (int i = 0; i < laid.size(); i++) {
             childrenOf[i] = new int[counts[i]];
@@ -400,6 +401,32 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
     }
 
     /**
+     * Layout coordinate to a screen point relative to this widget's area, at this zoom.
+     *
+     * THE PAIR ABOVE, RUN THE OTHER WAY, AND THE ONE PLACE THAT KNOWS THE VIEWPORT'S MAP.
+     * {@link FlowZoom#toScreen} says which order ModularUI composes the scroll translate and the
+     * zoom scale in, and why the other order is right at zoom 1 and wrong everywhere else.
+     *
+     * FIVE THINGS NEED IT, AND FOUR OF THEM HAD IT WRITTEN OUT BY HAND, which is how the fifth
+     * came to be written without it at all: {@link #fullyShowing} (through
+     * {@link #boxRectOnScreen}), {@link #parkCursorOverBox}, {@link #jumpToSelected}, the edge
+     * sweep and the harness. All five go through here now.
+     *
+     * {@link #panToBox} DELIBERATELY DOES NOT, and it is the one caller that must not be
+     * "tidied" into this. It PRODUCES a scroll offset rather than consuming one, so it wants
+     * `round(layout * zoom)` with no scroll term at all; routing it through here would subtract
+     * the current offset from the offset being computed and pan by the difference.
+     */
+    public int toScreenX(double layoutX) {
+        return FlowZoom.toScreen(layoutX, zoom, getScrollX());
+    }
+
+    /** Layout coordinate to a screen point relative to this widget's area, at this zoom. */
+    public int toScreenY(double layoutY) {
+        return FlowZoom.toScreen(layoutY, zoom, getScrollY());
+    }
+
+    /**
      * The box index ModularUI thinks is under the mouse, or -1.
      *
      * Asks the widgets themselves rather than walking a viewport stack, because
@@ -433,22 +460,81 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      */
     public void panToBox(int index) {
         FlowLayout.Box box = laid.boxes.get(index);
-        // CLAMPED, AND EXPLICITLY NOT THROUGH `panTo`, WHICH WRAPS. This was the first version
-        // and it produced a screenshot that passed the drawn check and was still unreadable.
-        // Centring on the ROOT asks for a negative offset -- the root sits at x=0 and half a
-        // viewport to its left is off the layout -- and `wrap`'s `Math.abs(value % range)`
-        // turns -202 into +202, which pans AWAY from the box by almost its own width. What
-        // landed was a two-pixel sliver of one node against the left edge, on a panel that
-        // still read as empty.
-        //
-        // `wrap` is right for `panTo`, whose caller is a sweep that must keep moving rather
-        // than park at an edge, and its comment says so. It is wrong for aiming, where running
-        // off the end means "as far as it goes", not "reappear on the other side". DO NOT
-        // route this back through `panTo` to save four lines.
-        int x = (int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
-                - getArea().width / 2;
-        int y = (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
-                - getArea().height / 2;
+        aimAt(box.x + FlowLayout.NODE_WIDTH / 2.0, box.y + FlowLayout.NODE_HEIGHT / 2.0);
+    }
+
+    /**
+     * Put a parent and one of its children BOTH wholly in frame, by centring their union.
+     *
+     * NOT {@link #panToBox} ON EITHER END, AND THE ARITHMETIC IS THE WHOLE REASON THIS EXISTS.
+     * A child sits exactly `COLUMN_PITCH` right of its parent, so the pair spans
+     * `COLUMN_PITCH + NODE_WIDTH` = 458 layout pixels. Centre the PARENT on the production 612px
+     * canvas and its left edge lands at 202, which puts the child's right edge at 660 -- 48 past
+     * the panel. Centring the union leaves 77 pixels of margin either side.
+     *
+     * WHY THE HARNESS NEEDS IT. `flow-nav` drags 60px and then measures whether an edge meets the
+     * nodes it joins, and the drag lands wherever the layout puts it: on `plan-truncated` every
+     * pair had at least one box clipped by the panel edge, so the measurement had nothing to
+     * measure and the shot exited on its own "no measurable pair" verdict -- while the PNG beside
+     * it showed the fix working. A probe that cannot reach a measurable state must NAVIGATE to
+     * one; giving up is a verdict about the scenario, not about the code.
+     *
+     * PAIRED WITH {@link #pairFitsTheViewport}, which is the question this cannot answer for
+     * itself: at zoom 2 the pair needs 916 pixels and no pan puts both ends in a 612px canvas.
+     * Ask first, aim second, and let the caller say so loudly when nothing fits.
+     */
+    public void panToPair(int parent, int child) {
+        FlowLayout.Box first = laid.boxes.get(parent);
+        FlowLayout.Box second = laid.boxes.get(child);
+        aimAt((first.x + second.right()) / 2.0,
+              (Math.min(first.y, second.y) + Math.max(first.bottom(), second.bottom())) / 2.0);
+    }
+
+    /**
+     * Could box `parent` and box `child` both be wholly in frame at this zoom, at any offset?
+     *
+     * A QUESTION ABOUT THE ZOOM AND THE PANEL, NOT ABOUT WHERE THE VIEW IS. It compares the
+     * pair's layout extent, scaled, against the canvas -- so a false here means no pan can help
+     * and the caller should say that rather than pan and hope. {@link #panToPair} has the
+     * numbers; the pair is 458 layout pixels wide, which fits a 612px canvas up to about zoom
+     * 1.33 and never at {@link FlowZoom#MAX}.
+     */
+    public boolean pairFitsTheViewport(int parent, int child) {
+        FlowLayout.Box first = laid.boxes.get(parent);
+        FlowLayout.Box second = laid.boxes.get(child);
+        int width = second.right() - first.x;
+        int height = Math.max(first.bottom(), second.bottom()) - Math.min(first.y, second.y);
+        return FlowZoom.scaledExtent(width, zoom) <= getArea().width
+                && FlowZoom.scaledExtent(height, zoom) <= getArea().height;
+    }
+
+    /**
+     * Centre the viewport on a layout point, clamped to the scrollable range.
+     *
+     * CLAMPED, AND EXPLICITLY NOT THROUGH `panTo`, WHICH WRAPS. This was the first version of
+     * {@link #panToBox} and it produced a screenshot that passed the drawn check and was still
+     * unreadable. Centring on the ROOT asks for a negative offset -- the root sits at x=0 and
+     * half a viewport to its left is off the layout -- and `wrap`'s `Math.abs(value % range)`
+     * turns -202 into +202, which pans AWAY from the box by almost its own width. What landed
+     * was a two-pixel sliver of one node against the left edge, on a panel that still read as
+     * empty.
+     *
+     * `wrap` is right for `panTo`, whose caller is a sweep that must keep moving rather than park
+     * at an edge, and its comment says so. It is wrong for aiming, where running off the end
+     * means "as far as it goes", not "reappear on the other side". DO NOT route this back through
+     * `panTo` to save four lines.
+     *
+     * SHARED BY {@link #panToBox} AND {@link #panToPair} so the clamp has one definition. Two
+     * aims with two copies of that reasoning is two chances for one of them to become a wrap
+     * again, and the failure it produces is a screenshot nobody can read rather than an error.
+     *
+     * `FlowZoom.toScreen` WITH A ZERO OFFSET, because this PRODUCES a scroll offset rather than
+     * consuming one -- see {@link #toScreenX}'s note on why `panToBox` must not go through the
+     * canvas-relative pair.
+     */
+    private void aimAt(double layoutX, double layoutY) {
+        int x = FlowZoom.toScreen(layoutX, zoom, 0) - getArea().width / 2;
+        int y = FlowZoom.toScreen(layoutY, zoom, 0) - getArea().height / 2;
         getScrollArea().getScrollX().scrollTo(getScrollArea(),
                 clampToRange(x, FlowZoom.scaledExtent(laid.width, zoom), getArea().width));
         getScrollArea().getScrollY().scrollTo(getScrollArea(),
@@ -462,13 +548,31 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
 
     /** Is box `index` wholly inside the viewport right now? */
     public boolean fullyShowing(int index) {
+        int[] rect = boxRectOnScreen(index);
+        return rect[0] >= 0 && rect[1] >= 0
+                && rect[0] + rect[2] <= getArea().width
+                && rect[1] + rect[3] <= getArea().height;
+    }
+
+    /**
+     * Box `index`'s rectangle in screen pixels relative to this canvas, as {x, y, width, height}.
+     *
+     * WHERE MODULARUI IS ABOUT TO DRAW THAT NODE, expressed by the same map the framework
+     * applies to it -- so this is the rectangle an edge has to meet, and the one the harness
+     * measures adjacency against. {@link #fullyShowing} used to compute its four edges inline
+     * and is now one caller of this rather than a second definition of it.
+     *
+     * ALLOCATES, AND IS THEREFORE NOT ON THE PER-FRAME PATH. Four ints a call is nothing at
+     * click or probe rates and is a garbage generator at sixty frames a second across a
+     * thousand nodes, which is why the edge sweep uses {@link #edgeSegments} and its reused
+     * buffer instead of building rectangles.
+     */
+    public int[] boxRectOnScreen(int index) {
         FlowLayout.Box box = laid.boxes.get(index);
-        int left = (int) Math.round(box.x * zoom) - getScrollX();
-        int top = (int) Math.round(box.y * zoom) - getScrollY();
-        int right = (int) Math.round(box.right() * zoom) - getScrollX();
-        int bottom = (int) Math.round(box.bottom() * zoom) - getScrollY();
-        return left >= 0 && top >= 0
-                && right <= getArea().width && bottom <= getArea().height;
+        int left = toScreenX(box.x);
+        int top = toScreenY(box.y);
+        return new int[] {left, top, toScreenX(box.right()) - left,
+                          toScreenY(box.bottom()) - top};
     }
 
     /**
@@ -523,8 +627,6 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
         if (key.isEmpty()) {
             return false;
         }
-        int centreX = getScrollX() + getArea().width / 2;
-        int centreY = getScrollY() + getArea().height / 2;
         int best = -1;
         long bestDistance = Long.MAX_VALUE;
         for (int i = 0; i < laid.size(); i++) {
@@ -532,8 +634,12 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
             if (!key.equals(box.node.key())) {
                 continue;
             }
-            long dx = Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom) - centreX;
-            long dy = Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom) - centreY;
+            // THROUGH THE ONE CONVERSION rather than `round(centre * zoom) - scroll` written
+            // out again. This was the fifth open-coding of the viewport map and the edge sweep
+            // was the fourth, which is the one that turned out to be missing (#330). A box's
+            // distance from the viewport's centre is its SCREEN position less half the area.
+            long dx = toScreenX(box.x + FlowLayout.NODE_WIDTH / 2.0) - getArea().width / 2;
+            long dy = toScreenY(box.y + FlowLayout.NODE_HEIGHT / 2.0) - getArea().height / 2;
             long distance = dx * dx + dy * dy;
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -669,10 +775,8 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      */
     public boolean parkCursorOverBox(int index) {
         FlowLayout.Box box = laid.boxes.get(index);
-        int screenX = (int) Math.round((box.x + FlowLayout.NODE_WIDTH / 2.0) * zoom)
-                - getScrollX();
-        int screenY = (int) Math.round((box.y + FlowLayout.NODE_HEIGHT / 2.0) * zoom)
-                - getScrollY();
+        int screenX = toScreenX(box.x + FlowLayout.NODE_WIDTH / 2.0);
+        int screenY = toScreenY(box.y + FlowLayout.NODE_HEIGHT / 2.0);
         if (screenX < 0 || screenY < 0
                 || screenX >= getArea().width || screenY >= getArea().height) {
             return false;
@@ -722,11 +826,12 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * The plan node box `index` draws.
      *
      * FOR THE HARNESS, and specifically so a probe can assert that the menu a click OPENED is the
-     * menu for the box that was CLICKED. `flow-node-menu` reads the box under the real cursor from
-     * {@link #boxAtCursor} -- the layout's own answer -- and this turns it into the node whose label
-     * the menu panel must be titled with. Without it the strongest available verdict would be "a
-     * node menu is on top", which is equally true of the menu for the wrong node, and a screenshot
-     * of it is equally convincing. Same discrimination `jei-keybind` makes about the hovered stack.
+     * menu for the box that was CLICKED. `flow-node-menu` reads the box under the real cursor
+     * from {@link #boxAtCursor} -- the layout's own answer -- and this turns it into the node
+     * whose label the menu panel must be titled with. Without it the strongest available
+     * verdict would be "a node menu is on top", which is equally true of the menu for the wrong
+     * node, and a screenshot of it is equally convincing. Same discrimination `jei-keybind`
+     * makes about the hovered stack.
      */
     public PlanNode boxNode(int index) {
         return laid.boxes.get(index).node;
@@ -736,12 +841,13 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * A point in the canvas that is inside no box, in SCREEN pixels relative to the canvas, or
      * null when the diagram is dense enough that there is none on screen.
      *
-     * FOR THE DRAG-PAN PROBE, and the reason it searches rather than computing is `parkCursorOverBox`'s
-     * one level over: a press on a NODE is taken by the node -- ModularUI consults hovered widgets
-     * innermost first -- so a probe that guessed at an empty point and hit a box would drive the
-     * node menu and report the canvas as unable to pan. The column gap is 40px and the row pitch
-     * leaves gaps, so a coarse sweep finds one; returning null rather than a guess is what makes
-     * "no empty point" a distinguishable outcome from "panning is broken".
+     * FOR THE DRAG-PAN PROBE, and the reason it searches rather than computing is
+     * `parkCursorOverBox`'s one level over: a press on a NODE is taken by the node -- ModularUI
+     * consults hovered widgets innermost first -- so a probe that guessed at an empty point and
+     * hit a box would drive the node menu and report the canvas as unable to pan. The column gap
+     * is 40px and the row pitch leaves gaps, so a coarse sweep finds one; returning null rather
+     * than a guess is what makes "no empty point" a distinguishable outcome from "panning is
+     * broken".
      *
      * THE INSET IS THE CALLER'S DRAG BUDGET, NOT PADDING. The sweep used to start at (2,2) --
      * and after `panToBox(rootBox())` the layout's top-left corner is guaranteed empty, so
@@ -765,6 +871,20 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
 
     /** Direct children per box, so an edge sweep can start from what is visible. */
     private final int[][] childrenOf;
+
+    /**
+     * Which boxes {@link #updateVisible} last put on screen, indexed by box.
+     *
+     * THE SAME INFORMATION {@link #visibleBoxes} CARRIES, INDEXED INSTEAD OF SCANNED, and it
+     * exists because {@link #sweepEdges} has to ask "is this child on screen" once per child
+     * per frame. Off the list that is a linear search inside a loop over the list, which is
+     * quadratic in what is drawn on exactly the path this package has a frame-time gate on.
+     *
+     * A BOOLEAN PER BOX IS THE WHOLE COST, allocated once with the layout, and it is cleared
+     * from the PREVIOUS visible set rather than filled over every box -- so a frame pays for
+     * what the last one drew, not for what the plan contains.
+     */
+    private final boolean[] onScreen;
 
     /** How many were drawn last frame. The culling claim, readable from a test or a log. */
     public int drawnLastFrame() {
@@ -814,6 +934,23 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
         if (transformed) {
             return;
         }
+        updateVisible();
+    }
+
+    /**
+     * The culling and the level-of-detail decision, with no `context` and therefore no GL.
+     *
+     * SPLIT OUT OF {@link #preDraw} SO A TEST CAN DRIVE IT. `super.preDraw` applies the
+     * `Stencil` that clips the children, which is a GL call and cannot run headlessly -- so
+     * before #330 nothing but a screenshot had ever observed which boxes this decides are on
+     * screen, and {@link #sweepEdges} walks exactly that set. `FlowCanvasTest` now calls this
+     * and then the sweep, which is the pair of steps a frame takes.
+     *
+     * NOT A CONVENIENCE FOR THE TEST: the same split is what lets an assertion about culling be
+     * made at all. `drawnLastFrame` was readable only after a real draw, so the only instrument
+     * pointed at this was the frame-timing harness, which counts nodes and cannot say WHICH.
+     */
+    void updateVisible() {
         // EVERY VISIBLE NODE EVERY FRAME, not only the ones that just entered the viewport.
         // Zoom changes without the visible set changing at all -- a control-scroll on a small
         // plan moves no node in or out -- so detail applied only on entry would leave the
@@ -831,6 +968,9 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
         for (IWidget widget : visible) {
             widget.setEnabled(false);
         }
+        for (int i = 0; i < visibleBoxes.size(); i++) {
+            onScreen[visibleBoxes.get(i)] = false;
+        }
         visible.clear();
         visibleBoxes.clear();
         for (int i = 0; i < shown.size(); i++) {
@@ -840,6 +980,7 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
             widget.showDetail(detail);
             visible.add(widget);
             visibleBoxes.add(index);
+            onScreen[index] = true;
         }
     }
 
@@ -855,53 +996,259 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * a widget would double the child count for something that never needs to be hit-tested,
      * sized or themed. BetterQuesting's `PanelLine` makes the same call.
      *
-     * Only edges with a VISIBLE endpoint are drawn. A line between two off-screen nodes cannot
-     * cross the viewport, because the layout is columnar and monotonic in x -- a parent is
-     * always exactly one column left of its child, so the segment spans one column gap and
-     * nothing more.
+     * WHICH IS ALSO WHY THE COORDINATES HAVE TO BE CONVERTED BY HAND, AND #330 IS WHAT IT COST
+     * WHEN THEY WERE NOT. A widget child gets the scroll translate and the zoom scale from the
+     * viewport stack; this method gets neither, so an edge drawn in layout coordinates stays
+     * where the diagram was at scroll 0 and zoom 1. See {@link #edgeSegments}.
+     *
+     * Only edges with a VISIBLE endpoint are drawn, WHICH IS NOT THE SAME THING AS every edge
+     * that crosses the viewport. The note this replaces said it was. See {@link #sweepEdges}
+     * for the case it is not, which is issue #334 and is not #330.
      */
     @Override
     public void draw(ModularGuiContext context, WidgetThemeEntry<?> widgetTheme) {
         super.draw(context, widgetTheme);
-        // FROM WHAT IS VISIBLE, not over every box. Sweeping all of them to ask which edges
-        // to draw is O(plan) per frame -- the same shape as the spatial hash grid this
-        // package already rejected by measurement, and it would have undone the culling it
-        // sits next to. An edge spans exactly one column gap, because the layout is columnar
-        // and a parent is always one column left of its child, so an edge can only cross the
-        // viewport if one of its two ends is inside it: walking each visible box's parent AND
-        // its children finds every such edge and no others.
+        sweepEdges(PAINT);
+    }
+
+    /**
+     * Every edge with a visible endpoint, as rectangles handed to `sink`.
+     *
+     * A SINK RATHER THAN A DRAW CALL, AND IT IS WHAT MAKES THE SWEEP TESTABLE AT ALL. `draw`
+     * cannot run without a GL context, so before #330 the only thing that had ever looked at
+     * these coordinates was a screenshot -- and `flow-nav2.png` shows the bug and was cited as a
+     * pass. With a sink, `FlowCanvasTest` drives THIS method, at any scroll and zoom, and reads
+     * the exact rectangles production would paint. Nothing about the sweep is mocked; only the
+     * last hop, from a rectangle to the screen, is swapped.
+     *
+     * FROM WHAT IS VISIBLE, not over every box. Sweeping all of them to ask which edges to draw
+     * is O(plan) per frame -- the same shape as the spatial hash grid this package already
+     * rejected by measurement, and it would have undone the culling it sits next to.
+     *
+     * THE X ARGUMENT FOR THAT HOLDS AND THE Y ARGUMENT DOES NOT, AND THE NOTE THIS REPLACES
+     * ASSERTED BOTH. An edge spans exactly one column gap, because the layout is columnar and a
+     * parent is always one column left of its child -- so horizontally it cannot reach a viewport
+     * neither of its ends is near. VERTICALLY IT CAN: {@link FlowLayout} centres a parent on the
+     * band its whole SUBTREE spans, so a parent and one of its own children can be thousands of
+     * pixels apart, and a viewport between them -- inside that child's band, below the parent's
+     * row and above the child's -- holds neither box while the elbow's vertical run crosses it.
+     * That trunk is not drawn. Measured on a replica of this layout: `deepFan(3,5)` at zoom 1
+     * scrolled to (0,554) has NO box on screen and two trunks that should cross it.
+     *
+     * IT IS USUALLY MASKED RATHER THAN ABSENT, which is why it took until #330's review to see:
+     * every child of one parent shares the same corner x, so a visible sibling's trunk paints
+     * the same pixels. Nothing guarantees a visible sibling.
+     *
+     * NOT FIXED HERE, AND WIDENING THIS WALK CANNOT FIX IT -- the visible set can be empty, so
+     * no walk that starts from it reaches the edge. #334 has the measurements and the shape of
+     * the answer: the per-depth subtree bands `FlowLayout` computes and then discards are
+     * disjoint at a fixed depth, so the crossing parents can be found in O(1) per depth.
+     *
+     * WHAT IS DRAWN IS EXACTLY ONCE PER EDGE, which the walk this replaces was not. An edge
+     * belongs to its CHILD, so a child that is on screen draws it and the parent's side skips
+     * it; see the note in the loop for what the second copy of a translucent line looked like.
+     */
+    void sweepEdges(RectSink sink) {
         for (int i = 0; i < visibleBoxes.size(); i++) {
             int index = visibleBoxes.get(i);
-            FlowLayout.Box box = laid.boxes.get(index);
-            if (box.parent >= 0) {
-                edge(laid.boxes.get(box.parent), box);
+            int parent = parentOf(index);
+            if (parent >= 0) {
+                edge(parent, index, sink);
             }
             for (int child : childrenOf[index]) {
-                edge(box, laid.boxes.get(child));
+                // ONCE PER EDGE, AND THE ALPHA IS WHY IT MATTERS. An edge belongs to its
+                // CHILD -- the branch above draws it for every visible box -- so drawing it
+                // again from the parent's side is not a harmless repeat: `EDGE` is 0x66FFFFFF
+                // and `GuiDraw.drawRect` goes through `Platform.setupDrawColor`, which calls
+                // `GlStateManager.enableBlend`, so the same rectangle painted twice composites
+                // to about 64% opacity against 40% for one painted once. Before this the
+                // brightness of a line said whether both its nodes happened to be culled in,
+                // and it CHANGED as the far end scrolled into frame.
+                if (!onScreen[child]) {
+                    edge(index, child, sink);
+                }
             }
         }
     }
 
-    /** An elbow from a parent's right edge to a child's left edge. */
-    private void edge(FlowLayout.Box parent, FlowLayout.Box child) {
-        int fromX = parent.right();
-        int fromY = parent.y + FlowLayout.NODE_HEIGHT / 2;
-        int toX = child.x;
-        int toY = child.y + FlowLayout.NODE_HEIGHT / 2;
-        // An elbow rather than a diagonal: a straight line between two rows crosses the nodes
-        // between them at any real fan-out, and this pack fans out a lot.
-        int mid = (fromX + toX) / 2;
-        line(fromX, fromY, mid, fromY);
-        line(mid, Math.min(fromY, toY), mid, Math.max(fromY, toY));
-        line(mid, toY, toX, toY);
+    /**
+     * One edge, through the same {@link #edgeSegments} call the harness and the tests make.
+     *
+     * ONE DEFINITION OF WHERE AN EDGE GOES rather than a drawn one and an asserted one. The #191
+     * shape this package has already paid for twice is a seam that is correct and unused; a
+     * second copy of this arithmetic here would be the version that is correct, used, and
+     * disagrees with what any test could see.
+     */
+    private void edge(int parentIndex, int childIndex, RectSink sink) {
+        edgeSegments(parentIndex, childIndex, segments);
+        for (int i = 0; i + 3 < segments.size(); i += 4) {
+            sink.rect(segments.get(i), segments.get(i + 1), segments.get(i + 2),
+                      segments.get(i + 3));
+        }
     }
 
-    /** A one-pixel line in layout coordinates; the viewport transform is already applied. */
-    private void line(int x1, int y1, int x2, int y2) {
+    /** Where {@link #sweepEdges} puts its rectangles. Screen pixels relative to this canvas. */
+    interface RectSink {
+        void rect(int x, int y, int width, int height);
+    }
+
+    /**
+     * The production sink, and THE ONLY PLACE IN THIS PACKAGE THAT DRAWS AN EDGE.
+     *
+     * DELIBERATELY THE ONLY ONE, AND `FlowCanvasTest` ASSERTS THAT. A `GuiDraw` call anywhere
+     * else in the sweep is a coordinate no headless test can read, which is the state #330 was
+     * found in: the arithmetic was wrong for three releases and every instrument pointed at it
+     * was a photograph. Keeping the draw in one leaf means the mutation that reintroduces the
+     * bug -- painting from `draw` in layout coordinates -- moves a `GuiDraw.drawRect` reference
+     * into `FlowCanvas` itself and fails a test.
+     *
+     * A CONSTANT, so the sweep allocates nothing per frame. See {@link #segments}.
+     */
+    private static final RectSink PAINT = new RectSink() {
+        @Override
+        public void rect(int x, int y, int width, int height) {
+            com.cleanroommc.modularui.drawable.GuiDraw.drawRect(x, y, width, height, EDGE);
+        }
+    };
+
+    /**
+     * The rectangles one parent-to-child edge is drawn as, in SCREEN pixels relative to this
+     * canvas, appended to `out` as {x, y, width, height} quads. Cleared first.
+     *
+     * <h2>SCREEN AND NOT LAYOUT, AND THE COMMENT HERE USED TO SAY THE OPPOSITE</h2>
+     *
+     * The method this replaces was `line(int, int, int, int)` and its javadoc read "a one-pixel
+     * line in layout coordinates; the viewport transform is already applied." The second half was
+     * false and it is the whole of #330. Measured in the ModularUI 3.1.5 bytecode,
+     * `InternalWidgetTree.drawTree` calls `IWidget.draw` at offset 135 and does not reach
+     * `pushViewport` / `IViewport.transformChildren` until 188 and 194 -- so by the time this
+     * canvas paints, the stack carries the widget's own position (`IWidget.transform`, a
+     * translate by `area.rx, area.ry`) and NOTHING ELSE. The scroll translate and the zoom scale
+     * arrive afterwards and apply to the CHILDREN, which is where the nodes are.
+     *
+     * At scroll 0 and zoom 1 the two spaces are the same numbers, which is why every prodshot
+     * passed: `flow-nav2.png` shows orphaned edge fragments and its verdict asserted scroll
+     * offsets and node names. Jake found it in the pack instead -- "it is stuck on the background
+     * instead of connecting the nodes and scrolling as i scroll."
+     *
+     * DO NOT "SIMPLIFY" THIS BACK TO LAYOUT COORDINATES BY PUTTING A `GlStateManager.scale` OR A
+     * `stack` CALL AROUND THE SWEEP. That is the trap this class's header already names one level
+     * over: the viewport stack is the hook `getWidgetsAt` walks, so a transform pushed by hand
+     * for drawing only would look identical on screen and leave hit-testing reading a different
+     * space. The conversion is {@link FlowZoom#toScreen}, it is the same one
+     * {@link #boxRectOnScreen} and {@link #parkCursorOverBox} use, and `flow-hit` measures its
+     * inverse against ModularUI's own answer every run.
+     *
+     * <h2>Clipped here, because nothing else clips this call</h2>
+     *
+     * `AbstractScrollWidget.preDraw` is what keeps the children inside the viewport -- it applies
+     * a `Stencil` to the scroll area -- and it runs at drawTree offset 171, AFTER the draw at 135.
+     * `ModularPanel` adds no stencil of its own (it overrides neither `preDraw` nor
+     * `transformChildren`, checked in the same jar). So an unclipped edge is painted over the
+     * panel's heading and warning lines, and off the panel entirely: an elbow's vertical segment
+     * spans the gap between two rows that can be hundreds of pixels outside the canvas. The
+     * untransformed version could not show that, because its coordinates were wrong anyway.
+     *
+     * Every segment is axis-aligned, so the clip is a min and a max per axis rather than a
+     * Cohen-Sutherland; a segment with nothing inside the canvas is DROPPED rather than squashed
+     * against the border, which is also several hundred fewer draw calls on a wide fan.
+     *
+     * <h2>The elbow's corner is a LAYOUT midpoint</h2>
+     *
+     * Converted, not averaged -- and NOT because averaging would disagree between siblings. It
+     * would not, and the first version of this note claimed it would: `fromX` and `toX` depend
+     * only on the two COLUMNS, so every elbow crossing a given column gap has the same two ends
+     * however the corner is derived, whichever sibling it runs to.
+     *
+     * THE REASON IS THAT AVERAGING RECOVERS A LAYOUT FACT FROM TWO ALREADY-ROUNDED NUMBERS.
+     * `(round(a * z) + round(b * z)) / 2` can sit a pixel off the true centre of the gap, and
+     * unlike the two ENDS -- which are pinned to a node border, so a probe can say when they are
+     * wrong -- nothing pins the corner and nothing would report that pixel. The midpoint of the
+     * column gap is a fact about the layout, so it is stated in layout units and converted once.
+     */
+    public void edgeSegments(int parentIndex, int childIndex, IntArray out) {
+        out.clear();
+        FlowLayout.Box parent = laid.boxes.get(parentIndex);
+        FlowLayout.Box child = laid.boxes.get(childIndex);
+        int fromX = toScreenX(parent.right());
+        int fromY = toScreenY(parent.y + FlowLayout.NODE_HEIGHT / 2.0);
+        int toX = toScreenX(child.x);
+        int toY = toScreenY(child.y + FlowLayout.NODE_HEIGHT / 2.0);
+        int mid = toScreenX((parent.right() + child.x) / 2.0);
+        // An elbow rather than a diagonal: a straight line between two rows crosses the nodes
+        // between them at any real fan-out, and this pack fans out a lot.
+        segment(fromX, fromY, mid, fromY, out);
+        segment(mid, Math.min(fromY, toY), mid, Math.max(fromY, toY), out);
+        segment(mid, toY, toX, toY, out);
+    }
+
+    /** The parent box of `index`, or -1 when it is a root. */
+    public int parentOf(int index) {
+        return laid.boxes.get(index).parent;
+    }
+
+    /**
+     * Was box `index` on screen at the last {@link #updateVisible}?
+     *
+     * THE CULLER'S ANSWER AS THE SWEEP SEES IT, which is a different question from
+     * {@link #fullyShowing}: this one is "would an edge to it be drawn", that one is "is all of
+     * it in frame". A probe that conflated them would look for edges to boxes half off the
+     * canvas and read the clip as a missing line.
+     *
+     * PACKAGE-PRIVATE, like {@link #updateVisible} and {@link #sweepEdges}, because the only
+     * caller outside this class is `FlowCanvasTest` and it is in this package. A public method
+     * with no production caller is the seam-nobody-uses shape #191 already cost this repository
+     * twice; the sweep itself reads {@link #onScreen} directly.
+     */
+    boolean isVisible(int index) {
+        return onScreen[index];
+    }
+
+    /**
+     * One one-pixel segment between two SCREEN points, clipped to this canvas and appended to
+     * `out` as an {x, y, width, height} quad. Nothing is appended when none of it is visible.
+     *
+     * See {@link #edgeSegments} for what space these coordinates are in and why the clip lives
+     * here. A ONE-PIXEL MINIMUM ON BOTH AXES: a horizontal segment has no height of its own, and
+     * at zoom 0.5 a segment shorter than two layout pixels rounds to no length either, so
+     * without this an edge would be a rectangle of zero area and simply not appear.
+     */
+    private void segment(int x1, int y1, int x2, int y2, IntArray out) {
         int left = Math.min(x1, x2);
         int top = Math.min(y1, y2);
-        int width = Math.max(1, Math.abs(x2 - x1));
-        int height = Math.max(1, Math.abs(y2 - y1));
-        com.cleanroommc.modularui.drawable.GuiDraw.drawRect(left, top, width, height, EDGE);
+        int width = clippedLength(left, Math.max(1, Math.abs(x2 - x1)), getArea().width);
+        int height = clippedLength(top, Math.max(1, Math.abs(y2 - y1)), getArea().height);
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        out.add(Math.max(0, left));
+        out.add(Math.max(0, top));
+        out.add(width);
+        out.add(height);
     }
+
+    /**
+     * How much of the span [`from`, `from + length`) survives being clipped into [0, `limit`).
+     *
+     * ZERO OR NEGATIVE MEANS NOTHING IS VISIBLE, and both signs are reachable: a span wholly left
+     * of the canvas gives `min(limit, from + length) - 0`, which is negative, and one wholly right
+     * of it gives `limit - from`, which is also negative. Callers test `<= 0` rather than `== 0`
+     * for that reason -- an `== 0` test would draw a full-width rectangle for every edge whose
+     * far end is off the left of the canvas, which on a scrolled diagram is most of them.
+     */
+    static int clippedLength(int from, int length, int limit) {
+        return Math.min(limit, from + length) - Math.max(0, from);
+    }
+
+    /**
+     * The reused buffer {@link #edge} reads its rectangles out of.
+     *
+     * A FIELD BECAUSE THIS IS THE 60 FPS PATH. Three quads per edge and several hundred edges a
+     * frame is a few thousand ints; allocating a fresh array for each would put the diagram's
+     * pan gesture -- the one thing this package has a frame-time gate on -- into the allocator.
+     * Same argument {@link #visibleBoxes} makes about boxed Integers, one call deeper.
+     *
+     * CLIENT THREAD ONLY, like {@link #anchorMouseX} and for the same reason: nothing else draws.
+     */
+    private final IntArray segments = new IntArray(12);
 }

@@ -18,6 +18,13 @@ package io.github.jacoblasky.recipedump.client.flow;
  *
  * So: the scroll size is {@link #scaledExtent}, the offset that comes back is screen pixels,
  * and {@link #layoutOrigin} / {@link #layoutExtent} convert it back for the culler.
+ *
+ * {@link #toScreen} IS THE FORWARD DIRECTION AND IT IS NOT OPTIONAL FOR ANYTHING THE CANVAS
+ * PAINTS ITSELF. Only the canvas's CHILDREN get the scroll translate and the zoom scale; a
+ * `draw` on the canvas runs under neither, so anything drawn there in layout coordinates sits
+ * still while the diagram moves. That was #330 -- every edge detached from its nodes on the
+ * first scroll -- and the two spaces coincide at scroll 0 and zoom 1, which is where every
+ * screenshot had been taken.
  */
 public final class FlowZoom {
 
@@ -76,6 +83,40 @@ public final class FlowZoom {
      */
     public static int scaledExtent(int layoutExtent, float zoom) {
         return (int) Math.ceil(layoutExtent * (double) clamp(zoom));
+    }
+
+    /**
+     * Where a layout coordinate lands on screen, relative to the canvas, at this zoom and offset.
+     *
+     * THE ARITHMETIC MODULARUI ITSELF APPLIES TO THE NODE WIDGETS, and it is written out here so
+     * that the canvas's own painting can reach the same space its children land in. Measured in
+     * the 3.1.5 bytecode: `AbstractScrollWidget.transformChildren` calls
+     * `stack.translate(-scrollX, -scrollY)` and {@link FlowCanvas#transformChildren} then calls
+     * `stack.scale(zoom, zoom)`. `GuiViewportStack` implements both with JOML's
+     * `Matrix4f.translate` / `Matrix4f.scale`, which POST-multiply -- so the composed map is
+     * `M * T(-scroll) * S(zoom)` and a child's point comes out at `layout * zoom - scroll`, with
+     * the scale INSIDE the translate.
+     *
+     * THE OTHER ORDER IS THE TRAP, because it agrees everywhere the mistake is cheap.
+     * `zoom * (layout - scroll)` is identical at zoom 1 and differs by `scroll * (zoom - 1)`
+     * elsewhere -- correct in every unzoomed screenshot, wrong by 200 pixels at zoom 2 with the
+     * view a screen along. Do NOT reorder these two operations without re-reading
+     * `transformChildren`; the scroll offset is screen pixels precisely because it is applied
+     * OUTSIDE the scale (see this class's own header).
+     *
+     * ROUNDED, WHICH IS NOT WHAT {@link #layoutOrigin} DOES, and the difference is what each is
+     * for. That pair maps a screen RECTANGLE onto every layout pixel it touches, so it rounds
+     * outward on purpose and covering is the property it wants. This maps a POINT to the pixel
+     * it sits nearest: flooring would bias every edge endpoint up and to the left of the node it
+     * is supposed to touch, by up to a pixel, in the same direction at both ends.
+     *
+     * A `double` COORDINATE BECAUSE HALF A NODE IS NOT AN INTEGER. `parkCursorOverBox` and the
+     * edge sweep both want the centre of a 26px-high box, and rounding that to a layout pixel
+     * before scaling it throws away half a pixel that then shows up as an edge meeting a node
+     * off-centre at zoom 2.
+     */
+    public static int toScreen(double layoutCoordinate, float zoom, int scrollOffset) {
+        return (int) Math.round(layoutCoordinate * clamp(zoom)) - scrollOffset;
     }
 
     /**
