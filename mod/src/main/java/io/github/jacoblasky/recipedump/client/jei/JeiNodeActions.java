@@ -4,6 +4,7 @@ import io.github.jacoblasky.recipedump.RecipeDumpMod;
 import io.github.jacoblasky.recipedump.client.planner.NodeActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeStatus;
 import io.github.jacoblasky.recipedump.client.planner.NodeActionsHolder;
+import io.github.jacoblasky.recipedump.plan.Machines;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
 import net.minecraft.item.ItemStack;
@@ -87,6 +88,36 @@ public final class JeiNodeActions implements NodeActions {
     };
 
     private final GraphAccess graphs;
+
+    /**
+     * The graph {@link #catalysts} was built from, or null. See that field.
+     *
+     * IDENTITY AND NOT A FLAG, so a graph swapped underneath a running client rebuilds rather
+     * than answering from the old one's category ids -- which would not throw, it would draw a
+     * different machine.
+     */
+    private RecipeGraph catalystsFor;
+
+    /**
+     * `Machines.catalystsByCategory`'s answer for {@link #catalystsFor}, built on first use.
+     *
+     * <h2>THIS IS A MEMO AND NOT THE SECOND HOLDER THE CLASS HEADER FORBIDS</h2>
+     *
+     * That rule is about WHERE THE GRAPH COMES FROM: no static field, nothing cached in the
+     * constructor, `graphs.graph()` asked per invocation, because `onRuntimeAvailable` fires
+     * long before the 5.47 s load finishes and anything resolved once would be null for the rest
+     * of the session. That rule is intact here -- {@link #iconForCategory} still asks
+     * `graphs.graph()` first, every time, and this cache is INVALIDATED BY that answer changing.
+     *
+     * WHAT IT BUYS: `catalystsByCategory` is a whole-graph pass -- two maps over 645 categories
+     * plus a sort each -- and `PlannerWidgets.row` asks once per tree row. `plan-fluid-chain` is
+     * 703 rows, so an uncached lookup is that pass seven hundred times per panel build.
+     *
+     * NOT VOLATILE, DELIBERATELY. Every caller is a GUI build on the client thread; a torn read
+     * here would cost a rebuild of a map that is a pure function of the graph, which is why the
+     * pair is written graph-last so a reader can never see a map without its graph.
+     */
+    private java.util.Map<Integer, int[]> catalysts;
 
     public JeiNodeActions(GraphAccess graphs) {
         // Null collapses to NO_GRAPH rather than being kept, matching NodeActionsHolder's own
@@ -199,6 +230,70 @@ public final class JeiNodeActions implements NodeActions {
     public ItemStack iconForKey(String key) {
         ItemStack stack = stackForKey(key);
         return stack == null ? ItemStack.EMPTY : stack;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>THE ORDERING IS `Machines`' AND IS NOT RE-DERIVED HERE, which is the one thing about
+     * this method that matters. JEI lists whatever opens a category's recipes, and for Modular
+     * Machinery that is the generic Machine Blueprint: measured against the live `data/graph.json`,
+     * 226 of the pack's 227 `modularmachinery.*` categories list `modularmachinery:itemblueprint`
+     * FIRST, so `catalysts().row(cid)[0]` draws the same blueprint on essentially every Modular
+     * Machinery step in the pack -- a wrong answer that looks entirely plausible.
+     * `Machines.orderBySpecificity` fixes it by ranking on how many categories an item catalyses,
+     * fewest first, and {@link Machines#isNotAMachine} drops the blueprint outright where the
+     * ordering has nothing to demote it below.
+     *
+     * <p>NOT THROUGH `MachineStates` / `MachineTable`, WHICH LOOKS LIKE THE CLEAN ROUTE AND
+     * SILENTLY LOSES THE FURNACE. `MachineInfo.candidates()` is null or empty on four
+     * short-circuit paths -- a manual override, `Machines.ALWAYS_AVAILABLE`, hand crafting and
+     * `needsNoMachine` -- and `minecraft.smelting` is in `ALWAYS_AVAILABLE` while carrying 23
+     * catalysts in `graph.json`. So that route would draw no icon on the 180 smelting steps in
+     * the fixtures and would look like a lookup that merely failed.
+     *
+     * <p>THE FIRST RESOLVABLE CANDIDATE AND NOT THE FIRST CANDIDATE. A key that survives the
+     * ordering can still have no stack in this client's index -- `StackIndex` is built from
+     * JEI's item list -- and answering EMPTY on it would hide a machine the NEXT candidate can
+     * picture perfectly well.
+     */
+    @Override
+    public ItemStack iconForCategory(PlanNode node) {
+        RecipeGraph graph = graphs.graph();
+        if (graph == null || node == null || node.category() == null) {
+            return ItemStack.EMPTY;
+        }
+        int categoryId = graph.categoryId(node.category());
+        if (categoryId < 0) {
+            return ItemStack.EMPTY;
+        }
+        int[] candidates = orderedCatalysts(graph).get(Integer.valueOf(categoryId));
+        if (candidates == null) {
+            return ItemStack.EMPTY;
+        }
+        for (int i = 0; i < candidates.length; i++) {
+            if (Machines.isNotAMachine(graph.key(candidates[i]))) {
+                continue;
+            }
+            ItemStack stack = JeiBridge.stackFor(candidates[i], graph);
+            if (stack != null && !stack.isEmpty()) {
+                return stack;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** {@link #catalysts} for `graph`, building it if this is a graph we have not seen. */
+    private java.util.Map<Integer, int[]> orderedCatalysts(RecipeGraph graph) {
+        if (catalystsFor != graph) {
+            java.util.Map<Integer, int[]> built = Machines.catalystsByCategory(graph);
+            // THE MAP FIRST AND THE GRAPH SECOND. A reader that saw the graph updated before its
+            // map would answer from the previous graph's category ids, which is a wrong picture
+            // rather than a missing one.
+            catalysts = built;
+            catalystsFor = graph;
+        }
+        return catalysts;
     }
 
     @Override

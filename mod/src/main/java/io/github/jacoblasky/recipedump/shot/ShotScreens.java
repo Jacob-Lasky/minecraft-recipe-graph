@@ -564,6 +564,26 @@ public final class ShotScreens {
                 PlannerShot.openCaveats(arg);
             }
         });
+        // THE TWO THAT NEED A CURSOR TO EXIST AT ALL (#333). Every planner screen above opens a
+        // panel and photographs it, and a captured panel has no pointer on any row -- so P5's
+        // hover band and the machine tooltip were the only parts of that pass with no artifact.
+        // These park the real cursor inside a real tree row and report a VERDICT, because a
+        // photograph of a row with no band on it is indistinguishable from a photograph of a row
+        // whose band does not draw. `planner-hover` aims at the label and
+        // `planner-machine-tip` at the machine cell, and the split is deliberate: a tooltip is an
+        // opaque box drawn next to the cursor, so one picture cannot be of both.
+        register("planner-hover", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openHover(arg);
+            }
+        });
+        register("planner-machine-tip", new Opener() {
+            @Override
+            public void open(String arg) {
+                PlannerShot.openMachineTip(arg);
+            }
+        });
         register("jei", new Opener() {
             @Override
             public void open(String arg) {

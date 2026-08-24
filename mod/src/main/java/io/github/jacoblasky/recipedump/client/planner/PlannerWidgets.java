@@ -63,6 +63,11 @@ public final class PlannerWidgets {
      * column, and the label is the item's NAME -- {@link #badgeWidthFor} already records that the
      * label wins every width argument on this panel.
      *
+     * SINCE #333 THE INDENT MOVES ONLY THE NAME, and the columns no longer slide with it; see
+     * {@link #row(PlanNode, int, int, PlannerActions, String, TreeColumns)}. That is what made
+     * the {@link #RAIL} necessary and it does not change this number: the indent is still what
+     * charges the label column, so the arithmetic above is still the constraint.
+     *
      * THE TOTAL INDENT BUDGET IS WHAT WAS HELD FIXED, not this number: 5 levels at 10 pixels is 50
      * where 8 at 6 was 48, so the narrowest label column the tree can draw is unchanged at 29
      * characters. That is deliberate and it is measured -- see {@link #MAX_INDENT_DEPTH}.
@@ -77,15 +82,40 @@ public final class PlannerWidgets {
      *
      * <h2>FIVE SINCE #332, AND THE ARITHMETIC IS THE ARGUMENT</h2>
      *
-     * `row` charges `INDENT * min(depth, this)`, then {@link #ICON} + {@link #GAP} + {@link #QTY} +
-     * `GAP` = 68 pixels, and {@link #badgeWidthFor} then takes {@link #BADGE} + `GAP` = 93 on every
-     * full-width tree row, cap included (`PlannerLayoutTest.aFullWidthTreeRowStillCarriesItsBadge`
-     * `EvenAtTheIndentCap`). Out of {@link #CONTENT_WIDTH}'s 388 that leaves the label:
+     * `row` charges `INDENT * min(depth, this)`, then {@link #ICON} + {@link #GAP} = 13 pixels,
+     * and the right cluster takes `GAP` + {@link TreeColumns#clusterWidth} off the other end. Out
+     * of {@link #CONTENT_WIDTH}'s 388 that leaves the label:
+     *
+     * THE CLUSTER IS `ICON + GAP + qty + GAP + badge`, so the number depends on which columns the
+     * plan needs. Two of them are worth writing out. The WIDEST REAL PLAN is what production
+     * draws at its worst -- `plan-fluid-chain`, `plan-multiblock` and `plan-no-machine-declared`
+     * all derive `qty` 42 and `badge` 90, a 148px cluster:
      *
      * <pre>
-     *   depth 0    388 - 0  - 68 - 93 = 227px = 37 characters
-     *   the cap    388 - 50 - 68 - 93 = 177px = 29 characters   (8 x 6 = 48 before; 29 as well)
+     *   depth 0    388 - 0  - 13 - 3 - 148 = 224px = 37 characters
+     *   the cap    388 - 50 - 13 - 3 - 148 = 174px = 29 characters   (8 x 6 = 48 before; 29 too)
      * </pre>
+     *
+     * <h2>SO THE FLOOR DID NOT MOVE AT #333, AND THAT IS THE MEASUREMENT THAT MATTERS</h2>
+     *
+     * 29 characters at the cap is exactly what the panel had before, within half a character --
+     * the machine column cost 13 pixels and the per-plan quantity gave 10 back. What #333 bought
+     * is not a wider column on those three plans, it is that the column no longer SHARES itself
+     * with the machine's name: `NodeRowText.meta` used to append it, median 12 characters plus a
+     * 3-character separator, and `fit` then cut whichever of the two lost. The other 19 fixtures
+     * do get a wider column as well: the median cluster over the 22 fixtures is 85px, which is
+     * 39 characters at the cap, and the narrowest cluster any of them derives is 64px, which is
+     * 43. `theDerivedColumnCensusIsWhatTheseJavadocsCite` pins all four of those numbers, so a
+     * figure quoted here cannot go stale without a test saying so -- which is the only reason
+     * they are safe to quote at all.
+     *
+     * THE OTHER NUMBER IS {@link TreeColumns#VOCABULARY}'s, which is what the lone-node overload
+     * draws and no plan does: `QTY` 52 + `BADGE` 90 makes a 158px cluster, 35 characters at depth
+     * 0 and 27 at the cap. That is BELOW the 29-character floor, deliberately and harmlessly:
+     * reaching it needs a plan containing both `934,400x` and `no known source`, and none of the
+     * 22 fixtures contains the first. `theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasured`
+     * `Floor` measures the floor over the FIXTURES for that reason, rather than over a
+     * combination the vocabulary allows and the data does not produce.
      *
      * SO THE CAP CAME DOWN BECAUSE {@link #INDENT} WENT UP, AND THE PRODUCT IS WHAT MATTERS. At
      * 8 levels of 10 pixels the column would be 24 characters, which after `NodeRowText.meta`'s
@@ -169,7 +199,21 @@ public final class PlannerWidgets {
      * worse than neither, which is the whole reason that conversation happened.
      */
     public static final String TOKEN_MARK = "!";
-    /** Wide enough for `934,400x`, which is a real quantity from a Borax plan. */
+    /**
+     * Wide enough for `934,400x`, which is a real quantity from a Borax plan.
+     *
+     * THE WORST CASE THE VOCABULARY ALLOWS, AND SINCE #333 THE TREE DOES NOT USE IT. A row in a
+     * laid-out tree takes its quantity column from {@link TreeColumns#forTree}, which is the
+     * widest quantity the plan ACTUALLY CONTAINS -- see that class for why a worst-case column
+     * spent a fifth of the panel on a number no plan draws. This constant stays for the surfaces
+     * that hold no tree and therefore have nothing to derive from: the diagram node, whose box
+     * is a fixed `FlowLayout.NODE_WIDTH` sized against `FlowCanvas.NARROWEST_NODE` which reads
+     * this, and the {@link #row(PlanNode, int, int, PlannerActions)} overload a caller holding
+     * ONE node must use.
+     *
+     * MEASURED: no committed plan fixture exceeds 7 characters of quantity, which is 42px, so 52
+     * is 10 pixels of headroom on the widest real plan and 28 on the median one.
+     */
     public static final int QTY = 52;
     /**
      * The badge column, wide enough for the LONGEST word the vocabulary can produce.
@@ -178,9 +222,38 @@ public final class PlannerWidgets {
      * pins it. A badge is fixed vocabulary -- unlike a label, which is a registry name and may
      * legitimately be cut -- so a truncated one is always a bug. At 66 the screenshot of
      * `plan-variant-table` read "no known…", which is #139's mark saying half of itself.
+     *
+     * THE TREE DERIVES ITS OWN, PER PLAN, SINCE #333, AND THE INVARIANT ABOVE IS UNTOUCHED. A
+     * badge is still all-or-nothing and a truncated one is still always a bug; what changed is
+     * that the width comes from the badges the tree actually CONTAINS rather than from the ones
+     * it could. See {@link TreeColumns}. The test above was STRENGTHENED rather than relaxed to
+     * pay for it -- `everyBadgeEveryFixtureDrawsFitsThatPlansOwnColumn` asserts the same
+     * no-truncation rule per plan across all 22 fixtures, which covers the token-kind and
+     * provenance refinements that only real data reaches and this constant never exercised.
+     *
+     * KEPT FOR THE SAME TWO SURFACES {@link #QTY} IS KEPT FOR, and read by
+     * `FlowCanvas.NARROWEST_NODE` besides.
      */
     public static final int BADGE = widestBadge();
     public static final int GAP = 3;
+
+    /**
+     * The narrowest quantity column {@link TreeColumns} will derive: four characters.
+     *
+     * A FLOOR AND NOT A GUESS AT THE CONTENT. The quantity is the one column a reader compares
+     * BETWEEN rows rather than reading on its own, and a plan whose every node needs `1x` would
+     * derive a 12-pixel column -- narrower than the {@link #ICON} beside it, so the number would
+     * read as attached to its neighbour rather than as a column of its own. Four characters is
+     * `999x`, which is the width at which a right-aligned column still looks like one.
+     *
+     * IT COSTS THE LABEL NOTHING IT WOULD OTHERWISE HAVE HAD. Measured over the committed
+     * fixtures, 14 of the 22 plans derive a quantity at or below this floor, and every one of
+     * them still ends up with a WIDER label column than the panel drew before #333, because the
+     * badge column shrank by 30 to 66 pixels on those same plans.
+     * `theDerivedColumnCensusIsWhatTheseJavadocsCite` asserts that 14, because a count written
+     * in prose beside a constant is the exact figure this file has twice had to re-measure.
+     */
+    public static final int MIN_QTY = 4 * NodeRowText.CHAR_WIDTH;
 
     /**
      * The tallest the TODO list may get before it scrolls instead of growing.
@@ -323,6 +396,16 @@ public final class PlannerWidgets {
         return width - labelStart - GAP - BADGE >= MIN_LABEL ? BADGE : 0;
     }
 
+    /*
+     * THE TREE ASKS `TreeColumns.clusterWidth` INSTEAD, SINCE #333, and the rule is the same one.
+     * This form is kept for `oneLineNode` -- the diagram's row-height shape, which has no tree to
+     * derive a column from -- and for `aNodeTooNarrowForBothDropsTheBadgeAndKeepsTheLabel` and
+     * `theBadgeIsNeverPartiallyDrawn`, which sweep widths against the vocabulary and are where
+     * the all-or-nothing rule is actually pinned. DO NOT reach for it from a tree row: it charges
+     * `BADGE` where the row has a narrower badge to draw, which puts the surplus back into a
+     * column no plan needs.
+     */
+
     /**
      * The badge column on a line the LABEL DOES NOT SHARE. All or nothing, as above.
      *
@@ -337,6 +420,24 @@ public final class PlannerWidgets {
     public static int badgeWidthBeside(int room) {
         return room >= BADGE ? BADGE : 0;
     }
+
+    // ---- CHROME COLOURS -----------------------------------------------------------------
+    //
+    // NOTHING BELOW THIS LINE DESCRIBES THE PLAN, AND `NodeStatus` REMAINS THE ONLY SOURCE OF
+    // SEMANTIC INK. That class's header forbids a widget keeping its own notion of a status,
+    // because it briefly had one dict per renderer and adding a status silently drew every new
+    // node as `craft`; its five inks are a port of `present.py` and `render.CSS`, and a new
+    // SEMANTIC colour has to be argued on the Python side first.
+    //
+    // These are a different kind of thing. They describe the WIDGET's state -- selected, hovered,
+    // nested -- and no reader of a plan is meant to learn anything about an item from them, which
+    // is why they live here and are absent from `NodeStatus`. `SELECTION_FILL` and
+    // `SELECTION_EDGE` set that precedent before #333 and the rail joined them at it.
+    //
+    // THE NOTE IS HERE BECAUSE WITHOUT IT THE PALETTE READS AS OPEN. A reader who finds several
+    // colour constants in the planner and no statement of the division reasonably concludes that
+    // adding a sixth is a normal thing to do -- and the one that gets added is a semantic one.
+    // KEEP THEM TOGETHER and keep this paragraph at the top of the group.
 
     /**
      * The wash drawn behind a selected row or node, and the frame around it.
@@ -367,6 +468,49 @@ public final class PlannerWidgets {
      * a doubled edge on a busy canvas is legible, a missing one in the tree is not.
      */
     private static final int SELECTION_EDGE = 0xCC2F5F96;
+
+    /**
+     * The 1px vertical guide drawn at each level of a tree row's indent. #333.
+     *
+     * WHY DEPTH NEEDED A SECOND CARRIER AT ALL. Before #333 every column in a row slid right by
+     * {@link #INDENT} per level, so the whole row moved and the nesting was legible from the
+     * ragged left edge of the QUANTITY column. Anchoring the cluster fixed the alignment and took
+     * that away: what is left of the indent is white space in front of a sprite, and #332 already
+     * measured that white space alone does not read as a level -- "it doesn't indent enough when
+     * i'm in list view of the ingredients", reported against a six-pixel indent.
+     *
+     * A RAIL COSTS NO WIDTH, which is the whole reason it is the right answer here rather than a
+     * wider indent. {@link #MAX_INDENT_DEPTH}'s arithmetic shows the indent budget is capped at
+     * 53 pixels by the label column's measured floor, so buying depth resolution with pixels was
+     * not available; a line drawn INSIDE the space the indent already occupies is free.
+     *
+     * MUTED AND TRANSLUCENT, at 25%, so a column of rails down a 15-row panel reads as structure
+     * rather than as content. {@link NodeStatus#INK_MUTED}'s hue, deliberately, and not a sixth
+     * colour: the rails say nothing about the item, and a hue the palette does not already
+     * contain would read as one more thing the row is telling you.
+     */
+    private static final int RAIL = 0x406F6D68;
+
+    /**
+     * The band drawn behind the row the cursor is on. #333.
+     *
+     * WHAT IT IS FOR, AND IT IS NOT DECORATION. A tree row is 388 pixels wide and 10 tall, and
+     * the fact a reader needs from it -- the quantity and the badge -- is now anchored at the far
+     * RIGHT while the name it belongs to is at the left, indented. Tracking one row across that
+     * gap with nothing behind it is the failure mode every list in this pack solves the same way:
+     * the AE2 terminal and FTB Quests' quest list both band the row under the cursor. It also
+     * confirms the click target, which on this panel is the whole row and looks like nothing.
+     *
+     * NEUTRAL AND VERY FAINT, at 9% black, which is the one thing this constant has to get right.
+     * `SELECTION_FILL` is 25% of {@link NodeStatus#INK_CRAFT}'s hue and it MEANS something -- the
+     * item under it is selected. A hover band is a cursor, it is true of whatever the mouse
+     * happens to be over, and giving it a hue would make the panel look as though it were
+     * reporting a status about a row for as long as the pointer rested there. Black rather than a
+     * tint of the panel's own grey so it reads the same on the diagram node's nine-slice.
+     *
+     * UNDER THE SELECTION WASH AND NOT INSTEAD OF IT; see {@link #rowWash}.
+     */
+    private static final int HOVER_FILL = 0x18000000;
 
     /**
      * What the view bar's buttons say. #323.
@@ -468,6 +612,163 @@ public final class PlannerWidgets {
             widest = Math.max(widest, label.length());
         }
         return widest * NodeRowText.CHAR_WIDTH;
+    }
+
+    /**
+     * The column widths one tree's rows share, derived from that tree. #333.
+     *
+     * <h2>THE PANEL RESERVED A FIFTH OF ITSELF FOR A WORD MOST PLANS NEVER DRAW</h2>
+     *
+     * {@link #BADGE} is `no known source` -- the widest word the WHOLE vocabulary can produce --
+     * and it was charged on every row of every plan. {@link #QTY} is `934,400x`, from one Borax
+     * plan. Measured over the 22 committed fixtures: 19 of them draw a badge narrower than
+     * `BADGE` (by 30 to 66 pixels) and every one of them draws a quantity narrower than `QTY` (by
+     * 10 to 28). That surplus came out of the LABEL, which is the item's name, and
+     * {@link #badgeWidthFor}'s own note already records that the label wins every width argument
+     * on this panel.
+     *
+     * <h2>DERIVED, WHICH IS WHY THE BADGE'S INVARIANT SURVIVES INTACT</h2>
+     *
+     * `BADGE`'s javadoc says a truncated badge is always a bug, because a badge is fixed
+     * vocabulary while a label is a registry name and may legitimately be cut. A per-plan width
+     * keeps that exactly: every badge the tree draws still fits, BY CONSTRUCTION, because the
+     * width is the widest badge the tree contains. This is {@link #widestBadge}'s own idiom --
+     * compute the width from the data and let a test assert nothing truncates -- applied to a
+     * narrower population. `everyBadgeEveryFixtureDrawsFitsThatPlansOwnColumn` is that test and
+     * it is a STRONGER claim than the vocabulary sweep, not a weaker one: it exercises the
+     * token-kind and provenance refinements that only real plans reach.
+     *
+     * <h2>ASKED ONCE FOR THE WHOLE TREE, LIKE `NodeRowText.disambiguators`</h2>
+     *
+     * Which columns a tree needs is a property of the TREE and not of a row, and a row cannot see
+     * its siblings -- the same reason #232 hoisted the collision map out of {@link #row}. So
+     * {@link #tree} asks once and hands the answer down, and a caller holding one node gets
+     * {@link #VOCABULARY}, which is what the panel drew before this existed.
+     *
+     * IMMUTABLE AND WITHOUT BEHAVIOUR BEYOND ARITHMETIC, so it can be built in a test and read
+     * with no window. Every number on it is in GUI pixels.
+     */
+    public static final class TreeColumns {
+
+        /** The quantity column, at least {@link #MIN_QTY}. */
+        public final int qty;
+
+        /**
+         * The badge column, or 0 for a tree whose nodes carry no badge at all.
+         *
+         * ZERO MEANS NO COLUMN, NOT A NARROW ONE, and {@link #clusterWidth} spends no
+         * {@link #GAP} on it. `NodeStatus.badge` answers the raw status word for a status it does
+         * not know rather than "", so this is only zero for a tree of nodes with a blank status
+         * -- which is a solver bug rather than a layout case, and drawing a 0px column for it is
+         * the honest rendering.
+         */
+        public final int badge;
+
+        /**
+         * The columns the vocabulary allows, for a caller with no tree to derive from.
+         *
+         * NOT A DEFAULT AND NOT A FALLBACK -- it is the WORST CASE, which is the only safe answer
+         * when the population is unknown. The {@link #row(PlanNode, int, int, PlannerActions)}
+         * overload uses it for the reason its own javadoc gives about `fragment`: ambiguity, and
+         * now column width too, is a property of the list a node sits in, so a lone node is
+         * measured against everything it could have been beside.
+         */
+        public static final TreeColumns VOCABULARY = new TreeColumns(QTY, BADGE);
+
+        TreeColumns(int qty, int badge) {
+            this.qty = qty;
+            this.badge = badge;
+        }
+
+        /**
+         * The columns `root`'s subtree actually needs.
+         *
+         * WALKS THE WHOLE TREE, exactly as `NodeStatus.legendFor` does and for the same reason:
+         * the widest badge is only answerable by looking at every node at once.
+         */
+        public static TreeColumns forTree(PlanNode root) {
+            return new TreeColumns(Math.max(MIN_QTY, widestQuantityIn(root)),
+                                   widestBadgeIn(root));
+        }
+
+        /**
+         * The right cluster's width on a row of `rowWidth` whose label starts at `labelStart`.
+         *
+         * THE ALL-OR-NOTHING BADGE RULE, UNCHANGED, AGAINST THE NEW GEOMETRY. {@link
+         * #badgeWidthFor} states it: a badge is fixed vocabulary so the alternative to truncating
+         * is OMITTING, and the label wins. This is that rule expressed as a cluster width, which
+         * is the form {@link #row} needs now that the columns are right-anchored rather than laid
+         * out left to right from the indent.
+         *
+         * A FULL-WIDTH TREE ROW NEVER HITS IT, cap included, and
+         * `theRightClusterIsTheSameWidthAtEveryDepth` measures that rather than assuming it. The
+         * rule is here for the narrow row -- and the latent version of this bug is the one that
+         * gets found by a screenshot rather than by a test.
+         */
+        public int clusterWidth(int rowWidth, int labelStart) {
+            int wide = withBadge();
+            return rowWidth - labelStart - GAP - wide >= MIN_LABEL ? wide : withoutBadge();
+        }
+
+        /** True when {@link #clusterWidth} kept the badge on this row. */
+        public boolean drawsBadge(int rowWidth, int labelStart) {
+            return badge > 0 && clusterWidth(rowWidth, labelStart) == withBadge();
+        }
+
+        private int withBadge() {
+            return badge > 0 ? withoutBadge() + GAP + badge : withoutBadge();
+        }
+
+        /**
+         * The cluster with the badge dropped: the machine column, then the quantity.
+         *
+         * THE MACHINE COLUMN IS {@link #ICON} WIDE BECAUSE IT HOLDS THE SAME KIND OF THING the
+         * item column does -- a 16px sprite scaled into the box -- and two icon columns of
+         * different sizes on one row would read as two different kinds of fact. It is charged
+         * whether or not a machine resolves, which is {@link #ICON}'s own column rule.
+         */
+        private int withoutBadge() {
+            return ICON + GAP + qty;
+        }
+    }
+
+    /**
+     * The widest badge any node in this tree draws, in pixels.
+     *
+     * `NodeStatus.badge` AND NOT `badgeFor(status)`, which is the whole point: the refinements
+     * -- a token kind, a `Provenance`, #139's unsourced mark -- are what make one plan's widest
+     * badge differ from another's, and they are only visible through a node.
+     */
+    static int widestBadgeIn(PlanNode root) {
+        return widestIn(root, true) * NodeRowText.CHAR_WIDTH;
+    }
+
+    /**
+     * The widest quantity any node in this tree draws, in pixels, before {@link #MIN_QTY}.
+     *
+     * `NodeRowText.quantity(node.need())` IS THE STRING THE ROW ACTUALLY DRAWS, so this measures
+     * the rendered form and not the number: the grouping separators in `934,400x` are two of its
+     * eight characters, and a column sized from `String.valueOf(need)` would cut them off.
+     */
+    static int widestQuantityIn(PlanNode root) {
+        return widestIn(root, false) * NodeRowText.CHAR_WIDTH;
+    }
+
+    /**
+     * The longest badge or quantity in a subtree, IN CHARACTERS.
+     *
+     * CHARACTERS AND NOT PIXELS ALL THE WAY DOWN, so the recursion never divides a width back
+     * into a count -- {@link NodeRowText#CHAR_WIDTH} is applied exactly once, at the two callers.
+     * Both of the strings this measures are what `line` will push through
+     * {@link NodeRowText#fit}, which spends `CHAR_WIDTH` per character, so a count is the unit
+     * the fit is decided in and a pixel width is a presentation of it.
+     */
+    private static int widestIn(PlanNode node, boolean badges) {
+        int widest = (badges ? NodeStatus.badge(node) : NodeRowText.quantity(node.need())).length();
+        for (PlanNode child : node.children()) {
+            widest = Math.max(widest, widestIn(child, badges));
+        }
+        return widest;
     }
 
     /** The widest badge in {@link NodeStatus}'s vocabulary, in pixels. */
@@ -920,9 +1221,41 @@ public final class PlannerWidgets {
             this(onClick, "");
         }
 
+        /**
+         * How many indent rails this row draws, or 0. See {@link PlannerWidgets#RAIL}.
+         *
+         * A COUNT AND NOT A DEPTH, which is why {@link PlannerWidgets#row} passes the CAPPED
+         * level. A row past {@link PlannerWidgets#MAX_INDENT_DEPTH} is not indented, so drawing
+         * a rail for a level whose indent was never charged would put a line through the item's
+         * own icon -- and `plan-fluid-chain` runs to depth 20 against a cap of 5, so that is
+         * fifteen of every twenty rows rather than an edge case.
+         */
+        private int rails;
+
         public ClickableGroup(Runnable onClick, String selectionKey) {
             this.onClick = onClick;
             this.selectionKey = selectionKey == null ? "" : selectionKey;
+        }
+
+        /**
+         * Draw a rail at each of `levels` indent steps. #333.
+         *
+         * VOID RATHER THAN FLUENT, matching `NodeContent.detail`: the one caller uses it as a
+         * statement, and a returned `this` nobody reads invites chaining onto a builder that has
+         * no other steps.
+         *
+         * PUBLIC READ, PACKAGE-PRIVATE WRITE, because the read is the only headless view of it.
+         * Everything in `draw` past this point is `GuiDraw`, so a test that could only reach the
+         * draw path could assert that a row was BUILT at a depth and never that anything drew
+         * the depth -- the same gap `drawsAsSelected` exists to close for #213.
+         */
+        void rails(int levels) {
+            this.rails = Math.max(0, levels);
+        }
+
+        /** How many rails this row will draw. The headless read; see {@link #rails(int)}. */
+        public int railCount() {
+            return rails;
         }
 
         /**
@@ -960,17 +1293,76 @@ public final class PlannerWidgets {
             return PlanSelection.isSelected(selectionKey);
         }
 
+        /**
+         * The wash a row paints behind its own children, given the two states it can be in.
+         *
+         * <h2>A PURE FUNCTION BECAUSE `isHovering()` IS THE ONE THING A TEST CANNOT SET</h2>
+         *
+         * Hover is read from the screen's cursor, and `HeadlessLayout` has no screen -- so
+         * `isHovering()` is false in every test and a hover band decided inline inside `draw`
+         * would be a behaviour with no headless witness at all, in a `draw` body that already
+         * cannot be reached. Splitting the DECISION out leaves exactly one untestable step (that
+         * `draw` passes `isHovering()` in) and makes the other four cases assertable:
+         * `theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither` sweeps all four.
+         *
+         * IT RETURNS ONE COLOUR AND NOT A LIST, WHICH IS THE LAYERING DECISION MADE ONCE.
+         * Painting both would put a neutral 9% black over a blue 25% wash and mud it; the
+         * selection is the stronger claim -- it says something about the ITEM, where hover says
+         * something about the POINTER -- so it wins outright. That is also why the frame is drawn
+         * only for a selection: a hovered row needs no border to be found, the cursor is on it.
+         *
+         * PUBLIC FOR `shot/`, WHICH IS THE ONLY PLACE `isHovering()` IS EVER TRUE. The paragraph
+         * above is about a test; the other half of the problem is that a headless test can
+         * therefore only ever assert the three states that are NOT the one this exists for. The
+         * `planner-hover` screen closes that by parking a real cursor on a real row and asking
+         * this function what the row painted THAT FRAME, with the live flag as its argument --
+         * which is a claim about the running client rather than about arithmetic. Same reason
+         * {@link #drawsAsSelected} is public for #213, and it is a read: no behaviour, no
+         * colour handed out, and a caller cannot use it to paint anything.
+         *
+         * @return the fill, or 0 for none. See {@link #HOVER_FILL} and {@link #SELECTION_FILL}.
+         */
+        public static int rowWash(boolean hovered, boolean selected) {
+            if (selected) {
+                return SELECTION_FILL;
+            }
+            return hovered ? HOVER_FILL : 0;
+        }
+
         @Override
         public void draw(com.cleanroommc.modularui.screen.viewport.ModularGuiContext context,
                          com.cleanroommc.modularui.theme.WidgetThemeEntry<?> widgetTheme) {
             super.draw(context, widgetTheme);
-            if (!drawsAsSelected()) {
-                return;
+            // THE RAILS GO UNDER THE SELECTION WASH, not over it, which is why they are first.
+            // A selected row is already tinted `SELECTION_FILL` and a rail painted on top of that
+            // reads as a lighter blue stripe rather than as structure; underneath, the wash tints
+            // it along with everything else and the row stays one object.
+            //
+            // ONE PER LEVEL AT THE LEVEL'S OWN LEFT EDGE, so the rail sits in the white space the
+            // indent already bought and the item icon at `rails * INDENT` is clear of the last
+            // one. Full row height with no inset, so consecutive rows join into a continuous
+            // guide -- which is the whole point of a rail over a tick.
+            for (int level = 0; level < rails; level++) {
+                com.cleanroommc.modularui.drawable.GuiDraw
+                        .drawRect(level * INDENT + INDENT / 2, 0, 1, getArea().height, RAIL);
             }
+            boolean selected = drawsAsSelected();
+            int wash = rowWash(isHovering(), selected);
             int width = getArea().width;
             int height = getArea().height;
-            com.cleanroommc.modularui.drawable.GuiDraw
-                    .drawRect(0, 0, width, height, SELECTION_FILL);
+            if (wash != 0) {
+                com.cleanroommc.modularui.drawable.GuiDraw
+                        .drawRect(0, 0, width, height, wash);
+            }
+            if (!selected) {
+                // NO FRAME FOR A HOVER, deliberately; see `rowWash`. And nothing to read the
+                // cursor's own position from here -- `isHovering()` LAGS THE CURSOR BY A FRAME,
+                // which `shot/PlannerShot` already logs beside `isBelowMouseInTopPanel` for this
+                // reason, with the note that waiting longer for it does not help. A prodshot
+                // proving this band MUST advance at least one frame between moving the cursor and
+                // capturing, or it photographs an unhighlighted row and reads as a failure.
+                return;
+            }
             com.cleanroommc.modularui.drawable.GuiDraw
                     .drawRect(0, 0, width, 1, SELECTION_EDGE);
             com.cleanroommc.modularui.drawable.GuiDraw
@@ -1246,7 +1638,7 @@ public final class PlannerWidgets {
         int treeHeight = PANEL_HEIGHT - PADDING * 2 - y - LINE * footerLines - 2;
         body.child(tree(plan, CONTENT_WIDTH, treeHeight, actions).pos(0, y));
         y += treeHeight + 2;
-        body.child(line(footer(plan, book), CONTENT_WIDTH, NodeStatus.INK_MUTED).pos(0, y));
+        body.child(footerRow(plan, book, CONTENT_WIDTH).pos(0, y));
         if (!caveat.isEmpty()) {
             // The block starts one line below the footer, and `footerLines` above already took
             // its whole height out of the tree. `caveatBlock` owns the one-target-per-block rule.
@@ -1370,19 +1762,23 @@ public final class PlannerWidgets {
         // ASKED ONCE FOR THE WHOLE TREE, mirroring `entryLines`: which labels collide is a
         // property of the list and not of a row, and a row cannot see its siblings. #232.
         java.util.Map<String, String> fragments = NodeRowText.disambiguators(plan.tree());
-        appendRows(plan.tree(), 0, width, list, actions, fragments);
+        // THE SAME ARGUMENT, ONE COLUMN OVER (#333). How wide the quantity and badge columns
+        // need to be is a property of the tree; see `TreeColumns`.
+        TreeColumns columns = TreeColumns.forTree(plan.tree());
+        appendRows(plan.tree(), 0, width, list, actions, fragments, columns);
         return list;
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static void appendRows(PlanNode node, int depth, int width, ListWidget into,
                                    PlannerActions actions,
-                                   java.util.Map<String, String> fragments) {
+                                   java.util.Map<String, String> fragments,
+                                   TreeColumns columns) {
         // `get` RETURNS NULL FOR A ROW WITH NOTHING TO DISAMBIGUATE, which is the signal `row`
         // wants, so there is no second lookup and no way to ask the wrong question.
-        into.child(row(node, depth, width, actions, fragments.get(node.key())));
+        into.child(row(node, depth, width, actions, fragments.get(node.key()), columns));
         for (PlanNode child : node.children()) {
-            appendRows(child, depth + 1, width, into, actions, fragments);
+            appendRows(child, depth + 1, width, into, actions, fragments, columns);
         }
     }
 
@@ -1461,6 +1857,14 @@ public final class PlannerWidgets {
      * The meta run ("pinned", "172 recipes", "-> ...") is a second sentence about the same
      * node, it is what the tree row is for, and appending it here would push the name back
      * off the end of the line this method exists to give it.
+     *
+     * THE MACHINE BADGE COSTS THE LABEL 13 PIXELS OF THAT LINE, AND THE SUM IS RE-DONE RATHER
+     * THAN ASSUMED (#333). `FlowLayout.NODE_WIDTH` is 209 and `NODE_PAD` takes 3 from each side,
+     * so line two had 209 - 6 - 16 - 3 = 184px, which is 30 characters; with the badge it has
+     * 171px, which is 28. `FlowCanvasTest.aNodeHasRoomForAWholeItemName` pins the floor at 24 --
+     * "Sodium Fluoride Solution", the longest name in `plan-fluid-chain`'s upper chain and the
+     * one the old single-line node cut to "Sodium…" -- so the room is still there with four
+     * characters over, and that test now subtracts the badge so it cannot go stale.
      */
     private static void twoLineNode(NodeContent box, PlanNode node, int width, int height,
                                     int colour) {
@@ -1484,8 +1888,58 @@ public final class PlannerWidgets {
             box.detail(line(NodeStatus.badge(node), badgeWidth, colour)
                                .pos(right - badgeWidth, top));
         }
-        box.detail(line(NodeRowText.label(node), right - x, NodeStatus.INK_MUTED)
+        // THE MACHINE BADGE, BOTTOM-RIGHT, INSIDE `NODE_PAD` (#333 deliverable 1).
+        //
+        // ON THE NODE AND NOT ON THE EDGE, WHICH IS A DEPARTURE FROM WHAT #333 ASKED FOR. The
+        // issue says "a little machine icon on the line between nodes". Three reasons it belongs
+        // here instead, in order of weight:
+        //
+        //   1. A CRAFT NODE HAS N EDGES AND EXACTLY ONE MACHINE. `FlowLayout` is columnar and a
+        //      parent sits one column left of its children, so a node's children are its
+        //      INGREDIENTS and the recipe consuming them belongs to the node. A five-input craft
+        //      has five child edges, so an icon "on the edge" is five copies of one fact or an
+        //      arbitrary pick of which edge gets it. (The parent-side edge is single-valued and
+        //      would work, and still leaves the ROOT node's machine undrawable.)
+        //   2. EDGES ARE NOT WIDGETS, SO AN EDGE ICON FORFEITS THE WHOLE HOVER STACK.
+        //      `FlowCanvas.edge`'s javadoc says why they are not: "making each one a widget would
+        //      double the child count for something that never needs to be hit-tested, sized or
+        //      themed". A hoverable icon there is something that DOES need hit-testing, which
+        //      means hand-rolling per-segment point-in-rect tests in the one class that
+        //      explicitly declined to host widgets -- reimplementing what `ITooltip` gives a
+        //      widget for free.
+        //   3. IT IS A CHILD, SO IT INHERITS THE TRANSFORM. #330 landed the edges in screen
+        //      space; a node-mounted badge never needed that fix, because only the canvas's
+        //      CHILDREN get the scroll translate and the zoom scale.
+        //
+        // The edge-midpoint icon remains worth doing as a Phase 2 DECORATION that repeats this
+        // badge -- `COLUMN_GAP` is 40px, so a 10px sprite at the elbow has room -- but never as
+        // the only place the fact appears, because hover there still needs manual hit-testing.
+        //
+        // IN `detail`, SO IT GOES AWAY BELOW `FlowZoom.LABEL_LEGIBLE` along with the label and
+        // the badge word. A 10px sprite at zoom 0.5 is five physical pixels; `FlowZoom.MIN`'s own
+        // comment says what a reader zoomed out is actually reading, and it is the icon and the
+        // coloured quantity. The ITEM icon is not detail and this is, which is the same split
+        // `TOKEN_MARK` argues for from the other side.
+        // THE COLUMN IS CHARGED WHETHER OR NOT A MACHINE RESOLVED, which is {@link #ICON}'s rule,
+        // the same rule the item icon eight lines above already follows on this surface, and what
+        // the tree row does one method over. It was conditional first, and conditional is wrong
+        // for the reason `iconIfAny` states: `machineCell` answers null for a machine with no
+        // sprite and no roadblock, which is every client for the 5.47 s of the graph load, so the
+        // label would be re-fitted from 28 characters to 30 the moment the graph landed under an
+        // open diagram. It also gave two adjacent nodes different amounts of room for the same
+        // name depending on whether their categories happened to have catalysts, which reads as
+        // arbitrary rather than as a column.
+        //
+        // `FlowCanvasTest.aNodeHasRoomForAWholeItemName` ALREADY SUBTRACTS IT UNCONDITIONALLY, so
+        // this is the production side agreeing with the arithmetic that test does rather than
+        // being conservatively covered by it.
+        Icon machine = machineCell(node, ICON);
+        int labelRoom = right - x - ICON - GAP;
+        box.detail(line(NodeRowText.label(node), labelRoom, NodeStatus.INK_MUTED)
                            .pos(x, top + LINE));
+        if (machine != null) {
+            box.detail(machine.pos(right - ICON, top + LINE));
+        }
     }
 
     /**
@@ -1558,6 +2012,51 @@ public final class PlannerWidgets {
      */
     public static ParentWidget<?> row(final PlanNode node, int depth, int width,
                                       final PlannerActions actions, String fragment) {
+        return row(node, depth, width, actions, fragment, TreeColumns.VOCABULARY);
+    }
+
+    /**
+     * {@link #row(PlanNode, int, int, PlannerActions, String)}, told what columns the rest of
+     * this tree needs. #333.
+     *
+     * <h2>DEPTH MOVED EVERY COLUMN, AND THAT IS WHY NO COLUMN LINED UP</h2>
+     *
+     * This method used to set `x = indent` and then place the icon, the quantity and the label
+     * from there, so every column slid right by {@link #INDENT} per level. `disclose-planner.png`
+     * is what that looks like: the `1x` / `100x` / `9x` run drifts diagonally down the panel and
+     * there is no column for the eye to compare magnitudes in. Depth was being encoded TWICE --
+     * by the indent and again by the position of every cell -- and the price was that nothing
+     * aligned.
+     *
+     * SO THE ROW IS TWO GROUPS NOW. The LEFT group varies with depth (the indent, the item's
+     * icon, the label) and the RIGHT CLUSTER is a fixed width anchored to `width`, identical on
+     * every row at every depth. Nothing is lost by the columns no longer sliding: the indent
+     * still carries depth, and since this change `ClickableGroup.draw` also draws a rail per
+     * level, which costs no width at all.
+     *
+     * <pre>
+     *   depth 0   [◧] Strong Mythic Essence                    1x  craft
+     *   depth 1     │ [◧] Mildly Recursive Goo               100x  craft
+     *   depth 2     │ │ [◧] Nethengeic Rune                     1x  craft
+     *             ^^^^^^ rails                     right cluster ^^^^^^^
+     * </pre>
+     *
+     * THE QUANTITY IS RIGHT-ALIGNED IN ITS CELL, which is the other half of making it a column:
+     * a left-aligned `1x` above a left-aligned `100x` still gives the eye no ones digit to
+     * compare. `TextWidget.alignment` existed in ModularUI 3.1.5 and had no caller anywhere in
+     * this mod. `theQuantityCellIsRightAlignedAndTheLabelIsNot` is the headless read of it,
+     * because the alignment is applied inside `TextWidget.draw` via `TextRenderer.setAlignment`
+     * and a drawn position is not something a sizer can be asked about.
+     *
+     * @param columns what the whole tree needs, from {@link TreeColumns#forTree}. A caller
+     *                holding ONE node passes {@link TreeColumns#VOCABULARY}, for the reason the
+     *                overload above gives about `fragment`: a column width, like ambiguity, is
+     *                a property of the list a node sits in.
+     */
+    public static ParentWidget<?> row(final PlanNode node, int depth, int width,
+                                      final PlannerActions actions, String fragment,
+                                      TreeColumns columns) {
+        int level = Math.min(depth, MAX_INDENT_DEPTH);
         ClickableGroup row = new ClickableGroup(new Runnable() {
             @Override
             public void run() {
@@ -1565,9 +2064,9 @@ public final class PlannerWidgets {
             }
         }, node.key());
         row.size(width, ROW_HEIGHT);
+        row.rails(level);
 
-        int indent = Math.min(depth, MAX_INDENT_DEPTH) * INDENT;
-        int x = indent;
+        int x = level * INDENT;
 
         if (!tokenMark(row, node, ICON, x, 0)) {
             iconIfAny(row, NodeActionsHolder.actions().iconFor(node), ICON, x, 0);
@@ -1576,19 +2075,31 @@ public final class PlannerWidgets {
         x += ICON + GAP;
 
         int colour = NodeStatus.colour(node);
-        row.child(line(NodeRowText.quantity(node.need()), QTY, colour).pos(x, 0));
-        x += QTY + GAP;
-
-        // The same all-or-nothing rule as the diagram node. A full-width tree row never hits
-        // it, even at the indent cap -- but a row is not always full width, and the latent
-        // version of this bug is the one that gets found by a screenshot rather than a test.
-        int badgeWidth = badgeWidthFor(width, x);
-        int labelWidth = Math.max(GAP, width - x - (badgeWidth > 0 ? badgeWidth + GAP : 0));
+        // THE ALL-OR-NOTHING BADGE RULE MOVED TO `TreeColumns`, because the cluster is
+        // right-anchored now and the badge is the term that decides how wide it is. The rule
+        // itself is unchanged and so is its reason; see `badgeWidthFor`. A full-width tree row
+        // never drops the badge, cap included, and `theRightClusterIsTheSameWidthAtEveryDepth`
+        // measures that rather than trusting it.
+        int cluster = columns.clusterWidth(width, x);
+        int clusterX = width - cluster;
+        int labelWidth = Math.max(GAP, clusterX - GAP - x);
         row.child(line(labelAndMeta(node, fragment, labelWidth), labelWidth,
                        NodeStatus.INK_MUTED).pos(x, 0));
-        if (badgeWidth > 0) {
-            row.child(line(NodeStatus.badge(node), badgeWidth, colour)
-                              .pos(width - badgeWidth, 0));
+
+        int cx = clusterX;
+        // THE MACHINE THIS STEP RUNS IN (#333), FIRST IN THE CLUSTER. The width is charged
+        // whether or not anything resolved, which is `ICON`'s column rule -- a machine column
+        // that appeared only on rows with a sprite would re-flow the row the moment a graph
+        // finished loading mid-session.
+        Icon machine = machineCell(node, ICON);
+        if (machine != null) {
+            row.child(machine.pos(cx, 0));
+        }
+        cx += ICON + GAP;
+        row.child(rightLine(NodeRowText.quantity(node.need()), columns.qty, colour).pos(cx, 0));
+        cx += columns.qty + GAP;
+        if (columns.drawsBadge(width, x)) {
+            row.child(line(NodeStatus.badge(node), columns.badge, colour).pos(cx, 0));
         }
         return row;
     }
@@ -2064,7 +2575,7 @@ public final class PlannerWidgets {
             lines.add(new Line("", "nothing outstanding", NodeStatus.INK_MUTED));
         }
         addEntries(lines, null, plan.shoppingList(), NodeStatus.INK_NEED, widthPx);
-        // THE FOOTER'S "N machine(s) to build" IS A COUNT AND THESE ARE THE MACHINES. #190: every
+        // THE FOOTER'S "N machines" CELL IS A COUNT AND THESE ARE THE MACHINES. #190: every
         // `MachineRow` accessor but `size()` was called from a test and nowhere else, so the
         // player was told how many machines stood in the way and could never learn which.
         //
@@ -2261,7 +2772,12 @@ public final class PlannerWidgets {
         int inner = CONTENT_WIDTH;
         List<String> lines = PlanCaveats.detailLines(inner);
 
-        int height = PADDING * 2 + LINE + 1 + lines.size() * LINE;
+        // THE HEIGHT MUST INCLUDE THE GAPS THE LOOP BELOW ADDS, and this is the one place that
+        // can be wrong without anything saying so: ModularUI neither clamps nor clips a child
+        // (#125), so a panel sized without them draws its last notes past its own bottom edge
+        // and every layout assertion stays green. `caveatGaps` counts exactly what the loop
+        // spends, from the same `CONTINUATION` marker, so the two cannot disagree.
+        int height = PADDING * 2 + LINE + 1 + lines.size() * LINE + caveatGaps(lines);
         Group body = new Group();
         body.pos(PADDING, PADDING);
         body.size(inner, height - PADDING * 2);
@@ -2276,9 +2792,32 @@ public final class PlannerWidgets {
         // warning is about WORDING -- a reason phrased so blandly nobody reports it -- and the
         // wording here is the hand-written sentence itself. The player also arrived by clicking
         // a red line, so the panel does not have to shout to be understood as a caveat.
-        body.child(line(PlanCaveats.TITLE, inner, NodeStatus.INK_NEED).pos(0, 0));
+        // THE TITLE GETS THE STRIP AND KEEPS ITS INK (#333). `heading` would give it both, and
+        // the ink is the half that must not move: the paragraph above records that red here is
+        // the ONE alarm on a panel of five explanations, and `INK_CRAFT` would make the alarm a
+        // section label. Chrome and colour are separate decisions and only one of them is being
+        // made. Same texture and the same nine-slice argument as `heading`; see it.
+        TextWidget<?> title = line(PlanCaveats.TITLE, inner, NodeStatus.INK_NEED);
+        ((com.cleanroommc.modularui.widget.Widget) title)
+                .background(com.cleanroommc.modularui.drawable.GuiTextures.BUTTON_CLEAN);
+        body.child(title.pos(0, 0));
         int y = LINE + 1;
-        for (String text : lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            String text = lines.get(i);
+            // A HALF LINE BETWEEN NOTES, AND NONE INSIDE ONE (#333). Every note here runs to two
+            // or three lines, so with a uniform 10px rhythm the gap between note 1's last line
+            // and note 2's first is identical to the gap inside note 1 -- five paragraphs read as
+            // eleven sentences, which is what `caveats320.png` shows.
+            //
+            // DECIDED FROM `NodeRowText.CONTINUATION`, WHICH IS WHAT IT MEANS. `wrapRow` prefixes
+            // every line after the first with it precisely so a wrapped entry reads as one entry;
+            // a line that does NOT carry it is a new note. So this is reading the existing marker
+            // for its stated purpose rather than inventing a parallel notion of where notes start
+            // -- which would be a second answer to the same question, and `detailLines` would be
+            // the one that got edited.
+            if (i > 0 && !text.startsWith(NodeRowText.CONTINUATION)) {
+                y += LINE / 2;
+            }
             // ALREADY WRAPPED, so `line` has nothing left to cut. Passing the full width is
             // what keeps that true: a narrower box here would truncate text that was measured
             // against `inner`, and the ellipsis would land mid-sentence in the one place in
@@ -2290,6 +2829,24 @@ public final class PlannerWidgets {
                 .child(body);
     }
 
+
+    /**
+     * The pixels {@link #caveatsPanel} spends on the half-lines between its numbered notes.
+     *
+     * ITS OWN METHOD SO THE HEIGHT AND THE LAYOUT CANNOT DISAGREE. The panel sizes itself before
+     * it lays anything out, so the gaps have to be counted twice -- and a panel that counted
+     * fewer than it drew would put its last note past its own bottom edge with nothing to report
+     * it, which is #125's rule and the reason `flowChromeHeight` is a single source too.
+     */
+    static int caveatGaps(List<String> lines) {
+        int gaps = 0;
+        for (int i = 1; i < lines.size(); i++) {
+            if (!lines.get(i).startsWith(NodeRowText.CONTINUATION)) {
+                gaps += LINE / 2;
+            }
+        }
+        return gaps;
+    }
 
     /**
      * A scrollable column of one-line rows, each with the icon column charged.
@@ -2379,21 +2936,31 @@ public final class PlannerWidgets {
         return ModularPanel.defaultPanel(panelName, PANEL_WIDTH, PANEL_HEIGHT).child(body);
     }
 
-    private static String footer(PlanView plan, PlanBook book) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(plan.nodes()).append(" nodes");
-        if (!plan.shoppingList().isEmpty()) {
-            sb.append(NodeRowText.SEPARATOR).append(plan.shoppingList().size())
-              .append(" still needed");
+    private static Group footerRow(PlanView plan, PlanBook book, int width) {
+        Group row = new Group();
+        row.size(width, LINE);
+        List<NodeRowText.FooterCell> cells = NodeRowText.footerCells(plan, book);
+        int x = 0;
+        for (int i = 0; i < cells.size(); i++) {
+            if (i > 0) {
+                x += NodeRowText.FOOTER_CELL_GAP;
+            }
+            NodeRowText.FooterCell cell = cells.get(i);
+            // THE VALUE CARRIES THE INK AND THE LABEL DOES NOT, which is the whole change; see
+            // `NodeRowText.footerCells`. `colourFor` and not a mapping written here -- that is
+            // `NodeStatus`'s standing rule, and a cell with no status gets `INK_MUTED` from its
+            // documented fallback rather than from a status it does not have.
+            int valueWidth = cell.value().length() * NodeRowText.CHAR_WIDTH;
+            row.child(line(cell.value(), valueWidth, NodeStatus.colourFor(cell.status()))
+                              .pos(x, 0));
+            // ONE CHARACTER, so the number and its noun read as one cell; see `footerWidth`,
+            // which is the same arithmetic and is what the test measures against.
+            x += valueWidth + NodeRowText.CHAR_WIDTH;
+            int labelWidth = cell.label().length() * NodeRowText.CHAR_WIDTH;
+            row.child(line(cell.label(), labelWidth, NodeStatus.INK_MUTED).pos(x, 0));
+            x += labelWidth;
         }
-        if (!plan.machinesToBuild().isEmpty()) {
-            sb.append(NodeRowText.SEPARATOR).append(plan.machinesToBuild().size())
-              .append(" machine(s) to build");
-        }
-        if (!book.todoKeys().isEmpty()) {
-            sb.append(NodeRowText.SEPARATOR).append(book.todoKeys().size()).append(" on TODO");
-        }
-        return sb.toString();
+        return row;
     }
 
     /**
@@ -2413,6 +2980,21 @@ public final class PlannerWidgets {
      * would re-flow every row the moment a `NodeActions` was installed, or a graph finished
      * loading mid-session and `iconFor` began answering. A helper that also advanced the cursor
      * would make that conditional again.
+     *
+     * <h2>{@link #machineCell} DOES NOT COME THROUGH HERE, AND MUST NOT BE MADE TO</h2>
+     *
+     * It is the one place that builds an {@link Icon} for an EMPTY stack, on purpose: a machine
+     * standing between the player and the step is marked with a frame, and the frame has to be
+     * drawn whether or not the catalyst resolved a sprite. 37% of the fixtures' craft nodes
+     * resolve none, and so does every client during the 5.47 s graph load, so routing that cell
+     * through this guard would delete the roadblock mark on most of the rows that need it -- which
+     * is the signal #190/#252 established a reader scans for and §7.9 of #333's spec forbids
+     * hiding behind a hover.
+     *
+     * IT IS NOT A SECOND COPY OF THE GUARD EITHER. This method answers "is there a sprite"; that
+     * one answers "is there anything to SAY", which is a different question with a different
+     * source of truth (`NodeRowText.machineTooltipLines`) and a different answer on exactly the
+     * rows that matter.
      */
     /**
      * Draw {@link #TOKEN_MARK} in the icon column when `node` is a token, and say whether it did.
@@ -2441,6 +3023,85 @@ public final class PlannerWidgets {
     }
 
     /**
+     * The machine column's cell for one node, unpositioned, or null when there is nothing to show.
+     *
+     * <h2>WHAT #333 ASKED FOR AND WHY IT IS AN ICON RATHER THAN THE WORDS IT REPLACES</h2>
+     *
+     * Jake, on 0.11.0: "We do need to know what MACHINE is to be used." The plan already knew --
+     * `PlanNode.machine` is populated on 100% of the nodes carrying a category -- and
+     * `NodeRowText.meta` already drew it. What it did NOT do was survive: the machine sat at the
+     * end of the most contested column on the panel, sharing it with the item's own name, so
+     * `disclose-planner.png` reads `Centrifuge…`, `Bloodmaste…`, `Runic Altar (b…`. A sprite in a
+     * column of its own costs 13 pixels once and can never be truncated.
+     *
+     * <h2>NULL ON THREE DIFFERENT GROUNDS, AND THEY ARE NOT THE SAME ANSWER</h2>
+     *
+     * <ol>
+     *   <li>NO MACHINE WORTH NAMING -- `machineTooltipLines` is empty, which is hand crafting or
+     *       a node with no category at all. The words are the authority on this and not a second
+     *       test here: {@link NodeRowText#machineName} owns the hand-crafting suppression, so a
+     *       cell that decided it independently would be a second answer to the same question.</li>
+     *   <li>A MACHINE WITH NO PICTURE AND NO PROBLEM -- 62.9% of craft nodes resolve a catalyst,
+     *       and the misses are bee and tree breeding, where the bee IS the machine. An invisible
+     *       hover target is worse than nothing, because a tooltip nobody can find is a tooltip
+     *       that does not exist. THIS IS THE ONE THING #333 COSTS, AND THE LOSS IS BIGGER THAN
+     *       "AN INTERNAL UID": measured over the fixtures, 360 rows carry a machine NAME that no
+     *       catalyst can picture, and 352 of them are bee and tree breeding -- whose names are
+     *       `Bee Breeding` (284) and `Bee Produce` (68), which JEI titled and a reader could
+     *       read. Not one row in any fixture ever printed a raw category id like
+     *       `bdew.jeibees.mutation.rootBees`, so this is a readable phrase going away and not a
+     *       tidy-up. It is a gain on a 29-character column and a loss of a fact, and #333 takes
+     *       the trade knowingly rather than by not noticing; P8's tooltip-everywhere pass is
+     *       where it comes back, because a cell drawn for a name with no sprite needs a visible
+     *       hover target of its own before it can carry one.</li>
+     *   <li>NEVER FOR A ROADBLOCK. A machine standing between the player and the step gets a cell
+     *       whether or not it resolves a sprite, because the frame is the carrier and the frame
+     *       needs no picture. That is what makes P4a's requirement hold on the 438 roadblock rows
+     *       in the fixtures rather than only on the ones with an icon.</li>
+     * </ol>
+     *
+     * <h2>THE FRAME, AND WHY THE STATE IS NOT HOVER-ONLY</h2>
+     *
+     * `machineWhyBit`'s javadoc established that the machine's name and its STATE are "what a
+     * reader scans for", which is why only the `why` prose was ever allowed to be cut. Moving all
+     * of that into a tooltip would have traded a scannable signal for a prettier row -- a net
+     * loss of exactly the kind #190 and #252 fixed. So the state stays visible without hovering:
+     * a 1px frame in {@link NodeStatus#INK_NEED} around the cell.
+     *
+     * ONE FRAME AND NOT ONE PER STATE, and that is {@link NodeStatus}'s rule rather than
+     * laziness: its header forbids a widget keeping its own notion of a status, and a
+     * `buildable`-is-amber / `no route`-is-red mapping written here would be precisely the local
+     * status map that made adding a status draw silently wrong. {@link NodeStatus#isRoadblock} is
+     * the one predicate that exists for this question -- including the part that reads oddly,
+     * that `unknown` counts, because the tool failing to identify a machine is a real wall and
+     * not a clean bill. The exact word is in the tooltip.
+     *
+     * A FRAME RATHER THAN `GuiTextures.EXCLAMATION`, which is the stock alternative and would
+     * cover the sprite. Both survive greyscale, which is `TOKEN_MARK`'s test and the only one
+     * that matters here; a frame is the one that still lets the machine be recognised.
+     */
+    private static Icon machineCell(PlanNode node, int size) {
+        List<String> tooltip = NodeRowText.machineTooltipLines(node);
+        if (tooltip.isEmpty()) {
+            return null;
+        }
+        net.minecraft.item.ItemStack stack =
+                NodeActionsHolder.actions().iconForCategory(node);
+        boolean roadblock = NodeStatus.isRoadblock(node.machineState());
+        if ((stack == null || stack.isEmpty()) && !roadblock) {
+            return null;
+        }
+        Icon cell = icon(stack == null ? net.minecraft.item.ItemStack.EMPTY : stack, size, size);
+        if (roadblock) {
+            cell.frame(NodeStatus.INK_NEED);
+        }
+        for (int i = 0; i < tooltip.size(); i++) {
+            cell.addTooltipLine(tooltip.get(i));
+        }
+        return cell;
+    }
+
+    /**
      * The icon column's widget. ONLY REACHED WHEN THERE IS SOMETHING TO DRAW; see
      * {@link #iconIfAny}, which is the only caller and holds the guard.
      *
@@ -2466,7 +3127,13 @@ public final class PlannerWidgets {
      * put on the screen was not.
      */
     private static Icon icon(net.minecraft.item.ItemStack stack, int width, int height) {
-        reportIfModelless(stack);
+        // NOT FOR AN EMPTY STACK, which `machineCell` now builds deliberately for a roadblock
+        // with no sprite. `getItemModel(EMPTY)` answers the missing model for air, so an
+        // unguarded report would log "minecraft:air has no baked model" once per session and
+        // send the reader looking for a resource pack problem that does not exist.
+        if (!stack.isEmpty()) {
+            reportIfModelless(stack);
+        }
         Icon widget = new Icon(stack);
         widget.size(width, height);
         return widget;
@@ -2547,35 +3214,131 @@ public final class PlannerWidgets {
      * not do.
      *
      * SIZED BY THE CALLER AND SQUARE BY CONVENTION, not by construction: a 1.12.2 item texture
-     * is 16x16, so a box that is not square draws the item stretched. Both callers pass a
-     * square, {@link #ICON} in a tree or TODO row and {@link #NODE_ICON} on a diagram node.
+     * is 16x16, so a box that is not square draws the item stretched. Every caller passes a
+     * square -- {@link #ICON} in a tree row, a TODO row and the machine column,
+     * {@link #NODE_ICON} on a diagram node.
      *
      * NO GL STATE HANDLING HERE. `drawItem` is already wrapped in `Platform.setupDrawItem` /
      * `endDrawItem` and a push/pop of the matrix, so an item drawn from a widget leaves the
      * lighting and the depth range as it found them. Doing it again outside would be a second
      * owner of state that has exactly one.
      */
-    private static final class Icon extends com.cleanroommc.modularui.widget.Widget<Icon> {
+    static final class Icon extends com.cleanroommc.modularui.widget.Widget<Icon> {
 
         private final net.minecraft.item.ItemStack stack;
+
+        /**
+         * A 1px border drawn around the box, or 0 for none. See {@link #frame(int)}.
+         *
+         * `0` AND NOT A `Boolean` PLUS A COLOUR, because a fully transparent border and no border
+         * are the same picture, so one field cannot disagree with itself. Every real ink in
+         * {@link NodeStatus} carries `0xFF` alpha for the reason recorded there.
+         */
+        private int frame;
 
         Icon(net.minecraft.item.ItemStack stack) {
             this.stack = stack;
         }
 
+        /**
+         * Draw a 1px border in `argb` around this icon. See {@link PlannerWidgets#machineCell}.
+         *
+         * FLUENT, UNLIKE `NodeContent.detail`, because the one caller uses it mid-expression on a
+         * cell it is still building rather than as a statement about a box it already has.
+         */
+        Icon frame(int argb) {
+            this.frame = argb;
+            return this;
+        }
+
+        /**
+         * The border colour, or 0. THE HEADLESS VIEW OF THE ROADBLOCK MARK.
+         *
+         * `draw` is `GuiDraw` and therefore needs a GL context, so without this a test could
+         * assert that a machine cell was BUILT and never that the roadblock state reached it --
+         * and `IconWidgetTest`'s own header spells out why that gap matters: every layout
+         * assertion was green through a widget that drew its sprite in the wrong place. Same
+         * reason `ClickableGroup.drawsAsSelected` is public.
+         */
+        int frameColour() {
+            return frame;
+        }
+
+        /** The stack this draws, possibly EMPTY. For the same reason {@link #frameColour} exists. */
+        net.minecraft.item.ItemStack stack() {
+            return stack;
+        }
+
         @Override
         public void draw(com.cleanroommc.modularui.screen.viewport.ModularGuiContext context,
                          com.cleanroommc.modularui.theme.WidgetThemeEntry<?> widgetTheme) {
+            // EMPTY IS REACHABLE NOW, AND `drawItem` ALREADY RETURNS ON IT. `machineCell` builds
+            // a frame-only cell for a roadblock whose machine resolved no sprite, which is 37% of
+            // craft nodes' worth of catalyst misses plus every client with no graph loaded.
             com.cleanroommc.modularui.drawable.GuiDraw.drawItem(
                     stack, 0, 0, getArea().width, getArea().height,
                     context.getCurrentDrawingZ());
+            if (frame == 0) {
+                return;
+            }
+            int width = getArea().width;
+            int height = getArea().height;
+            com.cleanroommc.modularui.drawable.GuiDraw.drawRect(0, 0, width, 1, frame);
+            com.cleanroommc.modularui.drawable.GuiDraw.drawRect(0, height - 1, width, 1, frame);
+            com.cleanroommc.modularui.drawable.GuiDraw.drawRect(0, 0, 1, height, frame);
+            com.cleanroommc.modularui.drawable.GuiDraw.drawRect(width - 1, 0, 1, height, frame);
         }
     }
 
-    /** PUBLIC FOR `client.machines`, for the reason on {@link #line}. */
+    /**
+     * A section heading: {@link #line}'s text, on a strip that makes it look like one. #333.
+     *
+     * <h2>IT WAS `line(text, width, INK_CRAFT)` AND THAT IS DEFECT SIX OF THE DESIGN SPEC</h2>
+     *
+     * Blue text, same size, same weight and the same {@link #ROW_HEIGHT} as the data underneath
+     * it, on the same undifferentiated `#c6c6c6` field. So the panel's own title read as a row,
+     * and the view bar's buttons -- also `INK_CRAFT`, one line below -- read as a second title;
+     * `SHOW_DIAGRAM`'s javadoc records that collision from the other side, arguing that "colour
+     * does not say clickable on this panel" precisely because the heading had already spent it.
+     *
+     * `GuiTextures.BUTTON_CLEAN`, AND THE TWO REASONS IT IS THE RIGHT STOCK TEXTURE. Verified by
+     * disassembling `GuiTextures.<clinit>` in modularui-3.1.5: it is built with
+     * `UITexture.Builder.adaptable(...)`, so it is a NINE-SLICE and stretches to any box without
+     * distorting its frame -- a heading is 388px wide and 10 tall and no fixed-size texture
+     * survives that. And it carries `.canApplyTheme()`, so it tints with the active theme instead
+     * of fighting it, which matters because `NodeStatus`'s inks are the web UI's LIGHT theme
+     * chosen for vanilla's grey panel and a background that ignored the theme would be the one
+     * thing on the panel that did.
+     *
+     * NO ART PIPELINE, WHICH IS A CONSTRAINT AND NOT A CONVENIENCE. There is no texture asset in
+     * this mod and #333 does not add one; every background it introduces is a `GuiTextures`
+     * constant confirmed nine-slice by disassembly.
+     *
+     * IT COSTS NO WIDTH AND NO HEIGHT. The strip is the box the text already occupied, so nothing
+     * reflows, which is why this half of the spec's P6 lands here.
+     *
+     * <h2>THE OTHER HALF -- THE TREE'S RECESSED WELL -- IS DEFERRED, AND NOT FOR WANT OF WIDTH</h2>
+     *
+     * DO NOT REPEAT THE CLAIM THAT THE LABEL COLUMN CANNOT AFFORD THE INSET. It was made during
+     * #333 and it is false, and it is written down here because it is the kind of blocker that
+     * gets believed on sight: the inset does not have to come out of the row at all.
+     * `PADDING` 6 to 4 makes {@link #CONTENT_WIDTH} 392, a `WELL_INSET` of 2 spends 4 of it, and
+     * the tree row is 388 again -- byte for byte the width it is today, so the label column, its
+     * 29-character floor, {@link #MAX_INDENT_DEPTH} and every measured figure in this file are
+     * untouched. `PlanCaveatsTest`'s wrap budget goes to 392 / 6 = 65 characters, which is ABOVE
+     * the 64 that `MAX_CAVEAT_LINES` is the hazard for, so the caveat gets safer rather than
+     * riskier. The reason it is not here is that its whole value is what it LOOKS like and the
+     * instrument for that is a prodshot, and that it wants every tree-row test moved off
+     * `CONTENT_WIDTH` onto a new `TREE_ROW_WIDTH` -- a wide, mechanical change that belongs in
+     * its own commit beside its own screenshot rather than bolted to this one.
+     *
+     * PUBLIC FOR `client.machines`, for the reason on {@link #line}.
+     */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static TextWidget<?> heading(String text, int width) {
-        return line(text, width, NodeStatus.INK_CRAFT);
+        TextWidget widget = (TextWidget) line(text, width, NodeStatus.INK_CRAFT);
+        widget.background(com.cleanroommc.modularui.drawable.GuiTextures.BUTTON_CLEAN);
+        return widget;
     }
 
     /**
@@ -2600,6 +3363,38 @@ public final class PlannerWidgets {
         TextWidget widget = new TextWidget(IKey.str(NodeRowText.fit(text, width)));
         widget.color(colour);
         widget.size(width, LINE);
+        return widget;
+    }
+
+    /**
+     * {@link #line}, drawn against the RIGHT edge of its cell. #333.
+     *
+     * FOR THE QUANTITY, AND SO FAR ONLY FOR IT. A quantity is a magnitude a reader compares
+     * between rows, and comparing magnitudes means the ones digits have to be under each other;
+     * every other cell on this panel is a word, which is read from its left edge. So this is not
+     * a general "aligned line" helper and should not become one without an argument of its own.
+     *
+     * `alignment(Alignment.CenterRight)` AND NOT `textAlign`, WHICH IS THE SAME CALL. Measured in
+     * the 3.1.5 bytecode: `alignment(a)` is `textAlign(a)` and nothing else, and both set the one
+     * field `TextWidget.draw` hands to `TextRenderer.setAlignment(alignment, paddedWidth / scale,
+     * paddedHeight / scale)`. `alignment` is the name every other `IPositioned` uses.
+     *
+     * THE CUT STILL HAPPENS FIRST, through {@link #line}, and that ordering is load-bearing.
+     * Alignment positions whatever string it is given inside the box; it does not clip. An
+     * unfitted string handed to a right-aligned cell would be drawn LEFT of the cell, over the
+     * label beside it, and every layout assertion would stay green -- which is exactly the
+     * failure {@link #line}'s own note describes, in a direction a left-aligned cell cannot fail
+     * in.
+     *
+     * CenterRight AND NOT TopRight: the cell is {@link #LINE} tall and the font draws 9 pixels
+     * into it, so centring the odd pixel is the difference between a column that sits on its
+     * row's baseline and one that sits a pixel high. Nothing else on the panel does this because
+     * nothing else on the panel has ever asked for a vertical position at all.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static TextWidget<?> rightLine(String text, int width, int colour) {
+        TextWidget widget = (TextWidget) line(text, width, colour);
+        widget.alignment(Alignment.CenterRight);
         return widget;
     }
 }

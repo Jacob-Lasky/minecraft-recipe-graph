@@ -56,6 +56,11 @@ public interface NodeActions {
         }
 
         @Override
+        public ItemStack iconForCategory(PlanNode node) {
+            return ItemStack.EMPTY;
+        }
+
+        @Override
         public void showRecipes(PlanNode node) {
         }
 
@@ -113,6 +118,36 @@ public interface NodeActions {
      * `JeiNodeActions` therefore resolves both through one private method rather than two.
      */
     ItemStack iconForKey(String key);
+
+    /**
+     * The stack to draw in the row's MACHINE column, or {@link ItemStack#EMPTY} for none. #333.
+     *
+     * <h2>THE MACHINE'S NAME IS ON THE NODE; ITS PICTURE IS NOT, AND DERIVES CLIENT-SIDE</h2>
+     *
+     * `PlanNode.machine` carries the machine's display name on 100% of the nodes that carry a
+     * category, and nothing on any of the three wire surfaces carries a machine ITEM key --
+     * not `solve.py`'s per-node emit, not `machines_to_build`, not either `PlanJson`. The
+     * temptation is therefore to add one. DO NOT: `graph.json` already carries
+     * `catalysts` per category, which is 645 categories on the live graph, and the whole
+     * lookup is reachable from here. A `machine_key` field would cost edits in five files
+     * PLUS re-baselining all 22 golden fixtures in `tests/fixtures/plan/`, and would still
+     * need the specificity ordering `plan.Machines` already implements.
+     *
+     * A CATEGORY AND NOT A KEY, WHICH IS WHY IT TAKES A NODE. The two existing lookups turn
+     * an ITEM key into that item's own stack; this one turns a node's RECIPE CATEGORY into a
+     * picture of something else entirely, so it shares nothing with them but its return type.
+     * A `iconForCategory(String category)` overload would be honest too and is deliberately
+     * not offered: every caller has a node, and a node is what the roadblock state comes from.
+     *
+     * <h2>EMPTY IS THE RIGHT ANSWER ON MORE THAN A THIRD OF CRAFT NODES</h2>
+     *
+     * Measured over the fixtures: 826 of 1,314 craft nodes resolve a catalyst. Every miss is a
+     * category with no machine BY NATURE -- bee and tree breeding, where the bee is the machine,
+     * and hand crafting -- so "no icon" is the correct rendering rather than a lookup that
+     * failed. {@link PlannerWidgets#ICON}'s column rule already covers the layout consequence:
+     * the width is charged whether or not anything comes back.
+     */
+    ItemStack iconForCategory(PlanNode node);
 
     /** Open the recipe viewer focused on what MAKES this node's key. */
     void showRecipes(PlanNode node);

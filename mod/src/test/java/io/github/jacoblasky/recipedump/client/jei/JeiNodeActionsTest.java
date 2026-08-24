@@ -37,8 +37,10 @@ import mezz.jei.api.IJeiRuntime;
 import mezz.jei.api.IRecipeRegistry;
 import mezz.jei.api.IRecipesGui;
 import mezz.jei.api.recipe.IFocus;
+import net.minecraft.init.Blocks;
 import net.minecraft.init.Bootstrap;
 import net.minecraft.init.Items;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import org.junit.After;
 import org.junit.Before;
@@ -527,6 +529,265 @@ public class JeiNodeActionsTest {
             }
             Thread.sleep(5L);
         }
+    }
+
+    // -- the machine icon (#333) ------------------------------------------------------------
+
+    /**
+     * A machine step pictures the SPECIFIC controller, not the generic catalyst JEI lists first.
+     *
+     * <h2>THE TRAP, MEASURED AGAINST THE LIVE `data/graph.json`</h2>
+     *
+     * `graph.catalysts().row(cid)[0]` is the obvious implementation and it is wrong: 226 of the
+     * pack's 227 `modularmachinery.*` categories list `modularmachinery:itemblueprint` FIRST,
+     * because JEI lists whatever OPENS a category and one cheap blueprint opens all of them. So
+     * the naive pick draws the same blueprint on essentially every Modular Machinery step, which
+     * is a wrong answer that looks entirely plausible in a screenshot.
+     *
+     * BOTH CANDIDATES ARE REAL ITEMS HERE, AND THAT IS WHAT MAKES THIS BEHAVIOURAL RATHER THAN
+     * STRUCTURAL. `modularmachinery:itemblueprint` is not in the dev client's item set, so a
+     * fixture using the real key would return EMPTY for it whether or not any ordering ran --
+     * the test would pass on an implementation with no ordering at all. A stick standing in for
+     * the generic catalyst and a furnace for the specific one both resolve, so the assertion
+     * distinguishes the two implementations: unordered gives the stick, ordered gives the
+     * furnace.
+     *
+     * THE STICK IS MADE GENERIC THE ONLY WAY IT CAN BE -- by catalysing more categories.
+     * `Machines.orderBySpecificity` ranks on breadth, fewest first, with no threshold and no
+     * per-mod list, so "generic" is not a property of the key and cannot be faked by naming it.
+     */
+    @Test
+    public void aMachineStepPicturesItsSpecificControllerAndNotTheCatalystJeiListedFirst() {
+        ItemStack generic = new ItemStack(Items.STICK);
+        ItemStack specific = new ItemStack(Item.getItemFromBlock(Blocks.FURNACE));
+        RecipeGraph graph = catalystGraph(generic, specific);
+        JeiBridge.indexFor(graph, java.util.Arrays.asList(generic, specific));
+        NodeActions actions = new JeiNodeActions(source(graph));
+
+        // THE CONTROL FIRST: both stacks really are resolvable, or the assertion below could
+        // pass because neither was and EMPTY happened to equal EMPTY.
+        assertFalse("the generic catalyst must resolve, or this proves nothing",
+                    actions.iconForKey(DumpCommand.stackKey(generic)).isEmpty());
+        assertFalse("the specific catalyst must resolve too",
+                    actions.iconForKey(DumpCommand.stackKey(specific)).isEmpty());
+
+        ItemStack drawn = actions.iconForCategory(categoryNode("mm.recipes.melter"));
+        assertEquals("the machine column drew the catalyst JEI listed first, which is the"
+                     + " generic one on 226 of 227 Modular Machinery categories",
+                     specific.getItem(), drawn.getItem());
+    }
+
+    /**
+     * A smelting step still pictures its furnace, and the tempting route would have lost it.
+     *
+     * <h2>TRAP 2: `MachineStates` LOOKS LIKE THE CLEAN ROUTE AND FAILS SILENTLY</h2>
+     *
+     * `MachineInfo.candidates()` is the obvious source for "which item is this category's
+     * machine", and it is null or empty on four short-circuit paths: a manual override,
+     * `Machines.ALWAYS_AVAILABLE`, hand crafting, and `needsNoMachine`. `minecraft.smelting` is
+     * in `ALWAYS_AVAILABLE` -- correctly, you always have a furnace -- while carrying 23
+     * catalysts in the live `graph.json`. So routing the icon through `MachineStates` draws
+     * nothing on the 180 smelting steps in the committed fixtures and reads as a lookup that
+     * merely failed.
+     *
+     * THE COUNTERFACTUAL IS ASSERTED IN THIS TEST rather than described in a comment, which is
+     * the whole reason it is one test and not two. Without the second half a reader has no way
+     * to tell that the route being avoided would actually have broken.
+     */
+    @Test
+    public void aSmeltingStepPicturesItsFurnaceWhereTheMachineStatesRouteWouldHaveLostIt() {
+        ItemStack furnace = new ItemStack(Item.getItemFromBlock(Blocks.FURNACE));
+        GraphBuilder b = new GraphBuilder();
+        // A RECIPE IN THE CATEGORY, AND WITHOUT IT THE COUNTERFACTUAL BELOW SAYS NOTHING.
+        // `Machines.resolve` only builds a `MachineInfo` for a category that has recipes, so a
+        // catalyst-only graph makes `info(cid)` null -- which reads as "MachineStates would have
+        // lost it" for entirely the wrong reason, and arrives as an NPE rather than as a verdict.
+        // Measured: that is exactly how the first version of this test failed.
+        b.beginRecipe();
+        b.beginSlot(1, "item");
+        b.alternative(b.key("minecraft:iron_ore"));
+        b.endSlot();
+        b.output(b.key("minecraft:iron_ingot"), 1);
+        b.endRecipe("smelt-1", "minecraft.smelting", "Smelting", "test", false, false);
+        b.beginCatalyst("minecraft.smelting");
+        b.catalystKey(b.key(DumpCommand.stackKey(furnace)));
+        b.endCatalyst();
+        RecipeGraph graph = b.build();
+        JeiBridge.indexFor(graph, Collections.singletonList(furnace));
+
+        ItemStack drawn = new JeiNodeActions(source(graph))
+                .iconForCategory(categoryNode("minecraft.smelting"));
+        assertEquals("the catalyst route must picture the furnace",
+                     furnace.getItem(), drawn.getItem());
+
+        // AND THE ROUTE NOT TAKEN, so this test carries its own reason. `ALWAYS_AVAILABLE`
+        // short-circuits before candidates are collected, so there is nothing here to draw.
+        io.github.jacoblasky.recipedump.plan.MachineInfo info =
+                io.github.jacoblasky.recipedump.plan.Machines
+                        .resolve(graph, new io.github.jacoblasky.recipedump.plan.Evidence())
+                        .info(graph.categoryId("minecraft.smelting"));
+        assertNotNull("the category must have been RESOLVED for the counterfactual to be about"
+                      + " the short-circuit rather than about a category the resolver skipped",
+                      info);
+        assertTrue("MachineStates would have to be empty here for Trap 2 to be real; if it is"
+                   + " not, this test no longer says anything and the trap should be re-read",
+                   info.candidates() == null || info.candidates().length == 0);
+    }
+
+    /**
+     * The ordering is built once per graph and thrown away when the graph changes.
+     *
+     * `Machines.catalystsByCategory` is a whole-graph pass -- two maps over every category with a
+     * catalyst plus a sort each -- and `PlannerWidgets.row` asks once per tree ROW.
+     * `plan-fluid-chain` is 703 rows, so an uncached lookup runs that pass seven hundred times
+     * per panel build.
+     *
+     * THE INVALIDATION IS THE HALF WORTH ASSERTING, and it is why the cache is keyed on the graph
+     * by IDENTITY rather than by a boolean. A stale map would not throw: it would answer from the
+     * previous graph's category ids, which is a picture of a DIFFERENT machine, and the class
+     * header's rule about asking `graphs.graph()` per invocation exists for exactly this shape of
+     * failure during the 5.47 s load.
+     */
+    @Test
+    public void theCatalystOrderingIsCachedPerGraphAndDroppedWhenTheGraphChanges() {
+        ItemStack stick = new ItemStack(Items.STICK);
+        ItemStack furnace = new ItemStack(Item.getItemFromBlock(Blocks.FURNACE));
+
+        GraphBuilder first = new GraphBuilder();
+        first.beginCatalyst("mod.press");
+        first.catalystKey(first.key(DumpCommand.stackKey(stick)));
+        first.endCatalyst();
+        final RecipeGraph[] current = {first.build()};
+
+        GraphBuilder second = new GraphBuilder();
+        second.beginCatalyst("mod.press");
+        second.catalystKey(second.key(DumpCommand.stackKey(furnace)));
+        second.endCatalyst();
+        RecipeGraph replacement = second.build();
+
+        JeiBridge.indexFor(current[0], java.util.Arrays.asList(stick, furnace));
+        NodeActions actions = new JeiNodeActions(new JeiNodeActions.GraphAccess() {
+            @Override
+            public RecipeGraph graph() {
+                return current[0];
+            }
+        });
+        PlanNode node = categoryNode("mod.press");
+        assertEquals(stick.getItem(), actions.iconForCategory(node).getItem());
+        // Twice, so a cache that answered only its first caller would fail here.
+        assertEquals(stick.getItem(), actions.iconForCategory(node).getItem());
+
+        current[0] = replacement;
+        JeiBridge.indexFor(replacement, java.util.Arrays.asList(stick, furnace));
+        assertEquals("the ordering was cached against the OLD graph and never rebuilt",
+                     furnace.getItem(), actions.iconForCategory(node).getItem());
+    }
+
+    @Test
+    public void aCategoryWithNoCatalystDrawsNothingRatherThanGuessing() {
+        // 37% of the fixtures' craft nodes, and every one of them is a category with no machine
+        // BY NATURE -- bee and tree breeding, where the bee is the machine. "No icon" is the
+        // correct rendering and not a lookup that failed; `NodeActions.iconForCategory` says so.
+        ItemStack stick = new ItemStack(Items.STICK);
+        RecipeGraph graph = graphOf(DumpCommand.stackKey(stick));
+        JeiBridge.indexFor(graph, Collections.singletonList(stick));
+        NodeActions actions = new JeiNodeActions(source(graph));
+        assertSame(ItemStack.EMPTY,
+                   actions.iconForCategory(categoryNode("bdew.jeibees.mutation.rootBees")));
+    }
+
+    @Test
+    public void aMissingCategoryOrGraphIsAnEmptyStackRatherThanAnExceptionInARenderPass() {
+        // Every caller is a GUI build; `PlannerWidgets.machineCell` calls this with no null
+        // check of its own, and `StringTable.idOf` hashes its argument before it can answer -1.
+        NodeActions noGraph = new JeiNodeActions(JeiNodeActions.NO_GRAPH);
+        assertSame(ItemStack.EMPTY, noGraph.iconForCategory(categoryNode("mod.press")));
+        assertSame(ItemStack.EMPTY, noGraph.iconForCategory(null));
+        NodeActions wired = new JeiNodeActions(source(graphOf("minecraft:stick")));
+        assertSame(ItemStack.EMPTY, wired.iconForCategory(null));
+        assertSame("a node with no category at all", ItemStack.EMPTY,
+                   wired.iconForCategory(node("minecraft:stick")));
+    }
+
+    /**
+     * The lookup goes through `plan.Machines` and does not re-derive either rule.
+     *
+     * <h2>WHY THIS IS A CONSTANT-POOL TEST AND NOT A BEHAVIOURAL ONE</h2>
+     *
+     * `Machines.NOT_A_MACHINE` holds exactly `modularmachinery:itemblueprint`, and no `Item` in
+     * the dev client's set registers under that name -- so a category whose only catalyst is the
+     * blueprint answers EMPTY whether the filter runs or not, once because it was filtered and
+     * once because it did not resolve. A behavioural assertion there would be green against an
+     * implementation with no filter, which is the fabricated-artifact shape this repository has
+     * been bitten by more than once. `MachinesTest` pins what the two rules DO;
+     * `theGenericBlueprintIsNeverWhatAMachineIsPricedFrom` and
+     * `theMostSpecificCatalystIsNamedRatherThanWhicheverJeiListedFirst` are those tests. What is
+     * left for this file to assert is that the planner's icon REACHES them.
+     *
+     * `ClassFiles` ALREADY ANSWERS THIS SHAPE OF QUESTION HERE, in `IconWidgetTest`, and for the
+     * same reason: a choice that cannot be observed at runtime can still be observed in the
+     * bytecode, and "do not re-derive this" is a choice.
+     */
+    @Test
+    public void theMachineIconGoesThroughMachinesRatherThanReDerivingItsRules() throws Exception {
+        byte[] bytes = io.github.jacoblasky.recipedump.ClassFiles.read(
+                new java.io.File(io.github.jacoblasky.recipedump.ClassFiles.classesRoot(),
+                                 io.github.jacoblasky.recipedump.ClassFiles.ROOT_PACKAGE
+                                 + "/client/jei/JeiNodeActions.class"));
+        java.util.Set<String> called =
+                io.github.jacoblasky.recipedump.ClassFiles.methodReferences(bytes);
+        assertTrue("JeiNodeActions must take the ordering from Machines.catalystsByCategory --"
+                   + " a second ordering is a second thing to get wrong, and its wrong answer"
+                   + " (one blueprint on 226 of 227 categories) looks plausible: " + called,
+                   references(called, "plan/Machines.catalystsByCategory"));
+        assertTrue("...and it must filter Machines.isNotAMachine, which is what stops a"
+                   + " blueprint being drawn on a category where it is the ONLY catalyst and"
+                   + " the ordering therefore has nothing to demote it below: " + called,
+                   references(called, "plan/Machines.isNotAMachine"));
+    }
+
+    private static boolean references(java.util.Set<String> called, String prefix) {
+        for (String reference : called) {
+            if (reference.contains(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A graph shaped like the blueprint trap: `generic` opens four categories, `specific` one.
+     *
+     * THE GENERIC KEY IS LISTED FIRST IN THE CATEGORY UNDER TEST, which is JEI's own order and
+     * the whole reason the ordering exists. See
+     * `aMachineStepPicturesItsSpecificControllerAndNotTheCatalystJeiListedFirst`.
+     */
+    private static RecipeGraph catalystGraph(ItemStack generic, ItemStack specific) {
+        GraphBuilder b = new GraphBuilder();
+        int genericId = b.key(DumpCommand.stackKey(generic));
+        int specificId = b.key(DumpCommand.stackKey(specific));
+        b.beginCatalyst("mm.recipes.melter");
+        b.catalystKey(genericId);
+        b.catalystKey(specificId);
+        b.endCatalyst();
+        // THREE MORE, so the generic key's breadth is 4 against the specific one's 1. Fewer than
+        // this and the two would tie on breadth and fall back to JEI's index, which is the
+        // ordering doing nothing.
+        for (String other : new String[] {"crucible", "reactor", "infuser"}) {
+            b.beginCatalyst("mm.recipes." + other);
+            b.catalystKey(genericId);
+            b.endCatalyst();
+        }
+        return b.build();
+    }
+
+    /** A craft node that names `category` and nothing else a machine lookup reads. */
+    private static PlanNode categoryNode(String category) {
+        JsonObject json = json("mod:output", "item");
+        json.addProperty("status", "craft");
+        json.addProperty("category", category);
+        json.addProperty("machine", category);
+        return PlanJson.readNode(json);
     }
 
     private static RecipeGraph graphOf(String... keys) {

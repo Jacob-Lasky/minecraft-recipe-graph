@@ -838,6 +838,449 @@ final class PlannerShot {
      * the TODO panel is a fine picture of a successful run of the flow screen. So the cursor must
      * be over the button asked for and over no other.
      */
+    /**
+     * Park the real cursor inside a tree row and report what the running client did about it.
+     *
+     * ONE HOLD FOR BOTH SCREENS, differing only in which child of the row it aims at and which
+     * question it then asks. See {@link #openHover} and {@link #openMachineTip}.
+     *
+     * RE-PARKED EVERY POLL, WHICH IS `ClickViewButton`'S MEASURED RULE AND NOT CAUTION. The hover
+     * pass runs from the cursor position sampled at the START of a tick, so an answer read on the
+     * poll that moved the mouse describes where it used to be -- `flow-hit` published six tidy
+     * DISAGREE lines that were really six agreements, one row out of step, before that was
+     * understood. Re-parking to the SAME point every poll makes the rule harmless: the previous
+     * position and the current one are the same position.
+     */
+    private static final class ParkOnTreeRow implements ShotScreens.Hold {
+
+        /**
+         * Polls before the hover answer is worth reading. `flow-hit` measured 5.
+         *
+         * FIVE AND NOT ONE, AND THAT IS A MEASUREMENT RATHER THAN A MARGIN. One frame's gap is
+         * what produced `flow-hit`'s six off-by-one DISAGREE lines; `ClickViewButton` records
+         * that waiting longer than this does not rescue a flag that is not going to set, so a
+         * failure here after five polls is a real answer and not an impatient one.
+         */
+        private static final int SETTLE_POLLS = 5;
+
+        /**
+         * Polls before the TOOLTIP is read, which is longer, and for a different reason.
+         *
+         * `ITooltip.tooltipShowUpTimer` EXISTS, so a tooltip can be resolved and not yet drawn.
+         * The verdict below reads the RESOLUTION, which the timer does not gate -- but the PNG is
+         * half the artifact and the picture wants the box actually on screen, so this holds well
+         * past any plausible default rather than reading at the earliest moment that would pass.
+         * Twenty render ticks against a boot is free.
+         */
+        private static final int TOOLTIP_POLLS = 20;
+
+        private final PlanView plan;
+
+        private final boolean onMachineCell;
+
+        private int poll;
+
+        ParkOnTreeRow(PlanView plan, boolean onMachineCell) {
+            this.plan = plan;
+            this.onMachineCell = onMachineCell;
+        }
+
+        /** What this screen calls itself in the log and in its verdict. */
+        private String screen() {
+            return onMachineCell ? "planner-machine-tip" : "planner-hover";
+        }
+
+        @Override
+        public boolean busy() {
+            ModularPanel panel = livePanel();
+            if (panel == null) {
+                return true;
+            }
+            ListWidget<?, ?> list = firstList(panel);
+            if (list == null || list.getArea().h() <= 0) {
+                // NOT LAID OUT YET, which is `ScrollToRow`'s shape: the run's own timeout is the
+                // backstop rather than a frame count nobody can justify.
+                return true;
+            }
+            List<PlannerWidgets.ClickableGroup> rows = treeRows(list);
+            if (rows.size() != plan.flatten().size()) {
+                // THE INDEX-TO-NODE MAPPING IS THE ONLY WAY THIS SCREEN CAN NAME THE ROW IT
+                // PARKED ON, and it rests on the tree being built in `flatten()` order --
+                // `firstChancedRow`'s javadoc states that they are the same walk and that the
+                // comment is the reason to keep them so. If a wrapper ever sits between the list
+                // and its rows this count is what says so, rather than the log naming the wrong
+                // item with total confidence.
+                ShotScreens.reportFail(screen() + ": the tree has " + rows.size()
+                                       + " clickable rows against " + plan.flatten().size()
+                                       + " nodes, so a row cannot be named by index");
+                return false;
+            }
+            int index = firstVisibleRowWithAMachineCell(rows, list);
+            if (index < 0) {
+                ShotScreens.reportFail(screen() + ": no row in the tree's viewport carries a"
+                                       + " machine cell, so there is nothing to park on. Shoot a"
+                                       + " fixture whose first rows run in machines --"
+                                       + " `plan-truncated` does.");
+                return false;
+            }
+            PlannerWidgets.ClickableGroup row = rows.get(index);
+            PlanNode node = plan.flatten().get(index);
+            IWidget target = onMachineCell ? machineCell(row) : widestTextCell(row);
+            if (target == null) {
+                ShotScreens.reportFail(screen() + ": row " + index + " ("
+                                       + NodeRowText.label(node) + ") has no "
+                                       + (onMachineCell ? "machine cell" : "text cell")
+                                       + " to aim at");
+                return false;
+            }
+            Area box = target.getArea();
+            int targetX = box.x + box.width / 2;
+            int targetY = box.y + box.height / 2;
+            ScreenCursor.park(targetX, targetY);
+            if (poll == 0) {
+                ShotHarness.log(screen() + ": parking the cursor on row " + index + " -- "
+                                + NodeRowText.label(node) + " -- at its "
+                                + (onMachineCell ? "machine cell" : "label") + " " + targetX + ","
+                                + targetY + " (cell box " + box.x + "," + box.y + " " + box.width
+                                + "x" + box.height + "; row box " + row.getArea().x + ","
+                                + row.getArea().y + " " + row.getArea().width + "x"
+                                + row.getArea().height + "); machine words "
+                                + NodeRowText.machineTooltipLines(node));
+            }
+            poll++;
+            if (poll < (onMachineCell ? TOOLTIP_POLLS : SETTLE_POLLS)) {
+                return true;
+            }
+            return onMachineCell ? tooltipVerdict(panel, row, node, targetX, targetY)
+                                 : hoverVerdict(panel, row, node, targetX, targetY);
+        }
+
+        /**
+         * Did this row paint the hover band on the frame about to be captured?
+         *
+         * ASKED OF `rowWash` WITH THE LIVE FLAG, which is the only form of this question that is
+         * about the running client. `PlannerLayoutTest` already sweeps all four wash states, so
+         * asserting the arithmetic again would add nothing; what no test can supply is a true
+         * `isHovering()`, and that is exactly what this hands it.
+         *
+         * AND IT MUST NOT BE THE SELECTION WASH, which is the assertion that makes this
+         * discriminate rather than merely be non-zero. Nothing selects a row on this screen, but
+         * a future change that painted the selection wash on hover would satisfy "something was
+         * drawn" while destroying the distinction `HOVER_FILL`'s javadoc argues for -- a hue on a
+         * cursor makes the panel look as though it were reporting a status about whatever row the
+         * pointer rests on. Compared against `rowWash`'s own answer for the selected case, so no
+         * colour constant has to be exposed to ask it.
+         */
+        private boolean hoverVerdict(ModularPanel panel, PlannerWidgets.ClickableGroup row,
+                                     PlanNode node, int targetX, int targetY) {
+            boolean hovering = row.isHovering();
+            int wash = PlannerWidgets.ClickableGroup.rowWash(hovering, row.drawsAsSelected());
+            int selectionWash = PlannerWidgets.ClickableGroup.rowWash(false, true);
+            ShotHarness.log(screen() + ": after " + poll + " polls on "
+                            + NodeRowText.label(node) + " -- isHovering=" + hovering
+                            + " drawsAsSelected=" + row.drawsAsSelected()
+                            + " wash=0x" + Integer.toHexString(wash)
+                            + " selectionWash=0x" + Integer.toHexString(selectionWash)
+                            + " anyHovered=" + panel.isAnyHovered()
+                            + " belowMouse="
+                            + panel.getScreen().getPanelManager().isBelowMouseInTopPanel(row)
+                            + " resolved=[" + hoveredDiagnostic() + "] ["
+                            + cursorDiagnostic(targetX, targetY) + "]");
+            if (wash == 0) {
+                // THE PREDICTION THIS SCREEN EXISTS TO TEST, STATED IN THE FAILURE. `ClickViewButton`
+                // measured `isHovering()` never setting for a view-bar button and diagnosed it as
+                // the button's parent not being an `IViewport`; a tree row's parent IS one, so this
+                // failing means either that diagnosis is wrong or the band does not draw at all.
+                // Both are findings and neither is a flaky run, so it says which to go and read.
+                ShotScreens.reportFail(screen() + ": the row under the cursor painted no wash, so"
+                                       + " #333's hover band does not draw in game. isHovering="
+                                       + hovering + "; if that is false, `ClickViewButton`'s"
+                                       + " IViewport diagnosis needs re-reading -- a tree row's"
+                                       + " parent is a ListWidget, which IS one.");
+                return false;
+            }
+            if (wash == selectionWash) {
+                ShotScreens.reportFail(screen() + ": a hovered row painted the SELECTION wash,"
+                                       + " which makes a cursor look like a status; see"
+                                       + " HOVER_FILL's javadoc");
+                return false;
+            }
+            ShotScreens.reportPass();
+            return false;
+        }
+
+        /**
+         * Did ModularUI resolve a tooltip for the cell under the cursor, carrying our words?
+         *
+         * READ OFF `getAllHovered()` AND NOT OFF THE CELL WE AIMED AT. Asking the cell whether it
+         * has a tooltip is a question about the widget tree and was green before this screen
+         * existed. This asks the set ModularUI itself resolves from the live cursor -- the same
+         * one the tooltip renderer draws from -- so a pass means the render path found it.
+         *
+         * THEN THE WORDS, COMPARED AGAINST `NodeRowText`. `RichTooltip` exposes no line reader,
+         * but the `RichText` it wraps does (`getAsStrings`), reached through `getRichText()` and
+         * an instanceof-guarded cast -- guarded so a future ModularUI that returns something else
+         * downgrades this to "could not read the words" instead of throwing inside a shot. The
+         * comparison is what makes it end to end: the strings ModularUI is about to draw are the
+         * strings `machineTooltipLines` produced, which is #333's whole words-live-in-NodeRowText
+         * discipline asserted through the renderer for the first time.
+         */
+        private boolean tooltipVerdict(ModularPanel panel, PlannerWidgets.ClickableGroup row,
+                                       PlanNode node, int targetX, int targetY) {
+            List<String> expected = NodeRowText.machineTooltipLines(node);
+            com.cleanroommc.modularui.screen.RichTooltip resolved = resolvedTooltip();
+            ShotHarness.log(screen() + ": after " + poll + " polls on "
+                            + NodeRowText.label(node) + " -- expected " + expected
+                            + " resolvedTooltip=" + (resolved != null)
+                            + " rowHovering=" + row.isHovering()
+                            + " anyHovered=" + panel.isAnyHovered()
+                            + " resolved=[" + hoveredDiagnostic() + "] ["
+                            + cursorDiagnostic(targetX, targetY) + "]");
+            if (expected.isEmpty()) {
+                ShotScreens.reportFail(screen() + ": " + NodeRowText.label(node) + " has no"
+                                       + " machine words, so this row cannot show a tooltip and"
+                                       + " the row search picked wrong");
+                return false;
+            }
+            if (resolved == null) {
+                // THE DEFECT THIS SCREEN EXISTS TO CATCH, AND IT IS NOT COSMETIC. Since #333 the
+                // tooltip is the only place a tree row names its machine.
+                ShotScreens.reportFail(screen() + ": nothing under the cursor resolved a tooltip,"
+                                       + " so the machine's name is not reachable in game at all"
+                                       + " -- #333 moved it out of the row's text and into this");
+                return false;
+            }
+            if (resolved.isEmpty()) {
+                ShotScreens.reportFail(screen() + ": the resolved tooltip is EMPTY, so a box will"
+                                       + " be drawn with none of " + expected + " in it");
+                return false;
+            }
+            List<String> words = tooltipWords(resolved);
+            ShotHarness.log(screen() + ": the resolved tooltip carries " + words);
+            if (words == null) {
+                // NOT A FAILURE, AND SAYING SO IS THE POINT. The tooltip resolved and is not
+                // empty, which is the claim; only the read-back is unavailable, and downgrading
+                // to a pass with the reason logged is honest where failing would blame the mod
+                // for a ModularUI internal this screen has no contract with.
+                ShotHarness.log(screen() + ": could not read the words back -- getRichText() is"
+                                + " not a RichText in this ModularUI build, so the PNG is the"
+                                + " only witness to WHICH words. The tooltip itself resolved.");
+                ShotScreens.reportPass();
+                return false;
+            }
+            for (int i = 0; i < expected.size(); i++) {
+                if (!containsLine(words, expected.get(i))) {
+                    ShotScreens.reportFail(screen() + ": the resolved tooltip is missing \""
+                                           + expected.get(i) + "\"; it carries " + words
+                                           + " against NodeRowText's " + expected);
+                    return false;
+                }
+            }
+            ShotScreens.reportPass();
+            return false;
+        }
+
+        /**
+         * The first tooltip ModularUI resolves under the live cursor, or null.
+         *
+         * `getAllHovered()` RATHER THAN `getTopHovered()`, because the top of the stack is the
+         * innermost widget and the tooltip may belong to it OR to a parent -- `AbstractParentWidget`
+         * overrides `getTooltip` precisely so a hovered child can answer for its parent. Walking
+         * the whole resolved stack asks the question the renderer asks.
+         *
+         * `hasTooltip()` BEFORE `getTooltip()`, because the getter is documented on `ITooltip` as
+         * the builder entry point and creates one on demand; calling it first would manufacture
+         * the very thing this is checking for and pass on every row in the game.
+         */
+        private static com.cleanroommc.modularui.screen.RichTooltip resolvedTooltip() {
+            ModularScreen screen = ModularScreen.getCurrent();
+            if (screen == null) {
+                return null;
+            }
+            for (Object hovered : screen.getContext().getAllHovered()) {
+                if (hovered instanceof com.cleanroommc.modularui.api.widget.ITooltip
+                        && ((com.cleanroommc.modularui.api.widget.ITooltip<?>) hovered)
+                                .hasTooltip()) {
+                    return ((com.cleanroommc.modularui.api.widget.ITooltip<?>) hovered)
+                            .getTooltip();
+                }
+            }
+            return null;
+        }
+
+        /** Every widget ModularUI says the cursor is over, for a log line that can be argued with. */
+        private static String hoveredDiagnostic() {
+            ModularScreen screen = ModularScreen.getCurrent();
+            if (screen == null) {
+                return "no screen";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (Object hovered : screen.getContext().getAllHovered()) {
+                if (sb.length() > 0) {
+                    sb.append(" > ");
+                }
+                sb.append(hovered.getClass().getSimpleName());
+                if (hovered instanceof IWidget) {
+                    Area box = ((IWidget) hovered).getArea();
+                    sb.append('@').append(box.x).append(',').append(box.y)
+                      .append(' ').append(box.width).append('x').append(box.height);
+                }
+                if (hovered instanceof com.cleanroommc.modularui.api.widget.ITooltip
+                        && ((com.cleanroommc.modularui.api.widget.ITooltip<?>) hovered)
+                                .hasTooltip()) {
+                    sb.append("(tip)");
+                }
+            }
+            return sb.length() == 0 ? "nothing" : sb.toString();
+        }
+    }
+
+    /**
+     * The strings a resolved tooltip will draw, or null when this build will not say.
+     *
+     * SEE `ParkOnTreeRow.tooltipVerdict` for why the cast is guarded rather than assumed.
+     */
+    private static List<String> tooltipWords(
+            com.cleanroommc.modularui.screen.RichTooltip tooltip) {
+        Object rich = tooltip.getRichText();
+        if (!(rich instanceof com.cleanroommc.modularui.drawable.text.RichText)) {
+            return null;
+        }
+        List<String> out = new java.util.ArrayList<String>();
+        for (Object line : ((com.cleanroommc.modularui.drawable.text.RichText) rich)
+                .getAsStrings()) {
+            out.add(String.valueOf(line));
+        }
+        return out;
+    }
+
+    /**
+     * Whether `words` holds `wanted`, allowing the renderer to have wrapped or padded it.
+     *
+     * `contains` AND NOT `equals`, DELIBERATELY, and the looseness is bounded by the caller: the
+     * assertion is that every line `NodeRowText` produced is present, which is what "the tooltip
+     * carries our words" means. A `RichText` line is a rendered run and may carry formatting or a
+     * wrap that an equality test would fail on while the box on screen reads perfectly -- and a
+     * shot that cried wolf on a wrap would be turned off, which is worse than one that is exact.
+     */
+    private static boolean containsLine(List<String> words, String wanted) {
+        for (int i = 0; i < words.size(); i++) {
+            if (words.get(i) != null && words.get(i).contains(wanted)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The tree's rows, in display order, which is `plan.flatten()` order. See `ParkOnTreeRow`.
+     *
+     * DIRECT CHILDREN AND NOT A DEEP WALK, because a deep walk would also collect the
+     * `ClickableGroup` a diagram node is built from if one ever appeared under this list, and the
+     * caller's index-to-node mapping would then be silently off. The caller cross-checks the count
+     * against the node count, so a wrapper appearing between the list and its rows fails loudly.
+     */
+    private static List<PlannerWidgets.ClickableGroup> treeRows(ListWidget<?, ?> list) {
+        List<PlannerWidgets.ClickableGroup> rows =
+                new java.util.ArrayList<PlannerWidgets.ClickableGroup>();
+        for (IWidget child : list.getChildren()) {
+            if (child instanceof PlannerWidgets.ClickableGroup) {
+                rows.add((PlannerWidgets.ClickableGroup) child);
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * The first row wholly inside the tree's viewport that carries a machine cell, or -1.
+     *
+     * WHOLLY INSIDE, because a row clipped by the viewport edge is a row the cursor can be parked
+     * on the invisible half of. `plan-truncated`'s root runs in a Centrifuge, so this is row 0
+     * there and no scrolling is needed -- which is why neither screen scrolls, unlike
+     * `planner-yield`. Written as a search anyway so a fixture whose first rows are hand-crafted
+     * gets a picture instead of a failure.
+     */
+    private static int firstVisibleRowWithAMachineCell(
+            List<PlannerWidgets.ClickableGroup> rows, ListWidget<?, ?> list) {
+        for (int i = 0; i < rows.size(); i++) {
+            Area box = rows.get(i).getArea();
+            if (box.h() <= 0 || box.y() < list.getArea().y()
+                    || box.ey() > list.getArea().ey()) {
+                continue;
+            }
+            if (machineCell(rows.get(i)) != null) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The machine cell in a tree row, or null. Found by CARRYING A TOOLTIP.
+     *
+     * BY THE TOOLTIP AND NOT BY TYPE, because `PlannerWidgets.Icon` is package-private and this
+     * class is not in that package -- and the property is the better discriminator anyway. The
+     * machine cell is the only tooltipped widget the planner builds: #333's spec put P8's
+     * tooltips-on-everything pass explicitly out of scope, so "has a tooltip" means "is the
+     * machine cell" today. `theOnlyTooltipInATreeRowIsTheMachineCell` is what keeps that true --
+     * without it, P8 landing would silently point this screen at a label.
+     */
+    private static IWidget machineCell(PlannerWidgets.ClickableGroup row) {
+        for (IWidget child : row.getChildren()) {
+            if (child instanceof com.cleanroommc.modularui.api.widget.ITooltip
+                    && ((com.cleanroommc.modularui.api.widget.ITooltip<?>) child).hasTooltip()) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The widest text cell in a row, which is its label. See `ParkOnTreeRow`.
+     *
+     * BY WIDTH AND NOT BY CHILD ORDER, which is the lesson `PlannerLayoutTest`'s collision helper
+     * learned at #333: the right cluster is added AFTER the label, so "the cell after the
+     * quantity" became the badge and the helper started reporting `[NEED]` as every row's label.
+     * A width cannot drift that way.
+     */
+    private static IWidget widestTextCell(PlannerWidgets.ClickableGroup row) {
+        IWidget widest = null;
+        for (IWidget child : row.getChildren()) {
+            if (!(child instanceof com.cleanroommc.modularui.widgets.TextWidget)) {
+                continue;
+            }
+            if (widest == null || child.getArea().w() > widest.getArea().w()) {
+                widest = child;
+            }
+        }
+        return widest;
+    }
+
+    /**
+     * Where a probe thinks everything is, for when the probe itself is the thing wrong.
+     *
+     * THE RAW LWJGL PAIR IS PART OF THE LINE, not a redundant echo of the gui one. This is
+     * `FlowCanvas.cursorDiagnostic`'s argument and it earned its place here on the first run:
+     * "the raw y is what I set and the gui y is the mirror of it" is the reading that names
+     * the conversion rather than the panel, and without it a false negative is unattributable.
+     *
+     * AT FILE SCOPE SINCE #333, BECAUSE A SECOND CURSOR PROBE ARRIVED. It was private to
+     * `ClickViewButton`, and `ParkOnTreeRow` needs exactly the same line for exactly the same
+     * reason -- a park that reports a false negative is unattributable without it. Java would
+     * have let the second class reach into the first one's private, which compiles and reads as
+     * though the two probes are related; they are not, they just both move a mouse.
+     */
+    private static String cursorDiagnostic(int targetX, int targetY) {
+        int scale = ScreenCursor.scale();
+        return "asked=" + targetX + "," + targetY
+                + " mouseRaw=" + org.lwjgl.input.Mouse.getX() + ","
+                + org.lwjgl.input.Mouse.getY()
+                + " scale=" + scale
+                + " gui=" + ScreenCursor.guiX() + "," + ScreenCursor.guiY()
+                + " screen=" + ScreenCursor.guiWidth() + "x" + ScreenCursor.guiHeight()
+                + " display=" + ScreenCursor.displayHeight();
+    }
+
     private static final class ClickViewButton implements ShotScreens.Hold {
 
         /**
@@ -1003,25 +1446,6 @@ final class PlannerShot {
             return count;
         }
 
-        /**
-         * Where the probe thinks everything is, for when the probe itself is the thing wrong.
-         *
-         * THE RAW LWJGL PAIR IS PART OF THE LINE, not a redundant echo of the gui one. This is
-         * `FlowCanvas.cursorDiagnostic`'s argument and it earned its place here on the first run:
-         * "the raw y is what I set and the gui y is the mirror of it" is the reading that names
-         * the conversion rather than the panel, and without it a false negative is unattributable.
-         */
-        private static String cursorDiagnostic(int targetX, int targetY) {
-            int scale = ScreenCursor.scale();
-            return "asked=" + targetX + "," + targetY
-                    + " mouseRaw=" + org.lwjgl.input.Mouse.getX() + ","
-                    + org.lwjgl.input.Mouse.getY()
-                    + " scale=" + scale
-                    + " gui=" + ScreenCursor.guiX() + "," + ScreenCursor.guiY()
-                    + " screen=" + ScreenCursor.guiWidth() + "x" + ScreenCursor.guiHeight()
-                    + " display=" + ScreenCursor.displayHeight();
-        }
-
         private boolean verdict(String label) {
             ModularScreen screen = panel.getScreen();
             boolean open = screen.isPanelOpen(expected);
@@ -1108,6 +1532,98 @@ final class PlannerShot {
      */
     static void openCaveats(String arg) {
         PlannerScreen.openPanel(PlannerWidgets.caveatsPanel());
+    }
+
+    /** The fixture the two hover screens use when none is named. See {@link #openHover}. */
+    private static final String HOVER_FIXTURE = "plan-truncated";
+
+    /**
+     * `planner-hover`: A REAL CURSOR ON A REAL TREE ROW, so #333's hover band has an artifact.
+     *
+     * <h2>THE TWO THINGS #333 SHIPPED THAT NO SCREEN COULD PHOTOGRAPH</h2>
+     *
+     * P5's band and the machine tooltip were the only parts of that pass with no picture, and the
+     * reason is the same for both: they exist only while a cursor is somewhere. Every planner
+     * screen before these opens a panel and captures it, and a captured panel has no cursor on
+     * any row. `PlannerLayoutTest.theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither` sweeps
+     * all four wash states headlessly, which is worth having and is arithmetic:
+     * `PlannerWidgets.ClickableGroup.rowWash`'s own javadoc records that `isHovering()` is false
+     * in every test, so the one state the band exists for is the one a test cannot reach.
+     *
+     * <h2>AND THERE IS A MEASURED REASON TO DOUBT IT WORKS AT ALL, WHICH IS WHY THIS IS A PROBE</h2>
+     *
+     * `ClickViewButton` above records that `IWidget.isHovering()` NEVER SET for a view-bar button
+     * -- forty polls, cursor dead centre of a laid-out box, coordinates round-tripping -- and its
+     * diagnosis was that `flow-hit` gets a true answer only because its widgets sit inside a
+     * `FlowCanvas`, which is an `IViewport` and walks its own children, "a plain `ParentWidget` is
+     * not". The band is drawn from exactly that flag.
+     *
+     * SO THE PREDICTION IS THAT A TREE ROW HOVERS AND A VIEW BUTTON DOES NOT, and the difference
+     * is structural rather than lucky: the view bar is a `ViewBar`, a plain `ParentWidget`, while
+     * a tree row is a child of the tree's `ListWidget` -- and `ListWidget extends
+     * AbstractScrollWidget implements IViewport`, the same interface that makes the canvas work.
+     * Verified against `modularui-3.1.5`'s class hierarchy. If that is right this screen passes
+     * and the earlier measurement is explained rather than merely recorded; if it is wrong, #333
+     * shipped a band that never draws and THIS is the run that says so. Either way the verdict is
+     * the artifact and the PNG is the corroboration.
+     *
+     * <h2>WHY IT DOES NOT PARK ON THE MACHINE CELL, WHICH IS THE OBVIOUS PLACE</h2>
+     *
+     * A tooltip would be drawn over the row. The band is a 9%-black wash behind a 388x10 row and
+     * a `RichTooltip` is an opaque box next to the cursor, so a picture of the two together is a
+     * picture of the tooltip. `planner-machine-tip` is the screen that wants that; this one parks
+     * on the row's LABEL, which is inside the row and outside the only tooltipped cell it has.
+     */
+    static void openHover(String arg) {
+        openParked(arg, false);
+    }
+
+    /**
+     * `planner-machine-tip`: THE MACHINE TOOLTIP, RESOLVED BY MODULARUI AND READ BACK.
+     *
+     * <h2>THIS IS THE ONE CLAIM IN #333 THAT IS NOT COSMETIC</h2>
+     *
+     * The machine left `NodeRowText.meta` at #333, so the tooltip is now the ONLY place a tree row
+     * says which machine a step runs in. Measured over the fixtures, 979 rows carry a machine name
+     * and about 619 of them have a cell to hang it on -- so if the tooltip does not render, the
+     * pass replaced a readable phrase with a sprite on all of them and nothing in the suite would
+     * notice. `RichTooltip` is drawn under a GL context, so no headless test can reach it, and
+     * before #333 this mod had ZERO uses of `ITooltip` -- the capability is real in the jar and had
+     * never once been exercised here.
+     *
+     * <h2>THROUGH MODULARUI'S OWN RESOLUTION AND NOT THROUGH THE WIDGET WE PARKED ON</h2>
+     *
+     * The weak version of this probe asks the cell it aimed at whether it has a tooltip, which is
+     * a question about the widget tree and would have been green before the cursor existed. The
+     * verdict here instead asks `ModularGuiContext.getAllHovered()` -- the set ModularUI itself
+     * resolves from the live cursor and the same one the tooltip renderer draws from -- for a
+     * widget carrying a tooltip, and then reads the STRINGS back out of it and compares them
+     * against `NodeRowText.machineTooltipLines`. That is the whole path: cursor to hit test to
+     * resolved widget to tooltip to words, against the class that produced the words.
+     *
+     * FAILS LOUDLY AND NEVER SILENTLY, which is the point of it being a verdict screen: a run
+     * where nothing resolves reports NO and takes the build with it, rather than producing a
+     * perfectly good photograph of a row with no tooltip on it.
+     */
+    static void openMachineTip(String arg) {
+        openParked(arg, true);
+    }
+
+    /**
+     * Open a tree and hand the hold a row to park on. Shared by the two screens above.
+     *
+     * ONE OPENER FOR BOTH, because everything except the park point and the verdict is identical
+     * and a second copy of the panel-building line is a second thing to forget `schemaCheck` in --
+     * which `openCollision`'s own comment records happening once already.
+     */
+    private static void openParked(String arg, boolean onMachineCell) {
+        PlanView plan = fixture(arg == null || arg.trim().isEmpty() ? HOVER_FIXTURE : arg);
+        armNodeActions(plan.tree());
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, book(plan),
+                                                        PlannerScreen.schemaCheck(), SHOT_ACTIONS);
+        PlannerScreen.openPanel(panel);
+        ShotScreens.expectReport(onMachineCell ? "planner-machine-tip" : "planner-hover");
+        ShotScreens.holdCapture(new ParkOnTreeRow(plan, onMachineCell));
     }
 
     /**
@@ -1419,10 +1935,50 @@ final class PlannerShot {
      * behind it in this client and correctly draws no icon and no entries. Shoot
      * `plan-in-stock` (minecraft:hopper) or `plan-free-source` (minecraft:cobblestone) to see
      * the populated case.
+     *
+     * <h2>THE CATALYSTS ARE INTERNED TOO, SINCE #333, AND WITHOUT THEM THE SHOT LIED</h2>
+     *
+     * `iconForCategory` resolves a machine's sprite through `graph.categoryId(node.category())`
+     * and `RecipeGraph.catalysts()`. This method interned KEYS only, so every `categoryId` came
+     * back -1 and every machine column in every screenshot would have been empty -- a picture of
+     * a feature that is working, shaped exactly like a picture of a feature that is not. That is
+     * the failure this whole file exists to prevent, and it would have been diagnosed as a broken
+     * lookup rather than as a harness gap.
+     *
+     * THE CATALYST MUST BE AN ITEM KEY AND NOT THE CATEGORY'S OWN NAME, WHICH IS WHERE THIS WAS
+     * WRONG FIRST AND WOULD HAVE PRODUCED A LYING PICTURE. `internCatalysts` originally interned
+     * `builder.key(category)` -- so the catalyst key was `minecraft.smelting`, and this comment
+     * claimed the dev client would picture a furnace for it. It cannot: `StackIndex.build` keys
+     * the real JEI item list through `DumpCommand.stackKey`, which produces `minecraft:furnace`,
+     * and its only two weakenings strip a `#digest` or collapse durability. Nothing turns a
+     * category id into an item key, so EVERY machine column in EVERY screenshot would have been
+     * empty while this paragraph promised otherwise -- a picture of a broken feature next to a
+     * comment saying it works, which is the worst of the shapes this file exists to prevent.
+     *
+     * SO THE STAND-IN IS A REAL VANILLA BLOCK, picked from {@link #SHOT_MACHINES} by the
+     * category's own hash. A real `graph.json` maps `nuclearcraft_centrifuge` to
+     * `nuclearcraft:centrifuge_idle` and this harness has no dump to read that from -- see the
+     * paragraph above on why a second loader is not the answer -- but it can hand the lookup a
+     * key the dev client really resolves, which exercises the production path end to end:
+     * `categoryId`, `Machines.catalystsByCategory`, `isNotAMachine` and `JeiBridge.stackFor`.
+     * Hashed rather than constant so the column reads as a column of different machines instead
+     * of one furnace repeated, and deterministic so two shots of one fixture are comparable.
+     *
+     * WHAT THE SHOT THEREFORE DOES NOT PROVE: that the SPECIFICITY ORDERING picked the right
+     * candidate. Every category here has exactly one catalyst, so there is nothing to order.
+     * `JeiNodeActionsTest.aMachineStepPicturesItsSpecificControllerAndNotTheCatalystJeiListed`
+     * `First` is where that is proved, behaviourally, with two resolvable candidates. Do not
+     * read a correct-looking machine column as evidence of the ordering.
+     *
+     * THE ROADBLOCK FRAME DOES NOT DEPEND ON ANY OF THIS, which is what makes the shot worth
+     * taking either way: `machineCell` builds a frame-only cell from `machine_state` alone, and
+     * that field is in the fixture. `plan-truncated` carries 28 machine rows and
+     * `plan-fluid-chain` several hundred.
      */
     static void armNodeActions(PlanNode tree) {
         GraphBuilder builder = new GraphBuilder();
         intern(tree, builder);
+        internCatalysts(tree, builder, new java.util.HashSet<String>());
         final RecipeGraph graph = builder.build();
         JeiBridge.indexFor(graph);
         JeiNodeActions.install(new JeiNodeActions.GraphAccess() {
@@ -1439,5 +1995,78 @@ final class PlannerShot {
         for (PlanNode child : node.children()) {
             intern(child, builder);
         }
+    }
+
+    /**
+     * Give every category in the tree one catalyst, so the machine column has something to look
+     * up. See {@link #armNodeActions} for why this is synthetic and what it still exercises.
+     *
+     * ONCE PER CATEGORY, WHICH THE `seen` SET IS FOR AND NOT AN OPTIMISATION.
+     * `GraphBuilder.beginCatalyst` interns the category and `catalystKey` appends a row, so a
+     * category visited twice would list the same key twice -- and `Machines.orderBySpecificity`'s
+     * breadth count reads exactly that, so a duplicated key would look twice as generic as it is
+     * and could be demoted below a genuinely broader one.
+     *
+     * HAND CRAFTING IS SKIPPED, matching what the panel does with it: `NodeRowText.machineName`
+     * returns null for the three `Machines.isHandCrafting` prefixes, so a catalyst for them would
+     * be interned and never asked for.
+     */
+    static void internCatalysts(PlanNode node, GraphBuilder builder,
+                                java.util.Set<String> seen) {
+        String category = node.category();
+        if (category != null && !category.isEmpty() && seen.add(category)
+                && !io.github.jacoblasky.recipedump.plan.Machines.isHandCrafting(category)) {
+            builder.beginCatalyst(category);
+            builder.catalystKey(builder.key(shotMachineKey(category)));
+            builder.endCatalyst();
+        }
+        for (PlanNode child : node.children()) {
+            internCatalysts(child, builder, seen);
+        }
+    }
+
+    /**
+     * The vanilla blocks that stand in for a machine in a screenshot. See {@link #internCatalysts}.
+     *
+     * VANILLA AND BLOCK-SHAPED, so a reader of the picture sees something that could plausibly be
+     * a machine rather than a stick. All six are in the dev client's item list unconditionally,
+     * which is the only property that matters: a stand-in the index cannot resolve puts the
+     * harness straight back into the empty-column failure this array was added to fix.
+     *
+     * EVERY ENTRY MUST HAVE A REGISTERED `ItemBlock`, WHICH RULES OUT THE OBVIOUS CANDIDATES.
+     * `new ItemStack(Block)` goes through `Item.getItemFromBlock`, and a block whose item is
+     * registered separately -- `Blocks.CAULDRON` and `Blocks.BREWING_STAND` are the two that
+     * belong on a list of machines -- answers `Items.AIR`, so the stack is EMPTY and
+     * `DumpCommand.stackKey` has nothing to key. That fails as a null key at graph-build time
+     * during a screenshot, which is the worst place to find it, so
+     * `everyShotMachineStandInIsAnItemTheIndexCanActuallyResolve` checks all six by construction
+     * rather than only the ones a given fixture's categories happen to hash to.
+     */
+    static final net.minecraft.block.Block[] SHOT_MACHINES = {
+        net.minecraft.init.Blocks.FURNACE,
+        net.minecraft.init.Blocks.CRAFTING_TABLE,
+        net.minecraft.init.Blocks.ANVIL,
+        net.minecraft.init.Blocks.DISPENSER,
+        net.minecraft.init.Blocks.ENCHANTING_TABLE,
+        net.minecraft.init.Blocks.HOPPER,
+    };
+
+    /**
+     * The item key this harness pretends is `category`'s machine.
+     *
+     * `DumpCommand.stackKey` AND NOT A SPELLED-OUT `"minecraft:furnace"`, because that method is
+     * what {@link io.github.jacoblasky.recipedump.client.StackIndex} keys the real JEI item list
+     * through, and a hand-written key that disagreed with it by one character would resolve to
+     * nothing while looking entirely correct -- which is the same failure, one layer down.
+     *
+     * `Math.abs` ON THE HASH, AND `Integer.MIN_VALUE` IS WHY IT IS NOT ENOUGH ON ITS OWN.
+     * `Math.abs(Integer.MIN_VALUE)` is negative, so the remainder would be negative and the array
+     * read would throw -- on one category name in 4 billion, at screenshot time, in the harness
+     * everything else is evidenced through. Masking the sign bit cannot do that.
+     */
+    static String shotMachineKey(String category) {
+        int at = (category.hashCode() & 0x7FFFFFFF) % SHOT_MACHINES.length;
+        return io.github.jacoblasky.recipedump.DumpCommand.stackKey(
+                new net.minecraft.item.ItemStack(SHOT_MACHINES[at]));
     }
 }

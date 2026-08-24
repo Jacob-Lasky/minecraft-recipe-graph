@@ -42,6 +42,23 @@ public final class Machines {
     static final Set<String> NOT_A_MACHINE = new HashSet<String>(
             Arrays.asList("modularmachinery:itemblueprint"));
 
+    /**
+     * Whether `key` is one of the items JEI lists as a catalyst that is NOT the machine.
+     *
+     * A PREDICATE RATHER THAN A WIDER {@link #NOT_A_MACHINE}, because that field is a mutable
+     * `HashSet` and handing it out is handing out the ability to change it. #333 needed the
+     * question answered from `client.jei`, which is the first caller outside this package.
+     *
+     * IT IS THE BELT AND {@link #orderBySpecificity} IS THE BRACES, and both are needed. The
+     * ordering DEMOTES the blueprint -- it catalyses 226 categories, so it sorts last -- which
+     * is enough wherever a purpose-built controller exists. This is what stops a blueprint
+     * being drawn as the machine on a category where it is the ONLY catalyst, which the
+     * ordering cannot help with because there is nothing to demote it below.
+     */
+    public static boolean isNotAMachine(String key) {
+        return key != null && NOT_A_MACHINE.contains(key);
+    }
+
     /** Categories that need no machine at all. Never gate these; the player always has hands. */
     private static final Set<String> ALWAYS_AVAILABLE = new HashSet<String>(Arrays.asList(
             "minecraft.crafting", "minecraft.crafting.shaped", "minecraft.crafting.shapeless",
@@ -681,13 +698,25 @@ public final class Machines {
     }
 
     /**
-     * The catalyst map, reordered by specificity.
+     * The catalyst map, reordered by specificity. {categoryId: key ids, most specific first}
      *
      * MUST RUN OVER THE WHOLE MAPPING: "is this item specific to one machine" is only
      * answerable by looking at every category at once, so the breadth count is taken before
      * any category is ordered.
+     *
+     * PUBLIC SINCE #333, FOR THE PLANNER'S MACHINE ICON, AND THAT IS THE POINT OF WIDENING IT
+     * RATHER THAN COPYING IT. `client.jei.JeiNodeActions` needs "which item pictures this
+     * category's machine", and the naive answer -- `graph.catalysts().row(cid)[0]` -- draws
+     * `modularmachinery:itemblueprint` on 226 of the pack's 227 Modular Machinery categories,
+     * because JEI lists the generic blueprint FIRST. A second ordering next door would be a
+     * second thing to get wrong, and its wrong answer looks entirely plausible.
+     *
+     * IT IS A WHOLE-GRAPH PASS AND THE CALLER MUST CACHE IT. Two maps over every category with
+     * a catalyst plus a sort per category; {@link #resolve} runs it exactly once per graph and
+     * `JeiNodeActions` memoises it against the graph it came from. Calling this per tree ROW
+     * would be seconds per panel build on a 703-node plan.
      */
-    private static Map<Integer, int[]> catalystsByCategory(RecipeGraph graph) {
+    public static Map<Integer, int[]> catalystsByCategory(RecipeGraph graph) {
         Map<Integer, int[]> raw = new LinkedHashMap<Integer, int[]>();
         Csr catalysts = graph.catalysts();
         for (int category = 0; category < catalysts.rows(); category++) {

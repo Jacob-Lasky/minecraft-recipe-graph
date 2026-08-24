@@ -207,6 +207,17 @@ public class ShotScreensTest {
                 // the empty canvas and then presses Root. Both would go red if their wiring were
                 // removed and none of the three above would.
                 "flow-nav", "flow-node-menu",
+                // AND #333 ADDED THESE TWO, which are the only screens whose SUBJECT does not
+                // exist until a cursor is somewhere. Every other planner screen opens a panel and
+                // photographs it, and a captured panel has no pointer on any row -- so the hover
+                // band and the machine tooltip were the two things that pass shipped with no
+                // artifact at all. They park the real cursor inside a tree row and report a
+                // verdict, because a photograph of a row with no band on it is indistinguishable
+                // from a photograph of a row whose band does not draw. `planner-machine-tip` is
+                // the load-bearing one: since #333 the tooltip is the ONLY place a tree row names
+                // its machine, so a registration dropped here takes the only evidence that the
+                // name is reachable in game.
+                "planner-hover", "planner-machine-tip",
                 "planner-yield", "row-menu", "sources", "world-probe");
 
         List<String> actual = new ArrayList<String>(ShotScreens.names());
@@ -411,6 +422,21 @@ public class ShotScreensTest {
         // while every layout test still passes.
         assertTrue(ShotScreens.names().toString(),
                    ShotScreens.names().contains("planner-collide"));
+    }
+
+    @Test
+    public void theTwoCursorShotsAreReachableByName() {
+        // #333 shipped two things that only exist while a cursor is somewhere -- the row hover
+        // band and the machine tooltip -- and every other planner screen photographs a panel with
+        // no pointer on it. These are the only screens that park one on a tree row, so a dropped
+        // registration takes both artifacts with it while every layout test still passes. That is
+        // the same argument as the yield and collision shots above, with one extra edge: the
+        // machine tooltip is now the ONLY place a tree row names its machine, so the artifact it
+        // carries is not a nicety.
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-hover"));
+        assertTrue(ShotScreens.names().toString(),
+                   ShotScreens.names().contains("planner-machine-tip"));
     }
 
     @Test

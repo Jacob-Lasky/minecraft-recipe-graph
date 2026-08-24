@@ -82,8 +82,15 @@ public class FlowCanvasTest {
         // screenshots of this canvas read "Iron ..." and "Block..." -- a dependency diagram
         // whose boxes did not say what they were. On its own line the label gets the node
         // minus the icon column.
+        //
+        // AND SINCE #333, MINUS THE MACHINE BADGE, which shares that line at its right end.
+        // SUBTRACTED HERE RATHER THAN LEFT ALONE: this sum is computed from constants, so it
+        // would have gone on reporting 30 characters while the widget drew 28 -- a test that
+        // agrees with its own arithmetic instead of with the panel, which is the failure
+        // `NodeRowTextTest.columnAtDepth`'s javadoc records being made twice in this repository.
         int labelRoom = FlowLayout.NODE_WIDTH - PlannerWidgets.NODE_PAD * 2
-                - PlannerWidgets.NODE_ICON - PlannerWidgets.GAP;
+                - PlannerWidgets.NODE_ICON - PlannerWidgets.GAP
+                - PlannerWidgets.ICON - PlannerWidgets.GAP;
         int characters = labelRoom / NodeRowText.CHAR_WIDTH;
         // 24 is "Sodium Fluoride Solution", the longest name in `plan-fluid-chain`'s upper
         // chain and a name the old node cut to "Sodium…". Asserted as a character count

@@ -187,8 +187,56 @@ public class NodeRowTextTest {
         // The part that matters: still there at a width that loses everything else.
         String cut = NodeRowText.fit(meta, 9 * NodeRowText.CHAR_WIDTH);
         assertTrue(cut, cut.startsWith("pinned"));
-        assertTrue("the rest keeps the browser's order: " + meta,
-                   meta.indexOf("Rolling Machine") < meta.indexOf("172 recipes"));
+        assertTrue("the rest of the run survives: " + meta, meta.contains("172 recipes"));
+        // THE MACHINE IS NO LONGER IN THIS RUN (#333). It used to sit between `pinned` and the
+        // recipe count and this test asserted that order. It is an icon and a tooltip now, and
+        // the assertion moved with it rather than being dropped -- see
+        // `theMachineLeftTheMetaRunForATooltipThatCannotCutIt`.
+        assertFalse("the machine must have left the meta run, or #333 reclaimed nothing: "
+                    + meta, meta.contains("Rolling Machine"));
+        assertEquals("...and it is in the tooltip instead",
+                     "Rolling Machine",
+                     NodeRowText.machineTooltipLines(PlanJson.readNode(json)).get(0));
+    }
+
+    /**
+     * The machine is out of the row's text and into a tooltip, and the tooltip cannot cut it.
+     *
+     * <h2>WHAT #333's FIRST DELIVERABLE ACTUALLY PAID FOR</h2>
+     *
+     * The machine was the LONGEST part of the meta run -- measured over the committed fixtures,
+     * 1,314 rows drew one, median 12 characters and up to 51, plus a 3-character `SEPARATOR` on
+     * every one -- and it shared the label column with the item's own NAME. So it was present in
+     * the data, rendered, and then destroyed by the cut: `disclose-planner.png` reads
+     * `Centrifuge…`, `Bloodmaste…`, `Runic Altar (b…`, `Crafting (sh…`.
+     *
+     * THE 51-CHARACTER WORST CASE IS THE ONE ASSERTED, because a 306-pixel string cannot be made
+     * to fit any row on any screen Minecraft runs -- the tree row's widest label column is 224
+     * pixels -- so it is the case where "moved to a tooltip" is the only thing that can work.
+     */
+    @Test
+    public void theMachineLeftTheMetaRunForATooltipThatCannotCutIt() {
+        String longest = "Recursive Processor: Chemical Reactor Mark IV Controller";
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "mod:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("category", "modularmachinery.recipes.chemical_reactor");
+        json.addProperty("machine", longest);
+        PlanNode node = PlanJson.readNode(json);
+
+        assertFalse("the meta run must not carry the machine any more: " + NodeRowText.meta(node),
+                    NodeRowText.meta(node).contains(longest));
+        List<String> tooltip = NodeRowText.machineTooltipLines(node);
+        assertEquals("the machine's name is the tooltip's first line", longest, tooltip.get(0));
+        assertEquals("a machine the player HAS gets no state line and no reason", 1,
+                     tooltip.size());
+        // THE CONTROL: this string genuinely could not have fitted, so "moved" is doing work.
+        assertTrue("a " + longest.length() + "-character machine is "
+                   + longest.length() * NodeRowText.CHAR_WIDTH + "px against a label column that"
+                   + " is never wider than 224, so nothing about this row could have shown it",
+                   longest.length() * NodeRowText.CHAR_WIDTH > 224);
     }
 
     /**
@@ -202,18 +250,31 @@ public class NodeRowTextTest {
      * as a javadoc naming a caller that was never written is.
      */
     @Test
-    public void aBlockedMachineSaysWhyInTheRowRatherThanOnlyInAPanel() {
+    public void aBlockedMachineSaysWhyInItsTooltipRatherThanOnlyInAPanel() {
         PlanNode root = PlanFixtures.load("plan-truncated").tree();
-        String meta = NodeRowText.meta(root);
-        assertTrue(meta, meta.contains("Centrifuge (buildable)"));
-        assertTrue(meta, meta.contains("3 recipes"));
+        // THE ROW'S OTHER PARTS ARE UNTOUCHED BY #333, and asserting one of them here is what
+        // keeps this from passing on a `meta` that returned "".
+        assertTrue(NodeRowText.meta(root), NodeRowText.meta(root).contains("3 recipes"));
+
+        List<String> tooltip = NodeRowText.machineTooltipLines(root);
+        assertEquals("three lines: the name, the state, then what to do about it",
+                     3, tooltip.size());
+        assertEquals("Centrifuge", tooltip.get(0));
+        assertEquals("buildable", tooltip.get(1));
         // The part the name has always promised: what to do about the roadblock.
-        assertTrue("the row says a machine is in the way and not what to do about it: " + meta,
-                   meta.contains("craftable: nuclearcraft:centrifuge_idle"));
-        // AND NOT RUN TOGETHER WITH THE STATE. `buildable` and `craftable: ...` restate each
-        // other, so packing the reason inside the state's parentheses read as a formatting
-        // fault: "Centrifuge (buildable: craftable: nuclearcraft:centrifuge_idle)".
-        assertFalse(meta, meta.contains("buildable: craftable:"));
+        assertEquals("craftable: nuclearcraft:centrifuge_idle", tooltip.get(2));
+
+        // SEPARATE LINES AND NOT RUN TOGETHER, which is the constraint #252 paid for and the
+        // reason `machineWhyBit` was ever its own part. `buildable` and `craftable: ...` restate
+        // each other, so packing the reason inside the state's parentheses read as a formatting
+        // fault -- "Centrifuge (buildable: craftable: nuclearcraft:centrifuge_idle)". In a
+        // tooltip they are three lines, which is what the state and the reason wanted all along.
+        for (String line : tooltip) {
+            assertFalse("a tooltip line packs two facts together: " + line,
+                        line.contains("buildable: craftable:"));
+            assertFalse("...and the state is not parenthesised onto the name either: " + line,
+                        line.contains("Centrifuge (buildable)"));
+        }
     }
 
     @Test
@@ -228,6 +289,28 @@ public class NodeRowTextTest {
         }
         assertTrue("plan-cycle should contain a shapeless craft", shapeless != null);
         assertFalse(NodeRowText.meta(shapeless).contains("crafting_shapeless"));
+
+        // THIS TEST WAS PASSING ON THE WRONG STRING UNTIL #333, AND THE BUG WAS REAL. It checked
+        // for the CATEGORY -- `crafting_shapeless` -- while the old `machineBit` reached its
+        // `startsWith("crafting")` guard only when the machine name EQUALLED the category. JEI
+        // gives these a title, so `machine` was `Crafting (shapeless)`, the first branch took it,
+        // and the row announced hand crafting after all. Measured over the fixtures: 335 of 2,289
+        // rows did, on a panel whose own comment said "saying so on every second row is noise",
+        // and `disclose-planner.png` has `Crafting (sh…` in it.
+        assertEquals("the machine's own DISPLAY name must be suppressed too, not just the"
+                     + " category id: this is the string the panel was actually drawing",
+                     "Crafting (shapeless)", shapeless.machine());
+        assertFalse(NodeRowText.meta(shapeless), NodeRowText.meta(shapeless).contains("Crafting"));
+        assertTrue("and there is no machine tooltip on a hand-crafted row either",
+                   NodeRowText.machineTooltipLines(shapeless).isEmpty());
+
+        // ALL THREE PREFIXES, through the one predicate the repository already owns, so this stops
+        // being a fourth spelling of "is it a crafting table".
+        for (String category : new String[] {"minecraft.crafting", "crafting_shaped",
+                                             "crafting_shapeless"}) {
+            assertTrue(category + " must be hand crafting",
+                       io.github.jacoblasky.recipedump.plan.Machines.isHandCrafting(category));
+        }
     }
 
     @Test
@@ -626,19 +709,27 @@ public class NodeRowTextTest {
     }
 
     /**
-     * A roadblocked machine's reason rides in the node's meta run. #190.
+     * A roadblocked machine's reason rides in its tooltip. #190, moved by #333.
      *
      * `machine_why` was parsed into `PlanNode` and read by NOTHING, main or test, until #190.
      * The state label alone says a machine is in the way; the `why` says what to do about it,
      * which is the difference `ScenarioSource.Status.unavailable` argues about at length.
+     *
+     * IT USED TO BE THE FIRST THING `fit` DESTROYED, deliberately -- it went last in the meta run
+     * precisely so it would be the part a narrow row lost. A tooltip has no column to overflow,
+     * so #333 is a strict upgrade for this string rather than a relocation.
      */
     @Test
-    public void aRoadblockedMachineSaysWhyInTheMetaRun() {
-        String meta = NodeRowText.meta(machineNode("unavailable", "no blueprint in reach"));
-        assertTrue(meta, meta.contains("no blueprint in reach"));
-        // And a machine the player HAS gets no reason, because `solve.py` writes none.
-        String owned = NodeRowText.meta(machineNode("have", null));
-        assertFalse(owned, owned.contains("no blueprint in reach"));
+    public void aRoadblockedMachineSaysWhyInItsTooltip() {
+        List<String> blocked =
+                NodeRowText.machineTooltipLines(machineNode("unavailable", "no blueprint in reach"));
+        assertEquals(java.util.Arrays.asList("Pulverizer", "no route", "no blueprint in reach"),
+                     blocked);
+        // And a machine the player HAS gets no reason, because `solve.py` writes none -- and no
+        // state line either, because "have" on every second row is the noise the machine's own
+        // name-suppression rule exists to avoid.
+        assertEquals(java.util.Collections.singletonList("Pulverizer"),
+                     NodeRowText.machineTooltipLines(machineNode("have", null)));
     }
 
     @Test
@@ -790,12 +881,21 @@ public class NodeRowTextTest {
         // stale silently; `columnAtDepth` below calls the same constants and the same
         // `badgeWidthFor` that `PlannerWidgets.row` does, so it moves when the panel moves.
         //
-        // What the real column leaves for the yield, after a 3-character separator and this
-        // 16-character meta: 18 characters at depth 0, 12 at depth 4, 10 at the indent cap.
-        // Re-counted at #332, which took `INDENT` from 6 to 10 and `MAX_INDENT_DEPTH` from 8 to
-        // 5. The two ends did not move -- the product 5 x 10 is within 2px of the old 8 x 6, and
-        // `theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor` is what holds it there
-        // -- but the middle did, because depth 4 is now one level off the cap instead of four.
+        // THE COLUMN, RE-DERIVED AT #333 AND STATED AS WIDTHS THIS TIME. The figures that stood
+        // here -- "18 characters at depth 0, 12 at depth 4, 10 at the cap" -- did not say what
+        // they were counting and could not be checked against `columnAtDepth`, which is the
+        // failure mode this test's own comment warns about two paragraphs up. What the label
+        // column actually is, from `columnAtDepth`:
+        //
+        //     depth 0   224px = 37 characters      depth 3   194px = 32
+        //     depth 1   214px = 35                 depth 4   184px = 30
+        //     depth 2   204px = 34                 the cap   174px = 29
+        //
+        // The line under test is a 10-character label plus a 3-character separator plus a
+        // 16-character meta, which is 29 -- so it survives at every depth and has NOTHING SPARE
+        // at the cap. That was true before #333 as well (the cap was 177px, also 29 characters):
+        // the machine column cost 13 pixels and the per-plan quantity gave 10 back. What changed
+        // is that those 29 characters no longer include the machine's name.
         for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH; depth++) {
             String fitted = NodeRowText.fit(
                     "Iron Ingot" + NodeRowText.SEPARATOR + NodeRowText.meta(node),
@@ -836,19 +936,61 @@ public class NodeRowTextTest {
     /**
      * The label column at one indent depth, computed the way `PlannerWidgets.row` computes it.
      *
-     * CALLS THE PRODUCTION CONSTANTS AND `badgeWidthFor` RATHER THAN RESTATING THEM. The badge
-     * is the piece a hand-written version forgets: `badgeWidthFor` reserves it on every
-     * full-width tree row, cap included, and `aFullWidthTreeRowStillCarriesItsBadgeEvenAtTheIn`
-     * `dentCap` pins that. Omitting it overstates the label column by 93px, which is 16
-     * characters and the whole of the disagreement this test was re-pinned to settle.
+     * CALLS THE PRODUCTION CONSTANTS AND `TreeColumns.clusterWidth` RATHER THAN RESTATING THEM.
+     * The cluster is the piece a hand-written version forgets: it is charged on the right of
+     * every full-width tree row, cap included. Omitting it overstates the label column by 148px,
+     * which is 24 characters and the whole of the disagreement this test was re-pinned to settle.
+     *
+     * <h2>RE-DERIVED AT #333, AND WHY IT NOW READS THE FIXTURES</h2>
+     *
+     * The row was two columns laid out left to right from the indent and is now a depth-varying
+     * left group plus a right-anchored cluster; `badgeWidthFor` is no longer what a tree row
+     * asks. It also became PER-PLAN: `TreeColumns.forTree` derives the quantity and badge widths
+     * from the badges and quantities the plan actually contains, so there is no single number any
+     * more -- the median cluster over the 22 fixtures is 85px, the narrowest 64 and the widest
+     * 148, all four pinned by `PlannerLayoutTest.theDerivedColumnCensusIsWhatTheseJavadocsCite`.
+     *
+     * SO THIS TAKES THE WIDEST COLUMNS ANY COMMITTED FIXTURE DERIVES, which is the narrowest
+     * label column production can draw, which is the conservative answer for a test about
+     * whether a string survives. `TreeColumns.VOCABULARY` would be more conservative still and
+     * would be measuring a row no plan produces: reaching it needs a plan containing both
+     * `934,400x` and `no known source`, and none of the 22 fixtures contains the first.
+     *
+     * MEASURED, so the numbers in the callers can be checked: the widest fixtures --
+     * `plan-fluid-chain`, `plan-multiblock`, `plan-no-machine-declared` -- derive `qty` 42 and
+     * `badge` 90, a 148px cluster, which leaves the label 224px (37 characters) at depth 0 and
+     * 174px (29 characters) at the indent cap. Both are within half a character of what the
+     * panel drew before #333, and the difference is that the column no longer shares itself with
+     * the machine's name.
      */
     private static int columnAtDepth(int depth) {
-        int x = Math.min(depth, PlannerWidgets.MAX_INDENT_DEPTH) * PlannerWidgets.INDENT
-                + PlannerWidgets.ICON + PlannerWidgets.GAP
-                + PlannerWidgets.QTY + PlannerWidgets.GAP;
-        int badge = PlannerWidgets.badgeWidthFor(PlannerWidgets.CONTENT_WIDTH, x);
-        return Math.max(PlannerWidgets.GAP, PlannerWidgets.CONTENT_WIDTH - x
-                        - (badge > 0 ? badge + PlannerWidgets.GAP : 0));
+        int labelStart = Math.min(depth, PlannerWidgets.MAX_INDENT_DEPTH) * PlannerWidgets.INDENT
+                + PlannerWidgets.ICON + PlannerWidgets.GAP;
+        int cluster = widestColumnsInAnyFixture()
+                .clusterWidth(PlannerWidgets.CONTENT_WIDTH, labelStart);
+        return Math.max(PlannerWidgets.GAP, PlannerWidgets.CONTENT_WIDTH - cluster
+                        - PlannerWidgets.GAP - labelStart);
+    }
+
+    /**
+     * The widest quantity and badge columns any committed fixture derives, as one `TreeColumns`.
+     *
+     * NOT NECESSARILY ONE FIXTURE'S PAIR, and that is deliberate: taking the max of each term
+     * independently describes the narrowest label column any plan could produce even if no plan
+     * produces exactly that combination. A test about whether a string survives the cut wants the
+     * pessimistic answer, and it wants it derived rather than written down.
+     */
+    private static PlannerWidgets.TreeColumns widestColumnsInAnyFixture() {
+        int qty = 0;
+        int badge = 0;
+        for (String fixture : PlanFixtures.names()) {
+            PlannerWidgets.TreeColumns columns =
+                    PlannerWidgets.TreeColumns.forTree(PlanFixtures.load(fixture).tree());
+            qty = Math.max(qty, columns.qty);
+            badge = Math.max(badge, columns.badge);
+        }
+        assertTrue("no fixture derived any columns at all", qty > 0 && badge > 0);
+        return new PlannerWidgets.TreeColumns(qty, badge);
     }
 
     @Test
@@ -867,7 +1009,13 @@ public class NodeRowTextTest {
                 + meta.replace(", 0.1%", ", 0.004 per run, yields 0.1% of the time");
         String withPerRun = "Mildly Recursive Goo" + NodeRowText.SEPARATOR
                 + meta.replace(", 0.1%", ", 0.004 per run, 0.1%");
-        int labelWidth = 400 - 6 * 2 - ((10 + 2) + (52 + 2));
+        // `columnAtDepth(0)` AND NOT A HAND-WRITTEN SUM. The literal that stood here was
+        // `400 - 6*2 - ((10+2) + (52+2))` = 322px, which was wrong in two ways at once: it spent
+        // `GAP` as 2 where it is 3, and it omitted the badge column entirely -- the exact pair of
+        // mistakes `columnAtDepth`'s own javadoc records being made in this file before. It was
+        // ~100px too generous, so this control was weaker than it claimed while reading as
+        // stricter. Same method as the assertions above, so the two cannot disagree.
+        int labelWidth = columnAtDepth(0);
         assertFalse("the original form, prose with per_run beside it: "
                     + NodeRowText.fit(prose, labelWidth),
                     NodeRowText.fit(prose, labelWidth).contains("0.1%"));
@@ -876,27 +1024,40 @@ public class NodeRowTextTest {
                     NodeRowText.fit(withPerRun, labelWidth).contains("0.1%"));
     }
 
+    /**
+     * REPLACES `theYieldComesBeforeTheMachineReasonSoACutTakesTheReasonFirst`. #333.
+     *
+     * <h2>THE ORDER IT PINNED NO LONGER EXISTS, AND THE CONSTRAINT BEHIND IT IS NOW STRONGER</h2>
+     *
+     * That test asserted the yield came BEFORE the machine reason in the meta run, so that a cut
+     * would reach the reason first. Both machine parts left the run at #333, so there is no
+     * ordering left to assert -- and the thing the ordering was protecting is now protected
+     * absolutely rather than relatively: the yield is no longer competing with the machine at
+     * all, and the reason is in a tooltip that cannot cut.
+     *
+     * SO THIS ASSERTS THE STRONGER PROPERTY IN ITS PLACE, and it is deliberately the same node.
+     * A test deleted because a change made it meaningless leaves nothing watching the ground it
+     * covered; #252's `runs`/`per_run`/`yield_chance` reaching a row is the ground, and the
+     * yield's own survival test (`theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy`)
+     * covers the width half.
+     */
     @Test
-    public void theYieldComesBeforeTheMachineReasonSoACutTakesTheReasonFirst() {
-        // WHY IT IS EARLY IN THE RUN. `machineWhyBit` is last so `fit` drops it first, because
-        // its full text lives on the TODO panel's machine section. The yield has no second
-        // home and it is the part that says the plan may not be worth starting, so a cut must
-        // reach the reason before it reaches the yield.
-        //
-        // BUILT WITH BOTH PARTS PRESENT, and asserted on their ORDER rather than on their
-        // presence. An earlier version of this test allowed the machine to be absent, which
-        // made it pass on a node that could not have failed it.
+    public void theYieldNoLongerCompetesWithTheMachineForTheSameColumn() {
         PlanNode node = yieldNode(1000L, Double.valueOf(0.004), Double.valueOf(0.001),
                                   "buildable", "craftable: mod:pulverizer");
         String meta = NodeRowText.meta(node);
-        // THE PERCENT SIGN IS THE YIELD NOW. #252 abbreviated `yields 0.1% of the time`
-        // to a bare `0.1%` because the prose was 23 characters carrying 4 of content and
-        // `fit` was cutting it off entirely; there is no other proportion on this row.
-        int yieldAt = meta.indexOf("%");
-        int whyAt = meta.indexOf("craftable: mod:pulverizer");
-        assertTrue("the yield is missing from: " + meta, yieldAt >= 0);
-        assertTrue("the machine reason is missing from: " + meta, whyAt >= 0);
-        assertTrue("the yield must precede the machine reason: " + meta, yieldAt < whyAt);
+        // THE PERCENT SIGN IS THE YIELD. #252 abbreviated `yields 0.1% of the time` to a bare
+        // `0.1%` because the prose was 23 characters carrying 4 of content and `fit` was cutting
+        // it off entirely; there is no other proportion on this row.
+        assertTrue("the yield is missing from: " + meta, meta.indexOf("%") >= 0);
+        assertFalse("the machine's state must have left the run: " + meta,
+                    meta.contains("buildable"));
+        assertFalse("...and so must its reason, which used to be this run's last part: " + meta,
+                    meta.contains("craftable: mod:pulverizer"));
+        // AND BOTH ARE STILL REACHABLE, which is what makes this a move rather than a deletion.
+        assertEquals(java.util.Arrays.asList("Pulverizer", "buildable",
+                                             "craftable: mod:pulverizer"),
+                     NodeRowText.machineTooltipLines(node));
     }
 
     private static PlanNode yieldNode(long runs, Double perRun, Double yieldChance) {

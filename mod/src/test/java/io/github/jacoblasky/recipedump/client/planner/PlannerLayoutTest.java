@@ -55,6 +55,13 @@ public class PlannerLayoutTest {
     public void isolate() {
         io.github.jacoblasky.recipedump.common.ScenarioSource.resetReaders();
         io.github.jacoblasky.recipedump.client.LiveStock.forget();
+        // THREE STATICS NOW, NOT TWO (#333). `machineCell` reads `NodeActionsHolder.actions()`
+        // for the machine column exactly as the item column already did for `iconFor`, so a
+        // `JeiNodeActions` left installed by another class -- `JeiNodeActionsTest` installs one
+        // per case and resets in its own `@After`, but a case that dies between the two does not
+        // -- would add icon widgets to rows this class counts and measures. `install(null)`
+        // collapses to `NodeActions.NONE`, which is what an unwired client has.
+        NodeActionsHolder.install(null);
     }
 
     /**
@@ -985,9 +992,14 @@ public class PlannerLayoutTest {
      * is exactly what happened to the first one.
      *
      * IT ALSO PINS THE DENOMINATOR, and that half matters as much. 61 is the size of the
-     * population the fix operates on; if a fixture regeneration moves it, a reach of 22 means
+     * population the fix operates on; if a fixture regeneration moves it, a reach of 23 means
      * something different and this fails rather than quietly re-scaling. The same regeneration
      * already took the collision count from 17 to 13 under this branch once.
+     *
+     * 22 UNTIL #333 AND 23 AFTER IT, and the method was renamed with the number rather than
+     * having the number quietly edited under the old name -- which is precisely what the
+     * paragraph above says goes wrong with a figure nothing checks. The reason for the extra row
+     * is in the assertion itself.
      *
      * AND IT IS A LABEL-COLUMN TEST WITHOUT SAYING SO, WHICH #332 DISCOVERED THE HARD WAY. The
      * reach is decided by `labelAndMeta`, which takes the fragment only if the whole line still
@@ -999,11 +1011,16 @@ public class PlannerLayoutTest {
      * because the next person moving those constants will want to know this is one of the tests
      * that answers; the mutation row is in `evidence-331-332/mutation-reds.txt`.
      *
+     * AND IT IS A META-RUN TEST TOO, WHICH #333 DISCOVERED THE SAME WAY. The fragment is taken
+     * only if the whole line still fits, and the line is `label (fragment) · meta` -- so evicting
+     * the machine from `meta` widens the reach as surely as widening the column does. That is
+     * where the extra row came from.
+     *
      * The counted property is the row SHAPE the fix emits -- `label (fragment)` -- read off the
      * widgets the screen builds, not off the helper that writes the string.
      */
     @Test
-    public void twentyTwoOfSixtyOneCollidingRowsCanAffordTheFragment() {
+    public void twentyThreeOfSixtyOneCollidingRowsCanAffordTheFragment() {
         int collidingRows = 0;
         int tookFragment = 0;
         for (String fixture : PlanFixtures.names()) {
@@ -1047,9 +1064,23 @@ public class PlannerLayoutTest {
         assertEquals("the population the fix operates on; if a fixture regeneration moved it, "
                      + "re-measure the reach below rather than rescaling it",
                      61, collidingRows);
+        // 23 SINCE #333, RE-MEASURED AND NOT RESCALED, WHICH IS WHAT THIS TEST'S OWN JAVADOC
+        // ASKS FOR. The population is unchanged at 61; one more row can now afford the fragment,
+        // and it is a named one. `plan-variant-table`'s `Brown Concrete` was at capacity ONLY
+        // because its whole meta run was `Chiseling (buildable)`, 21 of its 37 characters -- the
+        // machine, which #333 moved into an icon and a tooltip. With the run empty the row has
+        // room to spare and takes `(chisel)`.
+        //
+        // WHY ONE AND NOT MORE, WHICH IS THE HONEST HALF. The eviction frees width only on rows
+        // whose meta run WAS the machine, and the rest of #273's population is not that shape:
+        // `Iron Ore`'s meta is `mined, not crafted`, a `note`, so it is 29 characters before and
+        // after and still cannot afford the 12 the fragment costs.
+        // `aRowWithRoomTakesTheFragmentAndARowAtCapacityLosesNothingItDrew` names both rows and
+        // asserts the two directions separately, so this number cannot move without one of them
+        // moving too.
         assertEquals("rows that can afford to say which item they are; the other "
-                     + (61 - 22) + " are at capacity and keep what they drew, which is #273",
-                     22, tookFragment);
+                     + (61 - 23) + " are at capacity and keep what they drew, which is #273",
+                     23, tookFragment);
     }
 
     /**
@@ -1124,19 +1155,42 @@ public class PlannerLayoutTest {
 
         List<String> lines = new java.util.ArrayList<String>();
         for (int i = 0; i < rows.size(); i++) {
+            // THE WIDEST TEXT CELL IS THE LABEL, AND IT IS FOUND THAT WAY BECAUSE CHILD ORDER
+            // WAS NEVER THE PROPERTY THIS WANTED (#333).
+            //
+            // This used to find the quantity in child order and take the NEXT widget. That held
+            // only while `row` happened to add [icon] quantity label [badge] in that sequence,
+            // and #333 anchored the quantity and the badge into a right cluster added AFTER the
+            // label -- so "the one after the quantity" became the BADGE, and this helper started
+            // reporting `[NEED]` as every row's label. Two tests then failed with numbers that
+            // looked like a production regression: `twentyTwoOfSixtyOne...` measured a reach of
+            // zero and `twoTreeRowsForDifferentItemsAreTellableApart` reported four new
+            // ambiguous labels, all of which drew the same badge as each other.
+            //
+            // It is the same fragility `VIEW_LABELS`' javadoc records about an index into the
+            // view bar: correct until someone adds a widget, then silently about the wrong thing.
+            // A width cannot drift that way. The tree is always built at `CONTENT_WIDTH` here, so
+            // the label column is 174px at its narrowest against a badge of at most 90 and a
+            // quantity of at most 52 -- and the assertion below refuses to guess if that ever
+            // stops being true, rather than quietly returning a badge again.
+            com.cleanroommc.modularui.widgets.TextWidget<?> label = null;
             List<String> inRow = new java.util.ArrayList<String>();
             for (IWidget widget : HeadlessLayout.flatten(rows.get(i))) {
-                if (widget instanceof com.cleanroommc.modularui.widgets.TextWidget) {
-                    inRow.add(((com.cleanroommc.modularui.widgets.TextWidget<?>) widget)
-                                      .getKey().getFormatted());
+                if (!(widget instanceof com.cleanroommc.modularui.widgets.TextWidget)) {
+                    continue;
+                }
+                com.cleanroommc.modularui.widgets.TextWidget<?> text =
+                        (com.cleanroommc.modularui.widgets.TextWidget<?>) widget;
+                inRow.add(text.getKey().getFormatted());
+                if (label == null || text.getArea().w() > label.getArea().w()) {
+                    label = text;
                 }
             }
-            String quantity = NodeRowText.quantity(nodes.get(i).need());
-            int at = inRow.indexOf(quantity);
-            assertTrue("row " + i + " of " + fixture + " must draw its own quantity ["
-                       + quantity + "] so the label beside it can be identified; drew " + inRow,
-                       at >= 0 && at + 1 < inRow.size());
-            lines.add(inRow.get(at + 1));
+            assertNotNull("row " + i + " of " + fixture + " drew no text at all", label);
+            assertTrue("row " + i + " of " + fixture + " has no cell wider than the badge"
+                       + " column, so the label cannot be identified by width; drew " + inRow,
+                       label.getArea().w() > PlannerWidgets.BADGE);
+            lines.add(label.getKey().getFormatted());
         }
         return lines;
     }
@@ -1251,9 +1305,29 @@ public class PlannerLayoutTest {
      * The negative branch is the no-eviction rule stated as a test: a row that cannot afford
      * the fragment must still say WHICH MACHINE, because that is what renders on master today
      * and #232 must not take it away. Those rows are #273's population.
+     *
+     * <h2>#333 RE-POINTED THE NEGATIVE BRANCH, EXACTLY AS THE PARAGRAPH ABOVE SAID IT WOULD</h2>
+     *
+     * `Brown Concrete` was at capacity BECAUSE of the machine: its whole meta run was
+     * `Chiseling (buildable)`, 21 of its 37 characters. #333 moved the machine to an icon and a
+     * tooltip, so that row's meta is now empty, it has room to spare, and it takes the fragment
+     * -- which means it is no longer an example of this branch. The test's own instruction was to
+     * re-point it at a row that is, not to loosen the assertion, so it is pointed at `Iron Ore`.
+     *
+     * `Iron Ore` IS THE ROW THAT SURVIVES THE EVICTION AT CAPACITY, and it is #273's own example.
+     * Its meta is `mined, not crafted`, a `note` rather than a machine, so #333 freed it nothing:
+     * `Iron Ore · mined, not crafted` is 29 characters and the disambiguated form is 41 against a
+     * 37-character column at depth 0. It declines, and it keeps what it drew.
+     *
+     * AND WHAT "KEEPS" MEANS CHANGED WITH IT, WHICH IS THE HONEST HALF. The old branch asserted a
+     * declining row still said WHICH MACHINE. There is no machine in a row's text any more, so
+     * that assertion cannot be made and must not be faked; what the rule protects is that a row
+     * which cannot afford the fragment loses NOTHING it was already drawing, and that is what is
+     * asserted -- the note arrives whole and un-truncated. The machine's own survival moved to
+     * `theMachineCellCarriesTheWordsTheRowStoppedPrinting` and to `NodeRowTextTest`.
      */
     @Test
-    public void aRowWithRoomTakesTheFragmentAndARowAtCapacityKeepsItsMachine() {
+    public void aRowWithRoomTakesTheFragmentAndARowAtCapacityLosesNothingItDrew() {
         // THE DIGEST TAIL, NOT MERELY "SOMETHING IN BRACKETS". Two `enderio:item_soul_vial:1`
         // keys differ only after the '#', so the fragment rule's whole job here is to skip the
         // three tokens they share; asserting only that a bracket appeared would pass on
@@ -1278,23 +1352,41 @@ public class PlannerLayoutTest {
         assertTrue("both Soul Vial rows have room, so both must say which item they are; drew "
                    + matching(fluidChain, "Soul Vial"), secondVial);
 
+        // AND THE ROW THAT #333 GAVE ROOM TO, so this test records the move rather than only
+        // surviving it. `Brown Concrete` was the at-capacity example because its meta run WAS the
+        // machine; with the machine gone it has room and takes the fragment.
         List<String> variantTable = treeLines("plan-variant-table");
-        boolean keptItsMachine = false;
+        boolean concreteTookIt = false;
         for (String line : variantTable) {
-            // AT CAPACITY IS THE PRECONDITION, ASSERTED RATHER THAN ASSUMED. If a future change
-            // gives this row room, this fails -- and that is correct: the row would no longer
-            // be an example of the branch this half exists to cover, and the test must be
-            // re-pointed at one that is, exactly as it was re-pointed here.
-            assertFalse("Brown Concrete is the AT-CAPACITY example and must decline the "
-                        + "fragment; if it now fits, this branch needs a different row: " + line,
-                        line.startsWith("Brown Concrete ("));
-            if (line.startsWith("Brown Concrete ") && line.contains("Fluid Transposer")) {
-                keptItsMachine = true;
+            if (line.startsWith("Brown Concrete (")) {
+                concreteTookIt = true;
+                assertFalse("a row that took the fragment must not have been cut to fit it: "
+                            + line, line.endsWith("..."));
             }
         }
-        assertTrue("the row at capacity must keep its machine name rather than lose it to a "
+        assertTrue("Brown Concrete was at capacity only because `Chiseling (buildable)` was 21 "
+                   + "of its 37 characters; with the machine in an icon it must now afford the "
+                   + "fragment. If this fails the eviction did not reach the row. Drew "
+                   + matching(variantTable, "Brown Concrete"), concreteTookIt);
+
+        // THE AT-CAPACITY BRANCH, RE-POINTED AT A ROW THE EVICTION DID NOT HELP. `Iron Ore`'s
+        // meta is a `note` and not a machine, so it is 29 characters before and after #333
+        // against a 37-character column, and the disambiguated form is 41.
+        List<String> declining = treeLines("plan-fluid-chain");
+        boolean keptWhatItDrew = false;
+        for (String line : declining) {
+            assertFalse("Iron Ore is the AT-CAPACITY example and must decline the fragment; if "
+                        + "it now fits, this branch needs a different row: " + line,
+                        line.startsWith("Iron Ore ("));
+            if (line.startsWith("Iron Ore ") && line.contains("mined, not crafted")) {
+                keptWhatItDrew = true;
+                assertFalse("...and it must keep what it drew WHOLE: " + line,
+                            line.endsWith("..."));
+            }
+        }
+        assertTrue("the row at capacity must lose nothing it was already drawing to a "
                    + "disambiguator it cannot afford; drew "
-                   + matching(variantTable, "Brown Concrete"), keptItsMachine);
+                   + matching(declining, "Iron Ore"), keptWhatItDrew);
     }
 
     /** Every text the tree draws for `fixture`, through the widgets the screen builds. */
@@ -2090,6 +2182,12 @@ public class PlannerLayoutTest {
             return net.minecraft.item.ItemStack.EMPTY;
         }
 
+        /** EMPTY, for the reason {@link #iconFor} is. #333. */
+        @Override
+        public net.minecraft.item.ItemStack iconForCategory(PlanNode node) {
+            return net.minecraft.item.ItemStack.EMPTY;
+        }
+
         @Override
         public void showRecipes(PlanNode node) {
             calls.add("showRecipes:" + node.key());
@@ -2691,6 +2789,147 @@ public class PlannerLayoutTest {
         for (IWidget child : box.getChildren()) {
             assertTrue("the labels must come back when the zoom does", child.isEnabled());
         }
+    }
+
+    /**
+     * A craft node carries its machine badge bottom-right, and it goes away with the label. #333.
+     *
+     * <h2>WHY THE NODE AND NOT THE EDGE, WHICH IS WHAT #333 LITERALLY ASKED FOR</h2>
+     *
+     * A craft node has N input edges and exactly one machine, so an icon "on the line between
+     * nodes" is N copies of one fact or an arbitrary pick of which edge gets it; and edges are
+     * drawn by `FlowCanvas` rather than being widgets, whose own javadoc says why -- "making each
+     * one a widget would double the child count for something that never needs to be hit-tested"
+     * -- so a hoverable icon there means hand-rolling point-in-rect tests in the one class that
+     * declined to host widgets. `twoLineNode`'s own comment carries the full argument.
+     *
+     * <h2>IN `detail`, WHICH IS THE HALF A SCREENSHOT WOULD NOT CATCH</h2>
+     *
+     * A 10px sprite at `FlowZoom.MIN` is five physical pixels. `FlowZoom.MIN`'s comment already
+     * establishes what survives a zoom-out -- the icon and the coloured quantity -- so the
+     * machine badge belongs with the label and the badge word, which go below
+     * `FlowZoom.LABEL_LEGIBLE`. The ITEM icon is deliberately NOT detail, and asserting that both
+     * of those are still true is what stops the badge being added to the wrong list: a badge in
+     * the permanent set would be an unreadable smear at every zoom-out, and the item icon in the
+     * detail set would leave an empty box.
+     */
+    @Test
+    public void aCraftNodesMachineBadgeSitsBottomRightAndHidesWithTheLabel() {
+        PlanNode node = machineNode("unavailable", "no blueprint in reach");
+        PlannerWidgets.NodeContent box =
+                PlannerWidgets.planNodeContent(node, 209, 26, PlannerActions.NONE);
+        HeadlessLayout.layOutPanel("machine-node", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+
+        PlannerWidgets.Icon badge = null;
+        for (IWidget child : box.getChildren()) {
+            if (child instanceof PlannerWidgets.Icon) {
+                badge = (PlannerWidgets.Icon) child;
+            }
+        }
+        assertNotNull("a roadblocked craft node must carry a machine badge", badge);
+        assertEquals("and it must carry the roadblock mark, which is the signal a player scans"
+                     + " the canvas for", NodeStatus.INK_NEED, badge.frameColour());
+        assertNotNull("...and the tooltip naming the machine", badge.getTooltip());
+
+        // BOTTOM-RIGHT, INSIDE `NODE_PAD`. Asserted as a position rather than trusted, because
+        // `FlowCanvas` gives every node a `MC_BACKGROUND` nine-slice whose frame occupies the
+        // outer two or three pixels -- `NODE_PAD`'s own javadoc records the screenshot where
+        // content positioned from 0 was drawn underneath that bevel.
+        // RELATIVE TO THE BOX AND NOT TO THE PANEL. `getArea()` is absolute after layout, so
+        // comparing against the node's declared width would be off by the panel's own offset --
+        // the same mistake `theRightClusterIsTheSameWidthAtEveryDepth` records making once.
+        assertEquals("the badge's right edge must sit exactly NODE_PAD inside the box",
+                     box.getArea().ex() - PlannerWidgets.NODE_PAD, badge.getArea().ex());
+        assertTrue("...and it must be on the lower of the two lines",
+                   badge.getArea().y() - box.getArea().y() >= PlannerWidgets.LINE);
+
+        box.showDetail(false);
+        assertFalse("the machine badge is detail: at zoom 0.5 a 10px sprite is five physical"
+                    + " pixels, which is what FlowZoom.MIN says a reader is NOT reading",
+                    badge.isEnabled());
+        box.showDetail(true);
+        assertTrue(badge.isEnabled());
+    }
+
+    /**
+     * A diagram node's label gets the same room whether or not a machine resolved. #333.
+     *
+     * `ICON`'s COLUMN RULE, ON THE SURFACE WHERE IT WAS BROKEN FIRST. `twoLineNode` subtracted
+     * the machine column only when `machineCell` returned one, and that method answers null for a
+     * machine with no sprite and no roadblock -- which is the state of EVERY client for the 5.47 s
+     * of the graph load, and of the 37% of craft nodes whose category has no catalyst at all. So
+     * the label was re-fitted from 28 characters to 30 the moment a graph landed under an open
+     * diagram, and two adjacent nodes gave the same name different room depending on whether
+     * their categories happened to have catalysts.
+     *
+     * ASSERTED ACROSS THE THREE CASES, because two of them agree by accident otherwise: a node
+     * whose machine has no cell at all (hand crafting), one whose machine is a roadblock and
+     * therefore always has a cell, and one with a machine name and neither sprite nor roadblock
+     * -- the last is the case that used to differ and the one `NodeActions.NONE` puts every node
+     * in here.
+     */
+    @Test
+    public void aDiagramNodesLabelGetsTheSameRoomWhetherOrNotAMachineResolved() {
+        int handCrafted = labelRoomOfNode(handCraftedNode());
+        int roadblocked = labelRoomOfNode(machineNode("unavailable", "no blueprint in reach"));
+        int quietMachine = labelRoomOfNode(machineNode("have", null));
+        assertEquals("a hand-crafted node and a roadblocked one must give their labels the same"
+                     + " room; the machine column is charged either way", handCrafted, roadblocked);
+        assertEquals("...and so must a node whose machine has a name but no picture, which is the"
+                     + " case that re-flowed when a graph finished loading",
+                     handCrafted, quietMachine);
+        // AND THE ROOM MUST BE THE CHARGED ONE, not the unreduced line. Without this all three
+        // could agree at `right - x` and the column would be free again.
+        int charged = NODE_WIDTH - PlannerWidgets.NODE_PAD * 2
+                - PlannerWidgets.NODE_ICON - PlannerWidgets.GAP
+                - PlannerWidgets.ICON - PlannerWidgets.GAP;
+        assertEquals("the label column must be the node minus both icon columns", charged,
+                     handCrafted);
+    }
+
+    /**
+     * `FlowLayout.NODE_WIDTH` and `NODE_HEIGHT`, SPELLED RATHER THAN IMPORTED.
+     *
+     * `flow` depends on `planner` and not the reverse, and a test that inverted that would be
+     * the first thing in the package to do so -- `aTallNodePutsItsLabelOnASecondLineWithRoomFor`
+     * `AWholeName` states the rule and `aCraftNodesMachineBadgeSitsBottomRightAndHidesWithThe`
+     * `Label` follows it. `FlowCanvasTest` is where the two numbers are pinned, so a change to
+     * them fails there rather than passing quietly here.
+     */
+    private static final int NODE_WIDTH = 209;
+    private static final int NODE_HEIGHT = 26;
+
+    /** The width of the label cell on `node`'s second line, from a laid-out diagram node. */
+    private static int labelRoomOfNode(PlanNode node) {
+        PlannerWidgets.NodeContent box = PlannerWidgets.planNodeContent(
+                node, NODE_WIDTH, NODE_HEIGHT, PlannerActions.NONE);
+        HeadlessLayout.layOutPanel("machine-room", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, box);
+        // THE WIDEST TEXT CELL IS THE LABEL, found by width rather than by child order for the
+        // reason `entryLines`' helper records: #333 changed the order once already and an index
+        // silently started reporting the badge.
+        int widest = 0;
+        for (IWidget child : HeadlessLayout.flatten(box)) {
+            if (child instanceof com.cleanroommc.modularui.widgets.TextWidget
+                    && child.getArea().w() > widest) {
+                widest = child.getArea().w();
+            }
+        }
+        assertTrue("the node drew no text cell at all", widest > 0);
+        return widest;
+    }
+
+    /** A craft node whose category is hand crafting, so `machineCell` builds nothing for it. */
+    private static PlanNode handCraftedNode() {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "mod:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("category", "crafting_shaped");
+        json.addProperty("machine", "Crafting (shaped)");
+        return PlanJson.readNode(json);
     }
 
     /**
@@ -3416,19 +3655,847 @@ public class PlannerLayoutTest {
      * pins the budget rather than either number, and it is the assertion that fails if someone
      * raises `INDENT` again without re-doing the sum.
      *
-     * 53 IS THE CEILING BECAUSE 29 CHARACTERS IS THE FLOOR. `NodeRowTextTest.theYieldSurvivesOnly`
-     * `TheShortestLabelsAndTheColumnSaysWhy` requires a 10-character label plus a 16-character meta
-     * to survive at the cap, which is 29 characters, which is 174 pixels -- and the column is
-     * `CONTENT_WIDTH` less the indent, less 68 for the icon and quantity columns, less 93 for the
-     * badge. That leaves 53 pixels for the whole indent.
+     * 29 CHARACTERS IS THE FLOOR, AND `NodeRowTextTest` IS WHERE IT COMES FROM.
+     * `theYieldSurvivesOnlyTheShortestLabelsAndTheColumnSaysWhy` requires a 10-character label
+     * plus a 3-character separator plus a 16-character meta to survive at the cap, which is 29
+     * characters, which is 174 pixels.
+     *
+     * <h2>MEASURED OVER THE FIXTURES SINCE #333, NOT DERIVED FROM CONSTANTS</h2>
+     *
+     * It used to assert `INDENT * MAX_INDENT_DEPTH <= 53`, and 53 was itself derived: the column
+     * was `CONTENT_WIDTH` less the indent, less 68 for the icon and quantity columns, less 93 for
+     * the badge, so a 29-character floor left 53 pixels for the indent. Both of those middle
+     * numbers are gone -- the quantity and badge columns are per-plan now
+     * (`PlannerWidgets.TreeColumns`) and the whole cluster is anchored to the right edge -- so
+     * there is no single arithmetic ceiling left to write down.
+     *
+     * WHAT REPLACES IT IS STRICTLY STRONGER. A literal derived from the widest possible columns
+     * is a claim about a row no plan draws; this measures the label column every committed
+     * fixture actually gets at the indent cap and takes the narrowest. It fails for the same
+     * reasons the old form did -- a bigger `INDENT`, a bigger `MAX_INDENT_DEPTH`, a wider cluster
+     * -- and additionally if a future fixture arrives whose own columns are the thing that
+     * narrows the label past the floor, which the old form could not see at all.
      */
     @Test
     public void theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor() {
         int budget = PlannerWidgets.INDENT * PlannerWidgets.MAX_INDENT_DEPTH;
-        assertTrue("the indent budget is " + budget + "px, which narrows the label column below"
-                   + " the 29 characters the yield test measures against; drop MAX_INDENT_DEPTH"
-                   + " rather than the column", budget <= 53);
-        assertTrue("...and it must actually indent something", budget > 0);
+        assertTrue("the indent must actually indent something", budget > 0);
+
+        int floor = 29 * NodeRowText.CHAR_WIDTH;
+        int narrowest = Integer.MAX_VALUE;
+        String worst = null;
+        for (String fixture : PlanFixtures.names()) {
+            PlannerWidgets.TreeColumns columns =
+                    PlannerWidgets.TreeColumns.forTree(PlanFixtures.load(fixture).tree());
+            int labelStart = budget + PlannerWidgets.ICON + PlannerWidgets.GAP;
+            int cluster = columns.clusterWidth(PlannerWidgets.CONTENT_WIDTH, labelStart);
+            int label = PlannerWidgets.CONTENT_WIDTH - cluster - PlannerWidgets.GAP - labelStart;
+            if (label < narrowest) {
+                narrowest = label;
+                worst = fixture;
+            }
+        }
+        assertTrue("at the indent cap " + worst + " leaves the label column " + narrowest
+                   + "px, which is " + narrowest / NodeRowText.CHAR_WIDTH + " characters against"
+                   + " a measured floor of 29; drop MAX_INDENT_DEPTH rather than the column",
+                   narrowest >= floor);
+        // AND THE FLOOR MUST STILL BE TIGHT, or this passes on a panel with room to spare and
+        // stops being a constraint on anything. It is exactly 174px on the three 700-node
+        // fixtures, which is the whole reason the number is worth pinning.
+        assertTrue("the narrowest column is " + narrowest + "px against a 174px floor, so the"
+                   + " budget has slack and this assertion no longer constrains the indent",
+                   narrowest <= floor + NodeRowText.CHAR_WIDTH);
+    }
+
+    /**
+     * THE BUG #333 FIXED, STATED AS A TEST: the right cluster does not move with depth.
+     *
+     * `row` used to set `x = indent` and place the icon, the quantity and the label from there,
+     * so every column slid right by `INDENT` per level and the quantity run drifted diagonally
+     * down `disclose-planner.png`. This is that defect's regression guard, and it is deliberately
+     * an EQUALITY over every depth rather than a bound: a cluster that moved by one pixel per
+     * level would satisfy any "roughly aligned" assertion while looking exactly as wrong.
+     *
+     * MEASURED FROM THE LAID-OUT WIDGETS AND NOT FROM THE ARITHMETIC. `columnAtDepth`-shaped
+     * derivations agree with the production formula by construction and would pass on a `row`
+     * that never applied it; the boxes ModularUI's own sizer produced cannot.
+     *
+     * PAST THE CAP TOO. `plan-fluid-chain` runs to depth 20 against `MAX_INDENT_DEPTH` 5, so the
+     * common case in the fixtures is a row whose indent is clamped -- and a clamp applied to the
+     * left group but not to the cluster would be invisible below the cap.
+     */
+    @Test
+    public void theRightClusterIsTheSameWidthAtEveryDepth() {
+        PlanView plan = PlanFixtures.load("plan-fluid-chain");
+        PlanNode leaf = deepest(plan.tree());
+        PlannerWidgets.TreeColumns columns =
+                PlannerWidgets.TreeColumns.forTree(plan.tree());
+
+        int quantityX = -1;
+        int badgeX = -1;
+        int rowRight = -1;
+        int badgeRight = -1;
+        for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH + 3; depth++) {
+            ParentWidget<?> row = PlannerWidgets.row(leaf, depth, PlannerWidgets.CONTENT_WIDTH,
+                                                     recorder(), null, columns);
+            List<IWidget> cells = columnsOf(row);
+            // The cluster is the two rightmost cells: the quantity, then the badge. Found by
+            // WIDTH rather than by index, because the icon column is present only when a stack
+            // resolves and `NodeActions.NONE` resolves none, so the index moves in production.
+            int qtyAt = -1;
+            int badgeAt = -1;
+            for (IWidget cell : cells) {
+                if (cell.getArea().w() == columns.qty) {
+                    qtyAt = cell.getArea().x();
+                } else if (columns.badge > 0 && cell.getArea().w() == columns.badge) {
+                    badgeAt = cell.getArea().x();
+                }
+            }
+            assertTrue("depth " + depth + " drew no quantity cell of " + columns.qty + "px",
+                       qtyAt >= 0);
+            assertTrue("depth " + depth + " drew no badge cell of " + columns.badge + "px",
+                       badgeAt >= 0);
+            if (depth == 0) {
+                quantityX = qtyAt;
+                badgeX = badgeAt;
+                // RELATIVE TO THE ROW, NOT TO THE PANEL. `getArea().x()` is absolute after
+                // layout -- the panel offsets its body -- so comparing a cell's x against
+                // `CONTENT_WIDTH` is off by that offset and says nothing. The two right EDGES
+                // are the pair that means something.
+                rowRight = row.getArea().ex();
+                badgeRight = badgeAt + columns.badge;
+            } else {
+                assertEquals("the quantity column moved between depth 0 and depth " + depth
+                             + "; the right cluster is sliding with the indent again (#333)",
+                             quantityX, qtyAt);
+                assertEquals("the badge column moved between depth 0 and depth " + depth,
+                             badgeX, badgeAt);
+            }
+        }
+        // AND IT IS ANCHORED TO THE RIGHT EDGE, not merely constant. A cluster pinned at a fixed
+        // x would also pass everything above while leaving a gap down the right of the panel.
+        assertEquals("the badge must end at the row's own right edge", rowRight, badgeRight);
+        assertTrue("the row must be the full content width, or the assertion above is about a"
+                   + " row nobody draws", rowRight - badgeX > 0);
+    }
+
+    /**
+     * The indent moves the NAME and nothing else. #333.
+     *
+     * THE OTHER HALF OF THE ASSERTION ABOVE, and it needs saying separately: a `row` that had
+     * stopped indenting altogether would keep the cluster perfectly still and pass that test
+     * while losing the tree structure #332 was reported about. `oneLevelOfIndentIsWiderThanOne`
+     * `CharacterAndTheRowHonoursIt` measures the step; this measures that the step reaches the
+     * LEFT group only.
+     */
+    @Test
+    public void oneMoreLevelOfDepthMovesTheLabelAndLeavesTheColumnsWhereTheyWere() {
+        PlanView plan = PlanFixtures.load("plan-truncated");
+        PlanNode leaf = deepest(plan.tree());
+        PlannerWidgets.TreeColumns columns = PlannerWidgets.TreeColumns.forTree(plan.tree());
+
+        int[] labelX = new int[2];
+        int[] labelWidth = new int[2];
+        for (int depth = 0; depth < 2; depth++) {
+            ParentWidget<?> row = PlannerWidgets.row(leaf, depth, PlannerWidgets.CONTENT_WIDTH,
+                                                     recorder(), null, columns);
+            // THE WIDEST CELL IS THE LABEL, and it is found that way rather than by index
+            // because the row's first cell is present only when a token mark or an icon was
+            // drawn. `TOKEN_MARK`'s cell is `ICON` wide, so "not a cluster column" would also
+            // match it and would then be mistaken for the label on a token row -- and
+            // `plan-truncated` has tokens.
+            for (IWidget cell : columnsOf(row)) {
+                if (cell.getArea().w() > labelWidth[depth]) {
+                    labelX[depth] = cell.getArea().x();
+                    labelWidth[depth] = cell.getArea().w();
+                }
+            }
+            assertTrue("depth " + depth + " drew no label cell wider than the cluster",
+                       labelWidth[depth] > columns.qty);
+        }
+        assertEquals("one level of depth must move the label by exactly INDENT",
+                     PlannerWidgets.INDENT, labelX[1] - labelX[0]);
+        assertEquals("...and the label is what pays for it, since the cluster does not move",
+                     PlannerWidgets.INDENT, labelWidth[0] - labelWidth[1]);
+    }
+
+    /**
+     * Every badge every fixture draws fits THAT PLAN's own badge column. #333.
+     *
+     * THE STRENGTHENED FORM OF `theBadgeColumnFitsEveryWordTheVocabularyCanProduce`, which is
+     * what pays for `TreeColumns` shrinking the column. `BADGE`'s javadoc says a truncated badge
+     * is always a bug because the vocabulary is fixed, and a per-plan width keeps that invariant
+     * by construction -- so this asserts the construction rather than trusting it.
+     *
+     * IT IS A STRONGER CLAIM THAN THE VOCABULARY SWEEP AND NOT A WEAKER ONE. That test walks
+     * `NodeStatus.all()`, `tokenKinds()` and `UNSOURCED_BADGE`; this walks `NodeStatus.badge(node)`
+     * over 2,289 real nodes, which is the only path that reaches the `Provenance` refinements --
+     * `badgeFor(provenance)` is not in the vocabulary the other test enumerates at all.
+     */
+    @Test
+    public void everyBadgeEveryFixtureDrawsFitsThatPlansOwnColumn() {
+        int checked = 0;
+        int narrower = 0;
+        for (String fixture : PlanFixtures.names()) {
+            PlanNode root = PlanFixtures.load(fixture).tree();
+            PlannerWidgets.TreeColumns columns = PlannerWidgets.TreeColumns.forTree(root);
+            if (columns.badge < PlannerWidgets.BADGE) {
+                narrower++;
+            }
+            for (PlanNode node : PlanFixtures.load(fixture).flatten()) {
+                String badge = NodeStatus.badge(node);
+                assertEquals(fixture + "'s badge column (" + columns.badge + "px) cuts \""
+                             + badge + "\"",
+                             badge, NodeRowText.fit(badge, columns.badge));
+                checked++;
+            }
+            assertTrue(fixture + " derived a wider badge column than the vocabulary allows",
+                       columns.badge <= PlannerWidgets.BADGE);
+        }
+        assertTrue("this asserted nothing: no fixture nodes were walked", checked > 2000);
+        // THE CONTROL. Without it the test passes on a `forTree` that simply returned `BADGE`,
+        // which is the change it exists to guard and the one a careless revert produces.
+        assertTrue("no fixture derived a narrower badge column than the vocabulary, so nothing"
+                   + " was reclaimed and `forTree` may as well be a constant",
+                   narrower >= 15);
+    }
+
+    /**
+     * Every quantity every fixture draws fits that plan's own quantity column. #333.
+     *
+     * `QTY` WAS 52 FOR ONE BORAX PLAN and was charged on every row of every other. The same
+     * no-truncation rule as the badge, and it matters more than it looks: `fit` cuts the TAIL,
+     * and a quantity's tail is its `x` and its unit, so a cut quantity reads as a smaller number
+     * rather than as a truncated one. That is the one truncation on this panel that produces a
+     * WRONG answer instead of an incomplete one.
+     */
+    @Test
+    public void everyQuantityEveryFixtureDrawsFitsThatPlansOwnColumn() {
+        int narrower = 0;
+        for (String fixture : PlanFixtures.names()) {
+            PlanNode root = PlanFixtures.load(fixture).tree();
+            PlannerWidgets.TreeColumns columns = PlannerWidgets.TreeColumns.forTree(root);
+            if (columns.qty < PlannerWidgets.QTY) {
+                narrower++;
+            }
+            for (PlanNode node : PlanFixtures.load(fixture).flatten()) {
+                String quantity = NodeRowText.quantity(node.need());
+                assertEquals(fixture + "'s quantity column (" + columns.qty + "px) cuts \""
+                             + quantity + "\"",
+                             quantity, NodeRowText.fit(quantity, columns.qty));
+            }
+            assertTrue(fixture + " derived a quantity column below the floor",
+                       columns.qty >= PlannerWidgets.MIN_QTY);
+        }
+        assertEquals("every committed fixture draws a quantity narrower than `QTY`, so all 22"
+                     + " should have derived a narrower column",
+                     PlanFixtures.names().size(), narrower);
+    }
+
+    /**
+     * The derived-column figures the #333 javadocs quote, asserted rather than written down.
+     *
+     * <h2>WHY THIS TEST EXISTS AT ALL</h2>
+     *
+     * `TreeColumns` made the row's geometry a function of the PLAN, so the javadocs on
+     * {@link PlannerWidgets#MAX_INDENT_DEPTH}, {@link PlannerWidgets#MIN_QTY},
+     * {@link PlannerWidgets#QTY} and `NodeRowTextTest.columnAtDepth` all quote a spread instead
+     * of a single width -- a median, a narrowest, a widest, a count of plans sitting on the
+     * quantity floor. Those are exactly the figures this file has already had to re-measure
+     * twice: #332 moved `INDENT`, #333 moved the whole layout, and each time a number in prose
+     * went on being quoted after it stopped being true. Three of the four were wrong when this
+     * test was written -- the median was quoted as 61px against a real 85, the label column at
+     * that median as 44 characters against a real 39, and the floor count as 13 against a real
+     * 14 -- and nothing failed, because prose has no assertion behind it.
+     *
+     * SO THE NUMBERS LIVE HERE AND THE JAVADOCS CITE THIS METHOD BY NAME. Re-deriving them is
+     * one loop; the point is that changing the fixtures, `NodeStatus.badge`'s vocabulary or
+     * either column constant now breaks a test that names what moved, instead of silently
+     * falsifying five comments.
+     *
+     * A MEDIAN OF AN EVEN POPULATION IS NOT ANY FIXTURE'S OWN CLUSTER, which is where the 61
+     * came from. A cluster is `ICON + GAP + qty + GAP + badge` with both derived terms a whole
+     * number of {@link NodeRowText#CHAR_WIDTH}s, so every real cluster is 4 mod 6 -- 61 is not,
+     * and could not have been produced by any plan. It is the mean of the two middle fixtures
+     * (82 and 88), which is what a median over 22 values is. Averaged here the same way, and
+     * said to be an average, so the next reader does not go looking for the plan that draws it.
+     */
+    @Test
+    public void theDerivedColumnCensusIsWhatTheseJavadocsCite() {
+        List<String> names = PlanFixtures.names();
+        assertEquals("the census is quoted as being over 22 fixtures", 22, names.size());
+
+        int[] clusters = new int[names.size()];
+        int atTheQuantityFloor = 0;
+        int narrowerBadge = 0;
+        int widest = 0;
+        int widestCount = 0;
+        for (int i = 0; i < names.size(); i++) {
+            PlanNode root = PlanFixtures.load(names.get(i)).tree();
+            PlannerWidgets.TreeColumns columns = PlannerWidgets.TreeColumns.forTree(root);
+            // THE LABEL START AT THE INDENT CAP, which is the narrowest row production draws and
+            // the one every quoted character count is taken at.
+            int labelStart = PlannerWidgets.MAX_INDENT_DEPTH * PlannerWidgets.INDENT
+                    + PlannerWidgets.ICON + PlannerWidgets.GAP;
+            clusters[i] = columns.clusterWidth(PlannerWidgets.CONTENT_WIDTH, labelStart);
+            if (clusters[i] > widest) {
+                widest = clusters[i];
+                widestCount = 0;
+            }
+            if (clusters[i] == widest) {
+                widestCount++;
+            }
+            // THE DERIVED QUANTITY BEFORE THE FLOOR IS APPLIED, because "sits on the floor" is a
+            // statement about the plan and `columns.qty` has already lost it to `Math.max`.
+            if (PlannerWidgets.widestQuantityIn(root) <= PlannerWidgets.MIN_QTY) {
+                atTheQuantityFloor++;
+            }
+            if (columns.badge < PlannerWidgets.BADGE) {
+                narrowerBadge++;
+            }
+        }
+        java.util.Arrays.sort(clusters);
+
+        assertEquals("MIN_QTY's javadoc says 14 of the 22 plans derive a quantity at or below"
+                     + " the floor", 14, atTheQuantityFloor);
+        assertEquals("TreeColumns' javadoc says 19 of them derive a narrower badge column than"
+                     + " the vocabulary allows", 19, narrowerBadge);
+        assertEquals("the widest cluster any fixture derives, quoted in four places", 148,
+                     clusters[clusters.length - 1]);
+        assertEquals("...and it is the three 700-node fixtures that derive it, which is what"
+                     + " `theWholeIndentBudgetStillLeavesTheLabelColumnItsMeasuredFloor`'s"
+                     + " tightness assertion is measuring", 3, widestCount);
+        assertEquals("the narrowest cluster any fixture derives", 64, clusters[0]);
+        int median = (clusters[clusters.length / 2 - 1] + clusters[clusters.length / 2]) / 2;
+        assertEquals("the median cluster, quoted by MAX_INDENT_DEPTH and by"
+                     + " `NodeRowTextTest.columnAtDepth`", 85, median);
+
+        // AND THE CHARACTER COUNTS THOSE WIDTHS ARE QUOTED AS, through the same division `fit`
+        // spends, so a comment saying "39 characters" cannot drift from the width beside it.
+        int labelStart = PlannerWidgets.MAX_INDENT_DEPTH * PlannerWidgets.INDENT
+                + PlannerWidgets.ICON + PlannerWidgets.GAP;
+        int atMedian = PlannerWidgets.CONTENT_WIDTH - median - PlannerWidgets.GAP - labelStart;
+        assertEquals("the median cluster leaves the label column this many characters at the cap",
+                     39, atMedian / NodeRowText.CHAR_WIDTH);
+        int atNarrowest = PlannerWidgets.CONTENT_WIDTH - clusters[0] - PlannerWidgets.GAP
+                - labelStart;
+        assertEquals("and the narrowest cluster this many, which is the widest label column any"
+                     + " plan gets at the cap", 43, atNarrowest / NodeRowText.CHAR_WIDTH);
+    }
+
+    /**
+     * The quantity cell is right-aligned and no other cell is. #333.
+     *
+     * THE ONLY HEADLESS VIEW OF P2's OTHER HALF. `TextWidget` applies its alignment inside `draw`,
+     * through `TextRenderer.setAlignment`, so the drawn position needs a font renderer and a GL
+     * context and a layout assertion cannot reach it. What a test CAN read is the property the
+     * draw pass will consult, and reading it is what stops the call being silently dropped --
+     * exactly the gap `ClickableGroup.drawsAsSelected` was made public to close for #213.
+     *
+     * AND THAT THE LABEL IS NOT, which is the half that makes this a statement about the design
+     * rather than about one call: `rightLine`'s javadoc says a quantity is a magnitude and every
+     * other cell is a word, and a right-aligned label would be the panel forgetting that.
+     */
+    @Test
+    public void theQuantityCellIsRightAlignedAndTheLabelIsNot() {
+        PlanView plan = PlanFixtures.load("plan-truncated");
+        PlannerWidgets.TreeColumns columns = PlannerWidgets.TreeColumns.forTree(plan.tree());
+        ParentWidget<?> row = PlannerWidgets.row(plan.tree(), 0, PlannerWidgets.CONTENT_WIDTH,
+                                                 recorder(), null, columns);
+        columnsOf(row);
+
+        int aligned = 0;
+        int left = 0;
+        for (IWidget cell : row.getChildren()) {
+            if (!(cell instanceof com.cleanroommc.modularui.widgets.TextWidget)) {
+                continue;
+            }
+            com.cleanroommc.modularui.widgets.TextWidget<?> text =
+                    (com.cleanroommc.modularui.widgets.TextWidget<?>) cell;
+            if (com.cleanroommc.modularui.utils.Alignment.CenterRight == text.getAlignment()) {
+                aligned++;
+                assertEquals("only the quantity is right-aligned, and this cell is "
+                             + cell.getArea().w() + "px", columns.qty, cell.getArea().w());
+            } else {
+                left++;
+            }
+        }
+        assertEquals("exactly one cell on the row is right-aligned", 1, aligned);
+        assertTrue("...and the rest are not, or this asserts nothing", left >= 2);
+    }
+
+    /**
+     * A row draws one indent rail per level it was actually indented by. #333.
+     *
+     * WHY THE RAILS EXIST: anchoring the right cluster took depth's second carrier away. Before
+     * #333 the whole row slid, so nesting was legible from the ragged left edge of the quantity
+     * column; now the indent is white space in front of a sprite, and #332 measured that white
+     * space alone does not read as a level.
+     *
+     * CAPPED, AND THAT IS THE ASSERTION THAT MATTERS. `plan-fluid-chain` runs to depth 20 against
+     * `MAX_INDENT_DEPTH` 5, so a rail count taken from the raw depth would draw fifteen rails
+     * across the item's own icon on three quarters of that plan's rows. `RAIL`'s javadoc states
+     * that constraint; this is it as a test.
+     */
+    @Test
+    public void aRowDrawsOneRailPerLevelOfIndentAndStopsAtTheCap() {
+        PlanNode leaf = deepest(PlanFixtures.load("plan-fluid-chain").tree());
+        for (int depth = 0; depth <= PlannerWidgets.MAX_INDENT_DEPTH + 4; depth++) {
+            ParentWidget<?> row = PlannerWidgets.row(leaf, depth,
+                                                     PlannerWidgets.CONTENT_WIDTH, recorder());
+            assertTrue("a tree row must be the widget that draws the rails",
+                       row instanceof PlannerWidgets.ClickableGroup);
+            int rails = ((PlannerWidgets.ClickableGroup) row).railCount();
+            assertEquals("depth " + depth + " drew " + rails + " rails",
+                         Math.min(depth, PlannerWidgets.MAX_INDENT_DEPTH), rails);
+        }
+        // The last rail must sit inside the indent it belongs to, clear of the icon column that
+        // starts at `MAX_INDENT_DEPTH * INDENT`. `RAIL`'s draw puts it at the level's midpoint.
+        assertTrue("a rail at the last level's midpoint must be left of the icon column",
+                   (PlannerWidgets.MAX_INDENT_DEPTH - 1) * PlannerWidgets.INDENT
+                   + PlannerWidgets.INDENT / 2
+                   < PlannerWidgets.MAX_INDENT_DEPTH * PlannerWidgets.INDENT);
+    }
+
+    /**
+     * A roadblocked machine is marked in the column WITHOUT hovering, sprite or no sprite. #333.
+     *
+     * <h2>THE CONSTRAINT THIS IS THE TEST FOR, AND WHO PAID FOR IT</h2>
+     *
+     * `machineWhyBit`'s javadoc established that the machine's name and its STATE are "what a
+     * reader scans for", which is why only the `why` prose was ever allowed to be cut. Moving all
+     * three into a hover-only tooltip would have deleted a scannable signal in the name of a
+     * tidier row -- a net loss of exactly the kind #190 and #252 fixed. So the icon carries the
+     * state as a 1px frame and the tooltip carries the detail.
+     *
+     * THE NO-SPRITE CASE IS THE ONE THAT MATTERS AND IT IS THE ONE UNDER TEST HERE.
+     * `NodeActions.NONE` resolves nothing, which is also the state of a real client during the
+     * 5.47 s graph load and of the 37% of craft nodes whose category has no catalyst. A mark that
+     * needed a picture to hang on would be missing on all of them, and 438 of the fixtures' rows
+     * are roadblocks.
+     *
+     * ONE INK AND NOT ONE PER STATE, which is `NodeStatus`'s rule rather than a shortcut: its
+     * header forbids a widget keeping its own notion of a status, and a
+     * `buildable`-is-amber / `no route`-is-red mapping written at the widget is precisely the
+     * local status map that made adding a status draw silently wrong.
+     */
+    @Test
+    public void aRoadblockedMachineIsMarkedInTheColumnWithoutHovering() {
+        PlannerWidgets.Icon blocked = machineCellOf(machineNode("unavailable",
+                                                               "no blueprint in reach"));
+        assertNotNull("a roadblocked machine must get a cell even with no sprite to draw",
+                      blocked);
+        assertTrue("...and it must draw nothing but the frame here, or this test is measuring"
+                   + " a sprite instead of a mark", blocked.stack().isEmpty());
+        assertEquals("the roadblock mark must be NodeStatus's own ink and not a new one",
+                     NodeStatus.INK_NEED, blocked.frameColour());
+
+        // A MACHINE YOU HAVE IS NOT A ROADBLOCK, which `isRoadblock`'s javadoc says out loud, so
+        // it gets no mark -- and with no sprite either there is nothing to draw and no cell.
+        assertNull("a machine you have and cannot picture has nothing to show",
+                   machineCellOf(machineNode("have", null)));
+
+        // AND `unknown` COUNTS, which is the part of `isRoadblock` that reads oddly and is
+        // deliberate: the tool failing to identify a machine is a real wall, not a clean bill.
+        PlannerWidgets.Icon unidentified = machineCellOf(machineNode("unknown", null));
+        assertNotNull("an unidentified machine is a wall too", unidentified);
+        assertEquals(NodeStatus.INK_NEED, unidentified.frameColour());
+    }
+
+    /**
+     * The machine cell carries the words the row stopped printing, and `NodeRowText` owns them.
+     *
+     * A TOOLTIP IS THE ONE SURFACE ON THIS PANEL A HEADLESS TEST CANNOT READ THE TEXT OF --
+     * `RichTooltip` is drawn under a GL context -- so the discipline is that the STRINGS live in
+     * `NodeRowText`, where `NodeRowTextTest` asserts every one of them with no window, and the
+     * widget only has to be shown to have taken them. That split is what this asserts: the cell
+     * has a tooltip, and the words it was built from are the ones `machineTooltipLines` produced.
+     */
+    @Test
+    public void theMachineCellCarriesTheWordsTheRowStoppedPrinting() {
+        PlanNode node = machineNode("unavailable", "no blueprint in reach");
+        PlannerWidgets.Icon cell = machineCellOf(node);
+        assertNotNull(cell);
+        assertNotNull("the machine cell must carry a tooltip, or the machine's name is gone from"
+                      + " the panel entirely", cell.getTooltip());
+        // THE WORDS THEMSELVES ARE ASSERTED IN `NodeRowTextTest`, and that this is where they
+        // come from is asserted here: three of them for a roadblock, and the row's own text has
+        // none of them.
+        assertEquals(3, NodeRowText.machineTooltipLines(node).size());
+        assertFalse("the machine must have left the row's text: " + NodeRowText.meta(node),
+                    NodeRowText.meta(node).contains("Pulverizer"));
+    }
+
+    /**
+     * The machine cell is the ONLY tooltipped widget in a tree row. #333.
+     *
+     * <h2>THIS IS A CONTRACT WITH THE SCREENSHOT HARNESS, NOT A TIDINESS CLAIM</h2>
+     *
+     * `PlannerShot.machineCell` finds the cell to park a cursor on by asking which child carries a
+     * tooltip, because `PlannerWidgets.Icon` is package-private and `shot/` cannot name the type.
+     * That identification is only sound while "has a tooltip" means "is the machine cell", which
+     * is true today because #333's spec put P8 -- tooltips on every truncated label, badge and
+     * caveat -- explicitly out of scope.
+     *
+     * SO WHEN P8 LANDS, THIS FAILS, AND THAT IS THE POINT. Without it, P8 would silently point
+     * `planner-hover` and `planner-machine-tip` at a label: both would still produce a green
+     * verdict and a plausible PNG, and the machine tooltip would stop being the thing under test.
+     * A shot that quietly changes its subject is the failure `PlannerShotTest`'s own header is
+     * about. Whoever lands P8 should give the harness a stronger discriminator and then relax
+     * this.
+     *
+     * ASSERTED ON A ROADBLOCKED ROW, so the cell exists whether or not a sprite resolved -- which
+     * is the state `NodeActions.NONE` puts every row in here, and the state of a real client for
+     * the 5.47 s of the graph load.
+     */
+    @Test
+    public void theOnlyTooltipInATreeRowIsTheMachineCell() {
+        PlanNode node = machineNode("unavailable", "no blueprint in reach");
+        ParentWidget<?> row = PlannerWidgets.row(node, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                 recorder());
+        HeadlessLayout.layOutPanel("one-tooltip", PlannerWidgets.PANEL_WIDTH,
+                                   PlannerWidgets.PANEL_HEIGHT, row);
+
+        int tooltipped = 0;
+        boolean onTheMachineCell = false;
+        for (IWidget child : row.getChildren()) {
+            if (!(child instanceof com.cleanroommc.modularui.api.widget.ITooltip)) {
+                continue;
+            }
+            if (!((com.cleanroommc.modularui.api.widget.ITooltip<?>) child).hasTooltip()) {
+                continue;
+            }
+            tooltipped++;
+            onTheMachineCell = child instanceof PlannerWidgets.Icon;
+        }
+        assertEquals("the row must carry exactly one tooltip, because `PlannerShot.machineCell`"
+                     + " identifies the cell to park a cursor on by that property and cannot name"
+                     + " the package-private type", 1, tooltipped);
+        assertTrue("...and the one tooltip must be on the machine cell itself", onTheMachineCell);
+
+        // AND THE LABEL MUST NOT HAVE ONE, which is the half that names what would break it: P8
+        // puts the full item name on the cell `fit` shortened, and the label is the widest cell in
+        // the row, so it is the first thing a park-by-tooltip search would find instead.
+        for (IWidget child : row.getChildren()) {
+            if (child instanceof com.cleanroommc.modularui.widgets.TextWidget) {
+                assertFalse("a text cell grew a tooltip (P8?), which silently re-points the"
+                            + " harness's cursor shots at it",
+                            ((com.cleanroommc.modularui.api.widget.ITooltip<?>) child)
+                                    .hasTooltip());
+            }
+        }
+    }
+
+    /**
+     * A hand-crafted step draws no machine cell at all. #333.
+     *
+     * `NodeRowText.machineName` OWNS THIS DECISION AND THE WIDGET DOES NOT SECOND-GUESS IT.
+     * `machineCell` returns null when `machineTooltipLines` is empty, so there is exactly one
+     * answer to "is there a machine worth naming" and it is in the class that holds the words.
+     * A cell that tested the category itself would be a second answer to the same question, and
+     * the old `machineBit` is what happens when the two drift: it had the rule and reached it
+     * only when JEI had given the category no title, so 335 rows announced hand crafting anyway.
+     */
+    @Test
+    public void aHandCraftedStepDrawsNoMachineCell() {
+        for (String category : new String[] {"minecraft.crafting", "crafting_shaped",
+                                             "crafting_shapeless"}) {
+            com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+            json.addProperty("key", "mod:thing");
+            json.addProperty("label", "Thing");
+            json.addProperty("need", 1);
+            json.addProperty("status", NodeStatus.CRAFT);
+            json.addProperty("category", category);
+            // THE JEI TITLE, which is the case the old code got wrong. Without it this test
+            // passes against the very bug it exists to pin.
+            json.addProperty("machine", "Crafting (shapeless)");
+            json.addProperty("machine_state", "have");
+            assertNull(category + " drew a machine cell", machineCellOf(PlanJson.readNode(json)));
+        }
+    }
+
+    /**
+     * Every fixture's tree lays out with the machine column charged whether or not it is filled.
+     *
+     * {@link PlannerWidgets#ICON}'s COLUMN RULE, ON THE NEW COLUMN. A width that depended on
+     * whether a stack came back would re-flow every row the moment a `NodeActions` was installed
+     * or a graph finished loading mid-session, which is a whole panel twitching under the cursor.
+     * `NodeActions.NONE` fills none of them here, so this is the empty end of that rule; the
+     * filled end is `JeiNodeActionsTest`'s behavioural pair.
+     */
+    @Test
+    public void theMachineColumnIsChargedOnEveryRowWhetherOrNotItIsFilled() {
+        for (String fixture : PlanFixtures.names()) {
+            PlanView plan = PlanFixtures.load(fixture);
+            PlannerWidgets.TreeColumns columns =
+                    PlannerWidgets.TreeColumns.forTree(plan.tree());
+            int labelStart = PlannerWidgets.ICON + PlannerWidgets.GAP;
+            int cluster = columns.clusterWidth(PlannerWidgets.CONTENT_WIDTH, labelStart);
+            assertTrue(fixture + "'s cluster is " + cluster + "px, which does not include a "
+                       + PlannerWidgets.ICON + "px machine column plus a gap",
+                       cluster >= PlannerWidgets.ICON + PlannerWidgets.GAP + columns.qty);
+        }
+    }
+
+    /**
+     * The row wash layers hover under selection, and draws neither when neither. #333.
+     *
+     * <h2>WHY THE DECISION IS A FUNCTION AND NOT A LINE INSIDE `draw`</h2>
+     *
+     * `isHovering()` reads the screen's cursor and `HeadlessLayout` has no screen, so it is false
+     * in every test here -- a hover band decided inline would be a behaviour with no headless
+     * witness whatsoever, inside a `draw` body that already cannot be reached. `rowWash` takes
+     * the two states as arguments, which leaves exactly one untestable step (that `draw` passes
+     * `isHovering()` in) and makes all four combinations assertable. `IconWidgetTest`'s header
+     * makes the same argument about `draw` from the other direction.
+     *
+     * THE LAYERING IS THE ASSERTION THAT MATTERS. A hovered AND selected row must draw the
+     * selection, not the hover and not both: a neutral 9% black over a blue 25% wash muds it, and
+     * the selection is the stronger claim -- it says something about the ITEM where hover says
+     * something about the POINTER.
+     */
+    @Test
+    public void theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither() {
+        assertEquals("a row that is neither hovered nor selected must paint nothing at all; a"
+                     + " wash on every row is a wall of bands",
+                     0, PlannerWidgets.ClickableGroup.rowWash(false, false));
+        int hover = PlannerWidgets.ClickableGroup.rowWash(true, false);
+        int selected = PlannerWidgets.ClickableGroup.rowWash(false, true);
+        assertTrue("a hovered row must paint something, or the band does not exist", hover != 0);
+        assertTrue("a selected row must paint something", selected != 0);
+        assertNotEquals("the hover band and the selection wash must be different colours, or"
+                        + " hover is silently claiming the row is selected", selected, hover);
+        assertEquals("a hovered AND selected row draws the SELECTION; painting the hover over it"
+                     + " muds a 25% blue with a 9% black, and painting both is the same thing",
+                     selected, PlannerWidgets.ClickableGroup.rowWash(true, true));
+
+        // AND THE HOVER BAND IS NEUTRAL, WHICH IS THE CONSTRAINT `HOVER_FILL` ARGUES. A hue would
+        // make the panel look as though it were reporting a status about whatever row the pointer
+        // happened to rest on. Read off the channels rather than the constant, so this fails if
+        // someone tints it rather than if someone renames it.
+        int red = (hover >> 16) & 0xFF;
+        int green = (hover >> 8) & 0xFF;
+        int blue = hover & 0xFF;
+        assertEquals("the hover band must be neutral: red and green differ", green, red);
+        assertEquals("...and green and blue differ", blue, green);
+        assertTrue("...and it must be faint, or it swallows INK_MUTED text",
+                   ((hover >>> 24) & 0xFF) < 0x40);
+    }
+
+    /**
+     * A heading is drawn on a strip and a data row is not. #333, defect six of the design spec.
+     *
+     * `heading` WAS `line(text, width, INK_CRAFT)` -- blue text, same size, same weight, same
+     * height as the data under it, on the same undifferentiated grey field. So the panel's title
+     * read as a row, and the view bar one line below it -- also `INK_CRAFT` -- read as a second
+     * title. `SHOW_DIAGRAM`'s javadoc records that collision from the other side.
+     *
+     * ASSERTED AS "HAS A BACKGROUND AND A ROW DOES NOT", which is the only part of this a headless
+     * test can see: what the nine-slice looks like is a screenshot's business. The pair is what
+     * makes it a statement about hierarchy rather than about one call -- a background added to
+     * `line` as well would satisfy half of this and undo all of it.
+     */
+    @Test
+    public void aHeadingIsDrawnOnAStripAndADataRowIsNot() {
+        assertNotNull("a heading must carry a background, or it looks like a row",
+                      PlannerWidgets.heading("Totals", PlannerWidgets.CONTENT_WIDTH)
+                              .getBackground());
+        assertNull("...and a data row must NOT, or the whole panel is strips and the hierarchy"
+                   + " is back where it started",
+                   PlannerWidgets.line("64x Hopper", PlannerWidgets.CONTENT_WIDTH,
+                                       NodeStatus.INK_MUTED).getBackground());
+    }
+
+    /**
+     * The footer is a row of stat cells whose VALUES carry the ink, and it fits. #333.
+     *
+     * <h2>WHAT WAS WRONG WITH THE SENTENCE IT REPLACES</h2>
+     *
+     * `52 nodes · 19 still needed · 9 machine(s) to build · 3 on TODO`, all of it `INK_MUTED`.
+     * `19 still needed` is the answer to the question the panel exists to answer and `52 nodes`
+     * is a fact about the solver's work, drawn identically.
+     *
+     * <h2>THE WIDTH IS THE HALF THAT CAN FAIL SILENTLY</h2>
+     *
+     * Two widgets per cell means the second one's x is arithmetic -- `CHAR_WIDTH` per character --
+     * and #125 measured that ModularUI neither clamps nor clips a child wider than its parent. So
+     * a footer that overran `CONTENT_WIDTH` would simply be drawn off the panel with every layout
+     * assertion still green. `NodeRowText.footerWidth` is the same arithmetic the layout uses, so
+     * this asserts the sum rather than reading boxes off a panel -- which would only ever confirm
+     * that ModularUI put the widgets where it was told.
+     *
+     * EVERY FIXTURE, because the widest cell set is the one with a five-digit node count and a
+     * populated plan book, and no single fixture is the worst case for all four cells at once.
+     */
+    @Test
+    public void theFooterStatRowFitsTheContentWidthOnEveryFixture() {
+        // A POPULATED BOOK, because the `on TODO` cell only exists when there is one and it is
+        // the widest label of the four. An empty book leaves that branch unexercised.
+        PlanBook book = new PlanBook();
+        book.setTodo("minecraft:iron_ingot", 64L);
+        book.setTodo("fluid:water", 934_400L);
+        int widest = 0;
+        String worst = null;
+        boolean sawInkedValue = false;
+        boolean sawUninkedValue = false;
+        for (String fixture : PlanFixtures.names()) {
+            PlanView plan = PlanFixtures.load(fixture);
+            List<NodeRowText.FooterCell> cells = NodeRowText.footerCells(plan, book);
+            assertFalse(fixture + " produced no footer cells at all; the node count is"
+                        + " unconditional", cells.isEmpty());
+            assertEquals("the first cell is always the node count", "nodes",
+                         cells.get(0).label());
+            for (NodeRowText.FooterCell cell : cells) {
+                // EACH LABEL'S OWN STATUS, NOT "SOMETHING IS INKED" (#333). This loop first
+                // asserted only that SOME cell carried a status and some cell did not, and the
+                // deliberate revert of `still needed` to no status went GREEN through it --
+                // `machines` and `on TODO` still carried theirs, so both flags stayed satisfied
+                // while the one number a player acts on went back to grey. Measured, in
+                // `evidence-333/mutants/results.txt`, mutant M9. An assertion about the
+                // POPULATION cannot catch a change to one MEMBER of it.
+                assertEquals("the footer cell labelled \"" + cell.label() + "\" must carry"
+                             + " exactly this status, or its value loses the ink that is the"
+                             + " whole point of the stat row",
+                             expectedFooterStatus(cell.label()), cell.status());
+                if (cell.status().isEmpty()) {
+                    sawUninkedValue = true;
+                    assertEquals("a cell with no status must fall back to INK_MUTED through"
+                                 + " colourFor, not through a status it does not have",
+                                 NodeStatus.INK_MUTED, NodeStatus.colourFor(cell.status()));
+                } else {
+                    sawInkedValue = true;
+                    assertNotEquals("a cell WITH a status must be drawn in that status's ink,"
+                                    + " or the stat row is a grey sentence again: " + cell,
+                                    NodeStatus.INK_MUTED,
+                                    NodeStatus.colourFor(cell.status()));
+                }
+            }
+            int width = NodeRowText.footerWidth(cells);
+            if (width > widest) {
+                widest = width;
+                worst = fixture;
+            }
+        }
+        assertTrue("the footer row is " + widest + "px on " + worst + " against a "
+                   + PlannerWidgets.CONTENT_WIDTH + "px panel; ModularUI neither clamps nor"
+                   + " clips (#125), so the overflow would simply be drawn off the edge",
+                   widest <= PlannerWidgets.CONTENT_WIDTH);
+        // BOTH KINDS OF CELL MUST HAVE BEEN SEEN, or the loop above asserted one branch and the
+        // other is unexercised -- which is how "the values carry the ink" passes on a footer
+        // where none of them does.
+        assertTrue("no cell carried a status, so nothing was inked", sawInkedValue);
+        assertTrue("no cell lacked a status, so the INK_MUTED fallback is unexercised",
+                   sawUninkedValue);
+    }
+
+    /**
+     * The caveat panel separates its notes and reserves the height it spends doing it. #333.
+     *
+     * <h2>THE RHYTHM IS THE POINT AND THE HEIGHT IS THE THING THAT CAN FAIL SILENTLY</h2>
+     *
+     * Every note on this panel runs to two or three wrapped lines, so at a uniform 10px rhythm
+     * the gap between note 1's last line and note 2's first is the same as the gap inside note 1
+     * -- five paragraphs drawn as eleven sentences, which is what `caveats320.png` shows.
+     *
+     * The half-line between notes is cheap to add and easy to get wrong in the one direction
+     * nothing reports: `caveatsPanel` sizes the panel BEFORE it lays the notes out, so a height
+     * computed without the gaps draws the last notes past the panel's own bottom edge and every
+     * layout assertion stays green, because #125 measured that ModularUI neither clamps nor clips.
+     * So this asserts the two agree, and it asserts the gaps EXIST -- a `caveatGaps` that always
+     * answered 0 would satisfy the first half perfectly.
+     */
+    @Test
+    public void theCaveatPanelSeparatesItsNotesAndReservesTheHeightForIt() {
+        List<String> lines = io.github.jacoblasky.recipedump.client.planner.PlanCaveats
+                .detailLines(PlannerWidgets.CONTENT_WIDTH);
+        assertTrue("the caveat panel must have notes for this to say anything; if the default"
+                   + " scenario stopped producing them, point this at one that does",
+                   lines.size() >= 2);
+
+        int gaps = PlannerWidgets.caveatGaps(lines);
+        assertTrue("no gap was reserved between any two notes, so the rhythm this test is about"
+                   + " does not exist: " + lines, gaps > 0);
+        // AND NOT A GAP PER LINE, which is the other way to be wrong: the wrapped continuations
+        // of one note must stay tight against it. `wrapRow` marks them, so the count of gaps has
+        // to be strictly fewer than the count of lines.
+        assertTrue("a gap was reserved on every line, so the continuations of a note are being"
+                   + " separated from it too: " + gaps + "px over " + lines.size() + " lines",
+                   gaps < (lines.size() - 1) * PlannerWidgets.LINE / 2);
+
+        ModularPanel panel = PlannerWidgets.caveatsPanel();
+        HeadlessLayout.layOut(panel);
+        for (IWidget widget : HeadlessLayout.flatten(panel)) {
+            assertTrue("a caveat line is drawn past the panel's own bottom edge, which is what"
+                       + " happens when the height forgets the gaps the layout spends: "
+                       + widget.getArea() + " against " + panel.getArea(),
+                       widget.getArea().ey() <= panel.getArea().ey());
+        }
+        assertTrue("and the panel must still fit the smallest screen Minecraft allows",
+                   panel.getArea().h() <= 240);
+    }
+
+    /**
+     * Which `NodeStatus` word each footer label's value must be inked with.
+     *
+     * HELD HERE RATHER THAN READ OFF `footerCells`, which is the only way it says anything: a
+     * table derived from the thing under test agrees with it by construction. This is the
+     * argument `NodeRowText.footerCells` makes, written down where a change to it has to come
+     * and edit an expectation -- `still needed` is what a `raw` node is, `machines` is the
+     * `partial` case (reachable, not reached), the plan book's rows are already `INK_CRAFT` on the
+     * totals panel, and `nodes` is deliberately not a status at all because it is a fact about
+     * the solver's work rather than a claim about any item.
+     *
+     * IT FAILS ON AN UNKNOWN LABEL rather than passing it, so a fifth cell added to the footer
+     * cannot arrive uninked and unnoticed.
+     */
+    private static String expectedFooterStatus(String label) {
+        if ("nodes".equals(label)) {
+            return "";
+        }
+        if ("still needed".equals(label)) {
+            return NodeStatus.RAW;
+        }
+        if ("machines".equals(label)) {
+            return NodeStatus.PARTIAL;
+        }
+        if ("on TODO".equals(label)) {
+            return NodeStatus.CRAFT;
+        }
+        throw new AssertionError("the footer grew a cell labelled \"" + label + "\" and nothing"
+                                + " says which ink its value takes; add it here deliberately");
+    }
+
+    /** The machine cell `PlannerWidgets.row` would build for `node`, or null. */
+    private static PlannerWidgets.Icon machineCellOf(PlanNode node) {
+        ParentWidget<?> row = PlannerWidgets.row(node, 0, PlannerWidgets.CONTENT_WIDTH,
+                                                 recorder());
+        columnsOf(row);
+        PlannerWidgets.Icon found = null;
+        for (IWidget child : row.getChildren()) {
+            if (child instanceof PlannerWidgets.Icon) {
+                assertNull("a row drew two icons; this helper cannot tell the item column from"
+                           + " the machine column, and with NodeActions.NONE neither should"
+                           + " exist unless it is the machine's frame", found);
+                found = (PlannerWidgets.Icon) child;
+            }
+        }
+        return found;
+    }
+
+    /** A craft node whose machine is `Pulverizer` in the given state. */
+    private static PlanNode machineNode(String state, String why) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("key", "test:thing");
+        json.addProperty("label", "Thing");
+        json.addProperty("need", 1);
+        json.addProperty("status", NodeStatus.CRAFT);
+        json.addProperty("category", "thermalexpansion.pulverizer");
+        json.addProperty("machine", "Pulverizer");
+        json.addProperty("machine_state", state);
+        if (why != null) {
+            json.addProperty("machine_why", why);
+        }
+        return PlanJson.readNode(json);
     }
 
     /** The x of a row's first positioned child, after layout. */

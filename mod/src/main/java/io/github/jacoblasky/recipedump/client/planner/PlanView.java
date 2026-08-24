@@ -497,7 +497,7 @@ public final class PlanView {
         /**
          * What stands between the player and this machine, in words they can act on.
          *
-         * THE FOOTER'S "3 machine(s) to build" IS A COUNT AND THIS IS THE ANSWER. Until #190
+         * THE FOOTER'S "3 machines" CELL IS A COUNT AND THIS IS THE ANSWER. Until #190
          * nothing in game read any of these four accessors, so a player was told how many
          * machines were in the way and could never learn which, let alone why. `render.py`
          * puts this string in the badge tooltip and `NodeRowText.machineLines` puts it in the

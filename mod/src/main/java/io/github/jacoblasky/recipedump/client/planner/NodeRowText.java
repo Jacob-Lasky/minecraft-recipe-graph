@@ -1,6 +1,8 @@
 package io.github.jacoblasky.recipedump.client.planner;
 
+import io.github.jacoblasky.recipedump.common.PlanBook;
 import io.github.jacoblasky.recipedump.graph.Keys;
+import io.github.jacoblasky.recipedump.plan.Machines;
 import io.github.jacoblasky.recipedump.plan.PlanNode;
 import io.github.jacoblasky.recipedump.plan.Provenance;
 import io.github.jacoblasky.recipedump.plan.Quantities;
@@ -362,9 +364,14 @@ public final class NodeRowText {
      * the number reads the same either way. All four `MachineRow` accessors existed and only
      * `machinesToBuild().size()` was called.
      *
-     * THE MACHINE NAME WINS OVER THE CATEGORY where they differ, which is `NodeRowText.meta`'s
-     * rule and the browser's: a category like `modularmachinery.recipes.ender_stone` is the
-     * internal name for a machine the player knows by a different one.
+     * THE MACHINE NAME WINS OVER THE CATEGORY where they differ, which is
+     * {@link #machineName}'s rule and the browser's: a category like
+     * `modularmachinery.recipes.ender_stone` is the internal name for a machine the player knows
+     * by a different one. (It was `meta`'s rule until #333 moved the tree row's copy of it into
+     * `machineName`; this panel reads a `MachineRow` rather than a `PlanNode`, so it cannot share
+     * that method, and the two are pinned together by
+     * `theMachinesToBuildAreNameableWithTheirReasons` and
+     * `theMachineLeftTheMetaRunForATooltipThatCannotCutIt` respectively.)
      *
      * WRAPPED, BECAUSE THESE ARE THE LONGEST LINES THE PANEL HOLDS AND BY A LONG WAY. Measured
      * across the fixtures, the worst is 124 characters -- `Recursive Processor: Chemical
@@ -550,6 +557,19 @@ public final class NodeRowText {
      *
      * Empty when there is nothing to say, which is most leaf rows.
      *
+     * <h2>THE MACHINE LEFT THIS RUN AT #333, AND THAT IS WHAT PAID FOR THE REST OF IT</h2>
+     *
+     * `machineBit` and `machineWhyBit` used to be two of these parts. They were the LONGEST --
+     * measured over the fixtures, 1,314 rows drew a machine, median 12 characters and up to 51,
+     * plus the 3-character {@link #SEPARATOR} on every one -- and they sat in the most contested
+     * column on the panel, sharing it with the item's own NAME. So the machine was present in the
+     * data, rendered, and then destroyed by the cut: `Centrifuge…`, `Bloodmaste…`,
+     * `Runic Altar (b…` in `disclose-planner.png`.
+     *
+     * They are now an ICON AND A TOOLTIP; see {@link #machineTooltipLines} for the words and
+     * `PlannerWidgets.machineCell` for the column. The two constraints their javadocs encoded
+     * are carried forward rather than dropped, and the transfer is written down in that method.
+     *
      * `pinned` FIRST, WHICH IS THE ONE DEPARTURE FROM `render.py`'S PART ORDER, and the
      * departure is what preserves the property that order was copied for. In the browser
      * `pinned` is not part of the meta run at all -- `render.py` emits it as a `badge` span,
@@ -571,12 +591,14 @@ public final class NodeRowText {
         if (node.fromStock() > 0) {
             parts.add(quantityPlain(node.fromStock()) + " from stock");
         }
-        // EARLY IN THE RUN, WHICH IS THE OPPOSITE END FROM `machineWhyBit` AND FOR THE SAME
-        // REASON (#252). That one goes last so `fit` cuts it first, because the machine
-        // and its state are what a reader scans for and the full sentence lives on the TODO
-        // panel. This one has no second home and it is a warning: a fractional yield means the
-        // machine will run and produce nothing, which changes whether the plan is worth
-        // starting. Cutting it first would drop the only thing on the row that says so.
+        // EARLY IN THE RUN, AND #252's REASON OUTLIVED THE PART IT WAS ARGUED AGAINST. The
+        // comparison used to be with `machineWhyBit`, which went LAST so `fit` would cut it
+        // first; #333 moved both machine parts into a tooltip, so there is no longer a part this
+        // one is deliberately ahead of. What survives is the half that was about the yield
+        // itself: it has no second home -- the machine's `why` had one, on the TODO panel via
+        // `machineLines` -- and it is a WARNING, because a fractional yield means the machine
+        // will run and produce nothing, which changes whether the plan is worth starting. It
+        // stays early because a cut must reach everything else before it reaches that.
         //
         // NO BROWSER ORDER TO MIRROR HERE, unlike everything else in this run. `render.py`
         // draws neither `runs` nor `per_run` on a row, which is what #190 found and #252 is
@@ -584,10 +606,6 @@ public final class NodeRowText {
         String yield = yieldBit(node);
         if (yield != null) {
             parts.add(yield);
-        }
-        String machine = machineBit(node);
-        if (machine != null) {
-            parts.add(machine);
         }
         // THE INTERCHANGEABLE COUNT REPLACES THE RECIPE COUNT WHERE IT EXISTS, rather than
         // sitting beside it. #181: on `fluid:lifeessence` the row would otherwise read
@@ -617,70 +635,254 @@ public final class NodeRowText {
         if (node.resolvedTo() != null && !node.resolvedTo().isEmpty()) {
             parts.add("-> " + node.resolvedTo());
         }
-        // LAST, DELIBERATELY. See `machineWhyBit`: it is the longest part and the one whose
-        // full text lives elsewhere, so it is the one to lose when the row is cut.
-        String machineWhy = machineWhyBit(node);
-        if (machineWhy != null) {
-            parts.add(machineWhy);
-        }
         return join(parts);
     }
 
     /**
-     * The machine, and whether it is in the way.
+     * The machine this step runs in, or null when there is none worth naming.
      *
-     * Mirrors the browser's choice of which name to show: the machine when it differs from
-     * the category, otherwise the category, and nothing at all for hand crafting -- a
-     * `crafting`-prefixed category is a crafting table and saying so on every second row is
-     * noise. Returns null rather than "" so the caller cannot accidentally add a blank part.
+     * Mirrors the browser's choice of which name to show: the machine when it differs from the
+     * category, otherwise the category, and nothing at all for hand crafting.
      *
-     * THE REASON IS A SEPARATE PART AND NOT PACKED INTO THESE PARENTHESES; see
-     * {@link #machineWhyBit}.
+     * <h2>`Machines.isHandCrafting` AND NOT `category.startsWith("crafting")`, WHICH WAS A BUG</h2>
+     *
+     * The old spelling tested the CATEGORY for the prefix, and only reached that test when the
+     * machine name equalled the category -- so a shapeless recipe whose JEI title is
+     * `Crafting (shapeless)` fell down the first branch and printed it. Measured over the
+     * fixtures: 335 of 2,289 rows announced hand crafting, on a panel whose own comment said
+     * "saying so on every second row is noise". The predicate this now calls is the repository's
+     * one answer to "is this a crafting table" -- three prefixes, `minecraft.crafting`,
+     * `crafting_shaped`, `crafting_shapeless` -- and `Solver` and `MachineStates` already use it,
+     * so this stops being a fourth spelling of the same question.
+     *
+     * NULL AND NOT "", so a caller cannot accidentally add a blank line to a tooltip.
      */
-    private static String machineBit(PlanNode node) {
-        String shown = null;
-        if (node.machine() != null && !node.machine().equals(node.category())) {
-            shown = node.machine();
-        } else if (node.category() != null && !node.category().startsWith("crafting")) {
-            shown = node.category();
-        }
-        if (shown == null) {
+    static String machineName(PlanNode node) {
+        if (Machines.isHandCrafting(node.category())) {
             return null;
         }
-        if (NodeStatus.isRoadblock(node.machineState())) {
-            return shown + " (" + NodeStatus.machineStateLabel(node.machineState()) + ")";
+        if (node.machine() != null && !node.machine().isEmpty()
+                && !node.machine().equals(node.category())) {
+            return node.machine();
         }
-        return shown;
+        return node.category() == null || node.category().isEmpty() ? null : node.category();
     }
 
     /**
-     * What stands between the player and this node's machine, or null.
+     * Everything the machine column's tooltip says, in order, or empty for no machine. #333.
      *
-     * `machine_why` WAS PARSED INTO `PlanNode` AND READ BY NOTHING, main or test, until #190.
-     * `render.py` puts it in the badge tooltip; the dimmed meta run is this panel's nearest
-     * equivalent to a tooltip. Guarded by {@link NodeStatus#isRoadblock} because that is the
-     * exact condition `solve.py` writes the field under: a machine the player HAS gets no
-     * `why`, so an unguarded read would return null on most rows anyway.
+     * <h2>WHY THESE WORDS ARE HERE AND NOT AT THE WIDGET</h2>
      *
-     * ITS OWN PART RATHER THAN INSIDE {@link #machineBit}'S PARENTHESES, and the reason is that
-     * the two say overlapping things. The state is a fixed word from `NodeStatus`'s vocabulary
-     * and the `why` is prose that frequently restates it -- `buildable` beside
-     * `craftable: nuclearcraft:centrifuge_idle` -- so packing them together produced
-     * `Centrifuge (buildable: craftable: nuclearcraft:centrifuge_idle)`, which reads as a
-     * formatting fault. Kept apart, the state stays the scannable word it is meant to be.
+     * A tooltip built from string literals inside a widget is a user-visible string no test can
+     * reach: `RichTooltip` is drawn under a GL context, so `NodeRowTextTest` could assert nothing
+     * about it. This class is the panel's one home for words precisely so that every string
+     * remains assertable with no window, and moving the machine OUT of the row must not smuggle
+     * it out of that guarantee at the same time.
      *
-     * AND IT GOES LAST, SO {@link #fit} CUTS IT FIRST. That is the right end to lose: the
-     * machine's name and its state are what a reader scans for, and the full sentence is on the
-     * TODO panel's machine section via {@link #machineLines}, wrapped rather than cut. Keeping
-     * it last is also what leaves the browser's part order undisturbed.
+     * <h2>THE TWO CONSTRAINTS THE OLD `machineBit` / `machineWhyBit` ENCODED, CARRIED FORWARD</h2>
+     *
+     * #190 and #252 paid for a specific ORDER in the meta run: the machine's name and its state
+     * are what a reader scans for, so the `why` prose went last and `fit` cut it first. Both
+     * halves of that survive, in different places:
+     *
+     * <ul>
+     *   <li>THE `why` IS NO LONGER CUT AT ALL, which is a strict upgrade. It was the first thing
+     *       `fit` destroyed on a full row; a tooltip has no column to overflow.</li>
+     *   <li>THE STATE STAYS SCANNABLE WITHOUT HOVERING, which is the constraint a tooltip alone
+     *       WOULD have broken -- and it would have been a real loss, not a stylistic one. It is
+     *       carried by the machine icon's own frame; see `PlannerWidgets.machineCell`. Hover
+     *       gives the exact word and the reason; the frame says "this one is in your way" from
+     *       across the panel.</li>
+     * </ul>
+     *
+     * NO "Machine:" LABEL ON THE NAME. `node.machine()` is the JEI CATEGORY TITLE, so it is
+     * `Smelting`, `Casting` and `Bee Produce` as often as `Bloodmaster Crucible` -- and
+     * "Machine: Bee Produce" is a lie the old unlabelled meta run got away with only by not
+     * labelling it. The name is printed bare.
+     *
+     * THE STATE LINE ONLY WHEN IT IS A ROADBLOCK, because `NodeStatus.isRoadblock` is the exact
+     * condition `solve.py` writes `machine_why` under: a machine you HAVE gets no reason, and
+     * "have" as a tooltip line on every second row is the noise this method's name-suppression
+     * rule already exists to avoid.
      */
-    private static String machineWhyBit(PlanNode node) {
-        if (!NodeStatus.isRoadblock(node.machineState())) {
-            return null;
+    public static List<String> machineTooltipLines(PlanNode node) {
+        List<String> out = new ArrayList<String>();
+        String name = machineName(node);
+        if (name == null) {
+            return out;
         }
-        String why = node.machineWhy();
-        return why == null || why.isEmpty() ? null : why;
+        out.add(name);
+        if (NodeStatus.isRoadblock(node.machineState())) {
+            out.add(NodeStatus.machineStateLabel(node.machineState()));
+            String why = node.machineWhy();
+            if (why != null && !why.isEmpty()) {
+                out.add(why);
+            }
+        }
+        return out;
     }
+
+    /*
+     * DELETED: `machineWhyBit`, the meta run's last part. #333.
+     *
+     * `render.py` PUT `machine_why` IN THE BADGE TOOLTIP AND THIS PANEL HAD NO TOOLTIPS, which is
+     * the whole of why it was ever in the meta run: that comment read "the dimmed meta run is
+     * this panel's nearest equivalent to a tooltip". `ITooltip` was there the entire time --
+     * every ModularUI widget implements it and this mod had zero uses -- so the nearest
+     * equivalent has been replaced by the thing itself, and the browser and the panel now agree
+     * about where this sentence lives instead of merely about its words.
+     *
+     * IT NO LONGER GETS CUT, WHICH WAS ITS ENTIRE PROBLEM. The old note said this part went LAST
+     * so `fit` would drop it first, and called that "the right end to lose" -- true of a
+     * 29-character column and not a thing to preserve once the column is gone.
+     * {@link #machineTooltipLines} carries it, and the state's scannability -- the constraint
+     * #190/#252 actually paid for -- moved to the icon's frame rather than being dropped.
+     */
+
+    /**
+     * One cell of the footer's stat row: a number, what it counts, and the ink for the number.
+     *
+     * <h2>WHY THE VALUE AND THE LABEL ARE SEPARATE STRINGS</h2>
+     *
+     * The whole point of P7 is that the number a player ACTS ON carries a colour and the word
+     * saying what it counts does not. `19 still needed` in {@link NodeStatus#INK_NEED} beside
+     * `52 nodes` in {@link NodeStatus#INK_MUTED} is a row a reader can scan; the same two facts
+     * in one grey sentence -- which is what the footer was -- gives them equal weight, and one of
+     * them is actionable and the other is trivia.
+     *
+     * Two strings means two widgets means the second one's x depends on the first one's WIDTH,
+     * and measuring text is the thing this package cannot do. It is arithmetic instead:
+     * {@link NodeRowText#CHAR_WIDTH} per character, which is what every other width on this panel
+     * already is, and `theFooterStatRowFitsTheContentWidthOnEveryFixture` asserts the sum fits.
+     *
+     * A STATUS NAME AND NOT AN INK, which is `NodeStatus`'s standing rule: its header forbids a
+     * widget keeping its own notion of a status, so this hands over a word from that vocabulary
+     * and the widget asks `NodeStatus.colourFor`. `""` is the deliberate "not a status" case and
+     * `colourFor` already answers `INK_MUTED` for anything it does not know -- see
+     * {@link #footerCells} for why `52 nodes` is that case rather than being given a status it
+     * does not have.
+     */
+    public static final class FooterCell {
+
+        private final String value;
+        private final String label;
+        private final String status;
+
+        FooterCell(String value, String label, String status) {
+            this.value = value;
+            this.label = label;
+            this.status = status;
+        }
+
+        /** The number, already grouped. */
+        public String value() {
+            return value;
+        }
+
+        /** What it counts. */
+        public String label() {
+            return label;
+        }
+
+        /** The `NodeStatus` word whose ink the value takes, or "" for none. */
+        public String status() {
+            return status;
+        }
+
+        /** Value, a space, label -- what the cell reads as, for a test and for a log. */
+        @Override
+        public String toString() {
+            return value + " " + label;
+        }
+    }
+
+    /**
+     * The footer, as a row of stat cells instead of one grey sentence. #333.
+     *
+     * <h2>THE ONE NUMBER A PLAYER ACTS ON HAD THE SAME WEIGHT AS THE ONE THEY DO NOT</h2>
+     *
+     * The footer was `52 nodes · 19 still needed · 9 machine(s) to build · 3 on TODO`, all of it
+     * in `INK_MUTED`. `19 still needed` is the answer to the question the panel exists to answer
+     * and `52 nodes` is a fact about the solver's work, and they were drawn identically. The
+     * AE2 terminal and JEI both solve this the same way: a row of labelled cells where the VALUE
+     * carries the emphasis.
+     *
+     * <h2>NO NEW INK, WHICH IS WHAT MAKES THIS SAFE TO DO AT ALL</h2>
+     *
+     * Every value here maps onto a status `NodeStatus` already has, which is the whole point of
+     * that class being a port of `present.py`: `still needed` is what a `raw` node is,
+     * `machines` is the `partial` case -- something you can get to but have not -- and the plan
+     * book's own rows are drawn in `INK_CRAFT` on the totals panel already, so `on TODO` matches
+     * where it already appears. §7 of the design spec forbids a new semantic colour and none is
+     * introduced.
+     *
+     * `52 nodes` DELIBERATELY HAS NO STATUS. It is not a claim about any item -- it is how much
+     * work the solver did -- so giving it `cycle` or `depth` to borrow `INK_MUTED` would be
+     * exactly the local status map `NodeStatus`'s header forbids, dressed as reuse. `""` goes to
+     * `colourFor`, whose documented answer for a word it does not know is `INK_MUTED`, which is
+     * the right colour arrived at by the right route.
+     *
+     * <h2>THE CONDITIONALITY IS THE OLD FOOTER'S, UNCHANGED</h2>
+     *
+     * A cell appears only when its count is non-zero, exactly as the sentence's clauses did. A
+     * stat row of four cells three of which read `0` is worse than three cells: a zero is a fact
+     * about the panel and not about the plan, and `addSection`'s "a header standing over no rows
+     * is a claim the panel cannot support" is the same argument.
+     *
+     * `machines` AND NOT `machine(s) to build`. The parenthetical plural was a one-line
+     * sentence's compromise; a cell has a number beside it, so `9 machines` reads correctly and
+     * `1 machines` is the price -- paid because the alternative is branching on the count for a
+     * character. The full wording, with what each machine actually is, is on the totals panel via
+     * {@link #machineLines}, which is where #190 put it.
+     */
+    public static List<FooterCell> footerCells(PlanView plan, PlanBook book) {
+        List<FooterCell> cells = new ArrayList<FooterCell>();
+        cells.add(new FooterCell(grouped(plan.nodes()), "nodes", ""));
+        if (!plan.shoppingList().isEmpty()) {
+            cells.add(new FooterCell(grouped(plan.shoppingList().size()), "still needed",
+                                     NodeStatus.RAW));
+        }
+        if (!plan.machinesToBuild().isEmpty()) {
+            cells.add(new FooterCell(grouped(plan.machinesToBuild().size()), "machines",
+                                     NodeStatus.PARTIAL));
+        }
+        if (!book.todoKeys().isEmpty()) {
+            cells.add(new FooterCell(grouped(book.todoKeys().size()), "on TODO",
+                                     NodeStatus.CRAFT));
+        }
+        return cells;
+    }
+
+    /**
+     * How wide {@link #footerCells}' row is when laid out, in pixels.
+     *
+     * HERE AND NOT AT THE WIDGET, because it is the same arithmetic the widget lays out with and
+     * two copies of it would be two answers to "does the footer fit". `PlannerWidgets.footerRow`
+     * is the layout; this is the measurement, and the test asserts this against
+     * `CONTENT_WIDTH` rather than reading boxes off a laid-out panel -- which would only ever
+     * report that ModularUI put the widgets where they were told.
+     *
+     * ONE CHARACTER INSIDE A CELL, TWO BETWEEN CELLS, AND THE RATIO IS THE WHOLE POINT. A cell
+     * has to read as one thing, so the space separating cells must beat the space inside one --
+     * otherwise `19 still needed 9 machines` is five words in a row with nothing grouping them.
+     * Counted in characters rather than in `PlannerWidgets.GAP` deliberately: this class states
+     * that no widget comes near it, and the footer's spacing is a property of the TEXT.
+     */
+    public static int footerWidth(List<FooterCell> cells) {
+        int width = 0;
+        for (int i = 0; i < cells.size(); i++) {
+            if (i > 0) {
+                width += FOOTER_CELL_GAP;
+            }
+            width += cells.get(i).value().length() * CHAR_WIDTH
+                    + CHAR_WIDTH
+                    + cells.get(i).label().length() * CHAR_WIDTH;
+        }
+        return width;
+    }
+
+    /** The pixels between one footer cell and the next: two characters. See {@link #footerWidth}. */
+    public static final int FOOTER_CELL_GAP = CHAR_WIDTH * 2;
 
     /** The one-line header above the tree: `2x Hopper`, plus the truncation warning. */
     public static String heading(PlanView plan) {
@@ -764,10 +966,13 @@ public final class NodeRowText {
         // panel of rows all saying it, with the machine name cut off the end to make room.
         //
         // WIDTH IS THE COST, NOT TIDINESS. `fit` cuts the meta run from the right, so a phrase
-        // carrying no information does not merely fail to help, it evicts `machineBit`, which
-        // is what a reader scans for. No test caught this because every part was individually
-        // correct and the defect only exists in aggregate, which is the #190 fluid-adjacency
-        // lesson in a new place: some things are only visible in a picture.
+        // carrying no information does not merely fail to help, it evicts whatever is behind it.
+        // In #252 that was `machineBit`, which is what a reader scans for; since #333 the machine
+        // is an icon and the parts behind this one are the note and the `-> resolved` pointer,
+        // both of which are the only thing on the row saying why it is there at all. The argument
+        // is unchanged and its subject moved. No test caught it because every part was
+        // individually correct and the defect only exists in aggregate, which is the #190
+        // fluid-adjacency lesson in a new place: some things are only visible in a picture.
         boolean singleRun = node.runs() == 1L;
         boolean unitYield = node.perRun() == 0.0 || node.perRun() == 1.0;
         boolean certain = !(node.yieldChance() > 0.0 && node.yieldChance() < 1.0);

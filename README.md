@@ -769,14 +769,51 @@ way to see. The buttons are the fix, and `PanelReachabilityTest` is the part tha
 fixed: it fails when any panel builder in the mod has no opener outside the harness, which is
 what neither the layout tests nor the screenshots could notice.
 
+**A tree row reads left to right and lines up down the panel.** Each row is the item's icon and
+its name, indented under its parent with a hairline rail per level, and then a fixed cluster
+pinned to the right edge: the machine the step runs in, the quantity, and the status badge. The
+quantity is right-aligned, so magnitudes compare down the column at a glance.
+
+It did not used to line up, and the reason was arithmetic rather than taste
+([#333](https://github.com/Jacob-Lasky/minecraft-recipe-graph/issues/333)). Every cell was laid
+out from the indent, so the whole row slid right by ten pixels per level and the quantities ran
+diagonally down the panel — depth was being drawn twice, and the price was that no column aligned
+with the one above it. Two columns were also reserved for their worst case rather than for their
+contents: the badge column was wide enough for `no known source` on every row of every plan, and
+the quantity column for `934,400x`, which between them held about a fifth of the row for words
+most plans never draw. Both are measured per plan now, from the badges and quantities that plan
+actually contains.
+
+**And the row says which machine.** Hovering the small block icon in the cluster names it — a
+Centrifuge, a Bloodmaster Crucible, or just `Smelting` — and, when the machine is something you
+have not built yet, says whether it is buildable and what it would take. A machine standing
+between you and the step is outlined in red so you can see it without hovering, which is the one
+thing that must not be hover-only: what you are missing is the reason the plan is not finished.
+
+The machine was always in the data and it was even being drawn, appended to the item's name after
+a dot — and then cut off, because the name and the machine were sharing the most crowded column on
+the panel. Screenshots of 0.11.0 are full of `Centrifuge…`, `Bloodmaste…` and `Runic Altar (b…`.
+Moving it into a column of its own is what paid for the rest of the pass: the icon cannot be
+truncated, and the name got the width back. No new data was needed for it — the machine's name has
+been on every craft step since the solver was written, and its picture is looked up in game from
+the catalyst list the dump already records.
+
+**The footer is a stat row.** `52 nodes`, `19 still needed`, `9 machines`, `3 on TODO` — with the
+number carrying the colour and the word beside it staying grey, because `19 still needed` is the
+answer to the question and `52 nodes` is a fact about the solver's work, and one grey sentence gave
+them equal weight.
+
 **The diagram is a surface you work from, not a picture.** Click any box in it and you get the
 same menu a tree row gives you — the recipe picker, "Add to TODO", "Favourite" — and the box you
 clicked becomes the selection, so every other occurrence of that item lights up across the whole
 diagram. Drag the empty canvas to pan it, control-scroll to zoom, and the row under the heading
 carries **Close**, **Root** (put the plan's root back in frame) and **Selected** (jump to the item
-you have selected, nearest occurrence first). The heading names the plan and the same red warning
-lines the tree carries sit above the canvas, so a plan cut off at the node cap says so here too
-rather than drawing a diagram shaped exactly like a complete one.
+you have selected, nearest occurrence first). Craft boxes carry the machine badge in their
+bottom-right corner, with the same red outline and the same hover, and it drops away with the
+label when you zoom out far enough that a ten-pixel sprite would be a smear. The heading names
+the plan and the same red warning lines the tree carries sit above the canvas, so a plan cut off
+at the node cap says so here too rather than drawing a diagram shaped exactly like a complete
+one.
 
 Until this landed the boxes were inert: they looked exactly like clickable tree rows and nothing
 happened when you clicked them

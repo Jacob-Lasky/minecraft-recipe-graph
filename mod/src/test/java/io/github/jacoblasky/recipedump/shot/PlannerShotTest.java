@@ -85,6 +85,123 @@ public class PlannerShotTest {
         }
     }
 
+    /**
+     * The machine column's synthetic catalyst resolves a real sprite. #333.
+     *
+     * <h2>THE DEFECT THIS IS THE TEST FOR, AND WHY NO SCREENSHOT WOULD HAVE REPORTED IT</h2>
+     *
+     * `internCatalysts` first interned the CATEGORY'S OWN NAME as the catalyst key --
+     * `minecraft.smelting` -- and its javadoc claimed the dev client would picture a furnace for
+     * it. It cannot. `StackIndex.build` keys the real JEI item list through
+     * `DumpCommand.stackKey`, which produces `minecraft:furnace`, and its only two weakenings
+     * strip a `#digest` or collapse durability; nothing turns a category id into an item key. So
+     * every machine column in every screenshot would have been EMPTY, which is
+     * indistinguishable from a broken lookup -- and the comment beside it said the opposite, so
+     * the picture would have been read as evidence against the production code rather than
+     * against the harness. `PlannerShotTest`'s own header names that shape: a harness that
+     * quietly stops exercising the real code produces pictures that look right and prove
+     * nothing.
+     *
+     * <h2>END TO END AND NOT STRUCTURAL, WHICH IS THE ONLY VERSION THAT WOULD HAVE FAILED</h2>
+     *
+     * "The key is not the category id" is easy to assert and would have passed on any other
+     * unresolvable string. So this builds the graph the harness builds, indexes it against the
+     * six vanilla stacks standing in for the dev client's item list, and asks
+     * `iconForCategory` -- the exact call `PlannerWidgets.machineCell` makes -- for a real
+     * stack. That is the whole path: `categoryId`, `Machines.catalystsByCategory`,
+     * `isNotAMachine`, `JeiBridge.stackFor`.
+     *
+     * `plan-truncated` RATHER THAN THIS FILE'S USUAL FIXTURE, because `plan-in-stock` is four
+     * nodes and the claim is about machine categories: this one is rooted in
+     * `nuclearcraft_centrifuge` and carries `botania.runicAltar`, `tconstruct.casting_table` and
+     * `minecraft.smelting` besides, so the hash spread over the stand-ins is exercised too.
+     */
+    @Test
+    public void theShotsCatalystResolvesASpriteRatherThanBeingACategoryIdNothingCanLookUp() {
+        PlanView plan = PlanFixtureFiles.load("plan-truncated");
+        GraphBuilder builder = new GraphBuilder();
+        PlannerShot.intern(plan.tree(), builder);
+        PlannerShot.internCatalysts(plan.tree(), builder, new java.util.HashSet<String>());
+        final RecipeGraph graph = builder.build();
+
+        // The dev client's JEI list, standing in as exactly the stacks the harness can name.
+        // READ OFF `SHOT_MACHINES` RATHER THAN RESTATED, or this test indexes one list while the
+        // harness keys another and the disagreement is the bug it exists to catch.
+        java.util.List<net.minecraft.item.ItemStack> listed =
+                new java.util.ArrayList<net.minecraft.item.ItemStack>();
+        for (net.minecraft.block.Block block : PlannerShot.SHOT_MACHINES) {
+            listed.add(new net.minecraft.item.ItemStack(block));
+        }
+        io.github.jacoblasky.recipedump.client.jei.JeiBridge.indexFor(graph, listed);
+        NodeActions actions = new JeiNodeActions(new JeiNodeActions.GraphAccess() {
+            @Override
+            public RecipeGraph graph() {
+                return graph;
+            }
+        });
+
+        java.util.List<PlanNode> nodes = new java.util.ArrayList<PlanNode>();
+        flatten(plan.tree(), nodes);
+        java.util.Set<String> drawn = new java.util.HashSet<String>();
+        int checked = 0;
+        for (PlanNode node : nodes) {
+            String category = node.category();
+            if (category == null || category.isEmpty()
+                    || io.github.jacoblasky.recipedump.plan.Machines.isHandCrafting(category)) {
+                continue;
+            }
+            assertTrue("the harness interned the category id itself as a key, which no item list"
+                       + " can ever answer: " + category, graph.keyId(category) < 0);
+            net.minecraft.item.ItemStack stack = actions.iconForCategory(node);
+            assertTrue("the machine column would be empty in every screenshot for " + category,
+                       !stack.isEmpty());
+            drawn.add(stack.getItem().getRegistryName().toString());
+            checked++;
+        }
+        assertTrue("plan-truncated must carry machine categories or this asserts nothing",
+                   checked > 0);
+        // AND THE STAND-INS VARY, which is the other half of `shotMachineKey`'s reason for
+        // hashing: one furnace repeated down the panel photographs as a single fact rather than
+        // as a column of machines.
+        assertTrue("every category resolved the same stand-in, so the hash is not spreading: "
+                   + drawn, drawn.size() > 1);
+    }
+
+    /**
+     * Every machine stand-in is an item, and they are six different ones.
+     *
+     * THE TEST ABOVE ONLY REACHES THE STAND-INS ONE FIXTURE'S CATEGORIES HASH TO, so an entry
+     * that produced no item could sit in the array indefinitely and then be picked by a category
+     * added next month -- at screenshot time, as a null key thrown out of `GraphBuilder`. The
+     * trap is specific and easy to walk back into: `new ItemStack(Block)` goes through
+     * `Item.getItemFromBlock`, and a block whose item is registered separately answers
+     * `Items.AIR`. `Blocks.CAULDRON` and `Blocks.BREWING_STAND` are both like that and both look
+     * exactly like things that belong on a list of machines.
+     */
+    @Test
+    public void everyShotMachineStandInIsAnItemTheIndexCanActuallyResolve() {
+        java.util.Set<String> keys = new java.util.HashSet<String>();
+        for (net.minecraft.block.Block block : PlannerShot.SHOT_MACHINES) {
+            net.minecraft.item.ItemStack stack = new net.minecraft.item.ItemStack(block);
+            assertTrue("this block has no registered ItemBlock, so the stack is EMPTY and the"
+                       + " harness would intern a null catalyst key: " + block,
+                       !stack.isEmpty());
+            String key = io.github.jacoblasky.recipedump.DumpCommand.stackKey(stack);
+            assertNotNull("stackKey answered null for " + block, key);
+            assertTrue("two stand-ins share the key " + key + ", so the hash cannot spread over"
+                       + " as many machines as the array claims", keys.add(key));
+        }
+        assertEquals("all six stand-ins must be distinct items",
+                     PlannerShot.SHOT_MACHINES.length, keys.size());
+    }
+
+    private static void flatten(PlanNode node, java.util.List<PlanNode> into) {
+        into.add(node);
+        for (PlanNode child : node.children()) {
+            flatten(child, into);
+        }
+    }
+
     @Test
     public void syntheticBuildsExactlyTheNodeCountAskedFor() {
         // THE SUBJECT OF EVERY 60 FPS MEASUREMENT IN THIS PROJECT, and it was wrong. Before
