@@ -81,7 +81,30 @@ public final class ClassFiles {
     }
 
     public static byte[] read(File file) throws IOException {
-        InputStream in = file.toURI().toURL().openStream();
+        return drain(file.toURI().toURL().openStream());
+    }
+
+    /**
+     * A class file from the test classpath by internal name, INCLUDING ONE FROM A DEPENDENCY.
+     *
+     * WHY A SECOND READER RATHER THAN A PATH. {@link #read} navigates the build's own output
+     * directory, which a dependency is not in -- `modularui` arrives as a jar on the classpath,
+     * and the only stable way to reach a class inside it is to ask the loader for the resource.
+     * {@link HoveredWidgetsTest} needs exactly that: the reason our harness may not call
+     * `ModularGuiContext.getAllHovered()` is a fact about the shipped jar's bytecode, and a
+     * comment asserting it goes stale the moment ModularUI is upgraded.
+     *
+     * ABSENCE FAILS RATHER THAN RETURNING NULL, because a gate whose subject is missing is a
+     * gate that stops asking, and this repository has measured that reading as a pass.
+     */
+    public static byte[] readResource(String internalName) throws IOException {
+        InputStream in = ClassFiles.class.getClassLoader()
+                .getResourceAsStream(internalName + ".class");
+        assertTrue(internalName + " is not on the test classpath", in != null);
+        return drain(in);
+    }
+
+    private static byte[] drain(InputStream in) throws IOException {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] chunk = new byte[8192];

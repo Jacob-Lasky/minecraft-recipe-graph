@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import io.github.jacoblasky.recipedump.ClassFiles;
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.client.flow.FlowCanvas;
 import io.github.jacoblasky.recipedump.client.flow.FlowCulling;
@@ -22,8 +23,13 @@ import io.github.jacoblasky.recipedump.client.planner.PlannerActions;
 import io.github.jacoblasky.recipedump.client.planner.PlannerState;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.init.Bootstrap;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /**
@@ -42,6 +48,34 @@ public class PlannerShotTest {
 
     /** Vanilla-rooted (`minecraft:hopper`) and deep enough to exercise the recursion. */
     private static final String FIXTURE = "plan-in-stock";
+
+    /**
+     * `Item.REGISTRY` must exist before `PlannerShot` can be INITIALISED AT ALL, and until now
+     * this class borrowed someone else's call.
+     *
+     * `PlannerShot.SHOT_MACHINES` is a static field holding `Blocks.FURNACE` and five siblings,
+     * so touching any member of `PlannerShot` runs a `<clinit>` that needs the block registry.
+     * Nothing here registered it. In a full suite run that is invisible, because one of the ten
+     * other classes that call `Bootstrap.register()` has already run -- so the dependency is on
+     * TEST ORDER, and the suite is green for a reason unrelated to this file.
+     *
+     * MEASURED, because "it must be the narrowing" is exactly the kind of claim this repository
+     * requires to be driven rather than asserted: `--tests '*PlannerShotTest*'` alone produced
+     * 13 failures, one `ExceptionInInitializerError` at `PlannerShot.<clinit>` and twelve
+     * `NoClassDefFoundError: Could not initialize class ... PlannerShot` cascading off it, on a
+     * tree with no changes of mine in it. The same selection is green with this method present.
+     *
+     * WHY IT MATTERS RATHER THAN BEING A CURIOSITY. `--tests '*PlannerShotTest*'` is the obvious
+     * way to iterate on this file, and it handed back thirteen red herrings that name the wrong
+     * thing entirely -- a reader chases a missing class instead of a missing bootstrap. The same
+     * trap sat in front of anyone verifying one of these screens for the first time.
+     */
+    @BeforeClass
+    public static void bootstrap() {
+        // Same reason as `StackIndexTest` and `DigestFixtureTest`, and this class needs it for
+        // the harder reason: not to build a stack, but to load `PlannerShot`.
+        Bootstrap.register();
+    }
 
     @Before
     @After
@@ -311,6 +345,91 @@ public class PlannerShotTest {
      * would have reported every failure as a pass and every pass as a failure. That is the
      * defect this file exists to make impossible, so the verdict is driven both ways here.
      */
+    /**
+     * The machine-tip verdict FAILS when it cannot read what ModularUI resolved. #333.
+     *
+     * THIS GUARD IS UNREACHABLE IN A SHOT TODAY, WHICH IS EXACTLY WHY IT IS DRIVEN HERE.
+     * `deps/modularui-3.1.5.jar` and the pack's staged jar are byte-identical, so the read
+     * cannot fail in a run -- and a guard no run executes is read-off-the-code, the condition
+     * under which `ShotScreens`' first `reported()` sat inverted. This one shipped inverted too:
+     * it called `reportPass()`, so the one screen that exists to prove the tooltip renders would
+     * have gone green having measured nothing, on precisely the future ModularUI upgrade that
+     * makes the read fail. Both directions are asserted so that cannot come back.
+     */
+    @Test
+    public void theMachineTipShotFailsWhenItCannotReadWhatModularUiResolved() {
+        String problem = PlannerShot.unmeasurableProblem(
+                false, "ModularGuiContext.hovered is a java.util.Set in this ModularUI build,"
+                       + " not a List");
+        assertNotNull("a screen that measured nothing must not report a pass", problem);
+        assertTrue("the failure must say it measured nothing: " + problem,
+                   problem.contains("measured NOTHING"));
+        assertTrue("and must carry the cause it was handed: " + problem,
+                   problem.contains("not a List"));
+        assertTrue("and must name the class to go and read: " + problem,
+                   problem.contains("HoveredWidgets"));
+    }
+
+    /**
+     * `tooltipVerdict` ACTUALLY CALLS the guard, which the two tests above cannot show.
+     *
+     * A PURE FUNCTION NOBODY CALLS IS A GREEN TEST OVER A DEAD BRANCH, and this repository has
+     * measured that exact shape more than once -- a seam asserted correct while nothing was
+     * wired to it. `unmeasurableProblem` returning the right string proves nothing about the
+     * screen unless the screen asks it, so the call is read out of the constant pool of the
+     * class that holds `tooltipVerdict`.
+     *
+     * THE NESTED CLASS BY SEARCH AND NOT BY `PlannerShot$1`-STYLE INDEX. `tooltipVerdict` lives
+     * in `ParkOnTreeRow`, a private nested class, and a positional name would be wrong the next
+     * time anyone declares a class above it. The holder is found by looking for it and asserted
+     * to be exactly one, which also makes this a statement about the code rather than about its
+     * layout.
+     */
+    @Test
+    public void theMachineTipVerdictIsWiredToTheGuardAndNotJustDocumentedAsBeingSo() throws Exception {
+        String called = "io/github/jacoblasky/recipedump/shot/PlannerShot.unmeasurableProblem"
+                        + "(ZLjava/lang/String;)Ljava/lang/String;";
+        List<String> holders = new ArrayList<String>();
+        int scanned = 0;
+        for (File file : ClassFiles.under("io/github/jacoblasky/recipedump/shot")) {
+            scanned++;
+            if (ClassFiles.methodReferences(ClassFiles.read(file)).contains(called)) {
+                holders.add(ClassFiles.internalName(file));
+            }
+        }
+        assertTrue("the scan read no classes, so it is not asking anything", scanned > 0);
+        assertEquals("exactly one class must call the unmeasurable guard, and it is the one"
+                     + " holding tooltipVerdict; found " + holders,
+                     1, holders.size());
+        assertTrue("the caller must be the parked-row hold that owns tooltipVerdict, not"
+                   + " something else that happened to call it: " + holders,
+                   holders.get(0).endsWith("PlannerShot$ParkOnTreeRow"));
+    }
+
+    /** And a hover set that DID read is measurable, whatever it turns out to contain. */
+    @Test
+    public void theMachineTipShotIsMeasurableWhenTheHoverSetReads() {
+        assertNull("an empty-but-read hover set is a legitimate answer, not a broken probe",
+                   PlannerShot.unmeasurableProblem(true, null));
+    }
+
+    /**
+     * The pair composes: the unreadable `Hovered` the probe really produces is unmeasurable.
+     *
+     * WITHOUT THIS THE TWO HALVES CAN BOTH BE RIGHT AND THE PROGRAMME STILL WRONG, because
+     * `unmeasurableProblem` takes booleans and could be handed the wrong ones. `underCursor(null)`
+     * is the one unavailable `Hovered` obtainable without a client, and it is the real thing
+     * rather than a stand-in.
+     */
+    @Test
+    public void theUnreadableHoverSetTheProbeActuallyProducesIsUnmeasurable() {
+        HoveredWidgets.Hovered real = HoveredWidgets.underCursor(null);
+        assertTrue("underCursor(null) must be the unavailable case for this to test anything",
+                   !real.available());
+        assertNotNull("the probe's own unreadable answer must be treated as unmeasurable",
+                      PlannerShot.unmeasurableProblem(real.available(), real.why()));
+    }
+
     @Test
     public void theProgressShotPassesOnlyWhenThePanelWasActuallyRedrawn() {
         assertNull("still reading, redrawn five times, monotone: this is the artifact",

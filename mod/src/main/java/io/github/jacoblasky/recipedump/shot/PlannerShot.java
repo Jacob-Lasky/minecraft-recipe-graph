@@ -976,6 +976,12 @@ final class PlannerShot {
             boolean hovering = row.isHovering();
             int wash = PlannerWidgets.ClickableGroup.rowWash(hovering, row.drawsAsSelected());
             int selectionWash = PlannerWidgets.ClickableGroup.rowWash(false, true);
+            // READ ONCE, LIKE `tooltipVerdict`, and for the same reason: `hovered` is replaced
+            // wholesale each frame. Nothing in this verdict depends on it -- the wash is the
+            // claim -- so an unreadable set prints its cause in the diagnostic and changes
+            // nothing else, which is why there is no availability branch here.
+            HoveredWidgets.Hovered hovered =
+                    HoveredWidgets.underCursor(ModularScreen.getCurrent());
             ShotHarness.log(screen() + ": after " + poll + " polls on "
                             + NodeRowText.label(node) + " -- isHovering=" + hovering
                             + " drawsAsSelected=" + row.drawsAsSelected()
@@ -984,7 +990,7 @@ final class PlannerShot {
                             + " anyHovered=" + panel.isAnyHovered()
                             + " belowMouse="
                             + panel.getScreen().getPanelManager().isBelowMouseInTopPanel(row)
-                            + " resolved=[" + hoveredDiagnostic() + "] ["
+                            + " resolved=[" + hoveredDiagnostic(hovered) + "] ["
                             + cursorDiagnostic(targetX, targetY) + "]");
             if (wash == 0) {
                 // THE PREDICTION THIS SCREEN EXISTS TO TEST, STATED IN THE FAILURE. `ClickViewButton`
@@ -1012,10 +1018,18 @@ final class PlannerShot {
         /**
          * Did ModularUI resolve a tooltip for the cell under the cursor, carrying our words?
          *
-         * READ OFF `getAllHovered()` AND NOT OFF THE CELL WE AIMED AT. Asking the cell whether it
-         * has a tooltip is a question about the widget tree and was green before this screen
-         * existed. This asks the set ModularUI itself resolves from the live cursor -- the same
-         * one the tooltip renderer draws from -- so a pass means the render path found it.
+         * READ OFF THE SET ModularUI RESOLVED AND NOT OFF THE CELL WE AIMED AT. Asking the cell
+         * whether it has a tooltip is a question about the widget tree and was green before this
+         * screen existed. This asks the set ModularUI itself resolves from the live cursor -- the
+         * same one the tooltip renderer draws from -- so a pass means the render path found it.
+         *
+         * THAT SET ARRIVES FROM {@link HoveredWidgets} AND NEVER FROM
+         * `ModularGuiContext.getAllHovered()`. This javadoc recommended that call by name until
+         * #333's fix, and it is the sentence a later author would have followed straight back
+         * into the `StackOverflowError` -- the call reads as ordinary ModularUI API, compiles
+         * fine, and kills the client on exhaustion. `HoveredWidgetsTest` bans the CALL; nothing
+         * can ban prose recommending it, so the prose is corrected here rather than left as the
+         * one unguarded route back to the crash.
          *
          * THEN THE WORDS, COMPARED AGAINST `NodeRowText`. `RichTooltip` exposes no line reader,
          * but the `RichText` it wraps does (`getAsStrings`), reached through `getRichText()` and
@@ -1028,18 +1042,25 @@ final class PlannerShot {
         private boolean tooltipVerdict(ModularPanel panel, PlannerWidgets.ClickableGroup row,
                                        PlanNode node, int targetX, int targetY) {
             List<String> expected = NodeRowText.machineTooltipLines(node);
-            com.cleanroommc.modularui.screen.RichTooltip resolved = resolvedTooltip();
+            HoveredWidgets.Hovered hovered =
+                    HoveredWidgets.underCursor(ModularScreen.getCurrent());
+            com.cleanroommc.modularui.screen.RichTooltip resolved = resolvedTooltip(hovered);
             ShotHarness.log(screen() + ": after " + poll + " polls on "
                             + NodeRowText.label(node) + " -- expected " + expected
                             + " resolvedTooltip=" + (resolved != null)
                             + " rowHovering=" + row.isHovering()
                             + " anyHovered=" + panel.isAnyHovered()
-                            + " resolved=[" + hoveredDiagnostic() + "] ["
+                            + " resolved=[" + hoveredDiagnostic(hovered) + "] ["
                             + cursorDiagnostic(targetX, targetY) + "]");
             if (expected.isEmpty()) {
                 ShotScreens.reportFail(screen() + ": " + NodeRowText.label(node) + " has no"
                                        + " machine words, so this row cannot show a tooltip and"
                                        + " the row search picked wrong");
+                return false;
+            }
+            String unmeasurable = unmeasurableProblem(hovered.available(), hovered.why());
+            if (unmeasurable != null) {
+                ShotScreens.reportFail(screen() + ": " + unmeasurable);
                 return false;
             }
             if (resolved == null) {
@@ -1083,21 +1104,25 @@ final class PlannerShot {
         /**
          * The first tooltip ModularUI resolves under the live cursor, or null.
          *
-         * `getAllHovered()` RATHER THAN `getTopHovered()`, because the top of the stack is the
-         * innermost widget and the tooltip may belong to it OR to a parent -- `AbstractParentWidget`
-         * overrides `getTooltip` precisely so a hovered child can answer for its parent. Walking
-         * the whole resolved stack asks the question the renderer asks.
+         * THE WHOLE RESOLVED STACK RATHER THAN `getTopHovered()`, because the top of the stack is
+         * the innermost widget and the tooltip may belong to it OR to a parent --
+         * `AbstractParentWidget` overrides `getTooltip` precisely so a hovered child can answer
+         * for its parent. Walking the whole resolved stack asks the question the renderer asks.
+         *
+         * THE STACK ARRIVES FROM {@link HoveredWidgets} AND NOT FROM `getAllHovered()`, WHICH
+         * CRASHES THE CLIENT. Read that class before reaching for the obvious call: in
+         * `modularui-3.1.5` the iterator behind `getAllHovered()` recurses into itself instead of
+         * ending, so this loop -- which runs to exhaustion whenever nothing under the cursor has
+         * a tooltip, i.e. exactly the defect this screen exists to catch -- died with a
+         * `StackOverflowError` in `ModularGuiContext$1.computeNext`.
          *
          * `hasTooltip()` BEFORE `getTooltip()`, because the getter is documented on `ITooltip` as
          * the builder entry point and creates one on demand; calling it first would manufacture
          * the very thing this is checking for and pass on every row in the game.
          */
-        private static com.cleanroommc.modularui.screen.RichTooltip resolvedTooltip() {
-            ModularScreen screen = ModularScreen.getCurrent();
-            if (screen == null) {
-                return null;
-            }
-            for (Object hovered : screen.getContext().getAllHovered()) {
+        private static com.cleanroommc.modularui.screen.RichTooltip resolvedTooltip(
+                HoveredWidgets.Hovered stack) {
+            for (Object hovered : stack.elements()) {
                 if (hovered instanceof com.cleanroommc.modularui.api.widget.ITooltip
                         && ((com.cleanroommc.modularui.api.widget.ITooltip<?>) hovered)
                                 .hasTooltip()) {
@@ -1108,14 +1133,20 @@ final class PlannerShot {
             return null;
         }
 
-        /** Every widget ModularUI says the cursor is over, for a log line that can be argued with. */
-        private static String hoveredDiagnostic() {
-            ModularScreen screen = ModularScreen.getCurrent();
-            if (screen == null) {
-                return "no screen";
+        /**
+         * Every widget ModularUI says the cursor is over, for a log line that can be argued with.
+         *
+         * SAYS WHY WHEN THERE IS NO ANSWER instead of printing "nothing", because those two
+         * differ by everything: one is a cursor over empty space and the other is a probe that
+         * has gone blind. Reading "nothing" off a blind probe is what would turn this diagnostic
+         * into the misleading half of a failure report.
+         */
+        private static String hoveredDiagnostic(HoveredWidgets.Hovered stack) {
+            if (!stack.available()) {
+                return "unreadable: " + stack.why();
             }
             StringBuilder sb = new StringBuilder();
-            for (Object hovered : screen.getContext().getAllHovered()) {
+            for (Object hovered : stack.elements()) {
                 if (sb.length() > 0) {
                     sb.append(" > ");
                 }
@@ -1595,11 +1626,16 @@ final class PlannerShot {
      *
      * The weak version of this probe asks the cell it aimed at whether it has a tooltip, which is
      * a question about the widget tree and would have been green before the cursor existed. The
-     * verdict here instead asks `ModularGuiContext.getAllHovered()` -- the set ModularUI itself
-     * resolves from the live cursor and the same one the tooltip renderer draws from -- for a
-     * widget carrying a tooltip, and then reads the STRINGS back out of it and compares them
-     * against `NodeRowText.machineTooltipLines`. That is the whole path: cursor to hit test to
-     * resolved widget to tooltip to words, against the class that produced the words.
+     * verdict here instead asks {@link HoveredWidgets} for `ModularGuiContext`'s own `hovered`
+     * list -- the set ModularUI itself resolves from the live cursor, and the one whose members
+     * are the widgets whose `drawForeground` draws a tooltip -- for a widget carrying a tooltip,
+     * and then reads the STRINGS back out of it and compares them against
+     * `NodeRowText.machineTooltipLines`. That is the whole path: cursor to hit test to resolved
+     * widget to tooltip to words, against the class that produced the words.
+     *
+     * VIA THAT CLASS AND NEVER VIA `ModularGuiContext.getAllHovered()`, which reads as the
+     * obvious call and crashes the client -- read `HoveredWidgets` for the bytecode. The first
+     * run of this screen in the 365-jar client died on it with a `StackOverflowError`.
      *
      * FAILS LOUDLY AND NEVER SILENTLY, which is the point of it being a verdict screen: a run
      * where nothing resolves reports NO and takes the build with it, rather than producing a
@@ -1607,6 +1643,64 @@ final class PlannerShot {
      */
     static void openMachineTip(String arg) {
         openParked(arg, true);
+    }
+
+    /**
+     * Why `planner-machine-tip` cannot put its claim to the client at all, or null when it can.
+     *
+     * A VERDICT SCREEN THAT CANNOT MEASURE MUST FAIL, AND THIS BRANCH ONCE RETURNED A PASS.
+     * When `HoveredWidgets` cannot read `ModularGuiContext.hovered`, nothing has been
+     * established -- no widget known to be hovered, no tooltip known to resolve, no words known
+     * to exist -- so a green from here is a claim about nothing, on the one screen whose entire
+     * purpose is the assertion it just skipped. {@link #openMachineTip}'s own javadoc already
+     * promised this screen "FAILS LOUDLY AND NEVER SILENTLY", which the pass contradicted from
+     * forty lines away.
+     *
+     * NOT THE SAME CASE AS `tooltipWords` RETURNING NULL, which is the analogy the pass was
+     * argued from and it does not hold. There the tooltip HAS resolved and is non-empty, so this
+     * screen's claim is proven and only WHICH strings it carries is unavailable, with the PNG as
+     * the witness to those. Here the claim was never put to the client.
+     *
+     * AND THE PRECEDENT ONE FILE OVER IS THE SECOND HALF OF ITS RULE, NOT THE FIRST -- GETTING
+     * THIS BACKWARDS WOULD JUSTIFY REINTRODUCING #330. `FlowInteractionShot`'s first version
+     * FAILED when nothing was measurable, and that was the defect: on `plan-truncated` every
+     * pair had an end clipped, so "'nothing measurable' was being reported as a failure of the
+     * code" while the PNG showed the fix working. The correction was to NAVIGATE
+     * (`navigateToAMeasurablePair`), not to switch a pass to a failure. What it still fails on is
+     * the residual case that no navigation can reach -- a pair needing 916px in a 612px canvas --
+     * which "fails loudly with the numbers".
+     *
+     * AN UNREADABLE HOVER SET IS THAT RESIDUAL CASE, which is why this is a failure and not a
+     * navigation step. There is no cursor move, no extra poll and no zoom that makes a renamed
+     * or retyped field readable, so there is nothing to navigate to and nothing to report but NO.
+     * A guard that CAN reach a measurable state and declines to is still the #330 mistake; do not
+     * cite this method for that.
+     *
+     * AND IT DOES NOT BLAME #333 FOR A ModularUI INTERNAL, which was the objection.
+     * `HoveredWidgetsTest` pins the field at SUITE time, so a rename cannot reach a shot while
+     * the suite is green; if this fires anyway, the ModularUI the client loaded is not the one
+     * the suite pinned. The message says so rather than leaving a reader to guess.
+     *
+     * PRIMITIVES RATHER THAN THE {@link HoveredWidgets.Hovered} ITSELF, for the reason
+     * `PlannerRecoveryShot.progressProblem` takes six of them: a guard that a shot exercises
+     * only when a dependency has already broken is otherwise read-off-the-code forever, and the
+     * last unexercised guard in this package had been wired to invert its own signal. Taking
+     * booleans lets `PlannerShotTest` drive both directions with no live screen. The seam
+     * between this and its one caller is covered separately, by asserting the call is installed.
+     *
+     * @return why the run proves nothing, or null if it can prove what it claims
+     */
+    static String unmeasurableProblem(boolean hoverSetRead, String why) {
+        if (hoverSetRead) {
+            return null;
+        }
+        return "could not read what ModularUI resolved, so this screen measured NOTHING -- "
+               + why + ". The tooltip may well render; this run cannot say either way, and that"
+               + " is a failure rather than a pass. Read `HoveredWidgets`, which reads"
+               + " `ModularGuiContext.hovered` because `getAllHovered()` cannot be iterated to"
+               + " the end in modularui-3.1.5. A GREEN `HoveredWidgetsTest` alongside this"
+               + " failure means the client's ModularUI is not the one the suite pinned, so"
+               + " compare the pack's jar against deps/.";
     }
 
     /**
