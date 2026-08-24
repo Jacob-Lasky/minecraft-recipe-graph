@@ -752,8 +752,8 @@ public class FlowCanvasTest {
      * composition at zoom 2 with the view 400 along, {@link
      * #modularUisOwnViewportMatrixAgreesWithTheConversionTheEdgesUse}, which compares the
      * conversion with ModularUI's own matrix across the whole zoom range, and
-     * {@link #theSweepPaintsEveryVisibleEdgeThroughTheSeamAndNothingOutsideTheCanvas}, which runs
-     * the whole sweep at 1.37.
+     * {@link #theSweepPaintsEveryEdgeWithAPixelOnTheCanvasThroughTheSeamAndNothingOutside},
+     * which runs the whole sweep at 1.37.
      *
      * SO THE ZOOMS ARE ASSERTED BY NAME AND NOT BY COUNT. `size() >= 3` was exactly the number
      * that is reachable, so it read as slack while having none, and one pair fewer anywhere would
@@ -782,6 +782,11 @@ public class FlowCanvasTest {
         java.util.Set<String> offsetsChecked = new java.util.HashSet<String>();
         int checked = 0;
         int controlled = 0;
+        // BOTH ELBOW SHAPES, COUNTED, because the count assertion below now accepts either and an
+        // "or" nothing exercises is not an assertion. If this fixture stopped producing same-row
+        // edges the two-rectangle branch would be dead and #335's fix would be untested here.
+        int straightEdges = 0;
+        int elbows = 0;
         for (float zoom : zooms) {
             canvas.setZoom(zoom);
             for (double fraction : fractions) {
@@ -803,14 +808,33 @@ public class FlowCanvasTest {
                                        + canvas.getScrollY());
                     IntArray out = new IntArray();
                     canvas.edgeSegments(parent, child, out);
-                    assertEquals("an unclipped elbow is three rectangles at zoom " + zoom
-                                 + " scroll " + canvas.getScrollX() + "," + canvas.getScrollY(),
-                                 12, out.size());
+                    // THREE RECTANGLES, OR TWO WHEN THE TWO BOXES SHARE A ROW, AND THE FIXED 12
+                    // HERE WAS #335. A straight edge has no vertical run to draw, and emitting a
+                    // 1x1 one at the corner put a doubled translucent pixel there -- so the count
+                    // is now the shape of the elbow rather than a constant. Same-row edges are
+                    // common: a parent is centred on its subtree band, so the middle child of any
+                    // odd fan and every single-child chain step is one.
+                    boolean straight = out.size() == 8;
+                    assertTrue("an unclipped elbow is three rectangles, or two when its boxes"
+                               + " share a row, at zoom " + zoom + " scroll " + canvas.getScrollX()
+                               + "," + canvas.getScrollY() + "; it was " + (out.size() / 4),
+                               straight || out.size() == 12);
+                    if (straight) {
+                        straightEdges++;
+                    } else {
+                        elbows++;
+                    }
 
-                    // The elbow's last run is horizontal and ends ON the child's left border, so
-                    // the pixel the edge arrives at is its right-hand end.
-                    int arrivalX = out.get(8) + out.get(10);
-                    int arrivalY = out.get(9);
+                    // The elbow's LAST run is horizontal and ends ON the child's left border, so
+                    // the pixel the edge arrives at is that quad's right-hand end.
+                    //
+                    // BY POSITION AND NOT BY A FIXED OFFSET, which is the other half of #335: the
+                    // arrival quad is `out.get(8)` for a three-rectangle elbow and `out.get(4)`
+                    // for a two-rectangle one, and a hardcoded index is wrong for one of them
+                    // whichever is written.
+                    int last = out.size() - 4;
+                    int arrivalX = out.get(last) + out.get(last + 2);
+                    int arrivalY = out.get(last + 1);
                     assertEquals("the edge must arrive inside the child it points at, at zoom "
                                  + zoom + " scroll " + canvas.getScrollX() + ","
                                  + canvas.getScrollY() + " (arrival " + arrivalX + ","
@@ -866,6 +890,9 @@ public class FlowCanvasTest {
                    + " the " + checked + " checked pairs the untransformed coordinates must land"
                    + " somewhere other than the node, or every assertion above would pass on the"
                    + " code #330 is about; it was " + controlled, controlled > 4);
+        assertTrue("both elbow shapes must have been checked, or the count assertion above is an"
+                   + " 'or' with a dead branch: " + straightEdges + " straight, " + elbows
+                   + " bent (#335)", straightEdges > 0 && elbows > 0);
     }
 
     /**
@@ -890,19 +917,34 @@ public class FlowCanvasTest {
     }
 
     /**
-     * The sweep draws every visible edge, through the one conversion, and nothing outside the
-     * canvas.
+     * The sweep draws every edge with a pixel on the canvas, through the one conversion, and
+     * nothing outside it.
      *
      * DRIVES THE PRODUCTION SWEEP. `FlowCanvas.draw` is `sweepEdges(PAINT)` and one line of
      * `super`, so this is the frame's own walk over the culled set with the last hop -- a
      * rectangle to the screen -- swapped for a recorder. `updateVisible` before it is the other
      * half of the same frame.
      *
-     * THE COUNT IS ASSERTED AGAINST `edgeSegments` PER PAIR, which is what makes this a statement
-     * that the sweep uses the seam rather than a second copy of the arithmetic. A sweep that
-     * painted in layout coordinates would not merely draw in the wrong place: at this offset most
-     * of its rectangles fall outside the canvas and are dropped by the clip, so the count itself
-     * moves.
+     * <h2>THE RULE THIS ASSERTS CHANGED WITH #334, AND THE OLD ONE WAS THE DEFECT</h2>
+     *
+     * It used to build its expected set from the VISIBLE boxes, mirroring the sweep's own walk,
+     * and that is exactly the rule #334 is about: an elbow whose two boxes are both off screen
+     * crosses viewports that hold neither, and a test written to the sweep's walk cannot see a
+     * missing one because it is missing from both sides. So the expectation is now stated in terms
+     * of the SEAM instead -- every pair for which `edgeSegments` produces a rectangle at all must
+     * be painted, and nothing else -- which is a statement about what the canvas owes the reader
+     * rather than about how the sweep finds it. Every other claim below is #330's and unchanged.
+     *
+     * THAT IS STILL A COUNT ASSERTED AGAINST `edgeSegments` PER PAIR, which is what makes this a
+     * statement that the sweep uses the seam rather than a second copy of the arithmetic. A sweep
+     * that painted in layout coordinates would not merely draw in the wrong place: at this offset
+     * most of its rectangles fall outside the canvas and are dropped by the clip, so the count
+     * itself moves.
+     *
+     * THE TEST MAY WALK THE WHOLE PLAN AND PRODUCTION MAY NOT. O(plan) per frame is the shape
+     * `FlowCulling` rejected by measurement; O(plan) once in a JUnit run is free, and it is the
+     * only way to state the claim without re-deriving the sweep's own bounds and grading the
+     * sweep against its own reasoning.
      *
      * AND NOTHING LEAVES THE CANVAS, which is the defect the fix would otherwise have introduced.
      * The `Stencil` that keeps the node widgets inside the viewport is applied by
@@ -914,7 +956,7 @@ public class FlowCanvasTest {
      * frame without the clip.
      */
     @Test
-    public void theSweepPaintsEveryVisibleEdgeThroughTheSeamAndNothingOutsideTheCanvas() {
+    public void theSweepPaintsEveryEdgeWithAPixelOnTheCanvasThroughTheSeamAndNothingOutside() {
         // `fan` AND NOT `deepFan`, AND THE FIRST VERSION OF THIS TEST GOT IT WRONG. A deep fan's
         // middle columns are SPARSE: at depth 1 a 3x4 tree has three boxes spread over 2,592
         // pixels of height, so a 300px viewport at zoom 1.37 landed on TWO nodes and the
@@ -940,33 +982,35 @@ public class FlowCanvasTest {
         assertTrue("the sweep must have drawn something: " + recorded.rects.size(),
                    recorded.rects.size() > 6);
 
-        // EXPECTED FROM THE SEAM, pair by pair, over the same walk `sweepEdges` makes: each
-        // visible box's parent edge and each of its children's.
+        // EXPECTED FROM THE SEAM, OVER EVERY EDGE IN THE PLAN. `edgeSegments` clips, so an edge
+        // with no pixel on this canvas produces no rectangle and contributes nothing -- which
+        // makes "what the seam produces" the complete expectation without the test having to
+        // decide for itself which edges are near the viewport. ONCE PER EDGE is asserted by the
+        // count rather than by inspection: `EDGE` is translucent, so a second copy of a line is
+        // 64% opacity where one is 40%, and a double-emitting sweep shows up here as a surplus.
         int expected = 0;
+        int fromOffScreenPairs = 0;
         IntArray out = new IntArray();
-        for (int box = 0; box < canvas.nodeCount(); box++) {
-            if (!canvas.isVisible(box)) {
+        for (int child = 0; child < canvas.nodeCount(); child++) {
+            int parent = canvas.parentOf(child);
+            if (parent < 0) {
                 continue;
             }
-            int parent = canvas.parentOf(box);
-            if (parent >= 0) {
-                canvas.edgeSegments(parent, box, out);
-                expected += out.size() / 4;
-            }
-            for (int child = 0; child < canvas.nodeCount(); child++) {
-                // ONCE PER EDGE, which is the rule `sweepEdges` follows and the reason this
-                // count is worth asserting: a visible child draws the edge from its own side,
-                // and `EDGE` is translucent, so painting it twice is 64% opacity where a line
-                // with one culled end gets 40%.
-                if (canvas.parentOf(child) == box && !canvas.isVisible(child)) {
-                    canvas.edgeSegments(box, child, out);
-                    expected += out.size() / 4;
-                }
+            canvas.edgeSegments(parent, child, out);
+            expected += out.size() / 4;
+            if (out.size() > 0 && !canvas.isVisible(parent) && !canvas.isVisible(child)) {
+                fromOffScreenPairs++;
             }
         }
-        assertEquals("the sweep must paint exactly what edgeSegments produces for the visible"
-                     + " boxes, or it is doing its own arithmetic", expected,
+        assertEquals("the sweep must paint exactly what edgeSegments produces for every edge with"
+                     + " a pixel on the canvas, or it is doing its own arithmetic", expected,
                      recorded.rects.size());
+        // AND THIS FIXTURE MUST CONTAIN THE #334 CASE, or the rule above is the old one wearing a
+        // new name. A 200-leaf fan centres its root thousands of pixels off frame, so the leaves
+        // ABOVE and BELOW the viewport all have a trunk crossing it with neither box on screen.
+        assertTrue("this fixture must contain edges with NEITHER box on screen that still paint,"
+                   + " or the expectation is untestably equal to the visible-boxes one it"
+                   + " replaced (#334); it had " + fromOffScreenPairs, fromOffScreenPairs > 0);
 
         for (int[] rect : recorded.rects) {
             assertTrue("a painted rectangle must be inside the canvas, or the edge is drawn over"
@@ -975,6 +1019,451 @@ public class FlowCanvasTest {
                        rect[0] >= 0 && rect[1] >= 0 && rect[2] > 0 && rect[3] > 0
                        && rect[0] + rect[2] <= 520 && rect[1] + rect[3] <= 300);
         }
+    }
+
+    /**
+     * The production canvas geometry, in one place. #334's measurements were taken at it and mean
+     * nothing at another size: a 612x372 viewport is 2.4 column pitches wide and 11 rows tall, and
+     * both numbers are load-bearing for which boxes end up on screen.
+     */
+    private static final int PROD_WIDTH = 612;
+    private static final int PROD_HEIGHT = 372;
+
+    /**
+     * A trunk crossing the viewport is drawn even when NEITHER of its boxes is on screen.
+     * The witness for #334, at the position it was measured at.
+     *
+     * THE VIEWPORT HOLDS NO NODE AT ALL AND OWES THE READER TWO LINES. `deepFan(3,5)` at zoom 1
+     * scrolled to (0,554) on the production 612x372 canvas: `FlowLayout` centres a parent on the
+     * band its whole SUBTREE spans, so box 1 sits at y=1280 and its own child box 2 at y=416, and
+     * a viewport between them is inside box 2's band, below box 1's row and above box 2's. Before
+     * #334 the sweep walked out from the culled-visible boxes, that set was EMPTY, and the canvas
+     * drew NOTHING -- a blank panel where the trunk telling the reader the branch continues should
+     * be. That is close to the symptom that opened #330 ("stuck on the background") from an
+     * entirely different cause, and it is an ordinary scroll position rather than a corner case.
+     *
+     * THE NUMBERS ARE ASSERTED, NOT JUST THE PRESENCE OF SOMETHING. x=478 is the midpoint of the
+     * gap between columns 1 and 2 -- `(249 + 209 + 498) / 2` -- and the trunk spans the whole
+     * canvas height at this offset because it runs from y=429 to y=1293 through a viewport at
+     * [554, 926). A fix that drew a trunk in the wrong column, or a stub of one, passes a
+     * "something was painted" assertion and fails this.
+     *
+     * AND `drawnLastFrame() == 0` IS THE PRECONDITION THAT MAKES IT #334 RATHER THAN #330. If any
+     * box were on screen the first pass could have reached these edges and the test would be
+     * measuring the wrong mechanism, so the emptiness is asserted rather than assumed -- and it is
+     * also what makes the red so unambiguous: on master the sweep emits zero rectangles here.
+     */
+    @Test
+    public void aTrunkCrossingTheViewportIsDrawnWhenNeitherOfItsBoxesIsOnScreen() {
+        FlowCanvas canvas = inert(PlanTrees.deepFan(3, 5));
+        canvas.pos(0, 0).size(PROD_WIDTH, PROD_HEIGHT);
+        HeadlessLayout.layOut(panelAround(canvas));
+        canvas.setZoom(FlowZoom.DEFAULT);
+        canvas.panTo(0, 554);
+        canvas.updateVisible();
+
+        assertEquals("this is #334's measured case and it requires an EMPTY visible set; a box on"
+                     + " screen would let the visible-box pass reach these edges and the test"
+                     + " would be measuring #330's mechanism instead",
+                     0, canvas.drawnLastFrame());
+        assertEquals("the pan must have landed where the measurement was taken", 554,
+                     canvas.getScrollY());
+
+        RectRecorder recorded = new RectRecorder();
+        canvas.sweepEdges(recorded);
+
+        // THE TRUNK FROM BOX 1 TO BOX 2, which is the row of #334's table with no box on screen.
+        // Box 1 is at y=1280 and box 2 at y=416, so the run goes from y=429 to y=1293 at the
+        // midpoint of the gap between columns 1 and 2 -- layout x `(249 + 209 + 498) / 2` = 478,
+        // which at zoom 1 and scroll x 0 is screen x 478. Against a viewport at [554, 926) what
+        // survives the clip is a one-pixel column down the whole canvas.
+        assertTrue("the trunk from box 1 to box 2 crosses this viewport and must be painted even"
+                   + " though neither box is on screen (#334); the sweep painted "
+                   + describe(recorded.rects),
+                   contains(recorded.rects, new int[] {478, 0, 1, PROD_HEIGHT}));
+        // AND IT IS THE ONLY ONE, WHICH IS WORTH ASSERTING RATHER THAN JUST THE PRESENCE OF IT.
+        // A trunk pass that painted the right line and a hundred wrong ones satisfies the
+        // assertion above, and so does one that emitted this edge twice -- and a doubled
+        // translucent line is a brighter line. The gap to the LEFT of this one carries the box
+        // 0 -> box 1 trunk, and it does NOT cross here: that run spans y 1293..3885, entirely
+        // below the viewport. #334's table has it at the zoom 1.37 and 2.0 rows instead.
+        assertEquals("exactly one edge has a pixel on this canvas at this offset, so the sweep"
+                     + " must paint exactly one rectangle: " + describe(recorded.rects),
+                     1, recorded.rects.size());
+    }
+
+    /**
+     * Every elbow with a pixel on the canvas is swept, at each position #334 measured. The general
+     * witness; {@link #aTrunkCrossingTheViewportIsDrawnWhenNeitherOfItsBoxesIsOnScreen} pins one.
+     *
+     * THE ROWS ARE THE ISSUE'S OWN TABLE, which is the point of writing them down rather than
+     * sweeping a lattice: they were found by scanning viewport positions against a replica of this
+     * layout, every zoom in the range reproduces the defect, and two of them are cases where a
+     * SIBLING'S trunk would have masked it. Masking is why this survived #330's review -- every
+     * child of one parent shares a corner x, so a visible sibling paints the same pixels -- and a
+     * lattice of round-numbered offsets is exactly the sampling that keeps hitting masked cases.
+     *
+     * THE EXPECTATION COMES FROM THE SEAM AND THE WALK IS THE TEST'S, NOT THE SWEEP'S. Asking
+     * `edgeSegments` for every pair in the plan is O(plan) and free in a JUnit run; grading the
+     * sweep against its own idea of which edges are nearby would be grading it against itself,
+     * which is the state #334 was found in. Production keeps its bound and
+     * {@link #theTrunkPassCostsABoundedMultipleOfWhatItPaints} and
+     * {@link #theWideFanIsNotWalkedToRejectIt} are where its two halves are asserted.
+     */
+    @Test
+    public void everyElbowWithAPixelOnTheCanvasIsSweptAtTheMeasuredScrollPositions() {
+        // {breadth, depth, zoom-in-thousandths, scrollX, scrollY}, from #334's measurements.
+        int[][] cases = {
+            {3, 5, 1000, 0, 554},
+            {3, 5, 500, 0, 263},
+            {3, 5, 1370, 0, 1797},
+            {3, 5, 2000, 0, 2654},
+            {2, 8, 1000, 0, 1172},
+        };
+        int crossingsWithBothBoxesOffScreen = 0;
+        for (int[] scenario : cases) {
+            FlowCanvas canvas = inert(PlanTrees.deepFan(scenario[0], scenario[1]));
+            canvas.pos(0, 0).size(PROD_WIDTH, PROD_HEIGHT);
+            HeadlessLayout.layOut(panelAround(canvas));
+            canvas.setZoom(scenario[2] / 1000.0f);
+            canvas.panTo(scenario[3], scenario[4]);
+            canvas.updateVisible();
+
+            RectRecorder recorded = new RectRecorder();
+            canvas.sweepEdges(recorded);
+
+            String where = "deepFan(" + scenario[0] + "," + scenario[1] + ") at zoom "
+                           + canvas.zoom() + " scroll " + canvas.getScrollX() + ","
+                           + canvas.getScrollY();
+            int expected = 0;
+            int offScreenPairs = 0;
+            IntArray out = new IntArray();
+            for (int child = 0; child < canvas.nodeCount(); child++) {
+                int parent = canvas.parentOf(child);
+                if (parent < 0) {
+                    continue;
+                }
+                canvas.edgeSegments(parent, child, out);
+                if (out.size() == 0) {
+                    continue;
+                }
+                expected += out.size() / 4;
+                if (!canvas.isVisible(parent) && !canvas.isVisible(child)) {
+                    offScreenPairs++;
+                }
+                for (int i = 0; i + 3 < out.size(); i += 4) {
+                    int[] rect = {out.get(i), out.get(i + 1), out.get(i + 2), out.get(i + 3)};
+                    assertTrue("this elbow has a pixel on the canvas and must be swept: box "
+                               + parent + " -> " + child + " wants "
+                               + java.util.Arrays.toString(rect) + " at " + where + " (#334)",
+                               contains(recorded.rects, rect));
+                }
+            }
+            assertEquals("and the sweep must paint nothing beyond them, or an edge is drawn twice"
+                         + " and a translucent line composites brighter, at " + where,
+                         expected, recorded.rects.size());
+            assertTrue("every one of these positions was measured as having a crossing edge with"
+                       + " neither box on screen, and " + where + " has none -- so the fixture or"
+                       + " the geometry has moved and this row no longer tests #334",
+                       offScreenPairs > 0);
+            crossingsWithBothBoxesOffScreen += offScreenPairs;
+        }
+        assertTrue("the five measured positions must between them cover several crossings, or this"
+                   + " is one case wearing five names: " + crossingsWithBothBoxesOffScreen,
+                   crossingsWithBothBoxesOffScreen >= 5);
+    }
+
+    /**
+     * The trunk pass costs a bounded multiple of what it paints, at every zoom and offset.
+     *
+     * THE CONSTRAINT #334 HAD TO BE FIXED WITHIN, AND IT IS THE REASON THE SUBTREE BANDS ARE THE
+     * QUERY. Enumerating every box in the two columns a viewport straddles would also have found
+     * the missing trunks, and it is O(plan) per frame -- the shape `FlowCulling`'s header rejected
+     * by measurement when it declined BetterQuesting's spatial hash grid, on a package with a
+     * 60 fps panning gate. So the number that matters is not "is it fast on this host" but "does a
+     * frame's work depend on how big the plan is", and `FlowCulling.bandsExamined` is what makes
+     * that answerable by a test rather than by a stopwatch.
+     *
+     * THE BOUND IS DERIVED, NOT CALIBRATED. Bands at one depth are disjoint and at least one
+     * `ROW_PITCH` apart, so a viewport of height H overlaps at most `H / ROW_PITCH + 2` per depth,
+     * and the pass looks at one depth per column gap it straddles. A 4,000-node plan and a 40-node
+     * plan must therefore give the SAME bound, which is what the two fixtures below check: a
+     * constant that happened to hold for the big one would pass a threshold and say nothing.
+     *
+     * `deepFan(3,6)` IS 1,093 BOXES AND `chain(30)` IS 30, and the second is not filler. A chain
+     * has one box per depth, so every column's band walk returns exactly one box -- which is the
+     * case where a pass that accidentally scanned a whole column would still look cheap, and the
+     * ratio assertion is what separates them.
+     */
+    @Test
+    public void theTrunkPassCostsABoundedMultipleOfWhatItPaints() {
+        PlanNode[] fixtures = {PlanTrees.deepFan(3, 6), PlanTrees.chain(30)};
+        for (PlanNode tree : fixtures) {
+            FlowCanvas canvas = inert(tree);
+            canvas.pos(0, 0).size(PROD_WIDTH, PROD_HEIGHT);
+            HeadlessLayout.layOut(panelAround(canvas));
+            FlowLayout.Laid laid = FlowLayout.of(tree);
+            int examined = 0;
+            int positions = 0;
+            for (float zoom : new float[] {FlowZoom.MIN, FlowZoom.DEFAULT, 1.37f, FlowZoom.MAX}) {
+                canvas.setZoom(zoom);
+                // IN LAYOUT PIXELS, NOT SCREEN ONES, AND THE FIRST VERSION OF THIS BUDGET HAD IT
+                // WRONG. The bands are layout facts and a zoomed-out viewport covers more of them
+                // for the same canvas: at `FlowZoom.MIN` a 372px canvas is 744 layout pixels, so a
+                // budget derived from 372 is half the honest one and the assertion would fail
+                // against correct code at the one zoom that stresses it hardest.
+                // PLUS THE PASS'S OWN ONE-PIXEL SLACK ON EACH SIDE, which `FlowCanvas.SLACK`
+                // documents: `FlowZoom.toScreen` rounds, so a point one layout pixel outside the
+                // viewport can still land on a border row and the pass has to consider it.
+                int layoutHeight = (int) Math.ceil(PROD_HEIGHT / (double) zoom) + 2;
+                int layoutWidth = (int) Math.ceil(PROD_WIDTH / (double) zoom) + 2;
+                // At most one column gap per depth the viewport straddles, and at most this many
+                // disjoint bands within each -- the +2 on each is the partial one at either end.
+                int gaps = layoutWidth / FlowLayout.COLUMN_PITCH + 2;
+                int perDepth = layoutHeight / (FlowLayout.NODE_HEIGHT + FlowLayout.ROW_GAP) + 2;
+                // PLUS TWO PER GAP for the search itself and the band the walk stops on, both of
+                // which the counter sees. Stated rather than absorbed into a fudge factor.
+                int budget = gaps * (perDepth + 2);
+                for (double fraction : new double[] {0.0, 0.17, 0.5, 0.83, 1.0}) {
+                    canvas.panToFraction(fraction, fraction);
+                    canvas.updateVisible();
+                    canvas.sweepEdges(new RectRecorder());
+                    assertTrue("the trunk pass must examine a bounded multiple of what a viewport"
+                               + " can hold and NOT a share of the plan: " + laid.size()
+                               + " boxes, " + gaps + " column gaps x " + (perDepth + 2)
+                               + " bands = budget " + budget + ", examined "
+                               + canvas.bandsExamined() + " at zoom " + zoom + " fraction "
+                               + fraction + " (#334)",
+                               canvas.bandsExamined() <= budget);
+                    examined += canvas.bandsExamined();
+                    positions++;
+                }
+            }
+            assertTrue("the pass must actually have run at these positions, or the bound above is"
+                       + " satisfied by doing nothing: examined " + examined + " over " + positions
+                       + " positions on a " + laid.size() + "-box plan", examined > 0);
+        }
+    }
+
+    /**
+     * The trunk pass does not walk a parent's children in order to reject them.
+     *
+     * THE HALF OF THE COST THE BAND COUNTER CANNOT SEE, and leaving it unasserted was a real gap
+     * in the test above rather than a theoretical one. The band walk is bounded by the viewport
+     * whatever the plan holds -- and a single band-overlapping parent can have two hundred
+     * children, so a pass that then tests every one of them to find the crossing ones has put the
+     * plan's own breadth back into the frame while `bandsExamined` still reports three. Deleting
+     * the per-parent binary search leaves the band budget above satisfied and fails this.
+     *
+     * `fan(200)` AT SCROLL Y 1500, AND THE OFFSET IS MEASURED RATHER THAN PICKED FOR LOOKING
+     * CENTRAL. The root's band is the whole layout so it always overlaps, and its children are
+     * split by the viewport -- the half on the crossing side is what has to be painted and the
+     * half that is not is what a naive walk would pay for. But the root sits at the CENTRE of its
+     * own band, so at the obvious "middle of the diagram" offset (fraction 0.5, scroll y 3011) the
+     * root is ON SCREEN, the pass skips it entirely and does no work at all. A test written there
+     * asserts a bound on nothing. Replicated across offsets at this geometry:
+     *
+     * <pre>
+     *   scrollY   root on screen   considered   painted   a naive walk would consider
+     *        0             no              12         0                           200
+     *     1500             no              59        47                           200
+     *     2400             no              87        75                           200
+     *     3011            YES               0         0                             0
+     * </pre>
+     *
+     * 1500 is the first of those where the pass both runs and paints a substantial number, so it
+     * is the one where the assertion has something to bite on.
+     *
+     * THE BOUND IS `painted + drawnLastFrame` AND IT IS DERIVED, NOT CALIBRATED -- and it is
+     * EXACTLY MET at every offset above, so it has no slack to hide a regression in. Every child
+     * the search hands back has an edge that genuinely crosses, so it is either painted or skipped
+     * for being on screen, and the on-screen ones are exactly what the first pass drew. Anything
+     * above that sum is work spent on edges that were never going to be drawn.
+     *
+     * AND `painted` MUST MEAN "PUT A RECTANGLE ON THE CANVAS", WHICH THE FIRST VERSION OF THIS DID
+     * NOT. It counted calls into `edge`, and the mutation this assertion exists to catch -- delete
+     * the per-parent binary search -- makes the pass hand 188 edges to `edge` instead of 59, of
+     * which `edgeSegments` clips 141 away to nothing. So `painted` rose with `considered`, the sum
+     * absorbed the waste and the mutation PASSED. Measured, not foreseen: the mutation was run,
+     * reported BUILD SUCCESSFUL, and that is the only reason the counter was fixed. A counter that
+     * grows with the waste it detects is not a counter.
+     *
+     * ITS OWN `@Test` AND NOT A SUBROUTINE OF THE BUDGET TEST ABOVE, AND THE MUTATION EVIDENCE IS
+     * WHAT SETTLED IT. Called from the end of that method, this claim never ran when the band
+     * budget failed first, and a green report never named it -- but the measured harm is
+     * attribution: mutation A deletes the per-parent binary search, which is THIS assertion's
+     * subject, and the failure was reported as
+     * `theTrunkPassCostsABoundedMultipleOfWhatItPaints FAILED`. A log line naming the wrong claim
+     * sends the next reader to the wrong bound.
+     */
+    @Test
+    public void theWideFanIsNotWalkedToRejectIt() {
+        FlowCanvas canvas = inert(PlanTrees.fan(200));
+        canvas.pos(0, 0).size(PROD_WIDTH, PROD_HEIGHT);
+        HeadlessLayout.layOut(panelAround(canvas));
+        canvas.setZoom(FlowZoom.DEFAULT);
+        canvas.panTo(0, 1500);
+        canvas.updateVisible();
+        assertEquals("the offset in this test's table is the one the numbers were measured at",
+                     1500, canvas.getScrollY());
+        assertFalse("and the root must be OFF screen at it, or the pass skips it and this"
+                    + " asserts a bound on no work at all", canvas.isVisible(canvas.rootBox()));
+        canvas.sweepEdges(new RectRecorder());
+
+        assertTrue("this fixture must give the trunk pass real work, or the bound below is"
+                   + " satisfied by doing nothing: it painted " + canvas.trunkEdgesPainted()
+                   + " of 200 (#334)", canvas.trunkEdgesPainted() > 10);
+        assertTrue("the trunk pass must not walk a parent's children to reject them: it"
+                   + " considered " + canvas.trunkEdgesConsidered() + " edges to paint "
+                   + canvas.trunkEdgesPainted() + " with " + canvas.drawnLastFrame()
+                   + " boxes on screen, over a 200-child root (#334)",
+                   canvas.trunkEdgesConsidered()
+                       <= canvas.trunkEdgesPainted() + canvas.drawnLastFrame());
+    }
+
+    /**
+     * No two rectangles of one edge overlap, at any zoom and either direction. The witness for
+     * #335.
+     *
+     * `EDGE` IS `0x66FFFFFF` AND AN OVERLAP IS THEREFORE VISIBLE. `GuiDraw.drawRect` goes through
+     * `Platform.setupDrawColor`, which calls `GlStateManager.enableBlend`, so a pixel painted
+     * twice composites to about 64% opacity against 40% for one painted once -- the same
+     * arithmetic `FlowCanvas.sweepEdges` draws each edge exactly once for, one level down. There
+     * were two overlaps and both were at the corner:
+     *
+     * <ul>
+     * <li>A SAME-ROW EDGE emitted a 1x1 vertical run that was a strict subset of the arrival
+     *     horizontal, so every straight edge had a brighter dot at the midpoint of its column gap.
+     * <li>A CHILD ABOVE ITS PARENT doubled the corner pixel and a child BELOW did not, so the
+     *     artifact was asymmetric with direction.
+     * </ul>
+     *
+     * BOTH DIRECTIONS AND BOTH SHAPES ARE COUNTED RATHER THAN ASSUMED, because the asymmetry is
+     * the whole reason the second one survived: a fixture that only ever runs downward passes on
+     * the code #335 is about. `deepFan` gives both -- a parent centred on its subtree band sits
+     * above its later children and below its earlier ones -- and the counts below fail if any of
+     * the three cases stopped being exercised.
+     *
+     * AND THE ELBOW MUST STAY CONNECTED, which is the defect the obvious fix introduces. Deleting
+     * the vertical run's overlapping pixel is one edit away from deleting the pixel that joins it
+     * to a horizontal, and the result is an elbow with a one-pixel notch at the corner -- invisible
+     * in a screenshot at these sizes and wrong. So every rectangle after the first must touch one
+     * that came before it.
+     */
+    @Test
+    public void noTwoRectanglesOfOneEdgeOverlapAtAnyZoom() {
+        FlowCanvas canvas = inert(PlanTrees.deepFan(3, 4));
+        canvas.pos(0, 0).size(PROD_WIDTH, PROD_HEIGHT);
+        HeadlessLayout.layOut(panelAround(canvas));
+
+        int sameRow = 0;
+        int childAbove = 0;
+        int childBelow = 0;
+        IntArray out = new IntArray();
+        for (float zoom : new float[] {FlowZoom.MIN, FlowZoom.LABEL_LEGIBLE, FlowZoom.DEFAULT,
+                                      1.37f, FlowZoom.MAX}) {
+            canvas.setZoom(zoom);
+            for (double fraction : new double[] {0.0, 0.31, 0.67}) {
+                canvas.panToFraction(fraction, fraction);
+                for (int child = 0; child < canvas.nodeCount(); child++) {
+                    int parent = canvas.parentOf(child);
+                    // BOTH BOXES WHOLLY IN FRAME, so nothing is clipped and the rectangles are the
+                    // whole elbow. A clipped elbow cannot overlap ITSELF differently, but a
+                    // dropped segment would make the connectivity assertion below vacuous.
+                    if (parent < 0 || !canvas.fullyShowing(parent)
+                            || !canvas.fullyShowing(child)) {
+                        continue;
+                    }
+                    canvas.edgeSegments(parent, child, out);
+                    int[] parentRect = canvas.boxRectOnScreen(parent);
+                    int[] childRect = canvas.boxRectOnScreen(child);
+                    int parentMid = parentRect[1] + parentRect[3] / 2;
+                    int childMid = childRect[1] + childRect[3] / 2;
+                    if (childMid == parentMid) {
+                        sameRow++;
+                    } else if (childMid < parentMid) {
+                        childAbove++;
+                    } else {
+                        childBelow++;
+                    }
+
+                    String where = "box " + parent + " -> " + child + " at zoom " + zoom
+                                   + " scroll " + canvas.getScrollX() + "," + canvas.getScrollY();
+                    for (int a = 0; a + 3 < out.size(); a += 4) {
+                        for (int b = a + 4; b + 3 < out.size(); b += 4) {
+                            assertFalse("two rectangles of one edge overlap, so a translucent line"
+                                        + " composites brighter there: "
+                                        + quad(out, a) + " and " + quad(out, b) + " for " + where
+                                        + " (#335)",
+                                        overlaps(out, a, b));
+                        }
+                        assertTrue("every run of an unclipped elbow must touch one before it, or"
+                                   + " the corner has a notch: " + quad(out, a) + " for " + where,
+                                   a == 0 || touchesEarlier(out, a));
+                    }
+                }
+            }
+        }
+        assertTrue("all three cases must be exercised, or #335's asymmetry is untested: "
+                   + sameRow + " same-row, " + childAbove + " child above, " + childBelow
+                   + " child below", sameRow > 0 && childAbove > 0 && childBelow > 0);
+    }
+
+    /** The quad at `at` in a segment list, as {x, y, width, height} text. */
+    private static String quad(IntArray segments, int at) {
+        return "[" + segments.get(at) + "," + segments.get(at + 1) + " "
+               + segments.get(at + 2) + "x" + segments.get(at + 3) + "]";
+    }
+
+    /** Whether the quads at `a` and `b` share a pixel. Half-open on both axes. */
+    private static boolean overlaps(IntArray segments, int a, int b) {
+        return segments.get(a) < segments.get(b) + segments.get(b + 2)
+               && segments.get(b) < segments.get(a) + segments.get(a + 2)
+               && segments.get(a + 1) < segments.get(b + 1) + segments.get(b + 3)
+               && segments.get(b + 1) < segments.get(a + 1) + segments.get(a + 3);
+    }
+
+    /**
+     * Whether the quad at `at` touches any quad before it, sharing a pixel edge.
+     *
+     * TOUCHING AND NOT OVERLAPPING, which is the pair of properties an elbow has to have at once:
+     * the runs must join without doubling a pixel. Expanding by one pixel on each side and asking
+     * for an intersection is adjacency, since `overlaps` is exclusive at the far edges.
+     */
+    private static boolean touchesEarlier(IntArray segments, int at) {
+        for (int before = 0; before < at; before += 4) {
+            if (segments.get(at) <= segments.get(before) + segments.get(before + 2)
+                    && segments.get(before) <= segments.get(at) + segments.get(at + 2)
+                    && segments.get(at + 1) <= segments.get(before + 1) + segments.get(before + 3)
+                    && segments.get(before + 1) <= segments.get(at + 1) + segments.get(at + 3)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether `rects` holds `wanted`. See {@link RectRecorder}. */
+    private static boolean contains(java.util.List<int[]> rects, int[] wanted) {
+        for (int[] rect : rects) {
+            if (java.util.Arrays.equals(rect, wanted)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A recorded rectangle list, for a failure message.
+     *
+     * TRUNCATED, because a sweep gone wrong can record thousands and a JUnit message that long is
+     * unreadable in a CI log -- and the count is the part that says which failure it is.
+     */
+    private static String describe(java.util.List<int[]> rects) {
+        StringBuilder text = new StringBuilder(rects.size() + " rectangles");
+        for (int i = 0; i < rects.size() && i < 12; i++) {
+            text.append(i == 0 ? ": " : ", ").append(java.util.Arrays.toString(rects.get(i)));
+        }
+        return rects.size() > 12 ? text + ", ..." : text.toString();
     }
 
     /**

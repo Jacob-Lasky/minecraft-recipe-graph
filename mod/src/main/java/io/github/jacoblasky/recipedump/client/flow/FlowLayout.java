@@ -96,13 +96,40 @@ public final class FlowLayout {
         public final int depth;
         public final int x;
         public final int y;
+        /**
+         * The top and bottom of the row band this box's whole SUBTREE occupies, in layout
+         * pixels, measured like {@link #y} to the top of a node rather than to its centre. A
+         * leaf's band is its own row, so `bandTop == bandBottom == y`.
+         *
+         * KEPT RATHER THAN DISCARDED, AND #334 IS WHAT IT COST WHEN IT WAS DISCARDED. `of` has
+         * always computed these -- {@link #y} is their midpoint -- and it used to drop them
+         * on the floor, which left the canvas with no cheap way to ask "which edges cross this
+         * viewport". It could only ask "which BOXES are in it" and walk their edges, and an
+         * elbow whose two boxes are both off screen crosses viewports that hold neither. See
+         * `FlowCanvas.sweepTrunks`.
+         *
+         * <h2>AT A FIXED DEPTH THESE BANDS ARE DISJOINT AND ASCENDING, which is the property the
+         * query rests on</h2>
+         *
+         * Two boxes at the same depth head different subtrees, so their leaf-row ranges do not
+         * intersect, and `walk` emits siblings in child order -- so within one column the
+         * bands are ordered as well as disjoint. That makes "which boxes at this depth have a
+         * band overlapping this y-range" a binary search plus a walk of the answer, and it
+         * bounds the answer's SIZE too: consecutive bands in a column are at least one row pitch
+         * apart, so a viewport of height H overlaps at most `H / ROW_PITCH + 2` of them whatever
+         * the plan contains. {@link FlowCulling} enforces the ordering rather than assuming it.
+         */
+        public final int bandTop;
+        public final int bandBottom;
 
-        Box(PlanNode node, int parent, int depth, int x, int y) {
+        Box(PlanNode node, int parent, int depth, int x, int y, int bandTop, int bandBottom) {
             this.node = node;
             this.parent = parent;
             this.depth = depth;
             this.x = x;
             this.y = y;
+            this.bandTop = bandTop;
+            this.bandBottom = bandBottom;
         }
 
         public int right() {
@@ -118,9 +145,16 @@ public final class FlowLayout {
      * A box at an arbitrary position, for tests that need a layout this class would not
      * produce -- specifically an off-grid one, to prove {@link FlowCulling} rejects it.
      * Nothing in production should build a box by hand.
+     *
+     * THE BAND IS PASSED IN RATHER THAN DERIVED FROM `y`, because {@link FlowCulling} now
+     * checks that a column's bands ascend as well as its rows. Synthesising a degenerate
+     * `[y, y]` band here would satisfy that check for free and leave the caller's fixture
+     * making a claim about a layout this class would never produce -- which is the one thing
+     * a hand-built box exists to avoid.
      */
-    static Box boxAt(PlanNode node, int parent, int depth, int x, int y) {
-        return new Box(node, parent, depth, x, y);
+    static Box boxAt(PlanNode node, int parent, int depth, int x, int y,
+                     int bandTop, int bandBottom) {
+        return new Box(node, parent, depth, x, y, bandTop, bandBottom);
     }
 
     /** A laid-out plan: every box, and the extent they occupy. */
@@ -221,7 +255,7 @@ public final class FlowLayout {
         int maxDepth = 0;
         for (int i = 0; i < nodes.size(); i++) {
             boxes.add(new Box(nodes.get(i), parents.get(i), depths.get(i),
-                    depths.get(i) * COLUMN_PITCH, y[i]));
+                    depths.get(i) * COLUMN_PITCH, y[i], bandTop[i], bandBottom[i]));
             maxY = Math.max(maxY, y[i]);
             maxDepth = Math.max(maxDepth, depths.get(i));
         }

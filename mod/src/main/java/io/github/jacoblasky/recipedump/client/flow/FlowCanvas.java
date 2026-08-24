@@ -886,9 +886,74 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      */
     private final boolean[] onScreen;
 
+    /**
+     * The viewport {@link #updateVisible} last culled against, in LAYOUT pixels.
+     *
+     * THE CULLER'S OWN RECTANGLE, ROUNDED OUTWARD, and the rounding is what makes
+     * {@link #sweepTrunks}'s reasoning sound rather than nearly sound.
+     * {@link FlowZoom#layoutOrigin} floors and {@link FlowZoom#layoutExtent} ceils, so this covers
+     * every layout pixel the screen viewport touches -- which means anything with a pixel on this
+     * canvas is inside it, and a trunk pass that skips an edge outside it cannot be skipping an
+     * edge that would have painted.
+     * Rounding inward instead would drop edges along two borders at non-integer zooms only, which
+     * is the failure shape `FlowZoom`'s own header was written about.
+     */
+    private int viewLayoutX;
+    private int viewLayoutY;
+    private int viewLayoutWidth;
+    private int viewLayoutHeight;
+
     /** How many were drawn last frame. The culling claim, readable from a test or a log. */
     public int drawnLastFrame() {
         return visible.size();
+    }
+
+    /**
+     * Subtree bands {@link #sweepTrunks} looked at this frame. The trunk pass's cost, in one
+     * number, and the same argument {@link #drawnLastFrame} makes.
+     *
+     * THE CLAIM #334 HAD TO KEEP IS ALGORITHMIC AND THIS IS HOW IT IS OBSERVED. "The frame is
+     * still fast" depends on the host and the rasteriser; "a frame SEARCHES a bounded multiple of
+     * what a viewport can hold, whatever the plan contains" does not. `FlowCanvasTest` reads this
+     * against a budget derived from the viewport rather than calibrated to a measurement.
+     *
+     * <h2>IT IS THE SEARCH THAT IS BOUNDED BY THE VIEWPORT, NOT THE PAINTING, AND THIS NOTE USED
+     * TO SAY THIS NUMBER DECIDES THE 60 FPS GATE. IT DOES NOT.</h2>
+     *
+     * What a frame paints is proportional to what CROSSES the viewport, and on a wide fan that is
+     * a share of the plan rather than of the viewport -- because every child of one parent shares
+     * a corner x, so a fan whose parent is off frame owes the canvas one trunk per child and they
+     * all land in the same one-pixel column. Measured on a replica of this layout and this
+     * conversion, 612x372, viewport parked where no box is
+     * (`evidence-334-335/review/worstcase.py`):
+     *
+     * <pre>
+     *   fixture      zoom  scrollY   boxes   bands  considered  painted
+     *   fan(4000)     1.0    31905    4001       2         997      997
+     *   fan(4000)     2.0    63904    4001       2         998      998
+     *   fan(200)      1.0     1505     201       2          47       47
+     *   deepFan(3,7)  1.0    17401    3280       5           2        2
+     * </pre>
+     *
+     * `bandsExamined` is 2 in the 4,000-box row: the search really is bounded, and it is what this
+     * counter is for. `painted` is 997, a quarter of the plan, and NOTHING here bounds it -- every
+     * one of those edges genuinely has a pixel on this canvas, so drawing them is correct and #334
+     * is the defect of not drawing them.
+     *
+     * DO NOT READ THAT AS A REGRESSION THIS PASS INTRODUCED, because master already had frames of
+     * that shape: with the fan's parent ON screen, {@link #sweepEdges}'s first pass draws all
+     * 4,000 edges from the parent's side, and it always did. What #334 changed is that the same
+     * cost now also occurs at offsets where the parent is off frame. Same order, more positions.
+     *
+     * WHAT IS ACTUALLY UNTESTED IS THE PAINT COUNT AT THE SIZE THE GATE IS MEASURED AT.
+     * `FlowCulling`'s header pins the 60 fps panning gate to `DEFAULT_MAX_NODES` = 4,000, and the
+     * widest fixture any cost test here uses is `fan(200)`. If panning ever misses the frame on a
+     * wide fan, the fix is to coalesce the trunks of one parent into a single run per column gap
+     * -- they are collinear by construction -- and NOT to narrow this search, which is already
+     * bounded and is not what costs.
+     */
+    public int bandsExamined() {
+        return culling.bandsExamined();
     }
 
     /**
@@ -960,11 +1025,18 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
         // pixels. `FlowZoom` rounds the two edges outward; passing `getScrollX() / zoom` and
         // `width / zoom` directly rounds both inward and hides a strip of nodes along the
         // right and bottom edges at any zoom that is not a whole number.
+        //
+        // AND KEPT, because {@link #sweepTrunks} asks a second question of the same rectangle
+        // and the two must be the same rectangle. Recomputing it there would be four more calls
+        // that agree today and are one edit away from a sweep culling against a viewport the
+        // culler never saw -- the #191 two-definitions shape, and here it would show up as an
+        // edge drawn or dropped for a viewport nothing is looking at.
+        viewLayoutX = FlowZoom.layoutOrigin(getScrollX(), zoom);
+        viewLayoutY = FlowZoom.layoutOrigin(getScrollY(), zoom);
+        viewLayoutWidth = FlowZoom.layoutExtent(getScrollX(), getArea().width, zoom);
+        viewLayoutHeight = FlowZoom.layoutExtent(getScrollY(), getArea().height, zoom);
         IntArray shown = culling.visibleIn(
-                FlowZoom.layoutOrigin(getScrollX(), zoom),
-                FlowZoom.layoutOrigin(getScrollY(), zoom),
-                FlowZoom.layoutExtent(getScrollX(), getArea().width, zoom),
-                FlowZoom.layoutExtent(getScrollY(), getArea().height, zoom));
+                viewLayoutX, viewLayoutY, viewLayoutWidth, viewLayoutHeight);
         for (IWidget widget : visible) {
             widget.setEnabled(false);
         }
@@ -1001,9 +1073,12 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * viewport stack; this method gets neither, so an edge drawn in layout coordinates stays
      * where the diagram was at scroll 0 and zoom 1. See {@link #edgeSegments}.
      *
-     * Only edges with a VISIBLE endpoint are drawn, WHICH IS NOT THE SAME THING AS every edge
-     * that crosses the viewport. The note this replaces said it was. See {@link #sweepEdges}
-     * for the case it is not, which is issue #334 and is not #330.
+     * EVERY EDGE THAT CROSSES THE VIEWPORT IS DRAWN, WHICH IS NOT THE SAME THING AS every edge
+     * with a VISIBLE ENDPOINT -- and it took two goes to get this note right. It first claimed the
+     * two sets were the same; #334 measured that they are not, and this replaced that with an
+     * accurate description of a defect that was still open. Both sets are now covered, by
+     * {@link #sweepEdges} for the edges with a box on screen and by {@link #sweepTrunks} for the
+     * ones with neither, and that pair is where the argument lives.
      */
     @Override
     public void draw(ModularGuiContext context, WidgetThemeEntry<?> widgetTheme) {
@@ -1032,21 +1107,23 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * band its whole SUBTREE spans, so a parent and one of its own children can be thousands of
      * pixels apart, and a viewport between them -- inside that child's band, below the parent's
      * row and above the child's -- holds neither box while the elbow's vertical run crosses it.
-     * That trunk is not drawn. Measured on a replica of this layout: `deepFan(3,5)` at zoom 1
-     * scrolled to (0,554) has NO box on screen and two trunks that should cross it.
+     * Measured: `deepFan(3,5)` at zoom 1 scrolled to (0,554) has NO box on screen and two trunks
+     * that should cross it, and before #334 it drew nothing at all there.
      *
-     * IT IS USUALLY MASKED RATHER THAN ABSENT, which is why it took until #330's review to see:
+     * IT WAS USUALLY MASKED RATHER THAN ABSENT, which is why it took until #330's review to see:
      * every child of one parent shares the same corner x, so a visible sibling's trunk paints
      * the same pixels. Nothing guarantees a visible sibling.
      *
-     * NOT FIXED HERE, AND WIDENING THIS WALK CANNOT FIX IT -- the visible set can be empty, so
-     * no walk that starts from it reaches the edge. #334 has the measurements and the shape of
-     * the answer: the per-depth subtree bands `FlowLayout` computes and then discards are
-     * disjoint at a fixed depth, so the crossing parents can be found in O(1) per depth.
+     * SO THIS IS TWO PASSES, AND WIDENING THE FIRST ONE COULD NOT HAVE DONE IT -- the visible set
+     * is EMPTY in the measured case, so no walk starting from it reaches the edge at all. The
+     * second pass is {@link #sweepTrunks} and it starts from the subtree bands instead; the
+     * culling philosophy is intact and the bound is stated and tested there.
      *
-     * WHAT IS DRAWN IS EXACTLY ONCE PER EDGE, which the walk this replaces was not. An edge
-     * belongs to its CHILD, so a child that is on screen draws it and the parent's side skips
-     * it; see the note in the loop for what the second copy of a translucent line looked like.
+     * WHAT IS DRAWN IS EXACTLY ONCE PER EDGE, which the walk this replaces was not, and the two
+     * passes partition the edges rather than overlapping. An edge belongs to its CHILD, so a
+     * child that is on screen draws it and the parent's side skips it; see the note in the loop
+     * for what the second copy of a translucent line looked like. {@link #sweepTrunks} then takes
+     * only edges with NEITHER box on screen, which is exactly what this pass cannot reach.
      */
     void sweepEdges(RectSink sink) {
         for (int i = 0; i < visibleBoxes.size(); i++) {
@@ -1069,6 +1146,231 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
                 }
             }
         }
+        sweepTrunks(sink);
+    }
+
+    /**
+     * Layout pixels of slack the trunk pass allows itself around the viewport, on both axes.
+     *
+     * BECAUSE {@link FlowZoom#toScreen} ROUNDS AND {@link #viewLayoutX} FLOORS, AND ONE PIXEL IS
+     * ENOUGH. A layout point maps to `round(y * zoom) - scroll`, so a point up to `0.5 / zoom`
+     * ABOVE the viewport still lands on screen row 0; `FlowZoom.MIN` is 0.5, so that overshoot is
+     * at most one layout pixel and this covers it at every zoom the canvas allows.
+     *
+     * INSURANCE AGAINST THAT ARITHMETIC, NOT A FIX FOR AN OBSERVED DROP, and it is worth being
+     * exact about which. A replica of this layout and this conversion was swept over 420 viewport
+     * positions across five zooms and four fixtures and found NO edge that the exact bound would
+     * have missed -- so nothing here was measured going wrong. What is measured is that the
+     * rounding makes the exact bound depend on the zoom, and a boundary that is correct at four
+     * zooms and one pixel short at `FlowZoom.MIN` is the failure shape `FlowZoom`'s own header was
+     * written about: right in every screenshot anybody would think to take.
+     *
+     * IT CAN ONLY ADD WORK, NEVER WRONG PIXELS. An edge admitted by the slack and genuinely off
+     * canvas is clipped away by {@link #edgeSegments} and contributes no rectangle, so the cost of
+     * being generous here is a few comparisons against a dropped line if the exact bound is ever
+     * one pixel wrong. `FlowCanvasTest.theTrunkPassCostsABoundedMultipleOfWhatItPaints` charges
+     * the slack to the budget rather than letting it hide there.
+     */
+    private static final int SLACK = 1;
+
+    /**
+     * Edges {@link #sweepTrunks} looked at, and how many of them it painted, this frame.
+     *
+     * THE HALF OF THE TRUNK PASS'S COST THAT `bandsExamined` DOES NOT SEE, and the omission was
+     * real: the band walk is bounded by the viewport whatever the plan, but a band-overlapping
+     * parent can have four thousand children and the per-parent binary search is the only thing
+     * stopping the near-side half of them being walked in order to reject them. A counter on the
+     * bands alone is satisfied by a pass that then does O(plan) work one level down, which is
+     * exactly the shape being avoided.
+     *
+     * SO THE CLAIM IS `considered` MINUS `painted` IS SMALL, not that either is. Every child the
+     * search hands back has an edge that crosses this viewport, so it is either painted or skipped
+     * for being on screen -- and the on-screen ones are bounded by {@link #drawnLastFrame}.
+     * `FlowCanvasTest.theWideFanIsNotWalkedToRejectIt` asserts that difference on `fan(200)`,
+     * which is the wide-fan case the binary search exists for. NOT
+     * `theTrunkPassCostsABoundedMultipleOfWhatItPaints`, which is the BAND budget and is satisfied
+     * by a pass that then does O(plan) work one level down -- the two claims are separate tests
+     * because a failure has to name the bound it broke.
+     *
+     * <h2>`painted` COUNTS EDGES THAT PRODUCED A RECTANGLE, NOT CALLS TO {@link #edge}, AND THE
+     * DIFFERENCE IS WHY THE FIRST VERSION OF THIS COUNTER WAS USELESS</h2>
+     *
+     * MEASURED, BY MUTATION, AND THE MUTATION PASSED. With the per-parent binary search deleted
+     * the pass considered all 200 children instead of 59 -- and it also HANDED all 188 off-screen
+     * ones to `edge`, where `edgeSegments` clipped 141 of them away to nothing. Counting calls,
+     * `painted` rose in lockstep with `considered` (200 <= 188 + 12) and the assertion held while
+     * the pass did three times the work. Counting rectangles it does not: 200 against 47 + 12.
+     *
+     * A counter that grows with the waste it is supposed to detect measures nothing, and the only
+     * reason this was found is that the mutation was actually run rather than reasoned about.
+     */
+    private int trunkEdgesConsidered;
+    private int trunkEdgesPainted;
+
+    /** Edges the trunk pass looked at this frame. See {@link #trunkEdgesConsidered}. */
+    public int trunkEdgesConsidered() {
+        return trunkEdgesConsidered;
+    }
+
+    /**
+     * Edges the trunk pass put at least one rectangle on the canvas for this frame. NOT the
+     * number of edges it looked at, and not the number it called {@link #edge} for. See
+     * {@link #trunkEdgesConsidered}.
+     */
+    public int trunkEdgesPainted() {
+        return trunkEdgesPainted;
+    }
+
+    /**
+     * The edges that cross the viewport with NEITHER of their boxes on screen. #334.
+     *
+     * THE SECOND HALF OF THE SWEEP, AND THE FIRST HALF PROVABLY CANNOT REACH THESE.
+     * {@link #sweepEdges} walks out from the culled-visible boxes, and on `deepFan(3,5)` at zoom 1
+     * scrolled to (0,554) that set is EMPTY while two trunks cross the canvas -- so the reader
+     * gets a blank panel where the line telling them the branch continues should be. That is
+     * close to the symptom that opened #330 ("stuck on the background") from a different cause,
+     * and it is an ordinary scroll position on a large plan rather than a corner case.
+     *
+     * <h2>STILL BOUNDED, AND THE BOUND IS THE WHOLE DESIGN CONSTRAINT</h2>
+     *
+     * THE CULLING PHILOSOPHY DOES NOT MOVE: no O(plan) sweep, and the work a frame does is
+     * proportional to what it paints. Enumerating every box in the two columns the viewport
+     * straddles WOULD have been O(plan) -- that is the shape {@link FlowCulling}'s header rejected
+     * by measurement when it declined a spatial hash grid -- so this does not do that either. It
+     * costs, per column gap the viewport straddles:
+     *
+     * <ul>
+     * <li>one binary search over that column's bands, plus a walk of the bands that overlap the
+     *     viewport. `FlowLayout.Box.bandTop` proves that walk is O(1) in the plan: bands at one
+     *     depth are disjoint and a row pitch apart, so a viewport of height H overlaps at most
+     *     `H / ROW_PITCH + 2` of them. At the production 372px canvas that is about a dozen.
+     * <li>one binary search per such parent over its children, and then a walk of ONLY the
+     *     children whose edge really does cross -- every one of which is a line this frame has to
+     *     paint anyway. The binary search is what keeps a wide fan honest: a 200-child root whose
+     *     band overlaps has half its children on the near side of the viewport, and walking those
+     *     to reject them would put the plan's own breadth back into the frame.
+     * </ul>
+     *
+     * `FlowCulling.bandsExamined` counts the first part and
+     * `FlowCanvasTest.theTrunkPassCostsABoundedMultipleOfWhatItPaints` reads it, because "this is
+     * cheap" is a claim a counter can settle and a screenshot cannot.
+     *
+     * <h2>WHY THE BANDS ARE THE RIGHT QUERY, and it is a proof rather than an intuition</h2>
+     *
+     * A box's band contains every row in its subtree, so for any child C of P the whole elbow's
+     * y-range `[min(Py, Cy), max(Py, Cy)]` lies inside P's band. Contrapositive: if P's band
+     * misses the viewport, NO edge out of P can cross it. And if an edge out of P does cross,
+     * P's band overlaps and this walk finds P. Together with the x filter -- an edge spans
+     * exactly one column gap, which is the half of the old comment's argument that was true --
+     * the two passes cover every edge with a pixel on this canvas.
+     *
+     * ITS CHILDREN ARE ASCENDING IN Y, which is what makes the per-parent search possible and is
+     * a property of {@link FlowLayout}'s depth-first walk rather than of a sort: children are
+     * emitted in child order, sibling bands do not overlap, and {@link #childrenOf} is filled by
+     * one ascending pass over the boxes. So the crossing children are a contiguous PREFIX or
+     * SUFFIX of that list and the boundary is a binary search.
+     *
+     * <h2>The three cases, and the third is not dead code</h2>
+     *
+     * With the parent's centre line above the viewport, an edge crosses exactly when the child's
+     * is at or below the viewport's top -- a suffix. Below the viewport, exactly when the child's
+     * is above its bottom -- a prefix. INSIDE the viewport, every child's edge crosses, and that
+     * case is reachable: the parent's own column can be off screen horizontally while the column
+     * GAP is on screen, which is a viewport narrower than a column pitch. Production gives the
+     * canvas 612px and a pitch is 249, so it takes a zoom past 2.4 or a smaller panel -- but a
+     * filter that assumed it away would be an assumption about a caller rather than about the
+     * geometry, and this class already has one comment about what that costs.
+     */
+    private void sweepTrunks(RectSink sink) {
+        trunkEdgesConsidered = 0;
+        trunkEdgesPainted = 0;
+        if (viewLayoutWidth <= 0 || viewLayoutHeight <= 0) {
+            return;
+        }
+        int pitch = FlowLayout.COLUMN_PITCH;
+        // A gap `c` carries the edges from column `c` to column `c + 1`, and the elbow occupies
+        // layout x in [c*pitch + NODE_WIDTH, (c+1)*pitch): the departure horizontal starts at the
+        // parent's right border and the arrival one ends at the child's left. So the gaps that can
+        // matter are the ones whose span meets the viewport, and there are at most as many as
+        // there are visible columns.
+        int firstGap = Math.max(0, Math.floorDiv(viewLayoutX - SLACK, pitch));
+        int lastGap = Math.min(culling.columnCount() - 2, Math.floorDiv(
+                viewLayoutX + viewLayoutWidth - 1 + SLACK - FlowLayout.NODE_WIDTH, pitch));
+        int viewTop = viewLayoutY - SLACK;
+        int viewBottom = viewLayoutY + viewLayoutHeight + SLACK;
+        // THE BAND IS MEASURED TO A NODE'S TOP AND AN EDGE LEAVES ITS CENTRE, so the range asked
+        // of the band index is the viewport shifted back by half a node. Inflating the band
+        // instead would work and would be a fact about boxes stated in `FlowCulling`; the shift
+        // is the same arithmetic on the side that owns the reason for it.
+        int half = FlowLayout.NODE_HEIGHT / 2;
+        for (int gap = firstGap; gap <= lastGap; gap++) {
+            int at = culling.firstBandReaching(gap, viewTop - half);
+            for (int length = culling.columnLength(gap); at < length; at++) {
+                int parent = culling.boxInColumn(gap, at);
+                FlowLayout.Box box = laid.boxes.get(parent);
+                if (box.bandTop + half >= viewBottom) {
+                    break;   // bands ascend, so every band after this one is below too
+                }
+                // ON SCREEN MEANS THE FIRST PASS ALREADY DREW EVERY EDGE OUT OF THIS BOX, from
+                // one side or the other, so taking it again would be the doubled translucent
+                // line `sweepEdges` draws each edge exactly once to avoid.
+                if (onScreen[parent]) {
+                    continue;
+                }
+                emitCrossingChildren(parent, box.y + half, viewTop, viewBottom, sink);
+            }
+        }
+    }
+
+    /**
+     * The edges from `parent` whose vertical run crosses `[viewTop, viewBottom)` and whose child
+     * is off screen, as rectangles handed to `sink`. `parentCentre` is the parent's centre line.
+     *
+     * See {@link #sweepTrunks} for why the answer is a prefix or a suffix of {@link #childrenOf}
+     * and why finding the boundary rather than testing every child is what keeps the frame bounded.
+     */
+    private void emitCrossingChildren(int parent, int parentCentre, int viewTop, int viewBottom,
+                                      RectSink sink) {
+        int[] children = childrenOf[parent];
+        int from = 0;
+        int to = children.length;
+        if (parentCentre < viewTop) {
+            from = firstChildCentreAtOrBelow(children, viewTop);
+        } else if (parentCentre >= viewBottom) {
+            to = firstChildCentreAtOrBelow(children, viewBottom);
+        }
+        for (int i = from; i < to; i++) {
+            int child = children[i];
+            trunkEdgesConsidered++;
+            // THE OTHER HALF OF THE PARTITION. A visible child draws this edge from its own side
+            // in the first pass; only an edge with neither box on screen belongs to this one.
+            if (!onScreen[child] && edge(parent, child, sink) > 0) {
+                trunkEdgesPainted++;
+            }
+        }
+    }
+
+    /**
+     * The offset in `children` of the first one whose centre line is at or below `y`, or
+     * `children.length` when every one of them is above it.
+     *
+     * ASCENDING BY CONSTRUCTION, NOT BY A SORT -- {@link #sweepTrunks} has the argument. A
+     * mis-ordered list here would return a boundary in the middle of the crossing run and drop
+     * trunks silently, which is #334 again with no symptom, so {@link FlowCulling}'s constructor
+     * checks the band ordering the same property rests on.
+     */
+    private int firstChildCentreAtOrBelow(int[] children, int y) {
+        int low = 0;
+        int high = children.length;
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (laid.boxes.get(children[mid]).y + FlowLayout.NODE_HEIGHT / 2 < y) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
     }
 
     /**
@@ -1079,12 +1381,17 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * second copy of this arithmetic here would be the version that is correct, used, and
      * disagrees with what any test could see.
      */
-    private void edge(int parentIndex, int childIndex, RectSink sink) {
+    private int edge(int parentIndex, int childIndex, RectSink sink) {
         edgeSegments(parentIndex, childIndex, segments);
         for (int i = 0; i + 3 < segments.size(); i += 4) {
             sink.rect(segments.get(i), segments.get(i + 1), segments.get(i + 2),
                       segments.get(i + 3));
         }
+        // HOW MANY RECTANGLES REACHED THE SINK, which is a different question from whether this
+        // was called: `edgeSegments` clips, so an edge with nothing on the canvas goes through
+        // here and paints nothing. {@link #trunkEdgesPainted} needs the second answer and
+        // measuring it with the first is what let a mutation of the trunk pass go undetected.
+        return segments.size() / 4;
     }
 
     /** Where {@link #sweepEdges} puts its rectangles. Screen pixels relative to this canvas. */
@@ -1165,6 +1472,38 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * unlike the two ENDS -- which are pinned to a node border, so a probe can say when they are
      * wrong -- nothing pins the corner and nothing would report that pixel. The midpoint of the
      * column gap is a fact about the layout, so it is stated in layout units and converted once.
+     *
+     * <h2>TWO RECTANGLES OR THREE, AND NO TWO OF THEM EVER OVERLAP</h2>
+     *
+     * THE COUNT IS NOT FIXED, and a caller that indexes the arrival quad as `out.get(8)` is
+     * wrong on a same-row edge. Take the LAST quad: the elbow's runs are appended in order and
+     * the arrival horizontal is always the final one. #335 is what the fixed index cost.
+     *
+     * `EDGE` IS TRANSLUCENT, SO AN OVERLAP IS VISIBLE AND THIS USED TO HAVE TWO. `GuiDraw.drawRect`
+     * goes through `Platform.setupDrawColor`, which calls `GlStateManager.enableBlend`, so a
+     * pixel painted twice composites to about 64% opacity against 40% for one painted once --
+     * the same arithmetic {@link #sweepEdges} draws each edge exactly once for. Both overlaps
+     * were at the corner and both are gone:
+     *
+     * <ul>
+     * <li>A SAME-ROW EDGE emitted a 1x1 vertical run at the corner that was a strict subset of
+     *     the arrival horizontal, so every straight edge had a brighter dot at the midpoint of
+     *     its column gap. Those are not exotic: a parent is centred on its subtree band, so the
+     *     middle child of any odd fan and every step of a single-child chain is a straight edge,
+     *     and a recipe tree is mostly chains.
+     * <li>A CHILD ABOVE ITS PARENT doubled the corner pixel, because the vertical run covered
+     *     `[toY, fromY)` -- which includes `toY`, where the arrival horizontal starts. A child
+     *     BELOW covered `[fromY, toY)` and did not. So the artifact was asymmetric with
+     *     direction, which is the kind of thing a screenshot comparison never explains.
+     * </ul>
+     *
+     * THE RULE THAT REPLACES BOTH: THE VERTICAL RUN OWNS THE DEPARTURE ROW AND YIELDS THE
+     * ARRIVAL ROW. It always covers `fromY` and never covers `toY`, whichever way the elbow
+     * goes, so it meets the departure horizontal (which ends one pixel left of the corner) and
+     * stops one row short of the arrival horizontal (which starts at the corner). On a same-row
+     * edge that leaves it empty and the two horizontals abut. That is one statement rather than
+     * a case per direction, and `FlowCanvasTest.noTwoRectanglesOfOneEdgeOverlapAtAnyZoom` reads
+     * it back off the rectangles at every zoom.
      */
     public void edgeSegments(int parentIndex, int childIndex, IntArray out) {
         out.clear();
@@ -1178,8 +1517,28 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
         // An elbow rather than a diagonal: a straight line between two rows crosses the nodes
         // between them at any real fan-out, and this pack fans out a lot.
         segment(fromX, fromY, mid, fromY, out);
-        segment(mid, Math.min(fromY, toY), mid, Math.max(fromY, toY), out);
+        verticalRun(mid, fromY, toY, out);
         segment(mid, toY, toX, toY, out);
+    }
+
+    /**
+     * The elbow's vertical run at screen column `x`, from the departure row TOWARDS the arrival
+     * row and stopping one row short of it. Nothing is appended when the two rows are the same.
+     *
+     * NOT {@link #segment}, AND THE DIFFERENCE IS THE WHOLE OF #335. That method spans two points
+     * inclusively and floors a zero-length span to one pixel, which is right for a horizontal run
+     * -- at `FlowZoom.MIN` a short one rounds to no length and would vanish -- and wrong for this
+     * one, where a zero-length span means there is nothing to draw and the one-pixel floor put a
+     * rectangle inside the arrival horizontal. See {@link #edgeSegments} for the rule and for what
+     * a doubled translucent pixel looks like.
+     *
+     * `min(fromY, toY + 1)` IS THE HALF-OPEN RANGE IN BOTH DIRECTIONS and it is worth checking
+     * rather than trusting: with the child below, `toY > fromY` so this is `fromY` and the run
+     * covers `fromY .. toY - 1`; with the child above, `toY < fromY` so it is `toY + 1` and the run
+     * covers `toY + 1 .. fromY`. Either way `fromY` is in and `toY` is out.
+     */
+    private void verticalRun(int x, int fromY, int toY, IntArray out) {
+        quad(x, Math.min(fromY, toY + 1), 1, Math.abs(toY - fromY), out);
     }
 
     /** The parent box of `index`, or -1 when it is a root. */
@@ -1214,17 +1573,33 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * without this an edge would be a rectangle of zero area and simply not appear.
      */
     private void segment(int x1, int y1, int x2, int y2, IntArray out) {
-        int left = Math.min(x1, x2);
-        int top = Math.min(y1, y2);
-        int width = clippedLength(left, Math.max(1, Math.abs(x2 - x1)), getArea().width);
-        int height = clippedLength(top, Math.max(1, Math.abs(y2 - y1)), getArea().height);
-        if (width <= 0 || height <= 0) {
+        quad(Math.min(x1, x2), Math.min(y1, y2),
+             Math.max(1, Math.abs(x2 - x1)), Math.max(1, Math.abs(y2 - y1)), out);
+    }
+
+    /**
+     * One rectangle in SCREEN pixels, clipped to this canvas and appended to `out` as an
+     * {x, y, width, height} quad. Nothing is appended when none of it is visible.
+     *
+     * THE ONE PLACE THE CLIP HAPPENS, and it is split out of {@link #segment} rather than
+     * duplicated because {@link #verticalRun} needs the clip without that method's one-pixel
+     * floor. Two copies of a clip is the shape where an edge is dropped on one axis and not the
+     * other and no test says which copy was wrong; see {@link #edgeSegments} on why the floor is
+     * right for a horizontal run and wrong for a vertical one.
+     */
+    private void quad(int left, int top, int width, int height, IntArray out) {
+        int visibleWidth = clippedLength(left, width, getArea().width);
+        int visibleHeight = clippedLength(top, height, getArea().height);
+        // A ZERO-SIZED INPUT IS ALSO CAUGHT HERE, which is what `verticalRun` relies on for a
+        // same-row edge: `clippedLength(top, 0, limit)` is at most zero for any `top`, so the
+        // run drops out on the same test an off-canvas one does.
+        if (width <= 0 || height <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
             return;
         }
         out.add(Math.max(0, left));
         out.add(Math.max(0, top));
-        out.add(width);
-        out.add(height);
+        out.add(visibleWidth);
+        out.add(visibleHeight);
     }
 
     /**

@@ -51,6 +51,14 @@ public final class FlowCulling {
     private int boxesExamined;
     /** Columns examined by the last sweep. */
     private int columnsExamined;
+    /**
+     * Bands examined by the trunk pass since the last {@link #visibleIn}.
+     *
+     * RESET BY `visibleIn` AND NOT BY THE TRUNK QUERY ITSELF, because a frame is one
+     * `visibleIn` followed by one sweep and the number wanted is the frame's total. The trunk
+     * pass asks per column gap, so a counter each query reset would report only the last gap.
+     */
+    private int bandsExamined;
 
     public FlowCulling(FlowLayout.Laid laid) {
         this.boxes = laid.boxes;
@@ -97,6 +105,26 @@ public final class FlowCulling {
                                 + ". FlowCulling binary-searches each column and would "
                                 + "return the wrong run.");
             }
+            // AND THE SUBTREE BANDS ASCEND AND DO NOT OVERLAP, which is a SECOND precondition
+            // and not a restatement of the one above. Rows ascending is what
+            // `firstVisible` needs; `firstBandReaching` binary-searches the BANDS, and two
+            // boxes at one depth can only have ordered rows because their bands are ordered.
+            // `FlowLayout.Box.bandTop` records why that holds -- disjoint leaf ranges per
+            // subtree -- so a layout that broke it would be a layout this class cannot index,
+            // and the failure it would otherwise produce is a trunk that is silently not
+            // drawn: the search would stop short and #334 would be back with no symptom but a
+            // missing line.
+            if (slot > 0
+                    && boxes.get(columns[column][slot - 1]).bandBottom
+                            >= boxes.get(i).bandTop) {
+                throw new IllegalArgumentException(
+                        "column " + column + " has overlapping subtree bands at box " + i
+                                + ": the previous box's band ends at "
+                                + boxes.get(columns[column][slot - 1]).bandBottom
+                                + " and this one's starts at " + boxes.get(i).bandTop
+                                + ". FlowCulling binary-searches the bands and would return "
+                                + "the wrong run.");
+            }
             columns[column][slot] = i;
         }
     }
@@ -113,6 +141,7 @@ public final class FlowCulling {
         shown.clear();
         boxesExamined = 0;
         columnsExamined = 0;
+        bandsExamined = 0;
         if (viewWidth <= 0 || viewHeight <= 0) {
             return shown;
         }
@@ -201,6 +230,70 @@ public final class FlowCulling {
         }
         int index = boxesInColumn[at];
         return boxes.get(index).y <= y ? index : -1;   // else the point is in the row gap
+    }
+
+    /**
+     * The first box in `column` whose SUBTREE BAND reaches `top` or below it, as an offset into
+     * that column. `columnLength(column)` when the whole column's work is above `top`.
+     *
+     * THE QUERY `FlowCanvas.sweepTrunks` NEEDS AND THE ONE {@link #visibleIn} CANNOT
+     * ANSWER, and #334 is the difference. `visibleIn` answers "which boxes are in this
+     * viewport"; a diagram's edges are elbows between a parent and a child that can be
+     * thousands of pixels apart, so a viewport can be crossed by an edge while holding neither
+     * of its boxes -- and a sweep that starts from visible boxes draws nothing there. A box's
+     * band contains every one of its descendants' rows, so a parent whose band reaches into the
+     * viewport is the only candidate an edge crossing it can belong to, and a parent whose band
+     * does not is provably not one.
+     *
+     * O(log n) AND THE ANSWER IS O(1) LONG, which is what keeps the trunk pass off the O(plan)
+     * shape this class exists to avoid. `FlowLayout.Box.bandTop` has the proof: bands at one
+     * depth are disjoint and at least a row pitch apart, so a viewport of height H overlaps at
+     * most `H / ROW_PITCH + 2` of them however large the plan is. The constructor ENFORCES the
+     * disjointness rather than trusting it, because the failure mode of a mis-ordered column
+     * here is a search that stops short and a trunk that is silently not drawn.
+     *
+     * ACCESSORS RATHER THAN A RETURNED LIST, and not merely to save an allocation on the 60 fps
+     * path. {@link #shown} is the one reused buffer here and {@link #visibleIn} hands it out; a
+     * second query returning that same instance would alias the visible set a caller is
+     * mid-walk over, and the caller of this method is walking exactly that. A cursor cannot.
+     */
+    public int firstBandReaching(int column, int top) {
+        int[] boxesInColumn = columns[column];
+        int low = 0;
+        int high = boxesInColumn.length;
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (boxes.get(boxesInColumn[mid]).bandBottom < top) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        bandsExamined += boxesInColumn.length == 0 ? 0 : 1;
+        return low;
+    }
+
+    /** How many boxes are in `column`. See {@link #firstBandReaching}. */
+    public int columnLength(int column) {
+        return columns[column].length;
+    }
+
+    /**
+     * The box at offset `at` in `column`, ascending by band. See {@link #firstBandReaching}.
+     *
+     * COUNTED, because this is the trunk pass's per-frame cost and the same argument
+     * {@link #boxesExamined} makes applies to it: "the trunk sweep is cheap" is a claim about a
+     * bounded multiple of what is painted, and a counter is what lets a test say so instead of
+     * a screenshot.
+     */
+    public int boxInColumn(int column, int at) {
+        bandsExamined++;
+        return columns[column][at];
+    }
+
+    /** Bands the trunk pass looked at since {@link #visibleIn} last reset the counters. */
+    public int bandsExamined() {
+        return bandsExamined;
     }
 
     /** Binary search for the first box in `column` whose bottom edge is below `top`. */

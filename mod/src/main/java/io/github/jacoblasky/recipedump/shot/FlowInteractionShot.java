@@ -516,23 +516,6 @@ final class FlowInteractionShot {
         }
 
         /**
-         * Pick a parent/child pair both wholly in frame and read the rectangles the canvas paints
-         * for the edge between them. #330.
-         *
-         * PROGRAMMATIC BECAUSE THE PICTURE ALREADY LIED ONCE. `flow-nav2.png` was produced by
-         * this very screen with every edge in the wrong place, and it was cited as the artifact
-         * that proved the diagram worked. So the numbers are read here and asserted, and the
-         * screenshot is what a human looks at afterwards rather than the evidence.
-         *
-         * THE RECTANGLES COME FROM `FlowCanvas.edgeSegments`, WHICH IS THE CALL `draw` MAKES.
-         * Not a re-derivation of it: the sweep loops over the culled boxes and hands each pair to
-         * that method, so what is measured below is the geometry that was painted this frame.
-         *
-         * BOTH BOXES WHOLLY IN FRAME, so all three segments of the elbow are inside the canvas
-         * and none is clipped -- which keeps this a measurement of the conversion rather than of
-         * the clip, and means the arrival pixel is a pixel the cursor can be parked on.
-         */
-        /**
          * Pan until some parent and child are both wholly in frame, and say which. #330.
          *
          * "NOTHING MEASURABLE HERE" IS A NAVIGATION STEP, NOT A VERDICT, AND THE FIRST VERSION
@@ -618,6 +601,12 @@ final class FlowInteractionShot {
          * THE AIM IS VERIFIED RATHER THAN ASSUMED. `panToPair` clamps, so a pair within half a
          * viewport of an edge of the layout can be asked for and not delivered; this is where that
          * shows up, with both rectangles in the message.
+         *
+         * AND BOTH BOXES WHOLLY IN FRAME IS WHAT KEEPS THIS A MEASUREMENT OF THE CONVERSION
+         * RATHER THAN OF THE CLIP. Every run of the elbow is then inside the canvas and none is
+         * dropped, so the arrival pixel is a pixel the cursor can be parked on. It is every run
+         * and not "all three": since #335 a same-row pair is two rectangles, and `panToPair` can
+         * pick one -- a parent centred on its subtree band shares a row with its middle child.
          */
         private boolean findTheEdge(FlowCanvas canvas) {
             if (!canvas.fullyShowing(edgeParent) || !canvas.fullyShowing(edgeChild)) {
@@ -636,18 +625,30 @@ final class FlowInteractionShot {
             canvas.edgeSegments(edgeParent, edgeChild, segments);
             parentRect = canvas.boxRectOnScreen(edgeParent);
             childRect = canvas.boxRectOnScreen(edgeChild);
-            if (segments.size() != 12) {
-                ShotScreens.reportFail("an unclipped elbow must be three rectangles and this one"
-                                       + " is " + (segments.size() / 4) + " (#330)");
+            // THREE RECTANGLES, OR TWO WHEN THE PAIR SHARES A ROW, AND `!= 12` WAS #335. A
+            // straight edge has no vertical run to draw; emitting a 1x1 one at the corner put it
+            // inside the arrival horizontal, and `EDGE` is translucent so the doubled pixel showed
+            // as a brighter dot. A same-row pair is not exotic here -- `panToPair` aims at the
+            // nearest measurable pair and a parent centred on its subtree band shares a row with
+            // its middle child -- so this screen could pick one and would have failed on it.
+            if (segments.size() != 12 && segments.size() != 8) {
+                ShotScreens.reportFail("an unclipped elbow must be three rectangles, or two when"
+                                       + " its boxes share a row, and this one is "
+                                       + (segments.size() / 4) + " (#330, #335)");
                 return false;
             }
             // The elbow leaves the parent's right border with its first run and arrives at the
             // child's left border with its last, so the two ends are the first quad's left edge
-            // and the last quad's right edge.
+            // and the LAST quad's right edge.
+            //
+            // BY POSITION, NOT BY THE OFFSET 8, which is the other half of #335: the arrival quad
+            // is the third for a bent elbow and the second for a straight one, so a fixed index is
+            // wrong for one of them whichever number is written.
+            int arrival = segments.size() - 4;
             departureX = segments.get(0);
             departureY = segments.get(1);
-            arrivalX = segments.get(8) + segments.get(10);
-            arrivalY = segments.get(9);
+            arrivalX = segments.get(arrival) + segments.get(arrival + 2);
+            arrivalY = segments.get(arrival + 1);
             ShotHarness.log("flow-nav #330: box " + edgeParent + " -> " + edgeChild
                             + " at zoom " + canvas.zoom() + " scroll " + canvas.getScrollX()
                             + "," + canvas.getScrollY()

@@ -93,6 +93,37 @@ public class FlowCullingTest {
     }
 
     @Test
+    public void aColumnWithOverlappingSubtreeBandsIsRejectedRatherThanSilentlyMissingTrunks() {
+        // THE PRECONDITION `firstBandReaching` BINARY-SEARCHES ON, and it is a second one rather
+        // than a restatement of the row ordering above. #334's trunk pass finds the edges that
+        // cross a viewport by searching a column's SUBTREE BANDS, which works because two boxes at
+        // one depth head different subtrees and therefore hold disjoint leaf rows. A layout that
+        // broke that would still lay out and still cull correctly, and the search would stop short
+        // -- so an elbow crossing the viewport would simply not be drawn, which is #334 back again
+        // with no symptom but a missing line. That is the failure this guard exists to convert
+        // into a loud one, and it had none of its own until now.
+        FlowLayout.Laid laid = FlowLayout.of(PlanTrees.fan(3));
+        List<FlowLayout.Box> overlapping = new ArrayList<FlowLayout.Box>(laid.boxes);
+        FlowLayout.Box first = overlapping.get(1);
+        FlowLayout.Box second = overlapping.get(2);
+        assertTrue("the fixture must start with disjoint bands, or this proves nothing",
+                first.bandBottom < second.bandTop);
+        // ONLY THE BAND MOVES. `x`, `y` and the row ordering are untouched, so the two checks that
+        // already existed cannot be the ones that fire -- which is what makes this a test of the
+        // new precondition rather than of the old ones.
+        overlapping.set(1, FlowLayout.boxAt(first.node, first.parent, first.depth, first.x,
+                first.y, first.bandTop, second.bandTop));
+        try {
+            new FlowCulling(new FlowLayout.Laid(overlapping, laid.width, laid.height));
+            org.junit.Assert.fail("a column whose subtree bands overlap must be rejected at"
+                    + " construction, not indexed and quietly searched wrong");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(),
+                    expected.getMessage().contains("overlapping subtree bands"));
+        }
+    }
+
+    @Test
     public void onlyWhatTheViewportCoversIsReturned() {
         FlowLayout.Laid laid = FlowLayout.of(PlanTrees.fan(200));
         FlowCulling culling = new FlowCulling(laid);
@@ -249,9 +280,10 @@ public class FlowCullingTest {
     }
 
 
-    /** The same box, moved one pixel off the column pitch. */
+    /** The same box, moved one pixel off the column pitch. ONLY `x` differs. */
     private static FlowLayout.Box offGrid(FlowLayout.Box box) {
-        return FlowLayout.boxAt(box.node, box.parent, box.depth, box.x + 1, box.y);
+        return FlowLayout.boxAt(box.node, box.parent, box.depth, box.x + 1, box.y,
+                                box.bandTop, box.bandBottom);
     }
 
     private static boolean contains(IntArray values, int wanted) {
