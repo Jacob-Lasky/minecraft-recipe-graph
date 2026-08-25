@@ -1469,6 +1469,9 @@ public class PlannerLayoutTest {
      * MEASURED BY s1harness IN #185 for the half neither of these tests can reach: `flow-hit`
      * parks a real cursor and `IWidget.isHovering()` agrees with the layout at zoom 0.5, 1.0 and
      * 2.0, so `getWidgetsAt` routes correctly through both the scroll offset and the zoom matrix.
+     * That flag answers for a diagram node ONLY because `FlowCanvas` paints one -- see
+     * {@link #aTreeRowCanNeverHoverBecauseItCarriesNoBackground} -- so the measurement is about
+     * the TRANSFORM and is not evidence that `isHovering()` works for a `ClickableGroup`.
      */
     @Test
     public void aNodeContentBuiltWithActionsOpensTheirNodeMenu() {
@@ -2273,16 +2276,14 @@ public class PlannerLayoutTest {
      * `ClickableGroup` and not `Interactable`, which was the first attempt: a `ListWidget` is
      * an `AbstractScrollWidget` and therefore `Interactable` itself, so the loose test counted
      * the scroll viewport as a seventh row and reported an off-by-one that was its own.
+     *
+     * THE WALK ITSELF LIVES IN {@link io.github.jacoblasky.recipedump.ClickTargets} because
+     * `MachinesLayoutTest` and `BrowseLayoutTest` need the same one for #333's nesting rule, and
+     * two copies of "what counts as a click target" is exactly the disagreement that rule cannot
+     * afford. This stays as the local name every test in this file already reads by.
      */
     private static List<PlannerWidgets.ClickableGroup> clickables(IWidget root) {
-        List<PlannerWidgets.ClickableGroup> found =
-                new java.util.ArrayList<PlannerWidgets.ClickableGroup>();
-        for (IWidget widget : HeadlessLayout.flatten(root)) {
-            if (widget instanceof PlannerWidgets.ClickableGroup) {
-                found.add((PlannerWidgets.ClickableGroup) widget);
-            }
-        }
-        return found;
+        return io.github.jacoblasky.recipedump.ClickTargets.in(root);
     }
 
     /**
@@ -4238,16 +4239,397 @@ public class PlannerLayoutTest {
     }
 
     /**
+     * Move ModularUI's own mouse to a point and let ModularUI resolve what is under it.
+     *
+     * `GuiContext.updateState` is public and sets the absolute mouse the hit test reads.
+     * `ModularPanel.findHoveredWidgets` is PRIVATE, which is why this is reflective, and it is
+     * still the right thing to call: the panel registers `this::findHoveredWidgets` as a
+     * frame-update listener in its own `onInit`, and `ModularScreen.onFrameUpdate` runs those
+     * listeners immediately before `ModularGuiContext.onFrameUpdate` reads the list they filled.
+     * So this is the exact call the running client makes, sixty times a second, and calling it
+     * here is not a re-implementation of anything.
+     *
+     * NOT `ModularScreen.onFrameUpdate()`, WHICH IS PUBLIC AND WOULD BE THE OBVIOUS CHOICE. It
+     * ends in `ModularGuiContext.onFrameUpdate`, which calls `getScreenWrapper().setHoveredSlot`
+     * -- and `HeadlessLayout` has no wrapper to give it, for the reason that class's javadoc
+     * spends a paragraph on. This is the half of that method that reaches no wrapper.
+     *
+     * IT FAILS THE SUITE ON A RENAME RATHER THAN DEGRADING, which is the opposite of
+     * `shot/HoveredWidgets`'s deliberate politeness and is right for a test: a ModularUI bump
+     * that moved this method must stop the build here, where it costs a minute, rather than in a
+     * fifteen-minute client boot.
+     */
+    private static void resolveHover(ModularPanel panel, int x, int y) {
+        panel.getContext().updateState(x, y, 0f);
+        try {
+            java.lang.reflect.Method find =
+                    ModularPanel.class.getDeclaredMethod("findHoveredWidgets");
+            find.setAccessible(true);
+            find.invoke(panel);
+        } catch (Exception broken) {
+            throw new AssertionError("ModularPanel.findHoveredWidgets is not callable on this"
+                                     + " ModularUI, so nothing here can drive the real hit test."
+                                     + " It is private and registered as a frame-update listener"
+                                     + " in ModularPanel.onInit; find what it is called now."
+                                     + " Cause: " + broken, broken);
+        }
+    }
+
+    /**
+     * A tree row can NEVER hover, and that is why #333's band never drew. The root cause, pinned.
+     *
+     * <h2>THE MEASUREMENT THIS EXPLAINS</h2>
+     *
+     * `planner-hover` parked a real cursor dead on row 0's label in the 365-jar client on
+     * 2026-08-23 and reported `isHovering=false ... wash=0x0 belowMouse=true`, with a resolved
+     * hover stack of `[TextWidget@139,129 290x10 > ModularPanel@120,90 400x220]` -- the row
+     * itself absent. #333 drew the band from `isHovering()`, so it never once drew, and every
+     * headless test was green because `rowWash` is a pure function fed an input that never occurs.
+     *
+     * <h2>WHY THE FLAG CANNOT SET, AS A LIVE CALL RATHER THAN AS A STORY</h2>
+     *
+     * `ModularGuiContext.getHoveredWidgets` skips any widget whose `canHover()` is false -- no
+     * `hovered` entry and, decisively, no `onMouseStartHover()`, which is the only call that
+     * ever makes the `timeHovered` field `isHovering()` reads non-negative -- its two siblings,
+     * the constructor and `onMouseEndHover`, both write -1. And `AbstractParentWidget.canHover()`
+     * asks for a visible background, hover background, hover overlay, tooltip or themed
+     * background. A
+     * `ClickableGroup` is built with none of them on purpose, so the answer is false forever.
+     * This calls the real method on the real jar rather than restating the bytecode.
+     *
+     * THE DIAGRAM NODE IS THE CONTROL AND IT IS DOING REAL WORK. `FlowCanvas` sets
+     * `MC_BACKGROUND` on every `NodeContent`, and `NodeContent extends ClickableGroup` -- same
+     * class, one background apart -- so this proves `canHover()` can return true here and that
+     * the false above is about the background rather than about the type. It is also the
+     * evidence that killed the older `IViewport` diagnosis: `flow-hit`'s nodes answer because
+     * they are painted, not because a `FlowCanvas` walks them.
+     *
+     * DO NOT "FIX" A HOVER PROBLEM BY GIVING A ROW A BACKGROUND. That is 634 themed boxes down
+     * the tree panel, which is what {@link PlannerWidgets.ClickableGroup}'s own javadoc exists
+     * to prevent. The band reads {@link PlannerWidgets.ClickableGroup#drawsAsHovered} instead.
+     */
+    @Test
+    public void aTreeRowCanNeverHoverBecauseItCarriesNoBackground() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(),
+                                                         PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        List<PlannerWidgets.ClickableGroup> rows = treeClickables(panel);
+        assertFalse("the fixture produced no rows, so this asserts nothing", rows.isEmpty());
+        for (PlannerWidgets.ClickableGroup row : rows) {
+            assertFalse("a tree row reports canHover(), so ModularUI would put it in the hovered"
+                        + " set -- either something gave ClickableGroup a background (read its"
+                        + " javadoc before keeping that) or this ModularUI changed the rule."
+                        + " Either way `drawsAsHovered` needs re-reading.",
+                        row.canHover());
+        }
+
+        // THE CONTROL. Same class, one background apart. Without it "canHover() is false" is a
+        // claim about a method that might return false for everything.
+        // `NODE_WIDTH`/`NODE_HEIGHT` are this file's own literals, per the rule on their
+        // declaration: `flow` depends on `planner` and a test must not invert that.
+        PlannerWidgets.NodeContent node = PlannerWidgets.planNodeContent(
+                plan.tree(), NODE_WIDTH, NODE_HEIGHT, PlannerActions.NONE);
+        node.background(com.cleanroommc.modularui.drawable.GuiTextures.MC_BACKGROUND);
+        HeadlessLayout.layOutPanel("canHoverControl", 200, 60, node);
+        assertTrue("a NodeContent WITH a background still cannot hover, so the canHover() check"
+                   + " above cannot tell a painted widget from a bare one and proves nothing",
+                   node.canHover());
+    }
+
+    /**
+     * No click target sits inside another, or the hover band would stack on itself. #333.
+     *
+     * THIS BECAME A CONSTRAINT WHEN THE BAND'S PREDICATE CHANGED, which is why it is asserted
+     * now and was not before. `isHovering()` could be true for at most one widget in the tree --
+     * `ModularGuiContext.getHoveredWidgets` breaks at the first entry that cannot hover through
+     * -- so nesting could never have double-painted. `isBelowMouse()` is set on EVERY widget
+     * whose box contains the cursor, ancestors included, so a `ClickableGroup` inside another
+     * would paint `PlannerWidgets.HOVER_FILL` twice over the same pixels: 0x18000000 is a 9%
+     * black, two of them compose to about 18%, and the result is a visibly darker band on one
+     * row than on its neighbours that nothing else in the suite would catch.
+     *
+     * IT IS ALSO THE CLICK CONSTRAINT THE CLASS ALREADY STATED, now enforced rather than
+     * described. {@link PlannerWidgets.ClickableGroup}'s javadoc says a nested second one "would
+     * make a click ambiguous" and `aNodeContentBuiltWithActionsOpensTheirNodeMenu` asserts it for
+     * a diagram node only. Every panel below is a place a row is assembled, and a nested target
+     * would be as wrong in each.
+     *
+     * NO NESTING EXISTS TODAY -- read on 2026-08-24 off every `.child(...)` call whose receiver
+     * is a variable declared `ClickableGroup` or `NodeContent`, in the only three files that
+     * construct one (`PlannerWidgets`, `MachinesWidgets`, `BrowseTabs`): each takes a
+     * `line(...)`, an `icon(...)` or the machine icon, never another click target.
+     * `MachinesWidgets.chips` looks like the exception and is not -- its chips go into a plain
+     * `PlannerWidgets.Group`. That reading is exactly what this assertion replaces, because a
+     * reading goes stale on the next commit and cannot see a target added through a chain with
+     * no variable at all; the walk below can.
+     *
+     * AND THE WALK IS SHARED, BECAUSE THE PANELS THIS FILE CAN BUILD ARE NOT ALL OF THEM. The
+     * band lights on every `ClickableGroup` in the mod, and `machinesPanel`, `sourcesPanel` and
+     * `graphPanel` all carry them -- their own rows, and `BrowseTabs.strip` in all three. Only
+     * `MachinesLayoutTest` and `BrowseLayoutTest` own the fixtures that build those, so the
+     * assertion lives in {@link io.github.jacoblasky.recipedump.ClickTargets} and all three test
+     * classes call it. An invariant checked on a third of the surfaces that can break it is one
+     * that only looks guarded, which is the same shape of gap as the band #333 shipped.
+     */
+    @Test
+    public void noClickTargetSitsInsideAnotherOrTheHoverBandWouldStack() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        List<IWidget> panels = new java.util.ArrayList<IWidget>();
+        panels.add(HeadlessLayout.layOut(PlannerWidgets.plannerPanel(
+                plan, emptyBook(), matching(), PlannerActions.NONE)));
+        panels.add(HeadlessLayout.layOut(PlannerWidgets.todoPanel(
+                plan, emptyBook(), PlannerActions.NONE)));
+        panels.add(HeadlessLayout.layOut(PlannerWidgets.nodeMenu(
+                plan.tree(), PlannerActions.NONE)));
+
+        int checked = 0;
+        for (IWidget panel : panels) {
+            checked += io.github.jacoblasky.recipedump.ClickTargets
+                    .assertNoneNested("a planner panel", panel);
+        }
+        assertTrue("no click target was examined at all, so this asserts nothing about nesting",
+                   checked > 0);
+    }
+
+    /**
+     * ModularUI's own hit test puts the cursor in exactly ONE tree row, and says which. #333.
+     *
+     * NO FLAG IS SET AND NO GEOMETRY IS RE-DERIVED HERE. {@link #resolveHover} moves ModularUI's
+     * own mouse and runs ModularUI's own `findHoveredWidgets`, which walks
+     * `IViewport.getChildrenAt` through the real viewport stack and adds every enabled widget
+     * whose `isInside` contains the point -- filling the very list
+     * `PanelManager.getAllHoveredWidgetsList` hands to `ModularGuiContext.onFrameUpdate` in game.
+     * So this is ModularUI answering, on the real widget tree, with the harness supplying only a
+     * coordinate.
+     *
+     * THIS IS THE HALF THAT MAKES `isBelowMouse()` AN HONEST PREDICATE FOR A ROW-WIDE BAND.
+     * `drawsAsHovered` reads the per-widget flag that `ModularGuiContext.onFrameUpdate` sets from
+     * exactly this list, so what the list contains is what the band will light. Two things had to
+     * be true and neither was obvious: that the row is IN it at all -- it is not in the `hovered`
+     * list, which is the whole defect -- and that its NEIGHBOURS are not, which is the "must not
+     * light the row above or below" half of the requirement.
+     *
+     * ASKED AT FOUR POINTS ACROSS THE ROW -- left edge, over the icon column, the middle, and
+     * the last pixel -- because the requirement is the whole row box and not the label. The old
+     * flag would have been false at every one of them. A predicate that only answered over the
+     * TEXT, which is the tempting near-miss since the label cell is what a cursor usually rests
+     * on, would answer differently at different points and give a band that blinks as the
+     * pointer crosses the gap between two cells; asking at one point could not tell the two
+     * apart.
+     */
+    @Test
+    public void theCursorLandsInExactlyOneTreeRowAndModularUiSaysWhichOne() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(),
+                                                         PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        List<PlannerWidgets.ClickableGroup> rows = treeClickables(panel);
+        assertTrue("this needs two rows to say anything about a neighbour", rows.size() >= 2);
+        PlannerWidgets.ClickableGroup row = rows.get(0);
+        PlannerWidgets.ClickableGroup neighbour = rows.get(1);
+        Area box = row.getArea();
+        assertTrue("row 0 was never laid out, so a point 'inside' it means nothing",
+                   box.width > 0 && box.height > 0);
+
+        // LEFT EDGE, THE ICON, THE MIDDLE AND THE RIGHT EDGE. The label is one cell of four.
+        int[] xs = {box.x, box.x + PlannerWidgets.ICON / 2, box.x + box.width / 2,
+                    box.x + box.width - 1};
+        for (int x : xs) {
+            int y = box.y + box.height / 2;
+            resolveHover(panel, x, y);
+            assertTrue("ModularUI's hit test does not place " + x + "," + y + " inside row 0,"
+                       + " whose box is " + box.x + "," + box.y + " " + box.width + "x"
+                       + box.height + " -- so a band drawn from isBelowMouse() would not light"
+                       + " there", panel.isBelowMouse(row));
+            assertFalse("the point " + x + "," + y + " is inside row 0 AND inside row 1, so a"
+                        + " row-wide band would light two rows at once",
+                        panel.isBelowMouse(neighbour));
+        }
+
+        // AND OFF THE ROW ENTIRELY, which is the control: without it every assertion above is
+        // satisfied by a hit test that says yes to everything.
+        resolveHover(panel, box.x + box.width / 2,
+                     neighbour.getArea().y + neighbour.getArea().height / 2);
+        assertFalse("ModularUI still reports row 0 below the mouse with the cursor moved onto"
+                    + " row 1, so the hit test is not discriminating and the assertions above"
+                    + " are claims about the harness", panel.isBelowMouse(row));
+        assertTrue("...and it does not report row 1 either, so nothing was resolved at all and"
+                   + " the control proves the wrong thing", panel.isBelowMouse(neighbour));
+    }
+
+    /**
+     * `ModularGuiContext` still calls the below-mouse hooks the hover band depends on. #333.
+     *
+     * <h2>THE ONE LINK IN THE CHAIN NO LIVE TEST HERE CAN EXERCISE</h2>
+     *
+     * {@link #theCursorLandsInExactlyOneTreeRowAndModularUiSaysWhichOne} drives ModularUI's real
+     * hit test and watches the row land in the panel's list.
+     * {@link #theHoverBandFollowsTheCursorAndNotTheHoverFlag} drives the flag and watches the
+     * band follow. BETWEEN THEM sits `ModularGuiContext.onFrameUpdate`, which is what carries
+     * one to the other in game -- and it cannot be called here at all, because it ends in
+     * `getScreenWrapper().setHoveredSlot` and `HeadlessLayout` has no wrapper. So the CALLS that
+     * link carries are pinned against the jar instead, the way `shot/HoveredWidgetsTest` pins the
+     * iterator it bans: a ModularUI bump that DELETES or renames either hook fails HERE, in a
+     * minute, rather than in a fifteen-minute client boot or, worse, in a band that quietly stops
+     * drawing again.
+     *
+     * WHAT THE ORDER HAS TO BE, and every name below is the reason:
+     *
+     * <pre>
+     *   onFrameUpdate:  for each entry of the RAW below-mouse stack -> onMouseEnterArea()
+     *                   THEN getHoveredWidgets(that same stack):
+     *                       canHover()? no  -> skipped entirely
+     *                                   yes -> onMouseStartHover()
+     * </pre>
+     *
+     * `onMouseEnterArea` before the `canHover` filter is the whole reason `isBelowMouse()` is
+     * available to a bare `ClickableGroup` when `isHovering()` is not.
+     *
+     * WHAT THIS DOES NOT PIN, SAID PLAINLY: THAT ORDER. This scans the CONSTANT POOL -- it asks
+     * which methods the class names, not where in `onFrameUpdate` it names them. A ModularUI that
+     * moved `onMouseEnterArea` inside the `canHover` filter would still reference all four hooks,
+     * so this test would stay GREEN while the band went dark exactly as it was in #333. Do not
+     * read a passing run here as the order having been checked. Pinning it properly needs an
+     * instruction-stream walk of `onFrameUpdate`'s Code attribute, and `ClassFiles` parses the
+     * pool and Code lengths but not instruction streams.
+     *
+     * WHAT WOULD CATCH A REORDER IS `planner-hover`, which parks a real cursor on a real row and
+     * fails if the row paints no wash -- the only witness that can, because the whole point is
+     * that a pointer reaches the predicate. The order as it stands today is recorded in
+     * `evidence-hoverfix/bytecode-canhover.txt` (the enter loop at 115..190, `getHoveredWidgets`
+     * at 193) and `evidence-hoverfix/review/bytecode-clearing.txt` (the clear at 214..261).
+     *
+     * THE CONTROL IS THE HOVER PAIR ITSELF. `onMouseStartHover` and `canHover` must also still be
+     * named by that class -- they are the filter this depends on being downstream -- so their
+     * presence proves the scan can find a method reference at all. A search that matched nothing
+     * would otherwise satisfy an absence check it never really made.
+     */
+    @Test
+    public void modularUiStillCallsTheBelowMouseHooksTheHoverBandDependsOn()
+            throws java.io.IOException {
+        byte[] context = io.github.jacoblasky.recipedump.ClassFiles.readResource(
+                "com/cleanroommc/modularui/screen/viewport/ModularGuiContext");
+        java.util.Set<String> calls =
+                io.github.jacoblasky.recipedump.ClassFiles.methodReferences(context);
+
+        assertTrue("ModularGuiContext no longer calls IWidget.onMouseEnterArea, the only call that"
+                   + " ever makes the timeBelowMouse field ClickableGroup.drawsAsHovered reads"
+                   + " non-negative. The hover band is drawn from that flag; find what sets it"
+                   + " now, or the band is back to #333's state of never drawing.",
+                   calls.contains("com/cleanroommc/modularui/api/widget/IWidget"
+                                  + ".onMouseEnterArea()V"));
+        assertTrue("ModularGuiContext no longer calls IWidget.onMouseLeaveArea, so the band would"
+                   + " light and never clear -- every row the pointer crossed would stay washed.",
+                   calls.contains("com/cleanroommc/modularui/api/widget/IWidget"
+                                  + ".onMouseLeaveArea()V"));
+
+        // THE CONTROL, and it is the filter this whole design routes around. If these two
+        // vanished, the assertions above would be claims about a scan that finds nothing.
+        assertTrue("ModularGuiContext names neither canHover nor onMouseStartHover, so the scan"
+                   + " is not reading this class's calls at all and the two assertions above"
+                   + " prove nothing",
+                   calls.contains("com/cleanroommc/modularui/api/widget/IWidget.canHover()Z")
+                   && calls.contains("com/cleanroommc/modularui/api/widget/IWidget"
+                                     + ".onMouseStartHover()V"));
+    }
+
+    /**
+     * The band follows the flag ModularUI sets for the row under the cursor. #333. RED BEFORE.
+     *
+     * <h2>THIS IS THE ASSERTION THAT GOES RED ON THE CODE THAT SHIPPED</h2>
+     *
+     * `onMouseEnterArea()` is not a test fixture: it is the call
+     * `ModularGuiContext.onFrameUpdate` makes, at bytecode 185, on every entry of the below-mouse
+     * stack that {@link #theCursorLandsInExactlyOneTreeRowAndModularUiSaysWhichOne} just watched
+     * ModularUI build -- before any of the filtering that drops a bare `ClickableGroup`. It is
+     * the only call that ever makes `timeBelowMouse` non-negative, and that field is what
+     * `isBelowMouse()` reads. So the chain has
+     * no gap in it: real hit test puts the row in the list, `onFrameUpdate` calls this on
+     * everything in the list, and the band follows.
+     *
+     * MEASURED, not predicted: with `drawsAsHovered()` reverted to `return isHovering();` -- and
+     * nothing else changed -- this is the ONE test in the class that goes red, on the "painted NO
+     * wash" assertion, while the four-state sweep and both structural tests stay green. That one
+     * run is #333's gap reproduced end to end. It cannot be made to pass by waiting, either:
+     * nothing here touches `timeHovered`, and nothing could, since `onMouseStartHover` is only
+     * ever called on a widget that `canHover()` and
+     * {@link #aTreeRowCanNeverHoverBecauseItCarriesNoBackground} is the proof a row does not.
+     *
+     * THE NEIGHBOUR IS ASSERTED IN THE SAME BREATH, so "the band lit" cannot be satisfied by a
+     * predicate stuck at true -- which is the mutation that a wash-is-non-zero test alone would
+     * pass. And the wash is compared against the SELECTION wash for the reason
+     * `PlannerShot.hoverVerdict` gives: painting the selection colour on a cursor makes the panel
+     * look as though it were reporting a status about whatever row the pointer rests on.
+     */
+    @Test
+    public void theHoverBandFollowsTheCursorAndNotTheHoverFlag() {
+        PlanView plan = PlanFixtures.load("plan-in-stock");
+        ModularPanel panel = PlannerWidgets.plannerPanel(plan, emptyBook(), matching(),
+                                                         PlannerActions.NONE);
+        HeadlessLayout.layOut(panel);
+        List<PlannerWidgets.ClickableGroup> rows = treeClickables(panel);
+        assertTrue("this needs two rows to say anything about a neighbour", rows.size() >= 2);
+        PlannerWidgets.ClickableGroup row = rows.get(0);
+        PlannerWidgets.ClickableGroup neighbour = rows.get(1);
+
+        int none = PlannerWidgets.ClickableGroup.rowWash(row.drawsAsHovered(),
+                                                         row.drawsAsSelected());
+        assertEquals("a row with no cursor on it painted a wash, so the band is not following"
+                     + " anything", 0, none);
+
+        row.onMouseEnterArea();
+        int lit = PlannerWidgets.ClickableGroup.rowWash(row.drawsAsHovered(),
+                                                        row.drawsAsSelected());
+        assertNotEquals("the row ModularUI put under the mouse painted NO wash. That is #333's"
+                        + " defect exactly: the band is being drawn from a predicate the client"
+                        + " never sets. Read PlannerWidgets.ClickableGroup.drawsAsHovered.",
+                        0, lit);
+        assertNotEquals("a hovered row painted the SELECTION wash, which makes a cursor look"
+                        + " like a status about the item; see HOVER_FILL's javadoc",
+                        PlannerWidgets.ClickableGroup.rowWash(false, true), lit);
+        assertEquals("the row below the cursor did not paint the HOVER wash, so `rowWash` and"
+                     + " `drawsAsHovered` disagree about what a hovered row is",
+                     PlannerWidgets.ClickableGroup.rowWash(true, false), lit);
+
+        assertEquals("the NEIGHBOUR of the hovered row painted a wash too, so the band is not"
+                     + " reading a per-row predicate at all -- a cursor anywhere would light"
+                     + " the whole tree",
+                     0, PlannerWidgets.ClickableGroup.rowWash(neighbour.drawsAsHovered(),
+                                                              neighbour.drawsAsSelected()));
+
+        // AND IT GOES OUT AGAIN. `onFrameUpdate` clears a widget that has left the stack through
+        // `checkHoverEnd`, which calls this; a band that lit and never cleared would be a tree
+        // painted solid after the pointer had crossed it once.
+        row.onMouseLeaveArea();
+        assertEquals("the band did not clear when the cursor left, so every row the pointer has"
+                     + " ever crossed stays lit",
+                     0, PlannerWidgets.ClickableGroup.rowWash(row.drawsAsHovered(),
+                                                              row.drawsAsSelected()));
+    }
+
+    /**
      * The row wash layers hover under selection, and draws neither when neither. #333.
      *
      * <h2>WHY THE DECISION IS A FUNCTION AND NOT A LINE INSIDE `draw`</h2>
      *
-     * `isHovering()` reads the screen's cursor and `HeadlessLayout` has no screen, so it is false
-     * in every test here -- a hover band decided inline would be a behaviour with no headless
-     * witness whatsoever, inside a `draw` body that already cannot be reached. `rowWash` takes
-     * the two states as arguments, which leaves exactly one untestable step (that `draw` passes
-     * `isHovering()` in) and makes all four combinations assertable. `IconWidgetTest`'s header
-     * makes the same argument about `draw` from the other direction.
+     * Hover is read from the screen's cursor and `HeadlessLayout` has none, so a band decided
+     * inline would be a behaviour with no headless witness whatsoever, inside a `draw` body that
+     * already cannot be reached. `rowWash` takes the two states as arguments, which leaves
+     * exactly one step outside this test's reach -- WHICH PREDICATE `draw` PASSES IN -- and makes
+     * all four combinations assertable. `IconWidgetTest`'s header makes the same argument about
+     * `draw` from the other direction.
+     *
+     * <h2>AND FOUR GREEN STATES ARE NOT A WORKING BAND, WHICH IS WHAT #333 COST</h2>
+     *
+     * This test was green on the code that shipped a band nobody could ever see: `draw` fed
+     * `rowWash` the widget's `isHovering()`, which
+     * {@link PlannerWidgets.ClickableGroup#drawsAsHovered} shows can never be true for a
+     * background-less `ParentWidget`, so the arithmetic below was right about a case the client
+     * never reaches. Do NOT read a pass here as "the hover band works" -- it says only that the
+     * layering is right GIVEN a hovered row. The companion that says a row is ever hovered is
+     * {@link #theHoverBandFollowsTheCursorAndNotTheHoverFlag}, and the one that says a real
+     * pointer reaches it is the `planner-hover` prodshot.
      *
      * THE LAYERING IS THE ASSERTION THAT MATTERS. A hovered AND selected row must draw the
      * selection, not the hover and not both: a neutral 9% black over a blue 25% wash muds it, and

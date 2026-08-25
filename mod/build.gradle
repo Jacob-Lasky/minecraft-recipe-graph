@@ -202,6 +202,26 @@ processResources {
 
 test {
     testLogging { events 'passed', 'failed', 'skipped' }
+    // NO HTML REPORT. IT SERVES NOTHING HERE AND IT TOOK TWO FULLY-GREEN RUNS DOWN WITH IT.
+    // Twice on 2026-08-23 a :test task that had passed every assertion failed at the very end
+    // with `Could not generate test report to '/repo/mod/build/reports/tests/test'` and a
+    // `null: .../<TestClass>/index.html` per file it could not write -- `PanelReachabilityTest`
+    // and `ModularUiLayoutTest` in one run, `SchemaSixTest` in the other. The repository is on
+    // FUSE shfs and the report writes hundreds of small files at once under whatever load the
+    // rest of the host is under; the failure is the filesystem, is intermittent, and is
+    // indistinguishable at a glance from a real test failure, which is the expensive part.
+    //
+    // NOBODY READS IT. Every consumer of a run's results parses either gradle's console lines
+    // (`tools/check.sh` counts ` PASSED$`/` FAILED$`/` SKIPPED$` and greps the golden gate by
+    // name) or the JUnit XML (the freshness discipline in the skill: `stat` the XML and compare
+    // it against your own launch time before believing a result). No CI job, script or human
+    // workflow in this repository opens `index.html` -- there is no reference to it anywhere.
+    //
+    // THE XML STAYS AND IS NOT OPTIONAL. It is the artifact that says a run actually happened,
+    // and `tools/check.sh` asserts both halves of this after the java arm: XML present, HTML
+    // directory absent. Re-enabling the report turns that guard red.
+    reports.html.required = false
+    reports.junitXml.required = true
     // THE SHARED FIXTURES ARE AN INPUT, and Gradle cannot work that out for itself: they
     // live outside `mod/`, so nothing in the default input set covers them and the test task
     // stays UP-TO-DATE across a fixture change. Observed while adding the plan fixtures --

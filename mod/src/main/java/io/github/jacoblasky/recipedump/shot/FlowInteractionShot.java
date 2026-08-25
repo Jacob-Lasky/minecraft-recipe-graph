@@ -47,11 +47,16 @@ import io.github.jacoblasky.recipedump.plan.PlanNode;
  * this and `PlannerLayoutTest`, which calls `onMousePressed` on a widget it found by walking the
  * tree -- and which passes whether or not the widget is anywhere a mouse can reach.
  *
- * NOT GATED ON `IWidget.isHovering()`, which `PlannerShot.ClickViewButton` measured unreliable for
- * a widget in a plain `ParentWidget`: parked dead centre on a laid-out button box, that flag never
- * set across forty polls. The diagram's nodes sit inside a `FlowCanvas`, which IS an `IViewport`,
- * so `flow-hit` gets a true answer from the same flag -- but the verdicts below do not need it,
- * because a click that landed on the wrong thing opens the wrong panel and fails on the name.
+ * NOT GATED ON `IWidget.isHovering()`, which `PlannerShot.ClickViewButton` measured PERMANENTLY
+ * FALSE for a bare `ClickableGroup`: parked dead centre on a laid-out button box, that flag never
+ * set across forty polls. The reason is `AbstractParentWidget.canHover()` -- a `ParentWidget` with
+ * no visible background is skipped by `ModularGuiContext.getHoveredWidgets` and never gets
+ * `onMouseStartHover` -- and NOT the older story about the parent not being an `IViewport`, which
+ * `planner-hover` disproved on 2026-08-23 by measuring a tree row inside a `ListWidget` failing
+ * the same way. `flow-hit` gets a true answer from the same flag because `FlowCanvas` gives every
+ * node `MC_BACKGROUND`; see `PlannerWidgets.ClickableGroup.drawsAsHovered` for the bytecode. The
+ * verdicts below do not need the flag either way, because a click that landed on the wrong thing
+ * opens the wrong panel and fails on the name.
  */
 final class FlowInteractionShot {
 

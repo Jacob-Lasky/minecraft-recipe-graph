@@ -432,6 +432,16 @@ public class FlowCanvas extends AbstractScrollWidget<IWidget, FlowCanvas> implem
      * Asks the widgets themselves rather than walking a viewport stack, because
      * `IWidget.isHovering()` is already the answer `getWidgetsAt` produced this frame -- so
      * this reads the framework's real verdict rather than a re-derivation of it.
+     *
+     * THIS FLAG ONLY ANSWERS BECAUSE THE CONSTRUCTOR GIVES EVERY NODE `MC_BACKGROUND`, and
+     * that is a dependency rather than a coincidence: `ModularGuiContext.getHoveredWidgets`
+     * skips any widget whose `canHover()` is false, and for a `ParentWidget` that means one
+     * with no visible background, hover background, hover overlay or tooltip. A `NodeContent`
+     * stripped of its background would leave this method returning -1 forever, with nothing
+     * failing anywhere -- which is exactly what happened to the tree's hover band in #333; see
+     * `PlannerWidgets.ClickableGroup.drawsAsHovered` for the bytecode and the measurement.
+     * `isBelowMouse()` is NOT the substitute here: it does not break ties between overlapping
+     * boxes, and this method must name exactly one.
      */
     public int hoveredBox() {
         for (int i = 0; i < visibleBoxes.size(); i++) {

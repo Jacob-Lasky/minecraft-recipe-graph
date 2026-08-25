@@ -53,6 +53,16 @@ import java.util.List;
  * `isHovering` and `canHoverThrough` -- and it is a plain `List`, so iterating it terminates.
  * Reading it is the same data by the same order with none of the recursion.
  *
+ * THE `canHover` FILTER IS WHY MOST OF THIS MOD'S WIDGETS ARE NEVER IN THIS SET, and a reader
+ * who does not know that will misread every diagnostic printed from it. A `ParentWidget` with no
+ * visible background, hover background, hover overlay or tooltip is SKIPPED outright -- so a
+ * tree row, a view-bar button and a menu row are all absent even with the cursor dead on them,
+ * and the honest read for "is the cursor on this widget" is `IWidget.isBelowMouse()`, which is
+ * set from the RAW stack before this filtering. `PlannerWidgets.ClickableGroup.drawsAsHovered`
+ * carries the bytecode and the measurement that cost #333 a hover band. This class is still the
+ * right instrument for a TOOLTIP, which is drawn per widget from `isHoveringFor` and therefore
+ * only ever by a member of this very set.
+ *
  * <h2>WHO FILLS IT, AND WHEN -- THE FACT THAT MAKES THIS PROBE HONEST RATHER THAN VACUOUS</h2>
  *
  * The obvious objection to reading a field instead of calling a method is that the field might

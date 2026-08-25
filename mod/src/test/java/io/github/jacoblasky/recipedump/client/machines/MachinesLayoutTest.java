@@ -10,6 +10,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.widget.sizer.Area;
 import com.cleanroommc.modularui.widgets.ListWidget;
 
+import io.github.jacoblasky.recipedump.ClickTargets;
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.client.browse.BrowseActions;
 import io.github.jacoblasky.recipedump.client.planner.NodeRowText;
@@ -319,5 +320,44 @@ public class MachinesLayoutTest {
         ModularPanel panel = MachinesWidgets.detailPanel(unknown, MachinesActions.NONE);
         HeadlessLayout.layOut(panel);
         assertEquals(1, findList(panel).getChildren().size());
+    }
+
+    /**
+     * No click target on a machines panel sits inside another one. #333.
+     *
+     * THE HOVER BAND IS DRAWN ON `ClickableGroup` AND THIS SCREEN IS FULL OF THEM -- the table's
+     * rows, the state chips, the mod button, the mod picker's rows, the candidate rows, and
+     * `BrowseTabs.strip`'s tabs. Since #333 the band's input is `isBelowMouse()`, which ModularUI
+     * sets on EVERY widget whose box contains the cursor, ancestors included, so a nested target
+     * paints the wash twice over the same pixels and reads as a darker row with every layout
+     * assertion here still green.
+     *
+     * THE ASSERTION IS SHARED WITH `PlannerLayoutTest` AND `BrowseLayoutTest` rather than copied:
+     * the rule is one property of the whole UI, but only this class can build these panels. See
+     * {@link io.github.jacoblasky.recipedump.ClickTargets} for what the walk does and why it
+     * stops at the panel.
+     */
+    @Test
+    public void noClickTargetSitsInsideAnotherOrTheHoverBandWouldStack() {
+        MachineTable table = MachineTables.wide();
+        int checked = ClickTargets.assertNoneNested("the machines table", laidOut());
+        checked += ClickTargets.assertNoneNested("the mod picker", modPickerPanel(table));
+        checked += ClickTargets.assertNoneNested("the detail panel", detailPanel());
+        assertTrue("no click target was examined at all, so this asserts nothing about nesting",
+                   checked > 0);
+    }
+
+    private static ModularPanel modPickerPanel(MachineTable table) {
+        ModularPanel panel = MachinesWidgets.modPicker(table, MachineTable.Filter.NONE,
+                                                       MachinesActions.NONE);
+        HeadlessLayout.layOut(panel);
+        return panel;
+    }
+
+    private static ModularPanel detailPanel() {
+        ModularPanel panel = MachinesWidgets.detailPanel(MachineTables.pressRow(),
+                                                         MachinesActions.NONE);
+        HeadlessLayout.layOut(panel);
+        return panel;
     }
 }

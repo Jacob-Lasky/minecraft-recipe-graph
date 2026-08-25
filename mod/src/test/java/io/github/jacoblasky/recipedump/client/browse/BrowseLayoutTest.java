@@ -14,6 +14,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.widget.sizer.Area;
 import com.cleanroommc.modularui.widgets.ListWidget;
 
+import io.github.jacoblasky.recipedump.ClickTargets;
 import io.github.jacoblasky.recipedump.HeadlessLayout;
 import io.github.jacoblasky.recipedump.graph.GraphBuilder;
 import io.github.jacoblasky.recipedump.graph.RecipeGraph;
@@ -439,6 +440,32 @@ public class BrowseLayoutTest {
                         GraphWidgets.schemaColour(GraphFacts.checkSchema(9, 8)));
         assertNotEquals(GraphWidgets.schemaColour(GraphFacts.checkSchema(8, 8)),
                         GraphWidgets.schemaColour(GraphFacts.checkSchema(0, 8)));
+    }
+
+    /**
+     * No click target on a browse panel sits inside another one. #333.
+     *
+     * BOTH OF THESE PANELS CARRY `BrowseTabs.strip`, whose tabs are `ClickableGroup`s, and since
+     * #333 the hover band is drawn on that class from `isBelowMouse()` -- which ModularUI sets on
+     * every widget whose box contains the cursor, ancestors included. A nested target therefore
+     * paints the wash twice over the same pixels and reads as a darker tab, with every geometry
+     * assertion in this file still green.
+     *
+     * THE ASSERTION IS SHARED WITH `PlannerLayoutTest` AND `MachinesLayoutTest` rather than
+     * copied: one rule about the whole UI, asserted wherever the fixtures to build a panel live.
+     * See {@link io.github.jacoblasky.recipedump.ClickTargets}.
+     */
+    @Test
+    public void noClickTargetSitsInsideAnotherOrTheHoverBandWouldStack() {
+        int checked = ClickTargets.assertNoneNested("the sources panel",
+                                                    laidOutSources(sources(6, true)));
+        checked += ClickTargets.assertNoneNested(
+                "the graph panel",
+                laidOutGraph(GraphFacts.of(new GraphBuilder().build()), "/x/graph.json"));
+        assertTrue("no click target was examined at all, so this asserts nothing about nesting"
+                   + " -- BrowseTabs.strip puts one on both of these panels, so finding none"
+                   + " means the sweep is no longer reaching them",
+                   checked > 0);
     }
 
     /** Every string the panel's text widgets ended up holding, after truncation. */

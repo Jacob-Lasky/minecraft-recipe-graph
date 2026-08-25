@@ -44,6 +44,60 @@ public final class HeadlessLayout {
     public static final int SCREEN_WIDTH = 427;
     public static final int SCREEN_HEIGHT = 240;
 
+    static {
+        pinAbsentClientModsAsAbsent();
+    }
+
+    /**
+     * Tell ModularUI, once, that the optional client mods it looks for are not here.
+     *
+     * WITHOUT THIS, ANY MODULARUI PATH THAT ASKS "IS MOD X LOADED" DIES WITH A
+     * `NullPointerException` INSIDE FORGE. `ModularUI$Mods.isLoaded()` calls
+     * `Loader.isModLoaded(id)`, and there is no FML `Loader` in a plain JUnit JVM -- the failure
+     * is `NullPointerException at net.minecraftforge.fml.common.Loader.isModLoaded(Loader.java:690)`
+     * with nothing of ours in the frame, which reads as a broken test rather than as a missing
+     * game. Measured 2026-08-24 driving `ModularPanel.findHoveredWidgets`, which calls
+     * `ModularPanel.transform` -> `getScale()` -> `Mods.NEA.isLoaded()`.
+     *
+     * IT IS A STATEMENT OF FACT AND NOT A STUB. Nothing is loaded in this JVM: there is no mod
+     * list, and the reason `com/cleanroommc/neverenoughanimations/api/IAnimatedScreen.java` exists
+     * in this source tree at all is that NEA is a separate mod this machine does not have. So
+     * "not loaded" is the true answer, and the only thing being replaced is the crash that stands
+     * between ModularUI and giving it. Same family as `OverlayLikeScreen` below: keep the paths
+     * that need a running game out of a harness that has none, and say which ones.
+     *
+     * EVERY CONSTANT, NOT JUST THE ONE THAT BIT. They all reach the same `Loader` call, so
+     * pinning one leaves the next path to fail identically at a different line months later.
+     *
+     * THE FIELDS ARE SET IN THIS ORDER FOR A REASON: `loaded` first, then `initialized`, which is
+     * the gate `isLoaded()` returns early on. The reverse order leaves a window in which the enum
+     * claims to be initialised while `loaded` still holds whatever it held.
+     *
+     * A ModularUI that renames either field FAILS LOUDLY HERE rather than leaving the harness
+     * subtly wrong -- the same choice `PlannerLayoutTest.resolveHover` makes and the opposite of
+     * `shot/HoveredWidgets`'s deliberate politeness, for the same reason: a test may cost the
+     * build a minute, a shot costs it a fifteen-minute client boot.
+     */
+    private static void pinAbsentClientModsAsAbsent() {
+        try {
+            Class<?> mods = Class.forName("com.cleanroommc.modularui.ModularUI$Mods");
+            java.lang.reflect.Field loaded = mods.getDeclaredField("loaded");
+            java.lang.reflect.Field initialized = mods.getDeclaredField("initialized");
+            loaded.setAccessible(true);
+            initialized.setAccessible(true);
+            for (Object mod : mods.getEnumConstants()) {
+                loaded.setBoolean(mod, false);
+                initialized.setBoolean(mod, true);
+            }
+        } catch (Exception broken) {
+            throw new ExceptionInInitializerError(
+                    "ModularUI$Mods no longer has the boolean `loaded`/`initialized` pair this"
+                    + " harness pins, so every ModularUI path that asks whether an optional mod"
+                    + " is loaded will NullPointerException inside Forge's Loader instead."
+                    + " Read HeadlessLayout.pinAbsentClientModsAsAbsent. Cause: " + broken);
+        }
+    }
+
     private HeadlessLayout() {
     }
 

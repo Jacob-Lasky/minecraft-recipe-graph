@@ -427,6 +427,49 @@ if [ "$want_java" -eq 1 ]; then
         echo "!! Everything else will pass and prove nothing about the port."
     fi
     log=$(mktemp)
+
+    # THE TWO RESULT PATHS ARE CLEARED HERE, BEFORE THE RUN, AND `cleanTest` IS NOT ENOUGH.
+    #
+    # The guard after the run reads these two paths and says whether THIS run wrote them. That
+    # reading is only true if they were empty when the run started, and `cleanTest` does not get
+    # them there: Gradle's clean task deletes the `test` task's registered OUTPUTS, and a report
+    # that has been switched off with `reports.<x>.required = false` is no longer one. So the
+    # moment a report is disabled it also stops being cleaned, and the previous run's copy sits
+    # there forever. Measured here 2026-08-24, committed config (html off, xml on), one filtered
+    # `cleanTest test` in the container:
+    #
+    #   mod/build/test-results/test   92 stale files -> 1, freshly written   (xml IS an output)
+    #   mod/build/reports/tests/test  survived, with a sentinel file placed inside it untouched
+    #
+    # BOTH HALVES OF THE GUARD ARE UNSOUND WITHOUT THIS, IN OPPOSITE DIRECTIONS:
+    #
+    #   HTML, fails CLOSED and sticks. Gradle defaults this report ON, so every worktree that ran
+    #   the suite before it was disabled still has the directory. The guard then fires on every
+    #   run and tells the reader to set a flag that is already set -- an un-clearable red that has
+    #   nothing to do with the run it is reporting on.
+    #
+    #   XML, fails OPEN, which is worse and is the case the guard exists for. Disabling the XML
+    #   also stops `cleanTest` removing it, so the PREVIOUS run's results are still on disk and
+    #   the guard finds files and stays silent. Measured: a full `--java` run with
+    #   `reports.junitXml.required = false` wrote no XML at all and the guard said nothing,
+    #   because 92 files from the run before it were still there.
+    #
+    # Removing them first makes both readings honest whatever Gradle decides to own. If the
+    # removal itself fails the guard cannot make a true statement either way, so that is fatal
+    # here rather than silently downgraded.
+    results="$ROOT/mod/build/test-results/test"
+    html="$ROOT/mod/build/reports/tests/test"
+    rm -rf "$results" "$html" 2>/dev/null || true
+    if [ -e "$results" ] || [ -e "$html" ]; then
+        echo "!! COULD NOT CLEAR THE JAVA ARM'S RESULT PATHS before the run, so the guard after"
+        echo "!! it cannot tell this run's output from the last one's:"
+        [ -e "$results" ] && echo "!!   still there: $results"
+        [ -e "$html" ] && echo "!!   still there: $html"
+        echo "!! These are usually written by the container as uid 99. Remove them by hand"
+        echo "!! (docker run --rm --user 0:0 ... rm -rf) and re-run."
+        fail=1
+    fi
+
     # CONTAINER ON TOWER, DIRECT GRADLE ON A WORKSTATION. This arm hard-coded `docker run`, so
     # on cachyos-desktop -- JDK 25, no docker -- it exited 127 and this script reported
     # "java: 0 passed, 0 failed, 0 skipped" and carried on. Same defect `mod/tools/build-jar.sh`
@@ -503,6 +546,37 @@ if [ "$want_java" -eq 1 ]; then
         echo "!! That is not an empty suite -- it means the run did not happen, or its output"
         echo "!! format changed and every check below is reading a log that says nothing."
         echo "!! full log: $log"
+        fail=1
+    fi
+
+    # THE RESULTS THE READERS ACTUALLY READ, ASSERTED IN BOTH DIRECTIONS.
+    #
+    # The JUnit XML is the artifact that says a run happened -- the skill's freshness discipline
+    # is `stat` it and compare against your own launch time before believing a green -- so a run
+    # that produced none has left every later reader with the PREVIOUS run's verdict on disk and
+    # nothing saying so.
+    #
+    # The HTML report is the opposite case: nothing in this repository opens it, and twice on
+    # 2026-08-23 generating it killed a fully-green :test on FUSE shfs with
+    # "Could not generate test report ... null: .../index.html". `mod/build.gradle` turns it off
+    # and carries the two measurements; this is what notices if someone turns it back on, since
+    # the flake is intermittent and a green run proves nothing about it.
+    #
+    # BOTH READINGS ARE ONLY TRUE BECAUSE THESE PATHS WERE DELETED BEFORE THE RUN -- see the
+    # block above the gradle invocation, and DO NOT replace that deletion with `cleanTest`,
+    # which provably does not clean a report that has been switched off.
+    if [ -z "$(find "$results" -name 'TEST-*.xml' -print -quit 2>/dev/null)" ]; then
+        echo "!! THE JAVA ARM WROTE NO JUNIT XML to $results."
+        echo "!! Nothing downstream can tell this run's results from the last one's. If the XML"
+        echo "!! report was disabled in mod/build.gradle, put it back: the console lines are a"
+        echo "!! presentation format and the XML is the record."
+        fail=1
+    fi
+    if [ -d "$html" ]; then
+        echo "!! THE GRADLE HTML TEST REPORT IS BACK at $html."
+        echo "!! It serves no reader here and its generation has twice failed a fully-passing"
+        echo "!! :test on this filesystem. Set reports.html.required = false in mod/build.gradle"
+        echo "!! and read the comment there before re-enabling it."
         fail=1
     fi
 

@@ -1190,6 +1190,14 @@ public final class PlannerWidgets {
      * brings its own themed background and hover fill, and 634 of those down a tree panel is
      * a wall of boxes. What is wanted is a click target the width of the row and no visual
      * change at all.
+     *
+     * DO NOT GIVE THIS A BACKGROUND TO MAKE `isHovering()` WORK. That is the obvious repair for
+     * the defect {@link #drawsAsHovered} records -- `AbstractParentWidget.canHover()` is
+     * satisfied by a visible background, so one line here would make ModularUI hover the row --
+     * and it undoes the paragraph above outright: 634 themed boxes down the tree panel, which is
+     * the wall of boxes this class exists to avoid. The band is drawn from `isBelowMouse()`
+     * instead, which needs no background and asks the same question. Read
+     * {@link #drawsAsHovered} before touching either.
      */
     public static class ClickableGroup extends ParentWidget<ClickableGroup>
             implements com.cleanroommc.modularui.api.widget.Interactable {
@@ -1294,16 +1302,108 @@ public final class PlannerWidgets {
         }
 
         /**
+         * Whether the cursor is on this row right now. The hover band's input.
+         *
+         * <h2>`isBelowMouse()` AND NOT `isHovering()`: A `ClickableGroup` CAN NEVER HOVER</h2>
+         *
+         * DO NOT "RESTORE" `isHovering()` HERE. It is false on this widget in every frame of a
+         * running client, so #333 shipped a band that never once drew. Measured by
+         * `planner-hover` on 2026-08-23, cursor parked dead on row 0's label at 284,134 against a
+         * row box of 126,129 388x11: `isHovering=false drawsAsSelected=false wash=0x0
+         * anyHovered=true belowMouse=true`, and a resolved stack of
+         * `[TextWidget@139,129 290x10 &gt; ModularPanel@120,90 400x220]` with the row itself
+         * nowhere in it.
+         *
+         * IT IS THIS CLASS'S OWN DESIGN THAT FORBIDS THE FLAG, which is why no amount of waiting
+         * or polling reaches it. Disassembled out of `modularui-3.1.5`:
+         *
+         * <pre>
+         *   AbstractWidget.isHovering()       -&gt; timeHovered &gt;= 0
+         *   AbstractWidget.onMouseStartHover  -&gt; timeHovered = 0   THE ONLY CALL THAT EVER
+         *                                                          MAKES IT &gt;= 0; the other
+         *                                                          two writers, the
+         *                                                          constructor and
+         *                                                          onMouseEndHover, both
+         *                                                          write -1
+         *   ModularGuiContext.getHoveredWidgets(belowMouseStack):    innermost entry first
+         *       if (!w.canHover()) continue;      &lt;- SKIPPED: no add, no onMouseStartHover
+         *       hovered.add(w); w.onMouseStartHover();
+         *       if (!w.canHoverThrough()) break;
+         *   AbstractParentWidget.canHover()   -&gt; a VISIBLE background, hover background, hover
+         *                                        overlay, tooltip, or themed background
+         * </pre>
+         *
+         * This class has none of those, deliberately -- see its own javadoc, and do not "fix"
+         * the band by adding one. So `canHover()` is false, `onMouseStartHover()` is never
+         * called on a row, and `timeHovered` stays at the -1 the constructor set. The band and
+         * the flag were mutually exclusive by construction.
+         *
+         * <h2>`isBelowMouse()` IS THE SAME FRAME'S ANSWER WITHOUT THE `canHover` GATE</h2>
+         *
+         * `ModularGuiContext.onFrameUpdate` calls `onMouseEnterArea()` -- the only call that
+         * ever makes `timeBelowMouse` non-negative, its siblings writing -1 -- on EVERY entry of
+         * the raw below-mouse stack, at bytecode 115..190,
+         * BEFORE handing that same list to the `getHoveredWidgets` above at 193. And the stack
+         * is built by `IViewport.getChildrenAt`, which adds any enabled child whose
+         * `isInside(stack, x, y)` contains the cursor and asks nothing else. So the flag means
+         * exactly "the cursor is inside this widget's box, in the top hovered panel" -- which is
+         * the question a row-wide band is asking, and a stronger one than the old flag ever
+         * answered: it covers the label, the icon, the machine cell, the quantity and the dead
+         * space between them, because it is the ROW's box and not a child's.
+         *
+         * NOTHING ABOUT THE TIMING CHANGES. Both flags are set in the same `onFrameUpdate` off
+         * ModularUI's own `MinecraftMixin.timer` hook, so this lags a cursor move by a frame in
+         * exactly the way the old one did; `HoveredWidgets` records that hook. The note on the
+         * frame below still applies word for word.
+         *
+         * IT CANNOT LIGHT A NEIGHBOUR, AND THAT RESTS ON A FACT THIS FILE ALREADY OWNS.
+         * `isInside` is an area test in the widget's own transformed space, so a row is in the
+         * stack only if the cursor is genuinely inside its box -- and no two tree rows share a
+         * pixel, which is `ModularUiLayoutTest.noTwoRowsOverlapVertically` and the `ListWidget`
+         * stacking every layout test here depends on. Both halves are asserted together against
+         * ModularUI's real hit test by
+         * `PlannerLayoutTest.theCursorLandsInExactlyOneTreeRowAndModularUiSaysWhichOne`, which
+         * sets no flag and re-derives no geometry.
+         *
+         * <h2>THE BAND NOW DRAWS ON EVERY `ClickableGroup`, WHICH IS THE INTENDED BLAST RADIUS</h2>
+         *
+         * Say it out loud rather than let a reviewer find it: the band lives on this class, so
+         * fixing its input lights it on the machines table's rows (#254), the view bar's buttons,
+         * the node menu's rows, the recipe picker's rows and the caveat block -- every click
+         * target this class serves, none of which have ever shown one because the predicate was
+         * never true anywhere. That is the promise this class already made and could not keep,
+         * not a new decision, and it is the same affordance in all of them: a faint neutral wash
+         * saying "this is clickable". A row that wanted no band would have to say so, and none
+         * does. Diagram nodes are the one place unchanged in practice -- `FlowCanvas` paints them
+         * `MC_BACKGROUND`, so they satisfied `canHover()` and were already banding.
+         *
+         * PUBLIC FOR THE REASON {@link #drawsAsSelected} IS PUBLIC: everything past this point in
+         * `draw` is `GuiDraw` and needs a GL context, so this is the only headless view of the
+         * read, and it is the seam `shot/PlannerShot`'s `planner-hover` verdict asks with a real
+         * cursor on a real row. A read, like that one: no behaviour and no colour handed out.
+         */
+        public boolean drawsAsHovered() {
+            return isBelowMouse();
+        }
+
+        /**
          * The wash a row paints behind its own children, given the two states it can be in.
          *
-         * <h2>A PURE FUNCTION BECAUSE `isHovering()` IS THE ONE THING A TEST CANNOT SET</h2>
+         * <h2>A PURE FUNCTION BECAUSE THE CURSOR IS THE ONE THING A TEST CANNOT MOVE</h2>
          *
-         * Hover is read from the screen's cursor, and `HeadlessLayout` has no screen -- so
-         * `isHovering()` is false in every test and a hover band decided inline inside `draw`
-         * would be a behaviour with no headless witness at all, in a `draw` body that already
-         * cannot be reached. Splitting the DECISION out leaves exactly one untestable step (that
-         * `draw` passes `isHovering()` in) and makes the other four cases assertable:
-         * `theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither` sweeps all four.
+         * Hover is read from the screen's cursor and `HeadlessLayout` has no cursor, so a band
+         * decided inline inside `draw` would be a behaviour with no headless witness at all, in
+         * a `draw` body that already cannot be reached. Splitting the DECISION out leaves exactly
+         * one step outside a test's reach -- WHICH PREDICATE `draw` PASSES IN -- and makes the
+         * four combinations assertable: `theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither`
+         * sweeps all four.
+         *
+         * THAT ONE STEP IS WHERE #333 WENT WRONG, AND THE SEAM IS WHY IT WENT UNNOTICED. The
+         * arithmetic here was right the whole time; `draw` fed it `isHovering()`, which
+         * {@link #drawsAsHovered} shows can never be true for a `ClickableGroup`, so all four
+         * states were green over a band that never drew. A pure function is only as honest as
+         * its input, so the input now has a name, a headless witness of its own, and a live
+         * verdict in `shot/PlannerShot`.
          *
          * IT RETURNS ONE COLOUR AND NOT A LIST, WHICH IS THE LAYERING DECISION MADE ONCE.
          * Painting both would put a neutral 9% black over a blue 25% wash and mud it; the
@@ -1311,14 +1411,15 @@ public final class PlannerWidgets {
          * something about the POINTER -- so it wins outright. That is also why the frame is drawn
          * only for a selection: a hovered row needs no border to be found, the cursor is on it.
          *
-         * PUBLIC FOR `shot/`, WHICH IS THE ONLY PLACE `isHovering()` IS EVER TRUE. The paragraph
-         * above is about a test; the other half of the problem is that a headless test can
-         * therefore only ever assert the three states that are NOT the one this exists for. The
-         * `planner-hover` screen closes that by parking a real cursor on a real row and asking
-         * this function what the row painted THAT FRAME, with the live flag as its argument --
-         * which is a claim about the running client rather than about arithmetic. Same reason
-         * {@link #drawsAsSelected} is public for #213, and it is a read: no behaviour, no
-         * colour handed out, and a caller cannot use it to paint anything.
+         * PUBLIC FOR `shot/`, WHICH IS THE ONLY PLACE A REAL CURSOR EXISTS. The paragraph above
+         * is about a test; the other half of the problem is that a headless test drives
+         * {@link #drawsAsHovered}'s flag rather than a pointer, so only a client can say that a
+         * cursor actually lands where the layout says it does. The `planner-hover` screen closes
+         * that by parking a real cursor on a real row and asking this function what the row
+         * painted THAT FRAME, through the same seam `draw` uses -- a claim about the running
+         * client rather than about arithmetic. Same reason {@link #drawsAsSelected} is public for
+         * #213, and it is a read: no behaviour, no colour handed out, and a caller cannot use it
+         * to paint anything.
          *
          * @return the fill, or 0 for none. See {@link #HOVER_FILL} and {@link #SELECTION_FILL}.
          */
@@ -1347,7 +1448,7 @@ public final class PlannerWidgets {
                         .drawRect(level * INDENT + INDENT / 2, 0, 1, getArea().height, RAIL);
             }
             boolean selected = drawsAsSelected();
-            int wash = rowWash(isHovering(), selected);
+            int wash = rowWash(drawsAsHovered(), selected);
             int width = getArea().width;
             int height = getArea().height;
             if (wash != 0) {
@@ -1356,11 +1457,13 @@ public final class PlannerWidgets {
             }
             if (!selected) {
                 // NO FRAME FOR A HOVER, deliberately; see `rowWash`. And nothing to read the
-                // cursor's own position from here -- `isHovering()` LAGS THE CURSOR BY A FRAME,
-                // which `shot/PlannerShot` already logs beside `isBelowMouseInTopPanel` for this
-                // reason, with the note that waiting longer for it does not help. A prodshot
-                // proving this band MUST advance at least one frame between moving the cursor and
-                // capturing, or it photographs an unhighlighted row and reads as a failure.
+                // cursor's own position from here -- `drawsAsHovered()` LAGS THE CURSOR BY A
+                // FRAME, because `ModularGuiContext.onFrameUpdate` is what sets it and that runs
+                // off ModularUI's own client-tick mixin. A prodshot proving this band MUST
+                // advance at least one frame between moving the cursor and capturing, or it
+                // photographs an unhighlighted row and reads as a failure. `shot/PlannerShot`
+                // logs the seam beside `PanelManager.isBelowMouseInTopPanel` for exactly this
+                // reason, and waiting longer does not fix a predicate that is simply never set.
                 return;
             }
             com.cleanroommc.modularui.drawable.GuiDraw
@@ -1810,6 +1913,15 @@ public final class PlannerWidgets {
      * mouse over each node and compares `IWidget.isHovering()` against the layout's own answer:
      * they AGREE at zoom 0.5, 1.0 and 2.0, so `getWidgetsAt` routes correctly through the
      * scroll offset and the zoom matrix alike. That is what the viewport transform is for.
+     *
+     * AND `isHovering()` ANSWERS FOR A NODE ONLY BECAUSE `FlowCanvas` GIVES IT A BACKGROUND.
+     * That measurement is about the TRANSFORM and is not evidence that the flag works for a
+     * `ClickableGroup` in general -- it does not; see {@link ClickableGroup#drawsAsHovered}, and
+     * do not cite `flow-hit` against it. `FlowCanvas` sets `GuiTextures.MC_BACKGROUND` on every
+     * node it builds, which is precisely what `AbstractParentWidget.canHover()` looks for, so a
+     * node enters ModularUI's hovered set and a bare tree row never can. That line in
+     * `FlowCanvas` is load-bearing for `FlowCanvas.hoveredBox` as well as for the border, and
+     * removing it would silently stop the diagram answering which node the cursor is on.
      *
      * @param actions where a click goes. {@link PlannerActions#NONE} for a layout assertion or
      *                a screenshot, which is what the three-argument overload passes.

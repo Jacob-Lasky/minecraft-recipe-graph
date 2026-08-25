@@ -822,16 +822,23 @@ final class PlannerShot {
      * on a button it found by walking the widget tree, which passes whether or not the button is
      * anywhere a mouse can reach -- that is stated on `theCaveatsClickTargetCoversItsLines`, and
      * it is why that test exists at all. Here the cursor is sent to where the LAYOUT says the
-     * button is, and the click happens only if `IWidget.isHovering()` -- ModularUI's own verdict,
-     * from `getWidgetsAt` rather than from these coordinates -- says the cursor landed on it. Two
-     * answers from two different pieces of code, which is what `flow-hit` established the mouse
-     * can do on an Xvfb display.
+     * button is and the click is dispatched THROUGH THE SCREEN, so ModularUI does its own
+     * hit-testing from the live pointer and decides for itself which widget receives the press.
+     * Two answers from two different pieces of code, which is what `flow-hit` established the
+     * mouse can do on an Xvfb display.
+     *
+     * THE CLICK IS NOT GATED ON A HOVER FLAG AND MUST NOT BE. An earlier draft of this sentence
+     * said it was gated on `IWidget.isHovering()`; the code never was, and gating on it would
+     * have deadlocked this screen forever, because that flag is permanently false for a bare
+     * `ClickableGroup` -- see `PlannerWidgets.ClickableGroup.drawsAsHovered`. What discriminates
+     * is {@link #verdict}: a click on the wrong button opens the wrong panel and fails on the
+     * name.
      *
      * READ AFTER A WAIT AND NEVER ON THE POLL THAT MOVED, which is `flow-hit`'s measured lesson
      * and not caution: the hover pass runs from the cursor position sampled at the start of a
-     * tick, so `isHovering` lags a move by at least one frame. At one frame's gap that probe
-     * reported ModularUI answering for the PREVIOUS node on every line -- six tidy DISAGREE lines
-     * that were really six agreements, one row out of step.
+     * tick, so every hit-test flag lags a move by at least one frame. At one frame's gap that
+     * probe reported ModularUI answering for the PREVIOUS node on every line -- six tidy DISAGREE
+     * lines that were really six agreements, one row out of step.
      *
      * THE OTHER BUTTONS ARE CHECKED TOO, and that is the assertion that makes this discriminate.
      * "The cursor is over a button" is satisfied by being over the WRONG button, and a shot of
@@ -958,10 +965,29 @@ final class PlannerShot {
         /**
          * Did this row paint the hover band on the frame about to be captured?
          *
-         * ASKED OF `rowWash` WITH THE LIVE FLAG, which is the only form of this question that is
-         * about the running client. `PlannerLayoutTest` already sweeps all four wash states, so
-         * asserting the arithmetic again would add nothing; what no test can supply is a true
-         * `isHovering()`, and that is exactly what this hands it.
+         * THE WASH IS THE CLAIM, ASKED THROUGH THE SEAM `draw` ITSELF USES.
+         * `PlannerWidgets.ClickableGroup.drawsAsHovered` is the one step of the band that no
+         * headless test can drive with a pointer, and `rowWash` is the arithmetic
+         * `PlannerLayoutTest` already sweeps in all four states -- so re-asserting the arithmetic
+         * would add nothing and asserting the predicate alone would stop short of the pixel. This
+         * composes them exactly as `draw` does and asks what the row painted THAT FRAME.
+         *
+         * IT IS NOT A MIRROR OF THE IMPLEMENTATION, BECAUSE THE INPUT IS A REAL CURSOR AND THE
+         * SEAM IS CROSS-CHECKED. `ScreenCursor.park` moves the pointer on the Xvfb display and
+         * ModularUI resolves it on its own client-tick mixin with nothing of ours involved, so
+         * the one thing this screen exists to establish -- that a pointer on a row reaches that
+         * row's predicate -- cannot be satisfied by any arrangement of our code. And the seam is
+         * compared against `PanelManager.isBelowMouseInTopPanel`, a SECOND path to the same fact:
+         * a live scan of the top panel's `hovering` list rather than the per-widget flag
+         * `onFrameUpdate` sets from it. A `drawsAsHovered()` wired to a constant, or to the wrong
+         * widget, passes the first and fails the second. Both are read once, in one frame, off
+         * the one list `findHoveredWidgets` rebuilt for it.
+         *
+         * `isHovering()` IS STILL LOGGED, AS THE CONTROL THAT EXPLAINS THE OLD FAILURE. It must
+         * be FALSE here and that is not a defect: a `ClickableGroup` has no background, so
+         * `AbstractParentWidget.canHover()` is false and `ModularGuiContext.getHoveredWidgets`
+         * never calls `onMouseStartHover` on it. Printing it beside a lit band is what tells the
+         * next reader that the flag being false is expected rather than alarming.
          *
          * AND IT MUST NOT BE THE SELECTION WASH, which is the assertion that makes this
          * discriminate rather than merely be non-zero. Nothing selects a row on this screen, but
@@ -973,36 +999,65 @@ final class PlannerShot {
          */
         private boolean hoverVerdict(ModularPanel panel, PlannerWidgets.ClickableGroup row,
                                      PlanNode node, int targetX, int targetY) {
-            boolean hovering = row.isHovering();
-            int wash = PlannerWidgets.ClickableGroup.rowWash(hovering, row.drawsAsSelected());
+            boolean hovered = row.drawsAsHovered();
+            boolean belowMouse =
+                    panel.getScreen().getPanelManager().isBelowMouseInTopPanel(row);
+            int wash = PlannerWidgets.ClickableGroup.rowWash(hovered, row.drawsAsSelected());
             int selectionWash = PlannerWidgets.ClickableGroup.rowWash(false, true);
             // READ ONCE, LIKE `tooltipVerdict`, and for the same reason: `hovered` is replaced
             // wholesale each frame. Nothing in this verdict depends on it -- the wash is the
             // claim -- so an unreadable set prints its cause in the diagnostic and changes
             // nothing else, which is why there is no availability branch here.
-            HoveredWidgets.Hovered hovered =
+            //
+            // AND IT IS DIAGNOSTIC RATHER THAN THE MEASUREMENT, WHICH IS THE #333 LESSON ITSELF.
+            // This is `ModularGuiContext.hovered`, the set AFTER the `canHover` filter, so the
+            // row is expected to be ABSENT from it even on a passing run -- the printed stack on
+            // the failing run was `[TextWidget > ModularPanel]` and that is what a correct
+            // resolution looks like for a background-less row. Asserting the row's presence here
+            // would be asserting the very thing ModularUI does not do.
+            HoveredWidgets.Hovered resolved =
                     HoveredWidgets.underCursor(ModularScreen.getCurrent());
             ShotHarness.log(screen() + ": after " + poll + " polls on "
-                            + NodeRowText.label(node) + " -- isHovering=" + hovering
+                            + NodeRowText.label(node) + " -- drawsAsHovered=" + hovered
+                            + " belowMouse=" + belowMouse
+                            + " isHovering=" + row.isHovering() + " (expected false: a"
+                            + " ClickableGroup has no background, so canHover() is false)"
                             + " drawsAsSelected=" + row.drawsAsSelected()
                             + " wash=0x" + Integer.toHexString(wash)
                             + " selectionWash=0x" + Integer.toHexString(selectionWash)
                             + " anyHovered=" + panel.isAnyHovered()
-                            + " belowMouse="
-                            + panel.getScreen().getPanelManager().isBelowMouseInTopPanel(row)
-                            + " resolved=[" + hoveredDiagnostic(hovered) + "] ["
+                            + " resolved=[" + hoveredDiagnostic(resolved) + "] ["
                             + cursorDiagnostic(targetX, targetY) + "]");
+            if (hovered != belowMouse) {
+                // TWO PATHS TO ONE FACT, AND THEY MUST AGREE. `drawsAsHovered()` is the per-widget
+                // flag `ModularGuiContext.onFrameUpdate` sets; `isBelowMouseInTopPanel` scans the
+                // very list it was set from. Both were read once, this frame, so a disagreement is
+                // not a race -- it means the seam the band paints from is no longer reading
+                // ModularUI's answer, which is the failure a wash assertion alone cannot see
+                // because a predicate stuck at TRUE would light every row and pass.
+                ShotScreens.reportFail(screen() + ": the row's own hover seam says " + hovered
+                                       + " and ModularUI's top-panel hit list says " + belowMouse
+                                       + ", so `ClickableGroup.drawsAsHovered` is not reading"
+                                       + " what ModularUI resolved. The band may still be lit --"
+                                       + " that is the point: it would be lit from the wrong"
+                                       + " thing.");
+                return false;
+            }
             if (wash == 0) {
-                // THE PREDICTION THIS SCREEN EXISTS TO TEST, STATED IN THE FAILURE. `ClickViewButton`
-                // measured `isHovering()` never setting for a view-bar button and diagnosed it as
-                // the button's parent not being an `IViewport`; a tree row's parent IS one, so this
-                // failing means either that diagnosis is wrong or the band does not draw at all.
-                // Both are findings and neither is a flaky run, so it says which to go and read.
+                // THE PREDICTION THIS SCREEN EXISTS TO TEST, STATED IN THE FAILURE. The cursor is
+                // inside the row's box and the row painted nothing, so either ModularUI never put
+                // this row in the top panel's hit list (belowMouse, printed above, says whether)
+                // or the band is drawn from something else again. Both are findings and neither
+                // is a flaky run, so the message says which reading settles it.
                 ShotScreens.reportFail(screen() + ": the row under the cursor painted no wash, so"
-                                       + " #333's hover band does not draw in game. isHovering="
-                                       + hovering + "; if that is false, `ClickViewButton`'s"
-                                       + " IViewport diagnosis needs re-reading -- a tree row's"
-                                       + " parent is a ListWidget, which IS one.");
+                                       + " #333's hover band does not draw in game."
+                                       + " drawsAsHovered=" + hovered + " belowMouse=" + belowMouse
+                                       + "; if BOTH are false ModularUI did not resolve this row"
+                                       + " at all and the cursor or the layout is the suspect --"
+                                       + " read `cursorDiagnostic` above. Do NOT reach for"
+                                       + " `isHovering()`: `ClickableGroup.drawsAsHovered`'s"
+                                       + " javadoc has the bytecode showing it can never be true"
+                                       + " for a background-less ParentWidget.");
                 return false;
             }
             if (wash == selectionWash) {
@@ -1048,7 +1103,7 @@ final class PlannerShot {
             ShotHarness.log(screen() + ": after " + poll + " polls on "
                             + NodeRowText.label(node) + " -- expected " + expected
                             + " resolvedTooltip=" + (resolved != null)
-                            + " rowHovering=" + row.isHovering()
+                            + " rowBelowMouse=" + row.drawsAsHovered()
                             + " anyHovered=" + panel.isAnyHovered()
                             + " resolved=[" + hoveredDiagnostic(hovered) + "] ["
                             + cursorDiagnostic(targetX, targetY) + "]");
@@ -1315,7 +1370,7 @@ final class PlannerShot {
     private static final class ClickViewButton implements ShotScreens.Hold {
 
         /**
-         * The earliest poll on which `isHovering` is worth reading. `flow-hit` measured 5.
+         * The earliest poll on which a hit-test flag is worth reading. `flow-hit` measured 5.
          *
          * READ-THEN-MOVE, AND THE ANSWER ON ANY POLL BELONGS TO THE PREVIOUS POSITION. The hover
          * pass runs from the cursor position sampled at the start of a tick, so a read taken on
@@ -1434,14 +1489,24 @@ final class PlannerShot {
             // hit-testing from the live cursor to decide which widget receives it -- so the button
             // is reached BY POSITION and nothing here names the widget that gets the click.
             //
-            // AND NOT GATED ON `IWidget.isHovering()`, WHICH THIS PROBE MEASURED UNRELIABLE HERE.
+            // AND NOT GATED ON `IWidget.isHovering()`, WHICH IS PERMANENTLY FALSE FOR THIS BUTTON.
             // The first two runs parked the cursor dead centre of the button and polled that flag
             // forty times, about a second, and it never set: `asked=171,112 mouseRaw=342,576
             // scale=2 gui=171,112` against a laid-out box of `126,107 90x11`. The conversion round
             // trips and the point is inside the box, so the flag is not reporting the cursor.
-            // `flow-hit` gets a true answer from the same flag, but its widgets sit inside a
-            // `FlowCanvas`, which is an `IViewport` and walks its own children -- a plain
-            // `ParentWidget` is not. Waiting longer for it was tried and does not help.
+            //
+            // THE DIAGNOSIS THAT USED TO SIT HERE WAS WRONG, and #333 paid for it: it blamed the
+            // button's parent for not being an `IViewport`, reasoning from `flow-hit` getting a
+            // true answer inside a `FlowCanvas`. That story predicts a tree row hovers, because a
+            // row's parent is a `ListWidget` and that IS an `IViewport` -- and `planner-hover`
+            // measured a tree row NOT hovering, on 2026-08-23, over a band drawn from the flag.
+            // The real rule is `AbstractParentWidget.canHover()`: a `ParentWidget` with no
+            // visible background, hover background, hover overlay or tooltip is SKIPPED by
+            // `ModularGuiContext.getHoveredWidgets` and never gets `onMouseStartHover`. The view
+            // bar's buttons and the tree's rows are both bare `ClickableGroup`s and both fail;
+            // `FlowCanvas` sets `MC_BACKGROUND` on every node, which is the whole difference.
+            // The bytecode is in `PlannerWidgets.ClickableGroup.drawsAsHovered`. Waiting longer
+            // was tried and does not help, and could not have: nothing ever writes the field.
             //
             // THE VERDICT IS WHAT DISCRIMINATES, so nothing is lost by not gating: a click that
             // landed on the wrong button opens the wrong panel and {@link #verdict} fails on the
@@ -1452,7 +1517,9 @@ final class PlannerShot {
             ShotHarness.log("planner-view: dispatching a click at the cursor after " + poll
                             + " poll(s); ModularUI's own hit tests say belowMouse="
                             + screen.getPanelManager().isBelowMouseInTopPanel(button)
-                            + " isHovering=" + button.isHovering()
+                            + " drawsAsHovered=" + button.drawsAsHovered()
+                            + " isHovering=" + button.isHovering() + " (always false for a bare"
+                            + " ClickableGroup; see drawsAsHovered)"
                             + " anyHovered=" + panel.isAnyHovered()
                             + " otherButtons=" + othersHovered(buttons, button)
                             + " panelOpen=" + panel.isOpen() + " ["
@@ -1465,12 +1532,21 @@ final class PlannerShot {
             return true;
         }
 
-        /** How many OTHER view buttons claim the cursor. Non-zero means it is on the wrong one. */
+        /**
+         * How many OTHER view buttons claim the cursor. Non-zero means it is on the wrong one.
+         *
+         * `drawsAsHovered()` AND NOT `isHovering()`, WHICH MADE THIS A CONSTANT ZERO. Every view
+         * button is a bare `ClickableGroup`, so `AbstractParentWidget.canHover()` is false for
+         * all of them and `isHovering()` can never be true -- see that method's javadoc for the
+         * bytecode. This line printed `otherButtons=0` on every run of this screen and read as
+         * evidence that the cursor was on the right button, which it never once checked. Found
+         * while fixing #333's band, which was drawn from the same flag.
+         */
         private static int othersHovered(List<PlannerWidgets.ClickableGroup> buttons,
                                         PlannerWidgets.ClickableGroup button) {
             int count = 0;
             for (PlannerWidgets.ClickableGroup other : buttons) {
-                if (other != button && other.isHovering()) {
+                if (other != button && other.drawsAsHovered()) {
                     count++;
                 }
             }
@@ -1576,27 +1652,37 @@ final class PlannerShot {
      * P5's band and the machine tooltip were the only parts of that pass with no picture, and the
      * reason is the same for both: they exist only while a cursor is somewhere. Every planner
      * screen before these opens a panel and captures it, and a captured panel has no cursor on
-     * any row. `PlannerLayoutTest.theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither` sweeps
-     * all four wash states headlessly, which is worth having and is arithmetic:
-     * `PlannerWidgets.ClickableGroup.rowWash`'s own javadoc records that `isHovering()` is false
-     * in every test, so the one state the band exists for is the one a test cannot reach.
+     * any row. Three tests in `PlannerLayoutTest` get as close as a headless JVM can:
+     * `theRowWashLayersHoverUnderSelectionAndNeitherWhenNeither` sweeps all four wash states and
+     * is arithmetic; `theCursorLandsInExactlyOneTreeRowAndModularUiSaysWhichOne` drives
+     * ModularUI's own hit test from a coordinate; and
+     * `theHoverBandFollowsTheCursorAndNotTheHoverFlag` drives the state transition that hit test
+     * feeds and watches the wash follow. What none of them can do is put a PHYSICAL cursor at the
+     * coordinates the layout published and show that it arrives, which is the half only a running
+     * client can answer and the reason this screen exists.
      *
-     * <h2>AND THERE IS A MEASURED REASON TO DOUBT IT WORKS AT ALL, WHICH IS WHY THIS IS A PROBE</h2>
+     * <h2>THIS SCREEN ALREADY CAUGHT THE BAND NOT DRAWING, AND THAT IS WHAT IT NOW GUARDS</h2>
      *
-     * `ClickViewButton` above records that `IWidget.isHovering()` NEVER SET for a view-bar button
-     * -- forty polls, cursor dead centre of a laid-out box, coordinates round-tripping -- and its
-     * diagnosis was that `flow-hit` gets a true answer only because its widgets sit inside a
-     * `FlowCanvas`, which is an `IViewport` and walks its own children, "a plain `ParentWidget` is
-     * not". The band is drawn from exactly that flag.
+     * The first run of this screen, 2026-08-23, parked the cursor dead on row 0's label and
+     * reported `isHovering=false drawsAsSelected=false wash=0x0 anyHovered=true belowMouse=true`
+     * with a resolved stack of `[TextWidget@139,129 290x10 &gt; ModularPanel@120,90 400x220]` --
+     * the row absent from it entirely. #333 had drawn the band from `isHovering()`, so the band
+     * never once drew, and every headless test was green because `rowWash` is a pure function
+     * given inputs that never occur.
      *
-     * SO THE PREDICTION IS THAT A TREE ROW HOVERS AND A VIEW BUTTON DOES NOT, and the difference
-     * is structural rather than lucky: the view bar is a `ViewBar`, a plain `ParentWidget`, while
-     * a tree row is a child of the tree's `ListWidget` -- and `ListWidget extends
-     * AbstractScrollWidget implements IViewport`, the same interface that makes the canvas work.
-     * Verified against `modularui-3.1.5`'s class hierarchy. If that is right this screen passes
-     * and the earlier measurement is explained rather than merely recorded; if it is wrong, #333
-     * shipped a band that never draws and THIS is the run that says so. Either way the verdict is
-     * the artifact and the PNG is the corroboration.
+     * THE PREDICTION THAT FAILED IS WORTH KEEPING, BECAUSE IT WAS WRONG IN AN INSTRUCTIVE WAY.
+     * It was that a tree row hovers and a view-bar button does not, on the grounds that a row's
+     * parent is a `ListWidget` (an `IViewport`) and the view bar is a plain `ParentWidget`. Both
+     * in fact fail, and for a reason that has nothing to do with parents:
+     * `AbstractParentWidget.canHover()` is false for a widget with no visible background, hover
+     * background, hover overlay or tooltip, and `ModularGuiContext.getHoveredWidgets` skips such
+     * a widget without ever calling `onMouseStartHover`. `flow-hit`'s nodes answer because
+     * `FlowCanvas` gives them `MC_BACKGROUND`, not because of the canvas.
+     *
+     * SO THE BAND IS DRAWN FROM `isBelowMouse()` NOW, and this screen is the only witness that a
+     * real pointer reaches it: see `PlannerWidgets.ClickableGroup.drawsAsHovered` for the
+     * bytecode and `ParkOnTreeRow.hoverVerdict` for what is asserted and what is cross-checked.
+     * The verdict is the artifact and the PNG is the corroboration.
      *
      * <h2>WHY IT DOES NOT PARK ON THE MACHINE CELL, WHICH IS THE OBVIOUS PLACE</h2>
      *
