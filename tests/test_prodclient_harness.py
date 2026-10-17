@@ -205,7 +205,7 @@ class ProdClientHarnessTest(unittest.TestCase):
         measured whatever `stage-instance.sh` last happened to install. On a branch that changes
         Java that is a 22-minute run photographing the OLD behaviour, with nothing in the log to
         say which jar it was. It has to be `--mod-only`: re-staging the whole instance copies 377
-        jars out of the AMP server and takes about a minute."""
+        jars out of the server instance and takes about a minute."""
         prodshot = strip_comments(read("prodshot.sh"))
         # Loose about what sits between, because the path is `$(dirname "$0")/...` and the
         # nested quotes inside it defeat any character class written to exclude them.

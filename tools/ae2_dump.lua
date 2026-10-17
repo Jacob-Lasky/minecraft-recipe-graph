@@ -15,7 +15,8 @@ SETUP
   3. Copy this file onto the computer, then:  ae2_dump
   4. The file lands in the world save under
        <world>/opencomputers/<fs-address>/ae2_have.json
-     Pull it out with:  docker exec AMP cat .../opencomputers/<addr>/ae2_have.json
+     Pull it out with:  docker exec 5eb3b845-08ec-4363-9157-1a2515522d3c cat \
+       /home/container/MultiplayerRocks/opencomputers/<addr>/ae2_have.json   (the Pelican game container)
 
 The Adapter is what exposes the network as a component. Without it the proxy lookup
 below finds nothing -- a computer merely placed next to a controller is not connected.

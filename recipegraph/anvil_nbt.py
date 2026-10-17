@@ -1,8 +1,10 @@
 """Pure-stdlib Anvil region + NBT reader.
 
-No third-party deps on purpose: the AMP container has python3 but no pip, so this
-module must run unchanged both here and inside the container. DO NOT add nbtlib
-or numpy -- that breaks in-container use, which is the whole point.
+No third-party deps on purpose: it must run unchanged both here and in a bare
+throwaway `python:3-alpine` container that mounts the world read-only (the Pelican
+game image has no python, and there is no pip install step in that path; it used to
+run inside the AMP container, which had python3 but no pip). DO NOT add nbtlib
+or numpy -- that breaks the bare-container use, which is the whole point.
 """
 
 import gzip

@@ -29,8 +29,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # found no scripts at all.
 #
 # THE PRODCLIENT PAIR WAS MISSING FROM THIS LIST UNTIL #265, which meant the two heaviest
-# containers in the repository -- a 7g whole-pack client and the root container that copies the
-# pack out of the AMP instance -- were covered by the compliance sweep but not by the control
+# containers in the repository -- a 7g whole-pack client and the container that copies the
+# pack out of the server instance -- were covered by the compliance sweep but not by the control
 # that proves the sweep can see anything. A list that omits the runners it most needs to find is
 # the same shape as the defect it guards.
 KNOWN_RUNNERS = ("tools/check.sh", "mod/tools/build-jar.sh", "harness/shot.sh",
@@ -186,7 +186,7 @@ def _gate_covered_functions(text):
     have to become one function. The `docker run` inside it then carries no prefix, and the
     honest question stops being "does this line say gated" and becomes "can this line be
     reached without the lock". That is a property of the call sites, and it is transitive:
-    `stage_from_amp` is called only from `stage_instance`, which is called only as
+    `stage_from_server` is called only from `stage_instance`, which is called only as
     `gated stage_instance`.
 
     THIS IS A STRENGTHENING AND NOT AN EXEMPTION, and the difference is worth being explicit
