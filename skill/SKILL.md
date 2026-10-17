@@ -409,6 +409,15 @@ pocket-dev has no `java`, which is a container rather than a wall. The server di
 99:100 mode 755 (under AMP it was 0700 uid 1000 and needed a root container), so a 99:100
 container copies the jars out directly.
 
+**The parent `volumes/` directory is root 0700, and that is not a contradiction.** A bind
+mount of the subpath never traverses it, so the `-v` below works as 99:100 while an `ls` of
+`volumes/` from the same container is refused. A refused listing of the parent is not
+evidence the path is wrong.
+
+**DO NOT fall back to `/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft`.** The move
+off AMP on 2026-10-17 left that copy behind as a frozen fork. It still reads, so building or
+staging against it quietly uses a stale pack and nothing anywhere reports an error.
+
 ```bash
 docker run --rm --user 99:100 --memory=1g \
   -v /mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/mods:/mods:ro \
