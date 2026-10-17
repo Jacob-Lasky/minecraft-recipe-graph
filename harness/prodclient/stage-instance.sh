@@ -84,9 +84,12 @@ stage_from_server() {
     fi
     echo "stage-instance: staging the pack out of the server instance"
     # 99:100 like every other container here, so the copy is born owned by the array's owner and
-    # nothing root-owned is left to wedge later writers. `cp -rp` and NOT `cp -a`: -a also tries
-    # to preserve ownership, which a non-root copy cannot do. (Under AMP the source was 0700
-    # uid 1000 and this had to be a root container followed by a chown -R.)
+    # nothing root-owned is left to wedge later writers. (Under AMP the source was 0700 uid 1000
+    # and this had to be a root container followed by a chown -R.)
+    #
+    # COPIED INTO .tmp AND RENAMED ONLY AFTER EVERY cp SUCCEEDS. The guard at the top of this
+    # function treats "both directories exist" as "already staged", so creating them up front and
+    # failing mid-copy left a partial pack that every later run skipped over without a word.
     #
     # NO `gated` ON THIS LINE, and that is not an exemption. Every caller of this function is
     # inside `stage_instance`, which is only ever invoked as `gated stage_instance`, so the gate
@@ -98,11 +101,15 @@ stage_from_server() {
         -v "$PACK_SERVER:/mc:ro" -v "$HOST_BUILD:/out" \
         alpine sh -c '
             set -e
-            mkdir -p /out/packserver377 /out/packconfig
-            cp -rp /mc/mods/. /out/packserver377/
-            cp -rp /mc/config /out/packconfig/
-            cp -rp /mc/scripts /out/packconfig/
-            if [ -d /mc/resources ]; then cp -rp /mc/resources /out/packconfig/; fi'
+            rm -rf /out/packserver377.tmp /out/packconfig.tmp
+            mkdir -p /out/packserver377.tmp /out/packconfig.tmp
+            cp -a /mc/mods/. /out/packserver377.tmp/
+            cp -a /mc/config /out/packconfig.tmp/
+            cp -a /mc/scripts /out/packconfig.tmp/
+            if [ -d /mc/resources ]; then cp -a /mc/resources /out/packconfig.tmp/; fi
+            rm -rf /out/packserver377 /out/packconfig
+            mv /out/packserver377.tmp /out/packserver377
+            mv /out/packconfig.tmp /out/packconfig'
 }
 
 build_instance() {
@@ -409,9 +416,10 @@ install_graph() {
 # worse blast radius.
 stage_instance() {
     # `|| return 1` ON BOTH, because `install_graph` REFUSES a stale auto-selected graph and a
-    # refusal nothing propagates is not a refusal. Written out rather than left to `set -e`:
-    # this file has no `set -e`, and a guard that is correct where it is tested and inert where
-    # it is called is the exact shape #279 exists to stop shipping.
+    # refusal nothing propagates is not a refusal. Written out rather than left to `set -e`: this
+    # file does set -e (top of file), but bash suspends it inside any function reached through
+    # `||`, `&&`, `!` or an `if` condition, so a guard that relied on it would be correct where it
+    # is tested and inert where it is called -- the exact shape #279 exists to stop shipping.
     if [ "$MOD_ONLY" -eq 1 ]; then
         install_mod
         install_graph || return 1

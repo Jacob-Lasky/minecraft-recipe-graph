@@ -1822,8 +1822,9 @@ somebody redumps and rebuilds -- pinning fixtures to it makes the port's contrac
 of the last game launch. (The jar count is NOT a reason: the parity section above measured
 the recipe-bearing set identical on both machines, 364 jars each on 2026-08-03, with a
 difference of zero produced keys in both directions. The server's live `mods/` has since
-grown to 366 (369 on Pelican, 2026-10-17) — counted 2026-08-22 via a root container against the instance itself; note the
-staged copy in `.recipegraph-build/packserver377` still holds the old 364 and is stale. The
+grown: 366 on 2026-08-22 (counted on AMP via a root container) and 369 on 2026-10-17 (on Pelican,
+as 99:100). Re-stage with `stage-instance.sh` after the pack changes; a staged copy left behind
+in `.recipegraph-build/packserver377` keeps the old count until it is. The
 ARGUMENT is that the sets are recipe-identical, not that the count is frozen, so re-measure
 the sets rather than reading a drifted count as a divergence.)
 
