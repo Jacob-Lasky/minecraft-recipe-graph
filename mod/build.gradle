@@ -61,8 +61,8 @@ minecraft {
 //
 // Point `-Ppack_mods=<dir>` at any instance's `mods/` and all three resolve by glob. On a
 // machine with the client instance that is the instance itself; on Tower it is the staged
-// copy, because the AMP server's mods directory is mode 0700 uid 1000 and unreadable as
-// 99:100 (stage it with a root container, see the skill). Individual `-P<name>_jar` flags
+// copy staged out of the Pelican server's mods directory (99:100 mode 755 since the
+// 2026-10-17 move off AMP; see the skill). Individual `-P<name>_jar` flags
 // override one entry without disturbing the others.
 //
 //   ./gradlew build -Ppack_mods=/coding/.recipegraph-build/deps

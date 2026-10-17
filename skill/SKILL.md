@@ -140,7 +140,7 @@ have not started. Before writing the word:
   you have not started, not a blocker.
 - **Are you sure it is still true?** Re-check, do not inherit. This section replaced a
   paragraph asserting the mod could not be built on Tower because no pack instance existed
-  there, which was false for months: the AMP server on the same host holds 364 jars,
+  there, which was false for months: the server on the same host (AMP then, Pelican since 2026-10-17) holds the pack jars,
   `HadEnoughItems_1.12.2-4.28.1.jar` among them. Four issues sat behind it.
 
 ### Who can do what
@@ -154,7 +154,7 @@ Verify a row before relying on it; that is the whole lesson above. Commands are 
 | Run the Python tool, tests, the UI | yes | yes |
 | Read the AE2 network from the world save | yes, server world is on the same host | yes |
 | Serve the UI as a container | yes, this is where it runs | not where it lives |
-| Get the pack jars `checkPackJars` demands | yes, from the AMP server instance | yes |
+| Get the pack jars `checkPackJars` demands | yes, from the Pelican server's `mods/` | yes |
 | Compile the dump mod into a jar | **yes**, verified 2026-07-29, JDK 25 container | yes |
 | `recipegraph build` into a graph | yes, at a measured **0-key** jar gap (see below) | yes, authoritative |
 | **Boot the pack and render its GUIs** | **yes**, measured 2026-08-04, `harness/prodclient/` | yes |
@@ -189,7 +189,7 @@ Re-measured 2026-08-03:
 
 ```
 client instance      367 jars      (NOT ~410; that number was never counted either)
-tower AMP server     364 jars
+tower server (AMP)   364 jars
 shared               364, every one md5-identical (joined on FILENAME, not sort position)
 server-only            0
 client-only            3    esm-legacy (Extreme Sound Muffler), soundreloader, the dump mod
@@ -402,19 +402,18 @@ because no pack instance existed on Tower; see
 and what it cost.
 
 `compileJava dependsOn checkPackJars` needs `-Ppack_mods` pointing at a directory holding
-HadEnoughItems, ModularUI and AE2-UEL, and the AMP server on this host has all three:
-`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` holds 364 jars including
+HadEnoughItems, ModularUI and AE2-UEL, and the Pelican server on this host has all three:
+`/mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/mods` holds the pack jars (369 on 2026-10-17) including
 `HadEnoughItems_1.12.2-4.28.1.jar`, `modularui-3.1.5.jar` and `ae2-uel-v0.56.5.jar`.
-pocket-dev has no `java`, which is a container rather than a wall. The instance directory is
-mode 0700 uid 1000, so stage the jars out with a root container and `chown 99:100` rather than
-trying to read them as 99:100.
+pocket-dev has no `java`, which is a container rather than a wall. The server directory is
+99:100 mode 755 (under AMP it was 0700 uid 1000 and needed a root container), so a 99:100
+container copies the jars out directly.
 
 ```bash
-docker run --rm --user 0:0 --memory=1g \
-  -v /mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods:/mods:ro \
+docker run --rm --user 99:100 --memory=1g \
+  -v /mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/mods:/mods:ro \
   -v /mnt/user/misc/coding/.recipegraph-build/deps:/out \
-  alpine sh -c 'cp /mods/HadEnoughItems*.jar /mods/modularui-*.jar /mods/ae2-uel-*.jar /out/ \
-    && chown -R 99:100 /out'
+  alpine sh -c 'cp /mods/HadEnoughItems*.jar /mods/modularui-*.jar /mods/ae2-uel-*.jar /out/'
 
 # MOUNT THE REPOSITORY ROOT, NOT `mod/`. See below.
 docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
@@ -600,8 +599,8 @@ PY
 ```
 
 **THE DESKTOP BUILDS AND TOWER SERVES, but not because Tower cannot build.** That was the
-standing claim and it is wrong: the AMP server instance has both prerequisites, 364 jars in
-`/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft/mods` and a 2.5 MB
+standing claim and it is wrong: the Pelican server has both prerequisites, the pack jars in
+`/mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/mods` and a 2.5 MB
 `config/AppliedEnergistics2/items.csv`, and `data/mc-recipe-dump/` is already synced here.
 
 **AND NOT BECAUSE OF JAR PARITY EITHER -- THE LISTS HAVE NOW BEEN DIFFED AND THE GAP IS ZERO
@@ -1822,8 +1821,8 @@ that file is current.** It is the file the container serves, so it is replaced e
 somebody redumps and rebuilds -- pinning fixtures to it makes the port's contract a function
 of the last game launch. (The jar count is NOT a reason: the parity section above measured
 the recipe-bearing set identical on both machines, 364 jars each on 2026-08-03, with a
-difference of zero produced keys in both directions. The AMP instance's live `mods/` has since
-grown to 366 — counted 2026-08-22 via a root container against the instance itself; note the
+difference of zero produced keys in both directions. The server's live `mods/` has since
+grown to 366 (369 on Pelican, 2026-10-17) — counted 2026-08-22 via a root container against the instance itself; note the
 staged copy in `.recipegraph-build/packserver377` still holds the old 364 and is stale. The
 ARGUMENT is that the sets are recipe-identical, not that the count is frozen, so re-measure
 the sets rather than reading a drifted count as a divergence.)
@@ -2028,8 +2027,8 @@ precedence rule between them throws away true rows.
 
 * `config/advRocketry/planetDefs.xml` states what Advanced Rocketry ADDS to a planet. 33
   dimensions carry a DIMID, each with an `<OreGen>` block naming the blocks generated there.
-  On the AMP server instance at `.../Meatballcraft01/Minecraft/config/advRocketry/planetDefs.xml`
-  (mode 0700 uid 1000, so stage it out with a root container).
+  On the Pelican server at `/mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/config/advRocketry/planetDefs.xml`
+  (99:100 mode 755, readable by a 99:100 container).
 * `config/jeresources/world-gen.json` states what was OBSERVED, one flat JSON array of
   `{"block": "modid:name:meta", "dim": "Dim -1: the_nether"}` rows, 6,646 of them across 60
   dimensions. It sees the Nether, the End and the Abyssal Wasteland, which planetDefs cannot,

@@ -4,7 +4,7 @@
 # pack's CraftTweaker scripts, this mod's jar, and the handful of settings that only a headless
 # run needs changed.
 #
-#   harness/prodclient/stage-instance.sh                 # full rebuild from the AMP instance
+#   harness/prodclient/stage-instance.sh                 # full rebuild from the server instance
 #   harness/prodclient/stage-instance.sh --headless-only # just re-apply the overrides
 #
 # WHY THE OVERRIDES ARE A SCRIPT AND NOT A NOTE. Every one of them is a setting that is CORRECT
@@ -69,21 +69,24 @@ PACK_JARS="${PACK_JARS:-$LOCAL_BUILD/packserver377}"
 PACK_CONFIG="${PACK_CONFIG:-$LOCAL_BUILD/packconfig}"
 MOD_JAR="${MOD_JAR:-}"
 
-# The AMP server instance, on the HOST. Mode 0700 uid 1000, which is why staging out of it needs a
-# root container and a `chown 99:100` rather than a plain `cp`.
-AMP="${AMP:-/mnt/cache/AMP_Games/instances/Meatballcraft01/Minecraft}"
+# The MeatballCraft SERVER directory, on the HOST: the Pelican server's Wings volume since the
+# 2026-10-17 move off AMP. It is 99:100 mode 755, so a 99:100 container reads it directly; only
+# the parent `volumes/` dir is root 0700, and a bind mount of the subpath never traverses that.
+# DO NOT point this back at /mnt/cache/AMP_Games/...: that copy is a frozen fork from the
+# migration and would stage a stale pack without any error.
+PACK_SERVER="${PACK_SERVER:-/mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c}"
 HOST_BUILD="${HOST_BUILD:-/mnt/user/misc/coding/.recipegraph-build}"
 
-stage_from_amp() {
+stage_from_server() {
     if [ -d "$PACK_JARS" ] && [ -d "$PACK_CONFIG" ]; then
         echo "stage-instance: pack already staged; delete $PACK_JARS to re-stage"
         return 0
     fi
-    echo "stage-instance: staging the pack out of the AMP instance (root container)"
-    # --user 0:0, deliberately and only here: the AMP instance is mode 0700 uid 1000, so a
-    # 99:100 container cannot read it at all. The `chown -R 99:100` at the end of the script
-    # below is what keeps the rule intact, by handing the copy back to the array's owner rather
-    # than leaving root-owned files that wedge every other writer.
+    echo "stage-instance: staging the pack out of the server instance"
+    # 99:100 like every other container here, so the copy is born owned by the array's owner and
+    # nothing root-owned is left to wedge later writers. `cp -rp` and NOT `cp -a`: -a also tries
+    # to preserve ownership, which a non-root copy cannot do. (Under AMP the source was 0700
+    # uid 1000 and this had to be a root container followed by a chown -R.)
     #
     # NO `gated` ON THIS LINE, and that is not an exemption. Every caller of this function is
     # inside `stage_instance`, which is only ever invoked as `gated stage_instance`, so the gate
@@ -91,15 +94,15 @@ stage_from_amp() {
     # against this script's own lock. `tests/test_container_gate.py` checks that transitively
     # rather than taking the word of a `gated` prefix, and it carries controls that prove it can
     # still reject an ungated one.
-    docker run --rm --user 0:0 --memory=1g --memory-swap=1g \
-        -v "$AMP:/mc:ro" -v "$HOST_BUILD:/out" \
+    docker run --rm --user 99:100 --memory=1g --memory-swap=1g \
+        -v "$PACK_SERVER:/mc:ro" -v "$HOST_BUILD:/out" \
         alpine sh -c '
+            set -e
             mkdir -p /out/packserver377 /out/packconfig
-            cp -a /mc/mods/. /out/packserver377/
-            cp -a /mc/config /out/packconfig/
-            cp -a /mc/scripts /out/packconfig/
-            [ -d /mc/resources ] && cp -a /mc/resources /out/packconfig/
-            chown -R 99:100 /out/packserver377 /out/packconfig'
+            cp -rp /mc/mods/. /out/packserver377/
+            cp -rp /mc/config /out/packconfig/
+            cp -rp /mc/scripts /out/packconfig/
+            if [ -d /mc/resources ]; then cp -rp /mc/resources /out/packconfig/; fi'
 }
 
 build_instance() {
@@ -416,7 +419,7 @@ stage_instance() {
     fi
 
     if [ "$HEADLESS_ONLY" -eq 0 ]; then
-        stage_from_amp
+        stage_from_server
         build_instance
         install_mod
         install_graph || return 1

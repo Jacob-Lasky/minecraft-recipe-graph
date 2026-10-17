@@ -19,7 +19,7 @@ import net.minecraft.util.ResourceLocation;
  * <h2>THE SHAPE IS `javap` OUTPUT, NOT A GUESS. Verified 2026-08-22 against the pack's own jar</h2>
  *
  * `javap -p -cp ModularMachinery-CE-2.2.2.jar hellfirepvp.modularmachinery.common.machine.AbstractMachine`
- * (the jar MeatballCraft ships, read out of the AMP instance's `mods/`):
+ * (the jar MeatballCraft ships, read out of the server's `mods/`, then on AMP):
  *
  * <pre>
  *   public abstract class hellfirepvp.modularmachinery.common.machine.AbstractMachine {
