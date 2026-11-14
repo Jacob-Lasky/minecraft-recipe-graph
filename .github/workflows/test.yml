@@ -7,14 +7,23 @@ on:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    name: python (${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         # 3.8 is the floor the code claims to support; test the claim rather than
         # assuming it. 3.14 is the line the Dockerfile ships, so the version that runs on
         # the server is a version that is tested. Bump the two together or the pairing
         # rots. No pip install step exists on purpose -- stdlib only.
-        python-version: ["3.8", "3.14"]
+        # setup-python has 3.8 builds for Ubuntu 24.04, but not 26.04 (ubuntu-latest).
+        # Keep the floor leg pinned. Revisit when hosted 24.04 is deprecated or its
+        # setup-python 3.8 build disappears: move that leg to a Python 3.8 container
+        # rather than dropping coverage or raising the supported Python floor.
+        include:
+          - python-version: "3.8"
+            os: ubuntu-24.04
+          - python-version: "3.14"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
