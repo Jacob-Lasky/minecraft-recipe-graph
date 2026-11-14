@@ -476,8 +476,12 @@ if [ "$want_java" -eq 1 ]; then
     # had, one file over, and worse here: see the passed-nothing guard below for why 0/0/0 was
     # nearly a silent pass.
     #
-    # 8g, not 4g: the gate holds the whole 121 MB graph in the test JVM. 4g dies partway
-    # through with an OOM that looks like a hang.
+    # Keep the conservative 8g Docker default; it is not a measured minimum. W108
+    # (2026-11-13, source 1bcaa047, oracle cbbe136bddf02c9f) passed the full check,
+    # including PlanFixtureTest, inside a 4g cgroup: memory.peak was 3161980928 bytes
+    # (2.945 GiB), with zero memory-limit hits or OOM events. That bounds this source
+    # and oracle, not arbitrary larger graphs. Command, peak and Java test logs:
+    # /mnt/user/misc/coding/.recipegraph-build/w108-r2-20261113T235637Z-logs/
     if command -v docker >/dev/null 2>&1; then
         gated docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
             -v "$(host_path "$ROOT")":/repo \
