@@ -419,13 +419,15 @@ off AMP on 2026-10-17 left that copy behind as a frozen fork. It still reads, so
 staging against it quietly uses a stale pack and nothing anywhere reports an error.
 
 ```bash
-docker run --rm --user 99:100 --memory=1g \
+docker run --rm --user 99:100 --memory=1g --memory-swap=1g \
+  --label dev.jakelasky.build-role=disposable --cpus=4 \
   -v /mnt/cache/appdata/pelican/wings-data/volumes/5eb3b845-08ec-4363-9157-1a2515522d3c/mods:/mods:ro \
   -v /mnt/user/misc/coding/.recipegraph-build/deps:/out \
   alpine sh -c 'cp /mods/HadEnoughItems*.jar /mods/modularui-*.jar /mods/ae2-uel-*.jar /out/'
 
 # MOUNT THE REPOSITORY ROOT, NOT `mod/`. See below.
 docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
+  --label dev.jakelasky.build-role=disposable --cpus=4 \
   -v /mnt/user/misc/coding/minecraft-recipe-graph:/repo \
   -v /mnt/user/misc/coding/.recipegraph-build/deps:/deps:ro \
   -v /mnt/user/misc/coding/.recipegraph-build/gradle-cache:/gradle \

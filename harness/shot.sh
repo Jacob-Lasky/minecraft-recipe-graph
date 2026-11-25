@@ -166,7 +166,7 @@ shot_run() {
     # ALWAYS build, rather than only when the image is missing. A cached build is about a
     # second, and the alternative is that an edit to the Dockerfile keeps rendering against the
     # old libraries with no sign that it has.
-    if ! docker build -q -t "$IMAGE" "$(dirname "$0")" >/dev/null; then
+    if ! docker build -q --cpu-period=100000 --cpu-quota=400000 -t "$IMAGE" "$(dirname "$0")" >/dev/null; then
         echo "shot.sh: IMAGE BUILD FAILED, so nothing was rendered (exit 89 below is that, not" \
              "the client's)" >&2
         return 89
@@ -195,6 +195,7 @@ shot_run() {
     docker run --rm \
         --user 99:100 \
         --memory="$MEMORY" --memory-swap="$MEMORY" \
+        --label dev.jakelasky.build-role=disposable --cpus=4 \
         -v "$HOST_REPO:/repo" \
         -v "$HOST_BUILD/$DEPS_NAME:/deps:ro" \
         -v "$HOST_BUILD/$CACHE_NAME:/gradle" \

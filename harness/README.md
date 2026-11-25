@@ -34,8 +34,12 @@ Forge client and launches it obfuscated, the way a launcher does.
 
 ```bash
 python3 harness/prodclient/assemble.py
-harness/prodclient/prodshot.sh fixture packfixture -Dmcrecipedump.shotTimeoutSeconds=1800
+harness/prodclient/prodshot.sh fixture packfixture -Dmcrecipedump.shotTimeoutSeconds=3000
 ```
+
+A full-pack run holds the gate for about 28 minutes, and `prodshot.sh` caps its container at 4
+CPUs (`--cpus=4`), so give the screenshot timeout room: 3000 matches the full-pack example
+further down.
 
 Keep using `shot.sh` for ordinary GUI iteration. Ten mods and ninety seconds is why it exists.
 

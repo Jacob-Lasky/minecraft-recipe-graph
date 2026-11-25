@@ -94,6 +94,7 @@ if command -v docker >/dev/null 2>&1; then
     # Host paths are resolved by the UnRAID daemon, not by this container's view; the
     # `host_path` rewrite above is why. Only the container path needs them.
     gated docker run --rm --user 99:100 --memory=4g --memory-swap=4g \
+        --label dev.jakelasky.build-role=disposable --cpus=4 \
         -v "$(host_path "$ROOT")":/repo \
         -v "$(host_path "$PACK_MODS")":/deps:ro \
         -v "$(host_path "$GRADLE_CACHE")":/gradle \

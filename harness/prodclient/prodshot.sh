@@ -211,7 +211,7 @@ prodshot_staged_run() {
     #
     # It cannot deadlock: `docker build` does not source `tools/gate.sh` and takes no gate of its
     # own, so this is still ONE acquisition covering build, restage and boot.
-    if ! docker build -q -t "$IMAGE" "$(dirname "$0")" >/dev/null; then
+    if ! docker build -q --cpu-period=100000 --cpu-quota=400000 -t "$IMAGE" "$(dirname "$0")" >/dev/null; then
         echo "prodshot.sh: IMAGE BUILD FAILED, so nothing was staged or booted (exit 89 below" \
              "is that, not the client's)" >&2
         return 89
@@ -224,11 +224,16 @@ prodshot_staged_run() {
     echo "prodshot.sh: $(ls "$LOCAL_BUILD/$INSTANCE/mods"/*.jar 2>/dev/null | wc -l) mods," \
          "${MEMORY} container, ${CLIENT_HEAP} heap${SCREEN:+, screen '$SCREEN' -> $OUT_PNG}"
     date +%s > "$BOOT_STAMP"
+    # The disposable label tells Tower's sentinel this is a throwaway test container, so its errors and
+    # its own removal do not page (homelab stacks/sentinel/log-errors/collector.py ephemeral();
+    # 2026-11-13 left 153 mrg-prodshot-* error incidents open without it). --cpus=4 keeps one run
+    # from taking every core on the shared host.
     # --user 99:100 is UnRAID's nobody:users. A root container writing into these bind mounts
     # leaves root-owned files that wedge the array share for every other writer.
     docker run --rm --name "$CONTAINER" \
         --user 99:100 \
         --memory="$MEMORY" --memory-swap="$MEMORY" \
+        --label dev.jakelasky.build-role=disposable --cpus=4 \
         -v "$HOST_BUILD/$PRODCLIENT:/prodclient" \
         -v "$HOST_OBJECTS:/prodclient/assets/objects:ro" \
         -v "$HOST_BUILD/$INSTANCE:/instance" \
