@@ -484,6 +484,7 @@ if [ "$want_java" -eq 1 ]; then
     # /mnt/user/misc/coding/.recipegraph-build/w108-r2-20261113T235637Z-logs/
     if command -v docker >/dev/null 2>&1; then
         gated docker run --rm --user 99:100 --memory=8g --memory-swap=8g \
+            --label dev.jakelasky.build-role=disposable --cpus=4 \
             -v "$(host_path "$ROOT")":/repo \
             -v "$(host_path "$PACK_MODS")":/deps:ro \
             -v "$(host_path "$BUILD_DIR")":/build:ro \

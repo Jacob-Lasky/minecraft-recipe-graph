@@ -98,6 +98,7 @@ stage_from_server() {
     # rather than taking the word of a `gated` prefix, and it carries controls that prove it can
     # still reject an ungated one.
     docker run --rm --user 99:100 --memory=1g --memory-swap=1g \
+        --label dev.jakelasky.build-role=disposable --cpus=4 \
         -v "$PACK_SERVER:/mc:ro" -v "$HOST_BUILD:/out" \
         alpine sh -c '
             set -e

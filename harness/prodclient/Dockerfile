@@ -106,8 +106,9 @@ FROM eclipse-temurin:8-jdk
 #
 #   printf 'FROM mcrecipedump-prodclient:latest\nRUN apt-get update \\\n
 #     && apt-get install -y --no-install-recommends mesa-utils\n' > /tmp/p/Dockerfile
-#   docker build -t glprobe:throwaway /tmp/p
-#   docker run --rm --memory=4g --memory-swap=4g --user 99:100 glprobe:throwaway glxinfo -B
+#   docker build --cpu-period=100000 --cpu-quota=400000 -t glprobe:throwaway /tmp/p
+#   docker run --rm --memory=4g --memory-swap=4g --label dev.jakelasky.build-role=disposable --cpus=4 --user 99:100 \
+#     glprobe:throwaway glxinfo -B
 #
 # The entrypoint brings Xvfb up first, so `glxinfo` needs no arrangement beyond that.
 RUN apt-get update && apt-get install -y --no-install-recommends \
